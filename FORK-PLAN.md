@@ -63,7 +63,13 @@ by a less capable coder in a single coding session.
 4. **The pool ships on testnet for months before mainnet.** Cryptographic code that guards
    money must soak.
 5. Work on a branch (`x-fork`), keep `master` tracking upstream (`git remote add upstream
-   https://github.com/kaspanet/rusty-kaspa`).
+   https://github.com/kaspanet/rusty-kaspa`). The fork repo is **private during Phases
+   0–4** (freedom to be messy, narrative control) and **goes public at spec freeze (P5.9)
+   or Phase 6 start at the latest** — external review, public-testnet testers (P8.7), and
+   fair-launch credibility all require open source well before mainnet. This is a
+   commitment, not a drift: a "verifiable honesty" coin must not be developed in secret
+   longer than necessary.
+
 
 ## Phase 0 — Environment & orientation
 
