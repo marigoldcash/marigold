@@ -36,7 +36,6 @@ impl Connect {
                         ctx,
                         "Please note that public node infrastructure is operated by contributors and \
                         accessing it may expose your IP address to different node providers. \
-                        Consider running your own node for better privacy. \
                         ",
                     );
                     tprintln!(ctx);
