@@ -1201,7 +1201,7 @@ version = 1
     // use wasm_bindgen_test::wasm_bindgen_test;
     // #[wasm_bindgen_test]
     // pub fn test_wasm_serde_spk_constructor() {
-    //     let str = "kaspa:qpauqsvk7yf9unexwmxsnmg547mhyga37csh0kj53q6xxgl24ydxjsgzthw5j";
+    //     let str = "marigold:qpauqsvk7yf9unexwmxsnmg547mhyga37csh0kj53q6xxgl24ydxjey3z8dm9";
     //     let a = Address::constructor(str);
     //     let value = to_value(&a).unwrap();
     //
@@ -1212,7 +1212,7 @@ version = 1
     //
     // #[wasm_bindgen_test]
     // pub fn test_wasm_js_serde_spk_object() {
-    //     let expected = Address::constructor("kaspa:qpauqsvk7yf9unexwmxsnmg547mhyga37csh0kj53q6xxgl24ydxjsgzthw5j");
+    //     let expected = Address::constructor("marigold:qpauqsvk7yf9unexwmxsnmg547mhyga37csh0kj53q6xxgl24ydxjey3z8dm9");
     //
     //     use web_sys::console;
     //     console::log_4(&"address: ".into(), &expected.version().into(), &expected.prefix().into(), &expected.payload().into());
@@ -1233,7 +1233,7 @@ version = 1
     // pub fn test_wasm_serde_spk_object() {
     //     use wasm_bindgen::convert::IntoWasmAbi;
     //
-    //     let expected = Address::constructor("kaspa:qpauqsvk7yf9unexwmxsnmg547mhyga37csh0kj53q6xxgl24ydxjsgzthw5j");
+    //     let expected = Address::constructor("marigold:qpauqsvk7yf9unexwmxsnmg547mhyga37csh0kj53q6xxgl24ydxjey3z8dm9");
     //     let wasm_js_value: JsValue = expected.clone().into_abi().into();
     //
     //     // use web_sys::console;

@@ -862,7 +862,7 @@ impl Cli for KaspaCli {
 
         if let Some(descriptor) = self.wallet.descriptor() {
             let title = descriptor.title.unwrap_or(descriptor.filename);
-            if title.to_lowercase().as_str() != "kaspa" {
+            if title.to_lowercase().as_str() != "marigold" {
                 prompt.push(title);
             }
 

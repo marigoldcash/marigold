@@ -1054,7 +1054,7 @@ declare! {
         paymentSecret?:string;
     } | {
         walletSecret: string;
-        type: "kaspa-keypair-standard";
+        type: "marigold-keypair-standard";
         accountName:string;
         prvKeyDataId:string;
         paymentSecret?:string;

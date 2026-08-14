@@ -135,7 +135,7 @@ impl Pskb {
 
                         tprintln!(
                             ctx,
-                            "{} locked UTXO{} found with total amount of {} KAS",
+                            "{} locked UTXO{} found with total amount of {} MAGLD",
                             spend_utxos.len(),
                             if spend_utxos.len() == 1 { "" } else { "s" },
                             sompi_to_kaspa(total_locked_sompi)

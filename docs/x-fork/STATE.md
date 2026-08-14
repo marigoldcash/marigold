@@ -4,7 +4,7 @@ Snapshot of everything decided and built so far, so any fresh coding session on 
 machine can continue from the repo alone. Read this together with [FORK-PLAN.md](../../FORK-PLAN.md).
 Update this file whenever off-repo state changes (domains, accounts, infra).
 
-Last updated: 2026-08-14 (P2.7 complete)
+Last updated: 2026-08-14 (P2.8 complete)
 
 ## What this project is
 
@@ -79,45 +79,53 @@ substitute for it.
 
 ## Where execution stands
 
-- **Next step: P2.8** (user-facing rebrand pass 2 (wallet + CLI) — grep `wallet/`
-  and `cli/` for `"KAS"`/`"kaspa"` in display strings, ticker formatting, URLs;
-  display strings only. **This is also where the open P2.1 `kaspa-wallet-core` test
-  regression below should get fixed**, since it's the same crate). **Phase 2 so far:
-  P2.1-P2.7 done** — this fork is now a genuinely separate, fully-rebranded-at-the-
-  node-level network: own address prefixes, ports, P2P handshake name (confirmed
-  live against a real Kaspa mainnet peer — explicit rejection), no Kaspa DNS
-  seeders, own from-scratch genesis (mainnet motto: *"Hell is other people's
-  monetary policy. — Sartre"*; testnet: `marigold-testnet`; **P9.5 regenerates both
-  with the real launch timestamp — today's are placeholders**), all forks (10 BPS,
-  covenants, ZK opcodes) active from block 0 (confirmed live by mining on a real
-  sandboxed mainnet-mode node), and node-level display strings rebranded (app dir
-  `~/.marigold`, log files, `--help` banner — binary/crate name `kaspad` deliberately
-  kept, per Ground rule 1). Own DNS seeders remain a P9.2 future item (see "Live
-  infrastructure" above for the Cloudflare-delegation mechanism).
-  **A draft GitHub issue for kaspanet/rusty-kaspa is sitting unposted** — reporting
+- **Next step: P2.9 — the last step of Phase 2.** Two-node private network smoke
+  test: start two local nodes with `--addpeer` pointing at each other (different
+  appdirs/ports), mine on one. Verify: the second node's log shows it syncing blocks
+  mined by the first, and both report the same virtual DAA score via RPC.
+- **Phase 2 (P2.1-P2.8) is done.** This fork is now a genuinely separate,
+  fully-rebranded network end-to-end: own address prefixes, ports, P2P handshake
+  name (confirmed live against a real Kaspa mainnet peer — explicit rejection), no
+  Kaspa DNS seeders, own from-scratch genesis (mainnet motto: *"Hell is other
+  people's monetary policy. — Sartre"*; testnet: `marigold-testnet`; **P9.5
+  regenerates both with the real launch timestamp — today's are placeholders**), all
+  forks (10 BPS, covenants, ZK opcodes) active from block 0, and every user-facing
+  string rebranded across the node, wallet, and CLI (app dir, log files, `--help`
+  banner, ticker `MAGLD`, account storage tags, terminal link matcher + explorer
+  URLs). Binary/crate name `kaspad` and a few other identifier-not-display-string
+  cases (WASM API surface, `kaspa_utils` paths) deliberately kept, per Ground rule 1.
+  Own DNS seeders remain a P9.2 future item (see "Live infrastructure" above for the
+  Cloudflare-delegation mechanism).
+- **A draft GitHub issue for kaspanet/rusty-kaspa is sitting unposted** — reporting
   the `TestConsensus` block-version test-infra gap found at P2.6 as a potential
   upstream contribution; awaiting the user's go-ahead to actually post it (posting
   to a third-party public repo needs explicit confirmation).
-  **Three bugs found and fixed along the way** (all real-Kaspa legacy constants left
-  inconsistent with a from-scratch chain — see NOTES.md for full root-cause
-  writeups): a `get_chain_block_samples()` RPC feed hardcoding 16 real Kaspa 2021
-  checkpoint timestamps (P2.5); P2.6's activation flip surfacing 5 test failures
-  from stale pre-crescendo/pre-deflationary legacy values plus one latent test-infra
-  gap (`TestConsensus` hardcoding the pre-toccata block version — candidate for the
-  upstream issue above).
-  **⚠️ Known regression, still open: P2.1 broke 22 tests in `kaspa-wallet-core`**
-  (hardcoded `"kaspa:..."` test fixtures) — not caught at P2.1 time since its verify
-  step only checked `cargo test -p kaspa-addresses`. Some fixtures (legacy
-  wallet-import tests) may need real judgment, not a blind prefix swap. Flagged for
-  P2.8 (same crate). Full failing-test list in NOTES.md.
-  **Full gotcha log for P2.1-P2.6 is in [NOTES.md](NOTES.md)** — worth skimming
-  before continuing Phase 2: always rebuild `kaspad` before a live-network test (a
+- **Six real bugs found and fixed during Phase 2** (all stale real-Kaspa
+  legacy values/assumptions left inconsistent with a from-scratch, rebranded chain —
+  full root-cause writeups in NOTES.md, most as their own separate commits per
+  Ground rule 2): `get_chain_block_samples()`'s hardcoded 2021 checkpoint timestamps
+  (P2.5); P2.6's activation flip exposing 5 stale-legacy-value test failures plus
+  the `TestConsensus` block-version test-infra gap; the P2.1 address-prefix
+  regression recurring in `crypto/txscript` (found via a full-workspace test pass
+  during P2.8); a second P2.6-pattern hardcoded-block-version assertion in
+  `testing/integration`; and a genuine `bridge/` (stratum-bridge) address-validation
+  bug where the wallet-address regex/fallback-prefix logic still expected `kaspa:`.
+  **The P2.1 `kaspa-wallet-core` regression (22 failing tests) is now fixed** —
+  folded into P2.8 per the user's request, using a self-verified bech32
+  re-prefixing tool (see NOTES.md) that correctly preserves exact payloads for
+  addresses tied to fixed derivation seeds, rather than generating arbitrary fresh
+  ones.
+  **Standing lesson, worth repeating**: a full-workspace `cargo build`/`cargo test`
+  pass — not just the crate(s) a step names — has now caught real regressions in
+  unrelated crates multiple times this phase (`kaspa-wallet-core`, `crypto/txscript`,
+  `testing/integration`, `bridge/`). Keep doing this periodically, not just when a
+  step's own verify command happens to be narrow.
+  **Full gotcha log for all of Phase 2 is in [NOTES.md](NOTES.md)** — worth
+  skimming before Phase 3: always rebuild `kaspad` before a live-network test (a
   stale binary gave a false pass once), use `--appdir=<scratch>` for mainnet-mode
   testing (a pre-existing unrelated real mainnet datadir exists on this machine,
-  untouched), and periodically run full-workspace `cargo test`/`cargo build`, not
-  just the crate a step names — targeted checks have already missed one real
-  cross-crate regression this phase.
-  **Phases 0 and 1 are both complete.** Phase 0: P0.1-P0.6, see
+  untouched).
+- **Phases 0 and 1 are both complete.** Phase 0: P0.1-P0.6, see
   [NOTES.md](NOTES.md) — the single source of truth for build/test/devnet/wallet
   commands and gotchas (notably: `kaspa-cli` is REPL-only and unscriptable, P0.5 was
   done via RPC/rothschild instead). Phase 1: P1.1-P1.10, see "Locked parameters"

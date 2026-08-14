@@ -471,16 +471,16 @@ where
 
 pub(crate) fn change_address(network_type: NetworkType) -> Address {
     match network_type {
-        NetworkType::Mainnet => Address::try_from("kaspa:qpauqsvk7yf9unexwmxsnmg547mhyga37csh0kj53q6xxgl24ydxjsgzthw5j").unwrap(),
-        NetworkType::Testnet => Address::try_from("kaspatest:qqz22l98sf8jun72rwh5rqe2tm8lhwtdxdmynrz4ypwak427qed5juktjt7ju").unwrap(),
+        NetworkType::Mainnet => Address::try_from("marigold:qq93vgfvxapy6krrdeucfru65kcth3k3mnnl9lggzv0zjdplff2kqnate7vnh").unwrap(),
+        NetworkType::Testnet => Address::try_from("marigoldtest:qqgjyv6y24n80zye42aueh0wlugzzvjr23jhdpuc4xavhh8dlc8jqqvrryc5l").unwrap(),
         _ => unreachable!("network type not supported"),
     }
 }
 
 pub(crate) fn output_address(network_type: NetworkType) -> Address {
     match network_type {
-        NetworkType::Mainnet => Address::try_from("kaspa:qrd9efkvg3pg34sgp6ztwyv3r569qlc43wa5w8nfs302532dzj47knu04aftm").unwrap(),
-        NetworkType::Testnet => Address::try_from("kaspatest:qqrewmx4gpuekvk8grenkvj2hp7xt0c35rxgq383f6gy223c4ud5s58ptm6er").unwrap(),
+        NetworkType::Mainnet => Address::try_from("marigold:qqx35fe5g989k6r4s28ee2dkc0gdm6hhqsg3u2ecg4f97mres6f6qahy8xy9r").unwrap(),
+        NetworkType::Testnet => Address::try_from("marigoldtest:qqfjvw2vtaegtx9thmg7fac2r5cyx4nf0j869dwgm0hqz9p88fxkqghg8xdm9").unwrap(),
         _ => unreachable!("network type not supported"),
     }
 }
@@ -614,8 +614,8 @@ fn test_generator_compound_100k_random_transactions() -> Result<()> {
     let mut rng = StdRng::seed_from_u64(0);
     let inputs: Vec<f64> = (0..100_000).map(|_| rng.gen_range(0.001..10.0)).collect();
     let total = inputs.iter().sum::<f64>();
-    // The generated tree uses roughly 225 block-equivalents, so 150 KAS leaves
-    // enough room at the 0.5 KAS/block relay floor.
+    // The generated tree uses roughly 225 block-equivalents, so 150 MAGLD leaves
+    // enough room at the 0.5 MAGLD/block relay floor.
     let outputs = [(output_address, Kaspa(total - 150.0))];
     generator(test_network_id(), &inputs, &[], None, Fees::sender(Kaspa(5.0)), outputs.as_slice())
         .unwrap()

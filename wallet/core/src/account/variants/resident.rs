@@ -7,7 +7,7 @@ use crate::imports::*;
 use kaspa_addresses::Version;
 use secp256k1::{PublicKey, SecretKey};
 
-pub const RESIDENT_ACCOUNT_KIND: &str = "kaspa-resident-standard";
+pub const RESIDENT_ACCOUNT_KIND: &str = "marigold-resident-standard";
 
 pub struct Resident {
     inner: Arc<Inner>,

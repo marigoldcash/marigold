@@ -9,7 +9,7 @@ use kaspa_bip32::{ExtendedPrivateKey, Prefix, SecretKey};
 
 const CACHE_ADDRESS_OFFSET: u32 = 2048;
 
-pub const LEGACY_ACCOUNT_KIND: &str = "kaspa-legacy-standard";
+pub const LEGACY_ACCOUNT_KIND: &str = "marigold-legacy-standard";
 
 pub struct Ctor {}
 

@@ -401,10 +401,44 @@ small, mechanical, and individually testable.*
   with an isolated `$HOME` confirmed `~/.marigold/` gets created (not
   `~/.rusty-kaspa/`). `cargo test -p kaspa-core -p kaspad -p kaspa-daemon` all green.
 
-- [ ] **P2.8 — User-facing rebrand pass 2 (wallet + CLI).**
+- [x] **P2.8 — User-facing rebrand pass 2 (wallet + CLI).**
   Grep `wallet/` and `cli/` for `"KAS"`, `"kaspa"` in display strings, ticker formatting,
   and URLs. Same rule: display strings only.
   ✅ *Verify:* `cargo run --release -p kaspa-cli` shows your ticker in balances.
+  **Executed 2026-08-14.** First folded in the still-open P2.1 regression: 22 failing
+  `kaspa-wallet-core` tests from hardcoded `"kaspa:..."` test-fixture addresses.
+  Batch-fixed all 344 (346 with duplicates) across 5 wallet files by writing and
+  self-verifying (against 3 known-good P2.1 vectors) a standalone bech32
+  re-prefixing tool — decodes an old address's exact payload and re-encodes it under
+  the new prefix, rather than generating fresh arbitrary addresses, since several
+  (the gen0/gen1 legacy-derivation test vectors) are cryptographically tied to fixed
+  seed keys and must keep their exact derived payload. Then did the actual P2.8
+  sweep: ticker suffix `KAS`/`TKAS`/`SKAS`/`DKAS` → `MAGLD`/`TMAGLD`/`SMAGLD`/`DMAGLD`
+  (the two duplicate `kaspa_suffix()` implementations, in `wallet/core` and
+  `wallet/pskt`); 7 internal account-storage-kind tags (`kaspa-bip32-standard` etc.)
+  → `marigold-*`; default wallet storage folder/file (`~/.kaspa`/`kaspa` →
+  `~/.marigold`/`marigold`); the terminal link-matcher regex and three
+  `explorer.kaspa.org` URLs in `cli/matchers.rs` (was matching the wrong prefix
+  entirely and pointing at the wrong network's explorer — now
+  `explorer.marigold.cash`, a forward placeholder pending P9.4); CLI balance-display
+  strings; the `marigold-cpu-miner` binary search name. **Deliberately left
+  unchanged**: the `kaspad` binary name and its own log messages, `kaspa_utils`
+  crate paths, the WASM/JS public API surface (`kaspaToSompi` etc. — treated as
+  identifiers, not display strings, consistent with the `kaspad` decision), and
+  `compat/gen0.rs`'s real external legacy-Kaspa-wallet file paths/storage key (genuine
+  interop with actual third-party software, not our own branding). While running a
+  full-workspace test pass to verify (given the P2.1 lesson that targeted checks
+  miss cross-crate regressions), found and fixed the **same P2.1 regression pattern
+  in `crypto/txscript`** (2 real script-derived addresses, same payload-preserving
+  fix) and **two more real bugs, each fixed as its own separate commit**: a
+  P2.6-pattern test assertion in `testing/integration` expecting the wrong block
+  version, and a genuine `bridge/` (stratum-bridge) address-validation bug where the
+  wallet-address regex and fallback-prefix logic still expected `kaspa:`. Verified:
+  `sompi_to_kaspa_string_with_suffix()` called directly (kaspa-cli is REPL-only, per
+  P0.3) confirms output `"1,234.56789012 MAGLD"`. Full workspace clean:
+  `cargo build --workspace` and `cargo test --workspace` both green (144 test-result
+  blocks, 0 failures) — matches and exceeds the P0.2 baseline. Full writeup in
+  [NOTES.md](docs/x-fork/NOTES.md).
 
 - [ ] **P2.9 — Two-node private network smoke test.**
   Start two local nodes with `--addpeer` pointing at each other (different appdirs/ports via

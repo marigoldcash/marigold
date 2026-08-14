@@ -80,7 +80,7 @@ mod test {
         let acc = wallet.import_kaspawallet_golang_single_v1(&import_secret, &wallet_secret, file).await.unwrap();
         assert_eq!(
             acc.receive_address().unwrap(),
-            Address::try_from("kaspa:qpuvlauc6a5syze9g70dnxzzvykhkuatsjrx87mxqccqh7kf9kcssdkp9ec7w").unwrap(), // taken from golang impl
+            Address::try_from("marigold:qpuvlauc6a5syze9g70dnxzzvykhkuatsjrx87mxqccqh7kf9kcssy6jvfm3e").unwrap(), // taken from golang impl
         );
     }
 
@@ -131,7 +131,7 @@ mod test {
         let acc = wallet.import_kaspawallet_golang_multisig_v1(&import_secret, &wallet_secret, file).await.unwrap();
         assert_eq!(
             acc.receive_address().unwrap(),
-            Address::try_from("kaspa:pqvgkyjeuxmd8k70egrrzpdz5rqj0acmr6y94mwsltxfp6nc50742295c3998").unwrap(), // taken from golang impl
+            Address::try_from("marigold:pqvgkyjeuxmd8k70egrrzpdz5rqj0acmr6y94mwsltxfp6nc50742rf83px2s").unwrap(), // taken from golang impl
         );
     }
 

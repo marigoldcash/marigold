@@ -6,7 +6,7 @@ use crate::account::Inner;
 use crate::derivation::{AddressDerivationManager, AddressDerivationManagerTrait};
 use crate::imports::*;
 
-pub const BIP32_WATCH_ACCOUNT_KIND: &str = "kaspa-bip32-watch-standard";
+pub const BIP32_WATCH_ACCOUNT_KIND: &str = "marigold-bip32-watch-standard";
 
 pub struct Ctor {}
 

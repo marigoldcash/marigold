@@ -1837,7 +1837,7 @@ mod test {
         let result = wallet.get_info().await;
         println!("wallet.get_info(): {result:#?}");
 
-        let address = Address::try_from("kaspatest:qz7ulu4c25dh7fzec9zjyrmlhnkzrg4wmf89q7gzr3gfrsj3uz6xjceef60sd")?;
+        let address = Address::try_from("marigoldtest:qz7ulu4c25dh7fzec9zjyrmlhnkzrg4wmf89q7gzr3gfrsj3uz6xj5zzqhlvc")?;
 
         let utxo_context =
             self::create_utxos_context_with_addresses(rpc_api.clone(), vec![address.clone()], current_daa_score, utxo_processor)
@@ -1846,7 +1846,7 @@ mod test {
         let utxo_set_balance = utxo_context.calculate_balance().await;
         println!("get_utxos_by_addresses: {utxo_set_balance:?}");
 
-        let to_address = Address::try_from("kaspatest:qpakxqlesqywgkq7rg4wyhjd93kmw7trkl3gpa3vd5flyt59a43yyn8vu0w8c")?;
+        let to_address = Address::try_from("marigoldtest:qpakxqlesqywgkq7rg4wyhjd93kmw7trkl3gpa3vd5flyt59a43yyluh4z7md")?;
         let mut iter = UtxoIterator::new(&utxo_context);
         let utxo = iter.next().unwrap();
         let utxo = (*utxo.utxo).clone();

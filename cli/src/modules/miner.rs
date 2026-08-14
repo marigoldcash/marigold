@@ -21,7 +21,7 @@ impl DefaultSettings for MinerSettings {
         let mut settings = vec![(Self::Server, to_value("127.0.0.1").unwrap()), (Self::Mute, to_value(true).unwrap())];
 
         let root = nw_sys::app::folder();
-        if let Ok(binaries) = locate_binaries(&root, "kaspa-cpu-miner").await
+        if let Ok(binaries) = locate_binaries(&root, "marigold-cpu-miner").await
             && let Some(path) = binaries.first()
         {
             settings.push((Self::Location, to_value(path.to_string_lossy().to_string()).unwrap()));
@@ -188,13 +188,13 @@ impl Miner {
     async fn select(self: Arc<Self>, ctx: Arc<KaspaCli>) -> Result<()> {
         let root = nw_sys::app::folder();
 
-        let binaries = kaspa_daemon::locate_binaries(root.as_str(), "kaspa-cpu-miner").await?;
+        let binaries = kaspa_daemon::locate_binaries(root.as_str(), "marigold-cpu-miner").await?;
 
         if binaries.is_empty() {
-            tprintln!(ctx, "No kaspa-cpu-miner binaries found");
+            tprintln!(ctx, "No marigold-cpu-miner binaries found");
         } else {
             let binaries = binaries.iter().map(|p| p.display().to_string()).collect::<Vec<_>>();
-            if let Some(selection) = ctx.term().select("Please select kaspa-cpu-miner binary", &binaries).await? {
+            if let Some(selection) = ctx.term().select("Please select marigold-cpu-miner binary", &binaries).await? {
                 tprintln!(ctx, "selecting: {}", selection);
                 self.settings.set(MinerSettings::Location, selection.as_str()).await?;
             } else {

@@ -6,7 +6,7 @@ use crate::account::Inner;
 use crate::derivation::{AddressDerivationManager, AddressDerivationManagerTrait};
 use crate::imports::*;
 
-pub const WATCH_ONLY_ACCOUNT_KIND: &str = "kaspa-watch-only-standard";
+pub const WATCH_ONLY_ACCOUNT_KIND: &str = "marigold-watch-only-standard";
 
 pub struct Ctor {}
 

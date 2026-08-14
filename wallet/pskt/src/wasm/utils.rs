@@ -24,10 +24,10 @@ pub fn sompi_to_kaspa_string_with_trailing_zeroes(sompi: u64) -> String {
 
 pub fn kaspa_suffix(network_type: &NetworkType) -> &'static str {
     match network_type {
-        NetworkType::Mainnet => "KAS",
-        NetworkType::Testnet => "TKAS",
-        NetworkType::Simnet => "SKAS",
-        NetworkType::Devnet => "DKAS",
+        NetworkType::Mainnet => "MAGLD",
+        NetworkType::Testnet => "TMAGLD",
+        NetworkType::Simnet => "SMAGLD",
+        NetworkType::Devnet => "DMAGLD",
     }
 }
 

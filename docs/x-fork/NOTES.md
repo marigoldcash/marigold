@@ -534,3 +534,132 @@ Verified: `--help` banner reads "Marigold full node daemon (marigold-node) v..."
 a fresh run with an isolated `$HOME` created `~/.marigold/` (confirmed via directory
 listing, not just log text). `cargo test -p kaspa-core -p kaspad -p kaspa-daemon` —
 all green.
+
+### P2.8 — User-facing rebrand pass 2: wallet + CLI, and the P2.1 regression fix (2026-08-14)
+
+The biggest step so far. Two parts: fixing the still-open P2.1 regression (22 failing
+`kaspa-wallet-core` tests), then the actual P2.8 sweep — and along the way, a
+full-workspace verification pass surfaced three *more* real bugs in crates P2.8
+doesn't even own.
+
+**The bech32 re-prefixing tool.** Fixing the P2.1 regression meant updating ~344
+hardcoded `"kaspa:..."`/`"kaspatest:..."` address strings across the wallet crates.
+Two options: generate fresh arbitrary addresses (fine for pure placeholders, e.g.
+`wallet/core/src/tx/generator/test.rs`'s `change_address()`/`output_address()`
+helpers), or preserve the exact original payload under a new prefix (required for
+anything where the address is *derived* from something else — script bytes in
+`crypto/txscript`, or fixed BIP32 seed keys in the `gen0`/`gen1` legacy-derivation
+test vectors, where the test's whole point is "does deriving from this known seed
+produce this known address"). Since most of the 344 were the derivation-tied kind,
+I wrote a standalone Python script
+(`bech32_reprefix.py`, scratchpad) that reimplements the *exact* algorithm from
+`crypto/addresses/src/bech32.rs` (same charset, same polymod generator constants,
+same `conv8to5`/`conv5to8` bit-packing) but takes an arbitrary raw prefix *string*
+rather than the crate's `Prefix` enum — letting it decode an address under its
+*old* prefix (which the enum no longer accepts) and re-encode under the new one.
+
+**Self-verified before trusting it on real data**: round-tripped it against 3
+already-known-correct P2.1 test vectors (mainnet all-zero, testnet ECDSA all-zero,
+mainnet non-trivial payload) before running it on anything real. Then: extracted
+every quoted `"kaspa..."`/`"kaspatest..."` address workspace-wide (grep), converted
+all of them in one batch (zero decode errors — a good sign they were all
+genuinely valid, uncorrupted bech32 to begin with), and applied the replacements
+via exact string substitution (safe here since full addresses+checksums are long
+enough to never collide with unrelated text). Net: 346 replacements across 5 files
+in the first pass (`wallet/core`'s `account/mod.rs`, `compat/gen1.rs`, `wallet/mod.rs`;
+`wallet/keys`'s `gen0/hd.rs`, `gen1/hd.rs`), all 22 previously-failing tests fixed,
+zero new failures. This same tool script and technique is worth reusing for any
+future rebrand step that touches hardcoded address strings.
+
+**The actual P2.8 sweep**, once the regression was cleared:
+- **Ticker suffix** (`kaspa_suffix()`, duplicated verbatim in both `wallet/core/src/utils.rs`
+  and `wallet/pskt/src/wasm/utils.rs` — same fix needed in both places):
+  `KAS`/`TKAS`/`SKAS`/`DKAS` → `MAGLD`/`TMAGLD`/`SMAGLD`/`DMAGLD`. This is the string
+  that actually answers P2.8's own verify condition.
+- **Account storage-kind tags** — `LEGACY_ACCOUNT_KIND`, `BIP32_ACCOUNT_KIND`,
+  `BIP32_WATCH_ACCOUNT_KIND`, `MULTISIG_ACCOUNT_KIND`, `KEYPAIR_ACCOUNT_KIND`,
+  `WATCH_ONLY_ACCOUNT_KIND`, `RESIDENT_ACCOUNT_KIND` — each `"kaspa-X-standard"` →
+  `"marigold-X-standard"`. Checked every usage site first (grep across the whole
+  crate) to confirm nothing hardcodes the literal string separately for comparison
+  — everything routes through the same Rust constant, so a consistent rename is
+  safe. Found and fixed one literal duplicate that needed to stay in sync: a
+  TypeScript type-definition string in `wasm/api/message.rs` mirroring
+  `KEYPAIR_ACCOUNT_KIND`'s value for the generated `.d.ts`.
+- **Default wallet storage location** — `~/.kaspa` → `~/.marigold`,
+  default wallet/settings file name `"kaspa"` → `"marigold"`
+  (`wallet/core/src/storage/local/mod.rs`, `settings.rs`), plus the matching
+  `cli.rs` prompt-suppression check (hides the wallet name from the CLI prompt when
+  it's still the boring default — needed updating to check for the *new* default,
+  not the old one, to keep working).
+- **CLI terminal link matcher** (`cli/src/matchers.rs`) — this one was a genuine
+  functional bug, not just cosmetic: the address-matching regex was literally
+  `(kaspa|kaspatest):\S+`, which would never match a Marigold address at all
+  (clicking/copying addresses printed in the terminal would have silently stopped
+  working). Fixed the regex, and rebranded the three `explorer.kaspa.org` URLs
+  (addresses/blocks/txs) to `explorer.marigold.cash` — a forward-looking placeholder
+  since no explorer exists yet (that's P9.4); better than leaving it pointed at
+  Kaspa's real explorer, which would show "not found" or worse, someone else's
+  address, for a Marigold address.
+- **CLI output strings** — literal `"... KAS"` balance/scan-result text in
+  `account.rs`, `pskb.rs`, `send.rs` → `MAGLD` (these hardcode their own suffix
+  rather than calling `kaspa_suffix()`, so no double-suffix risk).
+- **`marigold-cpu-miner`** — the NW.js desktop-app bundled-binary search name in
+  `cli/src/modules/miner.rs`. No such binary exists yet either way (we've only used
+  the separate community `kaspa-miner` tool for testing, never built our own), so
+  this doesn't change current behavior — renamed for forward consistency with
+  whatever Marigold's own bundled miner eventually gets called.
+
+**Deliberately left unchanged** (same "identifier, not display string" judgment
+already applied to the `kaspad` binary name at P2.7):
+- The `kaspad` binary name itself and every log/prompt message that names it
+  accurately (`"Kaspad has stopped..."`, DB-version-mismatch prompts) — still
+  correct since the binary really is still called `kaspad`.
+- `kaspa_utils::...` crate paths (Ground rule 1).
+- The WASM/JS **public API surface** — `#[wasm_bindgen(js_name = "kaspaToSompi")]`
+  and its siblings (`sompiToKaspaString`, `ISompiToKaspa`, etc.). This is a bigger,
+  separate concern than a single string: a whole family of interdependent public
+  function/type names external SDK consumers would call directly. Renaming it
+  properly would be a systematic API redesign (and I have no JS/TS build harness
+  here to verify nothing else references these names), not a "grep for display
+  strings" fix — deferred, not forgotten. *Doc comment text* describing these
+  functions (e.g. "returns `KAS` for mainnet...") was still fixed, since that's pure
+  prose, not an identifier.
+- `compat/gen0.rs`'s `Kaspa/kaspa.kpk` paths and the `"kaspa-wallet"` local-storage
+  key in `legacy_v0_keydata_location()`. **This one needed real investigation, not
+  a pattern-match**: these strings target a *real, external, pre-existing* Kaspa
+  wallet's actual on-disk/browser-storage format (the original browser-based
+  "gen0" wallet), used for a genuine legacy-import compatibility feature.
+  Renaming them wouldn't be a rebrand — it would silently break the ability to
+  import a real user's real legacy Kaspa wallet, which is the entire point of this
+  module. Confirmed via `compat/gen1.rs` too (function names like
+  `import_kaspawallet_golang_single_v1` reference a *different* real external
+  legacy wallet, the Go `kaspawallet` CLI tool) — same category, same reasoning,
+  no changes needed there since it had no literal format-marker strings, only
+  identifiers.
+
+**Three more real bugs found via full-workspace verification, each its own
+commit** (not P2.8's commit — different crates/concerns per Ground rule 2):
+1. Same P2.1 regression pattern, one crate over: `crypto/txscript/src/standard.rs`
+   had 2 hardcoded `"kaspa:..."`/`"kaspatest:..."` expected-addresses, script-bytes-
+   derived (payload-preserving fix required, same tool). Also fixed 3 lines of
+   dead/commented-out code in `consensus/core/src/tx.rs` referencing the same
+   address for consistency.
+2. `testing/integration`'s `header_in_isolation_validation_test` — a P2.6-pattern
+   bug (hardcoded `BLOCK_VERSION` as the "correct" expected value in an assertion,
+   now wrong since toccata is active from genesis) — own commit, see its message.
+3. `bridge/` (stratum-bridge) — a genuinely new, real functional bug: wallet-address
+   regex/fallback-prefix logic still hardcoded `kaspa:`/`kaspatest:`/`kaspadev:`,
+   meaning a bare address submitted by a miner would get incorrectly coerced to an
+   invalid `kaspa:...` address. Own commit, see its message for full detail
+   (including why the existing test suite didn't catch it: fixtures were
+   self-consistently using the same stale prefix on both sides of the comparison,
+   masking the bug until the fixtures were also updated).
+
+**Verification.** `kaspa-cli` remains REPL-only (P0.3), so — same workaround as
+before — called `sompi_to_kaspa_string_with_suffix()` directly via a throwaway
+example: confirmed output `"1,234.56789012 MAGLD"`. Ran a full `cargo build
+--workspace` and `cargo test --workspace` (not just the touched crates) given the
+standing lesson from the P2.1 regression that targeted checks miss cross-crate
+breaks — this is exactly what caught the txscript/testing-integration/bridge bugs
+above. Final state: 144 test-result blocks, 0 failures, matching/exceeding the P0.2
+baseline.
