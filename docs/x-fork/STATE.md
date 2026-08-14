@@ -4,7 +4,7 @@ Snapshot of everything decided and built so far, so any fresh coding session on 
 machine can continue from the repo alone. Read this together with [FORK-PLAN.md](../../FORK-PLAN.md).
 Update this file whenever off-repo state changes (domains, accounts, infra).
 
-Last updated: 2026-08-14 (P2.4 complete)
+Last updated: 2026-08-14 (P2.5 complete)
 
 ## What this project is
 
@@ -79,21 +79,28 @@ substitute for it.
 
 ## Where execution stands
 
-- **Next step: P2.5** (new genesis blocks — write a fresh `coinbase_payload` genesis
-  motto for mainnet + testnet in `consensus/core/src/config/genesis.rs`; this alone
-  changes all genesis hashes, so it's an iterate-run-test/paste-hash-from-failure
-  dance, same pattern as P2.1's bech32 checksums). **Phase 2 so far: P2.1-P2.4 done**
-  — this fork is now a genuinely separate network at the identity/protocol level:
-  its own address prefixes, ports, P2P handshake name (confirmed live against a real
-  Kaspa mainnet peer — explicit rejection), and no more Kaspa DNS seeders. Own
-  seeders are a P9.2 future item (see "Live infrastructure" above for the
-  Cloudflare-delegation mechanism). **Full gotcha log for P2.1-P2.4 is in
-  [NOTES.md](NOTES.md)** — worth skimming before continuing Phase 2, especially: always
-  rebuild `kaspad` before a live-network test (a stale binary gave a false pass once
-  already), use `--appdir=<scratch>` for any mainnet-mode testing (there's a
-  pre-existing unrelated real mainnet datadir on this machine, untouched), and check
-  NOTES.md before assuming which step owns a given rename (the devnet data-subfolder
-  rename turned out to be P2.3's doing, not P2.7's, despite an earlier guess).
+- **Next step: P2.6** (reset fork activations — set `crescendo_activation`/
+  `toccata_activation` to `ForkActivation::always()` for mainnet/testnet in
+  `params.rs`, so all upgrades — 10 BPS, covenants, ZK opcodes — are active from
+  block 0; no history to protect on a fresh chain). **Phase 2 so far: P2.1-P2.5
+  done** — this fork is now a genuinely separate network at the identity/protocol
+  level (own address prefixes, ports, P2P handshake name — confirmed live against a
+  real Kaspa mainnet peer, explicit rejection — no more Kaspa DNS seeders) *and* has
+  its own from-scratch genesis (mainnet motto: *"Hell is other people's monetary
+  policy. — Sartre"*; testnet: `marigold-testnet`; **P9.5 will regenerate these with
+  the real launch timestamp — today's are Phase-2-milestone placeholders, not
+  final**). **⚠️ Known bug found during P2.5, not yet fixed** (different concern,
+  flagged rather than scope-crept): `consensus/src/consensus/mod.rs`'s
+  `get_chain_block_samples()` hardcodes 16 real Kaspa-mainnet-2021 checkpoint
+  `(daa_score, timestamp)` pairs for `NetworkType::Mainnet`, feeding the
+  `get_daa_score_timestamp_estimate` RPC — now wrong data for our fictional genesis.
+  Not consensus-critical, but needs a dedicated follow-up fix before mainnet;
+  see NOTES.md. Own DNS seeders are a P9.2 future item (see "Live infrastructure"
+  above for the Cloudflare-delegation mechanism). **Full gotcha log for P2.1-P2.5 is
+  in [NOTES.md](NOTES.md)** — worth skimming before continuing Phase 2, especially:
+  always rebuild `kaspad` before a live-network test (a stale binary gave a false
+  pass once already), use `--appdir=<scratch>` for any mainnet-mode testing (there's
+  a pre-existing unrelated real mainnet datadir on this machine, untouched).
   **Phases 0 and 1 are both complete.** Phase 0: P0.1-P0.6, see
   [NOTES.md](NOTES.md) — the single source of truth for build/test/devnet/wallet
   commands and gotchas (notably: `kaspa-cli` is REPL-only and unscriptable, P0.5 was

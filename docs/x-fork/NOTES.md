@@ -317,3 +317,52 @@ subdomain created in the Cloudflare dashboard for marigold.cash, then those
 hostnames populated into `dns_seeders` in `params.rs` (reversing this step). Nothing
 to action now — just recording the mechanism so it's not re-derived from scratch at
 P9.2.
+
+### P2.5 — New genesis blocks (2026-08-14)
+
+Mainnet motto: *"Hell is other people's monetary policy. — Sartre"* (user's pick).
+Testnet motto: plain `marigold-testnet` (matches upstream's own boring-but-clear
+testnet/simnet convention — keeps the quote unique to mainnet). Both well under the
+204-byte `max_coinbase_payload_len` limit (50 and 16 bytes respectively, vs. 184
+available after the 20-byte fixed prefix).
+
+**Mainnet's old genesis wasn't actually a from-scratch block** — worth knowing if
+this ever needs revisiting. Real Kaspa's `GENESIS` constant had `daa_score: 1312860`
+and a `coinbase_payload` embedding a Hebrew/Aramaic scripture quote *plus* a
+"Bitcoin block hash" and "Checkpoint block hash" — it's a checkpoint-reset genesis
+from partway into Kaspa's real history, not literally block 0 (the embedded Bitcoin
+hash is a classic anti-foreknowledge technique: cite a not-yet-mined-at-design-time
+Bitcoin block so nobody could have pre-mined favorable content). Testnet/simnet/
+devnet's genesis blocks were already plain from-scratch ones (`daa_score: 0`, no
+embedded hashes) — that's the shape this step gives mainnet too, per the plan's
+explicit instruction (`daa_score: 0`, `utxo_commitment: EMPTY_MUHASH`, no checkpoint
+history). Mainnet's `bits` also changed from Kaspa's real `486722099` to devnet's
+easy `0x1e21bc1c` — unmineable at zero launch hashrate otherwise.
+
+**Placeholder timestamp, not final.** Used "now" (`1786742438234` ms, 2026-08-14) for
+both networks. The plan's own design already accounts for this: **P9.5 explicitly
+regenerates mainnet's genesis with the real launch timestamp and motto** right before
+the actual launch ceremony. So today's genesis is a Phase-2-milestone artifact for
+testing the fork end-to-end, not the production one — don't treat these hashes as
+precious; P9.5 will produce different ones deliberately.
+
+**Same iterate-run-test/paste-hash technique as P2.1's bech32 checksums** — 4 rounds
+(mainnet merkle root → mainnet hash → testnet merkle root → testnet hash), each from
+the `assert_hashes_eq` panic's "Got hash [...]" array, pasted straight in.
+
+**Real bug found, deliberately NOT fixed in this step** (different concern —
+`consensus/src/consensus/mod.rs`, not `genesis.rs`; Ground rule 2 says one concern
+per commit): `get_chain_block_samples()` (around line 886) hardcodes a 16-entry
+`POINTS` array of **real Kaspa mainnet 2021 checkpoint `(daa_score, timestamp)`
+pairs**, sourced from Kaspa's own genesis-proof/tx-timestamp-estimation notebooks,
+prepended specifically `if network_type == Mainnet`. This feeds the
+`get_daa_score_timestamp_estimate` RPC call (`rpc/service/src/service.rs:871`) — on
+our fork's mainnet, with a fresh genesis at `daa_score: 0`, these 16 points are from
+a *different chain's* history and will corrupt that RPC's timestamp interpolation.
+Not consensus-critical (doesn't affect block validation or fund safety — it's an
+auxiliary estimate endpoint), but a real data-correctness bug that would ship silently
+broken if not caught before mainnet. **Needs a dedicated follow-up fix** (likely just
+deleting the mainnet-specific `POINTS` block entirely, since Marigold's mainnet has no
+analogous pre-genesis history to splice in) — not yet scheduled against a specific
+plan step; whoever picks up general mainnet-specific-hardcoded-Kaspa-data cleanup
+should grep for other `NetworkType::Mainnet` special-cases nearby too.

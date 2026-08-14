@@ -309,7 +309,7 @@ small, mechanical, and individually testable.*
   Own seeders come later at P9.2 — see the coder's Cloudflare-delegation question
   answered in NOTES.md, which sketches the mechanism ahead of that step.
 
-- [ ] **P2.5 — New genesis blocks (mainnet + testnet).**
+- [x] **P2.5 — New genesis blocks (mainnet + testnet).**
   Edit [consensus/core/src/config/genesis.rs](consensus/core/src/config/genesis.rs). For each
   network: write a new `coinbase_payload` message (your genesis motto — this alone changes
   all hashes), set `timestamp` to your launch epoch (ms), keep `bits` (testnet-grade initial
@@ -322,6 +322,29 @@ small, mechanical, and individually testable.*
   *Note: genesis PoW nonce does not need real mining — genesis is trusted by definition;
   the test only enforces internal hash consistency.*
   ✅ *Verify:* `cargo test -p kaspa-consensus-core genesis` passes.
+  **Executed 2026-08-14.** Mainnet motto: *"Hell is other people's monetary policy. —
+  Sartre"* (coder's choice). Testnet motto: plain `marigold-testnet` identifier,
+  matching upstream's own testnet/simnet convention (coder's choice, to keep the
+  quote unique to mainnet). Mainnet also got `bits: 0x1e21bc1c` (devnet's easy value,
+  copied per the plan's guidance — real Kaspa's `486722099` would be untouchable at
+  zero launch hashrate), `daa_score: 0`, `utxo_commitment: EMPTY_MUHASH` (mainnet
+  previously carried a real checkpoint-reset structure with embedded Bitcoin/
+  checkpoint block hashes — all removed, this is a genuine from-scratch genesis).
+  Testnet's `bits` kept as-is (`0x1e7fffff`, already testnet-grade); its
+  `utxo_commitment`/`daa_score` were already `EMPTY_MUHASH`/`0` upstream. Both got a
+  placeholder timestamp (`1786742438234`ms, today) — **P9.5 regenerates genesis with
+  the real launch timestamp and motto per the plan's own design, so this is
+  explicitly a Phase-2-milestone placeholder, not final.** Hashes recomputed via the
+  run-test/paste-hash dance (4 iterations: mainnet merkle root, mainnet hash, testnet
+  merkle root, testnet hash). `cargo test -p kaspa-consensus-core genesis` green,
+  plus full crate suite (58/58 + 7/7). Live sanity check: rebuilt `kaspad`, started
+  sandboxed mainnet- and testnet-mode nodes on the new genesis — both bootstrap
+  cleanly, no panics. **Found, but deliberately did not fix here (different concern,
+  see [NOTES.md](docs/x-fork/NOTES.md)):** `consensus/src/consensus/mod.rs` hardcodes
+  16 real Kaspa mainnet 2021 checkpoint `(daa_score, timestamp)` pairs specifically
+  for `NetworkType::Mainnet`, feeding the `get_daa_score_timestamp_estimate` RPC —
+  now stale/wrong data for our fictional mainnet genesis. Not consensus-critical, but
+  a real RPC correctness bug; flagged for a dedicated follow-up fix.
 
 - [ ] **P2.6 — Reset fork activations.**
   In [params.rs](consensus/core/src/config/params.rs) set for your mainnet/testnet:
