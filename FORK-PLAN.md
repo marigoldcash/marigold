@@ -376,13 +376,30 @@ small, mechanical, and individually testable.*
   `kaspad`, mined on a **sandboxed real mainnet-mode node** (not devnet, which P2.6
   doesn't touch) — 10 BPS acceptance confirmed, no version/subsidy rejections.
 
-- [ ] **P2.7 — User-facing rebrand pass 1 (node).**
+- [x] **P2.7 — User-facing rebrand pass 1 (node).**
   Grep `kaspad/src`, `core/src`, `daemon/src` for user-visible strings: application name,
   log banner, `--help` text, default app-dir name (so your node's data dir is
   `~/.xcn` -equivalent, not `~/.rusty-kaspa` — grep `app_dir`/`get_app_dir`). Change
   display strings only — not crate names, not module paths (Ground rule 1).
   ✅ *Verify:* `cargo run --release --bin kaspad -- --help` shows your name; a fresh run
   creates your app dir.
+  **Executed 2026-08-14.** App dir: `~/.rusty-kaspa` → `~/.marigold` (Windows:
+  `rusty-kaspa` → `marigold`) in `kaspad/src/daemon.rs`. Log file names:
+  `rusty-kaspa.log`/`rusty-kaspa_err.log` → `marigold.log`/`marigold_err.log` in
+  `core/src/log/consts.rs`. `--help` banner: `.about()` text in `kaspad/src/args.rs`
+  now reads "Marigold full node daemon (marigold-node) v{version}". Also updated the
+  `description` field in all three touched crates' `Cargo.toml` (kaspad, kaspa-core,
+  kaspa-daemon) for consistency, since `kaspad`'s feeds directly into the `--help`
+  text. **Deliberately left untouched, per Ground rule 1**: the crate/binary name
+  itself (`kaspad`) and every log line/message that refers to it by that name (e.g.
+  `"Kaspad has stopped..."`, DB-version-mismatch prompts) — these remain accurate
+  since the binary genuinely is still called `kaspad`. Also left a large `/* ... */`
+  block comment in `args.rs` untouched — it's dead reference documentation (never
+  compiled/displayed), already stale relative to reality even before this fork
+  (shows Kaspa's old pre-P2.2 ports), out of scope for a live-strings rebrand pass.
+  `cargo build --release --bin kaspad` clean; `--help` output confirmed; a fresh run
+  with an isolated `$HOME` confirmed `~/.marigold/` gets created (not
+  `~/.rusty-kaspa/`). `cargo test -p kaspa-core -p kaspad -p kaspa-daemon` all green.
 
 - [ ] **P2.8 — User-facing rebrand pass 2 (wallet + CLI).**
   Grep `wallet/` and `cli/` for `"KAS"`, `"kaspa"` in display strings, ticker formatting,

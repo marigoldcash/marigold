@@ -505,3 +505,32 @@ this step specifically. Generated a throwaway mainnet address (same
 `kaspa-addresses` example-then-delete pattern as P0.4/P2.5), started a sandboxed
 `--appdir` mainnet node, mined with `kaspa-miner` pointed at the real mainnet port
 (26110) — blocks accepted at genuine 10 BPS pace, no version or subsidy rejections.
+
+### P2.7 — User-facing rebrand pass 1: node (2026-08-14)
+
+Straightforward once the P2.3 investigation had already mapped `app_dir`/log-file
+territory. App dir `~/.rusty-kaspa` → `~/.marigold`; log files `rusty-kaspa.log`/
+`rusty-kaspa_err.log` → `marigold.log`/`marigold_err.log`; `--help` banner text (not
+the binary name) rebranded; three crates' `Cargo.toml` `description` fields updated
+for consistency (kaspad's feeds the `--help` banner directly).
+
+**The judgment call**: whether to also rename the actual clap `Command::new("kaspad")`
+name and the `"Kaspad"` mentions sprinkled through log/error messages
+(`"Kaspad has stopped..."`, DB-version-mismatch prompts). Decided **no** — the
+binary/crate itself stays named `kaspad` (Ground rule 1: crate/module identity is
+off-limits, kept for upstream-merge feasibility), so every message that refers to
+"Kaspad" as the name of the running program is *still accurate*, not stale. Renaming
+just the display text while leaving the actual invoked binary as `kaspad` would create
+a new inconsistency, not fix one.
+
+**Also deliberately skipped**: a ~40-line `/* ... */` block comment in `args.rs`
+(lines ~608+) that looks like a snapshot of Go-kaspad's old `--help` output, kept as
+developer reference. It's dead code — never compiled or displayed — and already
+inconsistent with reality independent of branding (it lists Kaspa's pre-P2.2 ports,
+16111/16210, not even the Rust node's actual historical defaults). Out of scope for
+a *live* user-facing strings pass.
+
+Verified: `--help` banner reads "Marigold full node daemon (marigold-node) v...";
+a fresh run with an isolated `$HOME` created `~/.marigold/` (confirmed via directory
+listing, not just log text). `cargo test -p kaspa-core -p kaspad -p kaspa-daemon` —
+all green.

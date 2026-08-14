@@ -4,7 +4,7 @@ Snapshot of everything decided and built so far, so any fresh coding session on 
 machine can continue from the repo alone. Read this together with [FORK-PLAN.md](../../FORK-PLAN.md).
 Update this file whenever off-repo state changes (domains, accounts, infra).
 
-Last updated: 2026-08-14 (P2.6 complete)
+Last updated: 2026-08-14 (P2.7 complete)
 
 ## What this project is
 
@@ -79,24 +79,32 @@ substitute for it.
 
 ## Where execution stands
 
-- **Next step: P2.7** (user-facing rebrand pass 1 (node) — grep `kaspad/src`,
-  `core/src`, `daemon/src` for user-visible strings: app name, log banner, `--help`
-  text, default app-dir name via `app_dir`/`get_app_dir`; display strings only, not
-  crate/module names per Ground rule 1). **Phase 2 so far: P2.1-P2.6 done** — this
-  fork is now a genuinely separate network end-to-end: own address prefixes, ports,
-  P2P handshake name (confirmed live against a real Kaspa mainnet peer — explicit
-  rejection), no Kaspa DNS seeders, own from-scratch genesis (mainnet motto: *"Hell
-  is other people's monetary policy. — Sartre"*; testnet: `marigold-testnet`; **P9.5
-  regenerates both with the real launch timestamp — today's are placeholders**), and
-  all forks (10 BPS, covenants, ZK opcodes) active from block 0 — confirmed live by
-  mining on a real sandboxed mainnet-mode node. Own DNS seeders remain a P9.2 future
-  item (see "Live infrastructure" above for the Cloudflare-delegation mechanism).
-  **Two bugs found and fixed along the way** (both real-Kaspa legacy constants left
-  inconsistent with a from-scratch chain — see NOTES.md for full root-cause writeups):
-  a `get_chain_block_samples()` RPC feed hardcoding 16 real Kaspa 2021 checkpoint
-  timestamps (P2.5), and P2.6's activation flip surfacing 5 test failures from stale
-  pre-crescendo/pre-deflationary legacy values plus one latent test-infra gap
-  (`TestConsensus` hardcoding the pre-toccata block version).
+- **Next step: P2.8** (user-facing rebrand pass 2 (wallet + CLI) — grep `wallet/`
+  and `cli/` for `"KAS"`/`"kaspa"` in display strings, ticker formatting, URLs;
+  display strings only. **This is also where the open P2.1 `kaspa-wallet-core` test
+  regression below should get fixed**, since it's the same crate). **Phase 2 so far:
+  P2.1-P2.7 done** — this fork is now a genuinely separate, fully-rebranded-at-the-
+  node-level network: own address prefixes, ports, P2P handshake name (confirmed
+  live against a real Kaspa mainnet peer — explicit rejection), no Kaspa DNS
+  seeders, own from-scratch genesis (mainnet motto: *"Hell is other people's
+  monetary policy. — Sartre"*; testnet: `marigold-testnet`; **P9.5 regenerates both
+  with the real launch timestamp — today's are placeholders**), all forks (10 BPS,
+  covenants, ZK opcodes) active from block 0 (confirmed live by mining on a real
+  sandboxed mainnet-mode node), and node-level display strings rebranded (app dir
+  `~/.marigold`, log files, `--help` banner — binary/crate name `kaspad` deliberately
+  kept, per Ground rule 1). Own DNS seeders remain a P9.2 future item (see "Live
+  infrastructure" above for the Cloudflare-delegation mechanism).
+  **A draft GitHub issue for kaspanet/rusty-kaspa is sitting unposted** — reporting
+  the `TestConsensus` block-version test-infra gap found at P2.6 as a potential
+  upstream contribution; awaiting the user's go-ahead to actually post it (posting
+  to a third-party public repo needs explicit confirmation).
+  **Three bugs found and fixed along the way** (all real-Kaspa legacy constants left
+  inconsistent with a from-scratch chain — see NOTES.md for full root-cause
+  writeups): a `get_chain_block_samples()` RPC feed hardcoding 16 real Kaspa 2021
+  checkpoint timestamps (P2.5); P2.6's activation flip surfacing 5 test failures
+  from stale pre-crescendo/pre-deflationary legacy values plus one latent test-infra
+  gap (`TestConsensus` hardcoding the pre-toccata block version — candidate for the
+  upstream issue above).
   **⚠️ Known regression, still open: P2.1 broke 22 tests in `kaspa-wallet-core`**
   (hardcoded `"kaspa:..."` test fixtures) — not caught at P2.1 time since its verify
   step only checked `cargo test -p kaspa-addresses`. Some fixtures (legacy

@@ -1,6 +1,6 @@
 [package]
 name = "kaspad"
-description = "Kaspa full node daemon"
+description = "Marigold full node daemon"
 keywords = ["kaspa", "blockdag"]
 rust-version.workspace = true
 version.workspace = true
