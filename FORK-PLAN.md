@@ -207,9 +207,16 @@ decision to record in `docs/x-fork/DECISIONS.md` (create it in P1.1). No code ch
   stamp sizing (possible 0.001 tier, deferred to P6.6/P8.3 calibration), and the
   stamp-lineage note are in [DECISIONS.md](docs/x-fork/DECISIONS.md).
 
-- [ ] **P1.9 — Regulatory posture.** One paragraph: which jurisdictions you'll operate/
+- [x] **P1.9 — Regulatory posture.** One paragraph: which jurisdictions you'll operate/
   incorporate in and that distribution will depend on CEXs willingness to adopt the coin. 
   Get real legal counsel before mainnet (P9.6).
+  **Executed 2026-08-14.** No legal entity for now (a Swiss-style nonprofit foundation
+  is the leading candidate if one becomes necessary later — jurisdiction deferred, not
+  decided); consistent with P1.5/P1.8 since there's no revenue or treasury for an
+  entity to hold. We are not a "Privacy Coin" and with EU's AMLR going into full effect 
+  10 July 2027 distribution dependend on CEXs willingness to adopt the coin and DEXs and P2P
+  usage — consistent with the project's shape. 
+  Full paragraph in [DECISIONS.md](docs/x-fork/DECISIONS.md).
 
 - [ ] **P1.10 — Network numbers.** Pick non-colliding defaults, record them:
   P2P port, gRPC port, borsh-wRPC port, JSON-wRPC port for mainnet + testnet

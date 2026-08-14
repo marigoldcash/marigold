@@ -4,7 +4,7 @@ Snapshot of everything decided and built so far, so any fresh coding session on 
 machine can continue from the repo alone. Read this together with [FORK-PLAN.md](../../FORK-PLAN.md).
 Update this file whenever off-repo state changes (domains, accounts, infra).
 
-Last updated: 2026-08-14 (P1.8 complete, revised to fee stamps)
+Last updated: 2026-08-14 (P1.9 complete)
 
 ## What this project is
 
@@ -47,17 +47,16 @@ pre-decision). Canonical domain **marigold.cash**.
 
 ## Where execution stands
 
-- **Next step: P1.9** (regulatory posture — one paragraph on jurisdictions, exchange-
-  delisting/AMLR 2027 acknowledgment, DEX-lean distribution; not legal advice, a
-  recorded eyes-open position, real counsel comes later at P9.6). P1.1-P1.8 are done —
-  see DECISIONS.md for the ticker collision trail, the P1.4 emission math (210M cap,
-  3-yr halving, no tail, ≈1.5228 MAGLD/s initial), P1.5 (fair launch from zero), P1.6
-  (denominations extended to {0.01...100000}, 8 tiers), and **P1.8's pool-op fee
-  mechanism, revised same-day to fee stamps** (whole small-denomination notes consumed
-  in-op as an embedded redeem-with-no-output whose value becomes the miner fee; the
-  earlier wallet-held transparent fee-reserve idea was rejected as violating the core
-  no-wallet principle — the wallet holds nothing but note keys; a possible 0.001
-  stamp tier is deferred to fee calibration). Phase 0
+- **Next step: P1.10** (network numbers — pick non-colliding P2P/gRPC/borsh-wRPC/
+  JSON-wRPC ports for mainnet + testnet, a different thousand-block from Kaspa's
+  16110/16210 family, e.g. 26110-family; mechanical, closes out Phase 1). P1.1-P1.9
+  are done — see DECISIONS.md for the ticker collision trail, the P1.4 emission math
+  (210M cap, 3-yr halving, no tail, ≈1.5228 MAGLD/s initial), P1.5 (fair launch from
+  zero), P1.6 (denominations extended to {0.01...100000}, 8 tiers), **P1.8's pool-op
+  fee mechanism** (fee stamps — whole small-denomination notes consumed in-op, value
+  goes to the including miner, never a dev fund), and **P1.9** (no legal entity for
+  now, Swiss foundation the leading candidate if one's ever needed, delisting/AMLR-2027
+  risk acknowledged with current facts, DEX/P2P-lean distribution). Phase 0
   (environment & orientation) is complete: P0.1-P0.6 all done on Linux, LMDE/Debian.
   For environment setup, working commands, and every build/test/devnet/wallet gotcha hit
   along the way, **read [NOTES.md](NOTES.md) first** — it's the orientation doc Phase 0
