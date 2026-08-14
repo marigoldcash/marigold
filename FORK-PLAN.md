@@ -127,14 +127,20 @@ decision to record in `docs/x-fork/DECISIONS.md` (create it in P1.1). No code ch
   Decision / Choice / Rationale / Date.
   ✅ *Verify:* file exists.
 
-- [ ] **P1.2 — Name & ticker.** Working name "X Coin" collides with everything (and with
+- [x] **P1.2 — Name & ticker.** Working name "X Coin" collides with everything (and with
   X/Twitter). Pick a real name, a 3–5 letter ticker, and check collisions on CoinGecko/
   CoinMarketCap. Record: name, ticker, address prefix string (lowercase, short, e.g.
   `xcn`), testnet prefix (e.g. `xcntest`).
-  **Pre-decided (2026-08-13), record formally when executing this step:** name
-  **Marigold** (collision-checked: no coin/CMC listing; known non-coin name-neighbors to
-  stay clear of are marigold.dev, a Tezos dev company, and marigold.com, a martech firm).
-  Ticker **MGLD** (provisional — verify unclaimed at execution time). Address prefixes
+  **Executed 2026-08-14.** Name **Marigold** confirmed as pre-decided (2026-08-13):
+  collision-checked, no coin/CMC listing; known non-coin name-neighbors to stay clear
+  of are marigold.dev (a Tezos dev company) and marigold.com (a martech firm). Ticker
+  ~~MGLD~~ **MAGLD** — the pre-decided MGLD didn't survive execution-time recheck (a
+  minor collision with an obscure, dead, unverified BSC token); a considered
+  alternative MCASH had a worse thematic collision (a dead 2019 project pitching
+  itself as private+feeless digital cash). MAGLD verified fully clean on both
+  CoinGecko and CoinMarketCap. Full search trail in
+  [DECISIONS.md](docs/x-fork/DECISIONS.md). Address prefixes (unaffected by the ticker
+  change, confirmed as pre-decided):
   `marigold` / `marigoldtest`. Canonical domain **marigold.cash** (precedent: Zcash's
   canonical z.cash); already registered and 301-redirecting to it: marigoldcoin.com/.io/
   .net/.org, marigold-coin.com, marigoldcash.com/.net/.org, marigold-cash.com,
