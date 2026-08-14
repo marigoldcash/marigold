@@ -4,7 +4,7 @@ Snapshot of everything decided and built so far, so any fresh coding session on 
 machine can continue from the repo alone. Read this together with [FORK-PLAN.md](../../FORK-PLAN.md).
 Update this file whenever off-repo state changes (domains, accounts, infra).
 
-Last updated: 2026-08-14 (P1.10 complete — Phase 1 done)
+Last updated: 2026-08-14 (P2.1 complete)
 
 ## What this project is
 
@@ -74,18 +74,21 @@ substitute for it.
 
 ## Where execution stands
 
-- **Next step: P2.1** (address prefix — first step of Phase 2, "Fork identity": edit
-  `crypto/addresses/src/lib.rs`'s `Prefix` enum string mappings from `kaspa`/
-  `kaspatest`/`kaspasim`/`kaspadev` to the P1.2 prefixes, plus `wasm.rs`, plus
-  recomputing the address test vectors). **Phases 0 and 1 are both complete.** Phase 0
-  (environment & orientation): P0.1-P0.6, see [NOTES.md](NOTES.md) — the single source
-  of truth for build/test/devnet/wallet commands and gotchas (notably: `kaspa-cli` is
-  REPL-only and unscriptable, P0.5 was done via RPC/rothschild instead). Phase 1
-  (design decisions): P1.1-P1.10, see "Locked parameters" above and
-  [DECISIONS.md](DECISIONS.md) for full rationale — **the fee-stamp mechanism and the
-  "wallet holds nothing but note keys" constraint are load-bearing for everything from
-  here on**, worth re-reading before any step touching wallets, fees, or transaction
-  format (P5.2 onward).
+- **Next step: P2.2** (network ports — edit `consensus/core/src/network.rs`'s
+  `default_rpc_port`/`default_borsh_rpc_port`/`default_json_rpc_port`/
+  `default_p2p_port` to the P1.10 numbers). **P2.1 done** (address prefix: `Prefix`
+  enum in `crypto/addresses/src/lib.rs` + `wasm.rs` now emit `marigold`/
+  `marigoldtest`/`marigoldsim`/`marigolddev`; also caught and fixed a stale prefix in
+  `benches/bench.rs` that wasn't in the step's stated file list — see NOTES.md for the
+  bech32-checksum-recomputation technique, which will recur at future rebrand steps).
+  **Phases 0 and 1 are both complete.** Phase 0 (environment & orientation): P0.1-P0.6,
+  see [NOTES.md](NOTES.md) — the single source of truth for build/test/devnet/wallet
+  commands and gotchas (notably: `kaspa-cli` is REPL-only and unscriptable, P0.5 was
+  done via RPC/rothschild instead). Phase 1 (design decisions): P1.1-P1.10, see
+  "Locked parameters" above and [DECISIONS.md](DECISIONS.md) for full rationale —
+  **the fee-stamp mechanism and the "wallet holds nothing but note keys" constraint
+  are load-bearing for everything from here on**, worth re-reading before any step
+  touching wallets, fees, or transaction format (P5.2 onward).
 - wasm-pack / wasm32 target only needed for WASM SDK steps, not for `kaspad`.
 - Phases 0–4 are bite-size sessions by design; use stronger models for Phase 5 spec
   work, ⚠️ HARD steps (P6.4, P6.11), and review gates.

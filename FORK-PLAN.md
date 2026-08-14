@@ -239,7 +239,7 @@ decision to record in `docs/x-fork/DECISIONS.md` (create it in P1.1). No code ch
 peers, Kaspa addresses are invalid on it, and it has its own genesis. Everything here is
 small, mechanical, and individually testable.*
 
-- [ ] **P2.1 — Address prefix.**
+- [x] **P2.1 — Address prefix.**
   Edit [crypto/addresses/src/lib.rs](crypto/addresses/src/lib.rs) — the `Prefix` enum's
   string mappings (`"kaspa"`, `"kaspatest"`, `"kaspasim"`, `"kaspadev"` → your P1.2
   prefixes) in all three places (serde rename, `Display`, `FromStr`) plus
@@ -249,6 +249,17 @@ small, mechanical, and individually testable.*
   vectors change).
   ✅ *Verify:* `cargo test -p kaspa-addresses` passes; a generated address starts with your
   prefix.
+  **Executed 2026-08-14.** `marigold`/`marigoldtest` per P1.2; extended `marigoldsim`/
+  `marigolddev` for simnet/devnet by the same base+suffix convention (mechanical, no
+  new naming stakes — never public-facing). Fixed 4 network-prefixed test vectors in
+  `lib.rs` plus `test_errors`' hardcoded strings (which would otherwise fail on
+  `InvalidPrefix` before even reaching the specific error each one tests) by iterating
+  fix→rerun→capture-checksum-from-failure, and one doc-comment example. Also found and
+  fixed a stale prefix in `crypto/addresses/benches/bench.rs` — not mentioned in this
+  step's scope, but in the same crate and would have broken the benchmark; caught by
+  grepping the whole crate rather than trusting the step description's file list.
+  `cargo test -p kaspa-addresses` (3/3 + doctests) and `cargo check --benches` both
+  green; confirmed a freshly generated address starts with `marigold:`.
 
 - [ ] **P2.2 — Network ports.**
   Edit [consensus/core/src/network.rs](consensus/core/src/network.rs):

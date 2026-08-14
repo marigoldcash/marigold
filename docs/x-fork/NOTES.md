@@ -205,3 +205,24 @@ throwaway-edit-then-`git checkout --`-revert pattern as before):
 **Process-management note**: this run used two more short-lived background processes
 (`rothschild`, a second `kaspa-miner` invocation) than P0.4 — same stop pattern
 (`pgrep -x <name>` + `kill`) worked fine throughout.
+
+### P2.1 — Address prefix rebrand (2026-08-14)
+
+**Technique for recomputing bech32 test vectors** (will recur at every step that
+rebrands a prefix/network-name string covered by a checksum — P2.2/P2.3 don't need
+this since ports/handshake names aren't checksummed, but keep it in mind for anything
+address-adjacent later): don't hand-compute bech32 checksums. Change the source
+string, run the test, and the assertion failure prints the *actual* correct value as
+`left:` (or panics with just the correct value in `check_from_string`'s case, since it
+uses `.expect()` rather than a two-sided assert) — paste that back in, rerun, repeat
+for the next failing vector. `check_into_string` only reports one mismatch per run
+(the test loop stops at first panic), so this is genuinely iterative — budget one
+test-run per test-vector, not one run total.
+
+**Gotcha — the same prefix string can hide in files the step description doesn't
+mention.** P2.1's own text names `lib.rs` and `wasm.rs`, but
+`crypto/addresses/benches/bench.rs` also hardcoded a `"kaspa:..."` address string
+(parsed via `.expect("Should work")` — would have panicked at bench time with the old
+prefix now rejected). Caught by `grep -rn "kaspa" <crate-dir>` across the whole crate
+rather than trusting the plan's file list literally. Worth doing this grep-the-whole-
+crate check at every P2.x rebrand step, not just the files named in the plan text.
