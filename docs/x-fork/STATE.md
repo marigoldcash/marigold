@@ -4,7 +4,7 @@ Snapshot of everything decided and built so far, so any fresh coding session on 
 machine can continue from the repo alone. Read this together with [FORK-PLAN.md](../../FORK-PLAN.md).
 Update this file whenever off-repo state changes (domains, accounts, infra).
 
-Last updated: 2026-08-14 (P1.2 complete)
+Last updated: 2026-08-14 (P1.3 complete)
 
 ## What this project is
 
@@ -27,9 +27,9 @@ the historical working title, kept deliberately).
 Coin **Marigold**, ticker **MAGLD** (formalized P1.2, 2026-08-14 — changed from the
 originally pre-decided MGLD after a collision check found MGLD, and later-considered
 MCASH, both had prior-project overlaps; full trail in
-[DECISIONS.md](DECISIONS.md)), prefixes `marigold`/`marigoldtest`, base unit **petal**
-(1 marigold = 10⁸ petals — P1.3, not yet formally executed). Canonical domain
-**marigold.cash**.
+[DECISIONS.md](DECISIONS.md)), prefixes `marigold`/`marigoldtest`, 8 decimals, base
+unit **petal** (1 marigold = 10⁸ petals — formalized P1.3, 2026-08-14, no changes from
+pre-decision). Canonical domain **marigold.cash**.
 
 ## Live infrastructure (as of 2026-08-14)
 
@@ -47,8 +47,8 @@ MCASH, both had prior-project overlaps; full trail in
 
 ## Where execution stands
 
-- **Next step: P1.3** (units & precision — base unit **petal** already pre-decided, see
-  "Naming" above; P1.3 formalizes it into [DECISIONS.md](DECISIONS.md)). P1.1 and P1.2
+- **Next step: P1.4** (supply & emission — 🧑‍⚖️ needs a human choice: total cap,
+  emission duration, initial per-second reward; not pre-decided anywhere yet). P1.1-P1.3
   are done — see DECISIONS.md for the full ticker collision-check trail. Phase 0
   (environment & orientation) is complete: P0.1-P0.6 all done on Linux, LMDE/Debian.
   For environment setup, working commands, and every build/test/devnet/wallet gotcha hit

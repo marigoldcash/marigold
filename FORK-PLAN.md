@@ -152,9 +152,11 @@ decision to record in `docs/x-fork/DECISIONS.md` (create it in P1.1). No code ch
   garden — the finality-anchor story; "Mary's gold" etymology carries the money
   association.
 
-- [ ] **P1.3 — Units & precision.** Recommend keeping Kaspa's 8 decimals (1 coin = 10⁸ base
+- [x] **P1.3 — Units & precision.** Recommend keeping Kaspa's 8 decimals (1 coin = 10⁸ base
   units, Kaspa's "sompi"). Name your base unit. Record it.
-  **Pre-decided (2026-08-13):** base unit **petal** — 1 marigold = 10⁸ petals.
+  **Executed 2026-08-14, confirmed as pre-decided (2026-08-13) with no changes:** kept
+  Kaspa's 8 decimals; base unit **petal** — 1 marigold = 10⁸ petals. Recorded in
+  [DECISIONS.md](docs/x-fork/DECISIONS.md).
 
 - [ ] **P1.4 — Supply & emission.** Decision has to be made on fixed cap (any round
   cap works), smooth geometric decay like Kaspa's "chromatic" schedule (halving the
