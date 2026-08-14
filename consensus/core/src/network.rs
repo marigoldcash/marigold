@@ -262,13 +262,13 @@ impl NetworkId {
         NETWORK_IDS.iter().copied()
     }
 
-    /// Returns a textual description of the network prefixed with `kaspa-`
+    /// Returns a textual description of the network prefixed with `marigold-`
     pub fn to_prefixed(&self) -> String {
-        format!("kaspa-{}", self)
+        format!("marigold-{}", self)
     }
 
     pub fn from_prefixed(prefixed: &str) -> Result<Self, NetworkIdError> {
-        if let Some(stripped) = prefixed.strip_prefix("kaspa-") {
+        if let Some(stripped) = prefixed.strip_prefix("marigold-") {
             Self::from_str(stripped)
         } else {
             Err(NetworkIdError::InvalidPrefix(prefixed.to_string()))

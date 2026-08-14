@@ -20,8 +20,9 @@ in sync when commands change (e.g. once P2 rebrands ports/prefixes/app-dir).
 
 ## Quick start (copy-paste, in order)
 
-Everything below targets **devnet**, still using upstream's unmodified `kaspa`/`kaspadev`
-prefixes and `161*0`-family ports (Phase 2 hasn't rebranded these yet).
+Everything below targets **devnet**, using the rebranded `marigold`/`marigolddev`
+address prefixes (P2.1), `26*10`-family ports (P2.2), and `marigold-` P2P handshake
+name (P2.3). Kaspa addresses/peers are no longer valid on this network.
 
 ```bash
 # Build the node
@@ -30,21 +31,21 @@ cargo build --release --bin kaspad
 # Run the full test suite (cargo-nextest not installed; plain `cargo test` works fine)
 cargo test --release
 
-# Start a devnet node (GRPC :16610, P2P :16611, WRPC-borsh :17610; app dir ~/.rusty-kaspa/kaspa-devnet/)
+# Start a devnet node (GRPC :26610, P2P :26611, WRPC-borsh :27610; app dir ~/.rusty-kaspa/marigold-devnet/)
 target/release/kaspad --devnet --enable-unsynced-mining --rpclisten-borsh=127.0.0.1 --utxoindex
 
 # Mine to an address (kaspa-cli can't generate one — see "kaspa-cli is REPL-only" below;
 # use rothschild --network devnet with no --private-key against a running node instead,
 # or the throwaway kaspa-addresses example described under P0.4 if you just need bytes
 # with no real key)
-kaspa-miner --mining-address <devnet-address> --kaspad-address 127.0.0.1 --port 16610 --threads 4 --mine-when-not-synced
+kaspa-miner --mining-address <devnet-address> --kaspad-address 127.0.0.1 --port 26610 --threads 4 --mine-when-not-synced
 
 # Generate a real keypair + address, then (after funding + maturity) send transactions
 target/release/rothschild --network devnet
 target/release/rothschild --network devnet --private-key <hex> --to-addr <addr> --tps 1
 
 # Ad-hoc RPC checks (kaspa-cli is not usable for this — see below): point
-# rpc/grpc/examples/simple_client at grpc://localhost:16610 (devnet) instead of its
+# rpc/grpc/examples/simple_client at grpc://localhost:26610 (devnet) instead of its
 # hardcoded mainnet default of 16110, `cargo run --release -p kaspa-grpc-simple-client-example`
 ```
 
@@ -94,8 +95,11 @@ cargo run --release --bin kaspad -- --devnet --enable-unsynced-mining --rpcliste
   even though `cargo build --release --bin kaspad` had just succeeded in P0.1 — different
   codegen flags between `cargo build` and `cargo run` invalidated those 3 crates' cache.
   Not a problem, just don't be surprised by it.
-- Default devnet app dir: `~/.rusty-kaspa/kaspa-devnet/` (datadir + logs subdirs). Not yet
-  rebranded (P2.7 will change this to a Marigold-named dir).
+- Default devnet app dir (as of P0.3, before any rebranding): `~/.rusty-kaspa/kaspa-devnet/`
+  (datadir + logs subdirs). **Correction (P2.3, see below): the `kaspa-devnet` subfolder
+  part was renamed to `marigold-devnet` by P2.3's network-name change, not P2.7 as
+  originally guessed here** — only the top-level `~/.rusty-kaspa` app-dir base name
+  remains P2.7's job.
 - Devnet default ports actually bound: GRPC `127.0.0.1:16610`, P2P `0.0.0.0:16611`,
   WRPC(borsh) `127.0.0.1:17610`. (Mainnet defaults, for reference when writing P2.2, are
   the `161*0` family — e.g. GRPC 16110 — which is what upstream examples hardcode.)
@@ -226,3 +230,54 @@ mention.** P2.1's own text names `lib.rs` and `wasm.rs`, but
 prefix now rejected). Caught by `grep -rn "kaspa" <crate-dir>` across the whole crate
 rather than trusting the plan's file list literally. Worth doing this grep-the-whole-
 crate check at every P2.x rebrand step, not just the files named in the plan text.
+
+### P2.2 — Network ports (2026-08-14)
+
+Mechanical: four functions in `consensus/core/src/network.rs` edited to the P1.10
+26xxx/27xxx/28xxx scheme. Verified live on a devnet node: GRPC 26610, P2P 26611,
+WRPC(borsh) 27610.
+
+### P2.3 — P2P network isolation (2026-08-14)
+
+`NetworkId::to_prefixed()`/`from_prefixed()` in `network.rs` changed `kaspa-` →
+`marigold-`; everything downstream (`Config::network_name()`, gRPC's `network_name`
+field, `RpcNetworkId`) picks it up automatically since they all funnel through this
+one function — no separate edits needed there.
+
+**Side effect worth knowing**: `kaspad/src/daemon.rs` and `database/rocknroll/src/db.rs`
+both derive the per-network data/log **subfolder** name from `network.to_prefixed()`
+too, so this one change silently renamed `~/.rusty-kaspa/kaspa-devnet/` →
+`~/.rusty-kaspa/marigold-devnet/` (and `kaspa-mainnet` → `marigold-mainnet`, etc.) as
+a side effect. **This corrects an earlier note in this file** (written during P0.3)
+that guessed this rename was P2.7's job — it isn't; it already happened here. P2.7
+still owns the top-level `~/.rusty-kaspa` app-dir base name itself.
+
+**Gotcha — a stale binary gave a false pass on the first live-test attempt.** After
+editing `network.rs`, I ran `cargo test` (which rebuilds test binaries) but then
+directly executed the *already-built* `target/release/kaspad` for the live integration
+check without rebuilding it first. Result: the node still identified as `kaspa-mainnet`
+under the hood, connected successfully to a real Kaspa mainnet peer, and started
+downloading real chain history (IBD) before the mistake was caught by checking file
+timestamps (`stat` on the binary vs. the edited source file). **Always rebuild the
+actual binary you're about to run after a source edit — a green `cargo test` does not
+imply the binary on disk reflects the latest source.** This will matter even more from
+here on, since Phase 2+ steps increasingly verify via live `kaspad` runs, not just
+`cargo test`.
+
+**Gotcha — a pre-existing, unrelated real-mainnet datadir exists on this machine** at
+`~/.rusty-kaspa/kaspa-mainnet/` (dated March 2025, predates this project). Running
+plain `kaspad` with no network flag defaults to mainnet and will find it, prompt an
+interactive "database is from an older version, downgrade? (y/n)" question on stdin
+(which a backgrounded process can't answer, so it just exits), and would touch real
+data if forced through. **Use `--appdir=<scratch-dir>` for any mainnet-mode testing**
+to sandbox it away from this — never delete or interact with the pre-existing
+directory without understanding what it is first.
+
+**Live network test used a real, currently-online Kaspa mainnet peer.** Kaspa's
+configured `dns_seeders` (still present in `params.rs`, since P2.4 hasn't stripped
+them yet) resolve to hosts that often run a full node alongside the DNS-seeder role.
+Checked several for an open port 16111 with a plain `/dev/tcp` probe before picking
+one (`seeder2.kaspad.net`); several of the *other* configured seeder hostnames no
+longer resolve at all (stale/decommissioned volunteer infrastructure) — not a problem
+for us since P2.4 removes this whole list regardless, but don't assume every
+configured seeder is still alive if this comes up again before P2.4 runs.

@@ -274,7 +274,7 @@ small, mechanical, and individually testable.*
   Rebuilt `kaspad` and started a devnet node: log confirmed GRPC `26610`, P2P `26611`,
   WRPC(borsh) `27610` — matches the devnet row of the P1.10 table exactly.
 
-- [ ] **P2.3 — P2P network isolation.**
+- [x] **P2.3 — P2P network isolation.**
   The P2P handshake exchanges a network name derived from `NetworkId` (e.g.
   `kaspa-mainnet`). Grep `protocol/p2p` and `consensus/core/src/network.rs` for how
   `network_name()` / `to_prefixed()` feed the version handshake; change the base string so
@@ -282,6 +282,20 @@ small, mechanical, and individually testable.*
   ✅ *Verify:* unit tests pass **and** an integration check: start your node, attempt to
   connect it to a public Kaspa node (`--addpeer`), confirm the log shows a
   network-mismatch rejection.
+  **Executed 2026-08-14.** `NetworkId::to_prefixed()`/`from_prefixed()` in
+  `consensus/core/src/network.rs` now use `marigold-` instead of `kaspa-` (this is the
+  single source of truth — `Config::network_name()`, the gRPC `network_name` field,
+  and `RpcNetworkId` (a type alias for `NetworkId`) all inherit it automatically). Also
+  fixed the same literal in `protocol/p2p/src/echo.rs`'s example handshake tool
+  (outside the step's stated file list, but in `protocol/p2p` as instructed, and would
+  otherwise fail to talk to our own real node). `cargo test -p kaspa-consensus-core
+  network` and `cargo test -p kaspa-p2p-lib` both green. **Live integration test**:
+  found a real Kaspa mainnet node with an open P2P port (`seeder2.kaspad.net`,
+  `--addpeer`'d directly, sandboxed to a scratch `--appdir` to avoid touching a
+  pre-existing unrelated mainnet datadir on this machine) — confirmed the real peer's
+  reject message: `Network mismatch - local: kaspa-mainnet, remote: marigold-mainnet`.
+  (First attempt gave a false pass — actually connected and started IBD — because the
+  `kaspad` binary hadn't been rebuilt since the source edit; see NOTES.md.)
 
 - [ ] **P2.4 — Strip Kaspa's DNS seeders.**
   In [consensus/core/src/config/params.rs](consensus/core/src/config/params.rs), set
