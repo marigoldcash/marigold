@@ -218,9 +218,18 @@ decision to record in `docs/x-fork/DECISIONS.md` (create it in P1.1). No code ch
   usage — consistent with the project's shape. 
   Full paragraph in [DECISIONS.md](docs/x-fork/DECISIONS.md).
 
-- [ ] **P1.10 — Network numbers.** Pick non-colliding defaults, record them:
+- [x] **P1.10 — Network numbers.** Pick non-colliding defaults, record them:
   P2P port, gRPC port, borsh-wRPC port, JSON-wRPC port for mainnet + testnet
   (Kaspa uses 16110/16210-family — pick a different thousand-block, e.g. 26110-family).
+  **Executed 2026-08-14.** Mirrors Kaspa's exact port structure shifted to the
+  **26xxx/27xxx/28xxx** block (chosen over reusing Kaspa's ports outright — see
+  [DECISIONS.md](docs/x-fork/DECISIONS.md), which cites Kaspa's own source comment
+  explaining why they vary ports per network: avoiding same-host bind conflicts, not
+  protocol collisions). gRPC: mainnet **26110**, testnet **26210** (simnet 26510,
+  devnet 26610). borsh-wRPC: mainnet **27110**, testnet **27210** (simnet 27510,
+  devnet 27610). JSON-wRPC: mainnet **28110**, testnet **28210** (simnet 28510,
+  devnet 28610). P2P: mainnet **26111**, testnet **26211**/26311/26411
+  (suffix-dependent, mirroring Kaspa's own scheme) (simnet 26511, devnet 26611).
 
 ---
 
