@@ -357,8 +357,8 @@ impl ShareHandler {
             let submitted_address = parts[0];
 
             // Check if submitted address matches authorized address (case-insensitive, ignore prefix)
-            let submitted_clean = submitted_address.trim_start_matches("kaspa:").trim_start_matches("kaspatest:");
-            let authorized_clean = wallet_addr.trim_start_matches("kaspa:").trim_start_matches("kaspatest:");
+            let submitted_clean = submitted_address.trim_start_matches("marigold:").trim_start_matches("marigoldtest:");
+            let authorized_clean = wallet_addr.trim_start_matches("marigold:").trim_start_matches("marigoldtest:");
 
             if submitted_clean.to_lowercase() != authorized_clean.to_lowercase() {
                 debug!(
@@ -1695,7 +1695,7 @@ mod retention_tests {
         let handler = ShareHandler::new("test-instance".to_string());
         let ctx = test_ctx();
         *ctx.worker_name.lock() = "ghost".to_string();
-        *ctx.wallet_addr.lock() = "kaspatest:ghost".to_string();
+        *ctx.wallet_addr.lock() = "marigoldtest:ghost".to_string();
 
         handler.get_create_stats(&ctx);
         assert_eq!(handler.stats.lock().len(), 1);

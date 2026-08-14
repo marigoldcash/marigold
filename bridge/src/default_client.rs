@@ -11,7 +11,7 @@ use std::sync::{Arc, LazyLock};
 static BIG_JOB_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r".*(BzMiner|IceRiverMiner).*").unwrap());
 
 /// Regex for matching wallet addresses
-static WALLET_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"kaspa(test|dev)?:([a-z0-9]{61}|[a-z0-9]{63})").unwrap());
+static WALLET_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"marigold(test|dev)?:([a-z0-9]{61}|[a-z0-9]{63})").unwrap());
 
 /// Default logger configuration
 pub fn default_logger() {
@@ -324,14 +324,14 @@ fn process_canxium_address(address: &str) -> String {
 
 /// Clean and validate wallet address
 fn clean_wallet(input: &str) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    // Try to decode as Kaspa address (supports kaspa:, kaspatest:, kaspadev:)
+    // Try to decode as a Marigold address (supports marigold:, marigoldtest:, marigolddev:)
     if Address::try_from(input).is_ok() {
         return Ok(input.to_string());
     }
 
-    // Try with kaspa: prefix if no recognized prefix
-    if !input.starts_with("kaspa:") && !input.starts_with("kaspatest:") && !input.starts_with("kaspadev:") {
-        return clean_wallet(&format!("kaspa:{}", input));
+    // Try with marigold: prefix if no recognized prefix
+    if !input.starts_with("marigold:") && !input.starts_with("marigoldtest:") && !input.starts_with("marigolddev:") {
+        return clean_wallet(&format!("marigold:{}", input));
     }
 
     // Try regex match
@@ -339,7 +339,7 @@ fn clean_wallet(input: &str) -> Result<String, Box<dyn std::error::Error + Send 
         return Ok(captures.as_str().to_string());
     }
 
-    Err("unable to coerce wallet to valid kaspa address".into())
+    Err("unable to coerce wallet to valid marigold address".into())
 }
 
 /// Send extranonce to client

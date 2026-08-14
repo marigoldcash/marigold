@@ -1203,7 +1203,7 @@ mod integration {
         use kaspa_stratum_bridge::InternalCpuMinerConfig;
         let miner_config = InternalCpuMinerConfig {
             enabled: false, // Don't actually mine in test
-            mining_address: "kaspatest:test".to_string(),
+            mining_address: "marigoldtest:test".to_string(),
             threads: 1,
             throttle: None,
             template_poll_interval: Duration::from_millis(250),
@@ -1768,7 +1768,7 @@ mod comprehensive_tests {
         let handler = ShareHandler::new("test-instance".to_string());
         let ctx = create_test_context_sync();
         *ctx.worker_name.lock() = "worker1".to_string();
-        *ctx.wallet_addr.lock() = "kaspatest:test".to_string();
+        *ctx.wallet_addr.lock() = "marigoldtest:test".to_string();
 
         let stats = handler.get_create_stats(&ctx);
         assert_eq!(*stats.worker_name.lock(), "worker1");
@@ -1790,7 +1790,7 @@ mod comprehensive_tests {
         let stats_before_wallet = handler.get_create_stats(&ctx);
         assert_eq!(*stats_before_wallet.worker_name.lock(), "ks0");
 
-        let wallet = "kaspa:qr8example123456789012345678901234567890123456789012345678901234567890".to_string();
+        let wallet = "marigold:qr8example123456789012345678901234567890123456789012345678901234567890".to_string();
         *ctx.wallet_addr.lock() = wallet.clone();
 
         // Reusing the same in-memory stats entry must still sync prom start time for the wallet.
@@ -1825,7 +1825,7 @@ mod comprehensive_tests {
         let handler = ShareHandler::new("test-instance".to_string());
         let ctx = create_test_context_sync();
         *ctx.worker_name.lock() = "worker1".to_string();
-        *ctx.wallet_addr.lock() = "kaspatest:test".to_string();
+        *ctx.wallet_addr.lock() = "marigoldtest:test".to_string();
         handler.get_create_stats(&ctx);
 
         // Set initial difficulty
@@ -1879,7 +1879,7 @@ mod comprehensive_tests {
         let handler = ShareHandler::new("test-instance".to_string());
         let ctx = create_test_context_sync();
         *ctx.worker_name.lock() = "worker1".to_string();
-        *ctx.wallet_addr.lock() = "kaspatest:test".to_string();
+        *ctx.wallet_addr.lock() = "marigoldtest:test".to_string();
         handler.get_create_stats(&ctx);
 
         // Set initial difficulty
@@ -2027,7 +2027,7 @@ mod comprehensive_tests {
 
         let config = InternalCpuMinerConfig {
             enabled: true,
-            mining_address: "kaspatest:test123456789012345678901234567890123456789012345678901234567890".to_string(),
+            mining_address: "marigoldtest:test123456789012345678901234567890123456789012345678901234567890".to_string(),
             threads: 4,
             throttle: Some(Duration::from_millis(10)),
             template_poll_interval: Duration::from_millis(250),
@@ -2035,7 +2035,7 @@ mod comprehensive_tests {
 
         assert!(config.enabled);
         assert_eq!(config.threads, 4);
-        assert_eq!(config.mining_address, "kaspatest:test123456789012345678901234567890123456789012345678901234567890");
+        assert_eq!(config.mining_address, "marigoldtest:test123456789012345678901234567890123456789012345678901234567890");
         assert!(config.throttle.is_some());
         assert_eq!(config.template_poll_interval, Duration::from_millis(250));
     }
@@ -2062,7 +2062,7 @@ mod comprehensive_tests {
 
         let config_valid = InternalCpuMinerConfig {
             enabled: true,
-            mining_address: "kaspatest:test123456789012345678901234567890123456789012345678901234567890".to_string(),
+            mining_address: "marigoldtest:test123456789012345678901234567890123456789012345678901234567890".to_string(),
             threads: 1,
             throttle: None,
             template_poll_interval: Duration::from_millis(250),
@@ -2108,7 +2108,7 @@ mod comprehensive_tests {
 
         let config_zero_threads = InternalCpuMinerConfig {
             enabled: true,
-            mining_address: "kaspatest:test123456789012345678901234567890123456789012345678901234567890".to_string(),
+            mining_address: "marigoldtest:test123456789012345678901234567890123456789012345678901234567890".to_string(),
             threads: 0, // Should be clamped to 1
             throttle: None,
             template_poll_interval: Duration::from_millis(250),
@@ -2131,7 +2131,7 @@ mod comprehensive_tests {
 
         let config_disabled = InternalCpuMinerConfig {
             enabled: false,
-            mining_address: "kaspatest:test123456789012345678901234567890123456789012345678901234567890".to_string(),
+            mining_address: "marigoldtest:test123456789012345678901234567890123456789012345678901234567890".to_string(),
             threads: 4,
             throttle: None,
             template_poll_interval: Duration::from_millis(250),
@@ -2155,7 +2155,7 @@ mod comprehensive_tests {
         // For this test, we'll just verify the disabled path doesn't require a real API
         let config = InternalCpuMinerConfig {
             enabled: false,
-            mining_address: "kaspatest:test123456789012345678901234567890123456789012345678901234567890".to_string(),
+            mining_address: "marigoldtest:test123456789012345678901234567890123456789012345678901234567890".to_string(),
             threads: 1,
             throttle: None,
             template_poll_interval: Duration::from_millis(250),
@@ -2180,7 +2180,7 @@ mod comprehensive_tests {
         // Test with throttle enabled
         let config_with_throttle = InternalCpuMinerConfig {
             enabled: true,
-            mining_address: "kaspatest:test123456789012345678901234567890123456789012345678901234567890".to_string(),
+            mining_address: "marigoldtest:test123456789012345678901234567890123456789012345678901234567890".to_string(),
             threads: 1,
             throttle: Some(Duration::from_millis(1)), // 1ms sleep per hash
             template_poll_interval: Duration::from_millis(250),
@@ -2192,7 +2192,7 @@ mod comprehensive_tests {
         // Test without throttle (maximum CPU usage)
         let config_no_throttle = InternalCpuMinerConfig {
             enabled: true,
-            mining_address: "kaspatest:test123456789012345678901234567890123456789012345678901234567890".to_string(),
+            mining_address: "marigoldtest:test123456789012345678901234567890123456789012345678901234567890".to_string(),
             threads: 1,
             throttle: None, // No sleep between hashes
             template_poll_interval: Duration::from_millis(250),
@@ -2213,7 +2213,7 @@ mod comprehensive_tests {
         // Fast polling (more frequent template updates)
         let config_fast = InternalCpuMinerConfig {
             enabled: true,
-            mining_address: "kaspatest:test123456789012345678901234567890123456789012345678901234567890".to_string(),
+            mining_address: "marigoldtest:test123456789012345678901234567890123456789012345678901234567890".to_string(),
             threads: 1,
             throttle: None,
             template_poll_interval: Duration::from_millis(100), // Poll every 100ms
@@ -2224,7 +2224,7 @@ mod comprehensive_tests {
         // Slow polling (less frequent template updates, less API load)
         let config_slow = InternalCpuMinerConfig {
             enabled: true,
-            mining_address: "kaspatest:test123456789012345678901234567890123456789012345678901234567890".to_string(),
+            mining_address: "marigoldtest:test123456789012345678901234567890123456789012345678901234567890".to_string(),
             threads: 1,
             throttle: None,
             template_poll_interval: Duration::from_millis(1000), // Poll every 1 second
@@ -2288,7 +2288,7 @@ mod comprehensive_tests {
         // Create a valid config
         let config = InternalCpuMinerConfig {
             enabled: true,
-            mining_address: "kaspatest:test123456789012345678901234567890123456789012345678901234567890".to_string(),
+            mining_address: "marigoldtest:test123456789012345678901234567890123456789012345678901234567890".to_string(),
             threads: 2,
             throttle: Some(Duration::from_millis(1)),
             template_poll_interval: Duration::from_millis(500),
@@ -2447,7 +2447,7 @@ mod comprehensive_tests {
         // Example 1: Single-threaded, throttled (low CPU usage)
         let config_low_cpu = InternalCpuMinerConfig {
             enabled: true,
-            mining_address: "kaspatest:test123456789012345678901234567890123456789012345678901234567890".to_string(),
+            mining_address: "marigoldtest:test123456789012345678901234567890123456789012345678901234567890".to_string(),
             threads: 1,
             throttle: Some(Duration::from_millis(10)),           // 10ms sleep per hash
             template_poll_interval: Duration::from_millis(1000), // Poll every second
@@ -2459,7 +2459,7 @@ mod comprehensive_tests {
         // Example 2: Multi-threaded, no throttle (maximum CPU usage)
         let config_max_cpu = InternalCpuMinerConfig {
             enabled: true,
-            mining_address: "kaspatest:test123456789012345678901234567890123456789012345678901234567890".to_string(),
+            mining_address: "marigoldtest:test123456789012345678901234567890123456789012345678901234567890".to_string(),
             threads: 8,                                         // Use all CPU cores
             throttle: None,                                     // No throttling
             template_poll_interval: Duration::from_millis(100), // Frequent template updates
@@ -2471,7 +2471,7 @@ mod comprehensive_tests {
         // Example 3: Balanced configuration
         let config_balanced = InternalCpuMinerConfig {
             enabled: true,
-            mining_address: "kaspatest:test123456789012345678901234567890123456789012345678901234567890".to_string(),
+            mining_address: "marigoldtest:test123456789012345678901234567890123456789012345678901234567890".to_string(),
             threads: 4,
             throttle: Some(Duration::from_millis(1)),           // Light throttling
             template_poll_interval: Duration::from_millis(250), // Default polling
@@ -2491,7 +2491,7 @@ mod comprehensive_tests {
         use kaspa_stratum_bridge::InternalCpuMinerConfig;
         let _config = InternalCpuMinerConfig {
             enabled: true,
-            mining_address: "kaspatest:test123456789012345678901234567890123456789012345678901234567890".to_string(),
+            mining_address: "marigoldtest:test123456789012345678901234567890123456789012345678901234567890".to_string(),
             threads: 1,
             throttle: None,
             template_poll_interval: std::time::Duration::from_millis(250),
@@ -2530,12 +2530,12 @@ mod comprehensive_tests {
         let event1 = JsonRpcEvent::new(
             Some("1".to_string()),
             "mining.authorize",
-            vec![json!("kaspa:qr8example123456789012345678901234567890123456789012345678901234567890")],
+            vec![json!("marigold:qr8example123456789012345678901234567890123456789012345678901234567890")],
         );
         // Verify event was created with proper prefix before calling handle_authorize
         assert_eq!(event1.params.len(), 1);
         let addr1 = event1.params[0].as_str().unwrap();
-        assert!(addr1.starts_with("kaspa:"), "Address should have kaspa: prefix");
+        assert!(addr1.starts_with("marigold:"), "Address should have kaspa: prefix");
         let _result1: Result<(), _> = handle_authorize(ctx.clone(), event1, None, None).await;
         // Note: This will fail with invalid address, but we're testing the cleaning logic
         // In real scenario, valid addresses would work
@@ -2545,11 +2545,11 @@ mod comprehensive_tests {
         let event2 = JsonRpcEvent::new(
             Some("2".to_string()),
             "mining.authorize",
-            vec![json!("kaspatest:qr8example123456789012345678901234567890123456789012345678901234567890")],
+            vec![json!("marigoldtest:qr8example123456789012345678901234567890123456789012345678901234567890")],
         );
         assert_eq!(event2.params.len(), 1);
         let addr2 = event2.params[0].as_str().unwrap();
-        assert!(addr2.starts_with("kaspatest:"), "Address should have kaspatest: prefix");
+        assert!(addr2.starts_with("marigoldtest:"), "Address should have kaspatest: prefix");
         let _result2: Result<(), _> = handle_authorize(ctx2.clone(), event2, None, None).await;
 
         // Test kaspadev: prefix
@@ -2557,11 +2557,11 @@ mod comprehensive_tests {
         let event3 = JsonRpcEvent::new(
             Some("3".to_string()),
             "mining.authorize",
-            vec![json!("kaspadev:qr8example123456789012345678901234567890123456789012345678901234567890")],
+            vec![json!("marigolddev:qr8example123456789012345678901234567890123456789012345678901234567890")],
         );
         assert_eq!(event3.params.len(), 1);
         let addr3 = event3.params[0].as_str().unwrap();
-        assert!(addr3.starts_with("kaspadev:"), "Address should have kaspadev: prefix");
+        assert!(addr3.starts_with("marigolddev:"), "Address should have kaspadev: prefix");
         let _result3: Result<(), _> = handle_authorize(ctx3.clone(), event3, None, None).await;
     }
 
@@ -2577,7 +2577,7 @@ mod comprehensive_tests {
         // Verify event was created with address without prefix (before calling handle_authorize)
         assert_eq!(event.params.len(), 1);
         let addr_param = event.params[0].as_str().unwrap();
-        assert!(!addr_param.starts_with("kaspa:"), "Test address should not have prefix initially");
+        assert!(!addr_param.starts_with("marigold:"), "Test address should not have prefix initially");
 
         // handle_authorize will call clean_wallet which should add kaspa: prefix
         let _result: Result<(), _> = handle_authorize(ctx.clone(), event, None, None).await;
@@ -2641,7 +2641,7 @@ mod comprehensive_tests {
             Some("1".to_string()),
             "mining.submit",
             vec![
-                json!("kaspatest:qr8example123456789012345678901234567890123456789012345678901234567890.worker1"),
+                json!("marigoldtest:qr8example123456789012345678901234567890123456789012345678901234567890.worker1"),
                 json!("1"),
                 json!("0000"),     // extranonce2
                 json!("00000000"), // ntime
@@ -2665,7 +2665,7 @@ mod comprehensive_tests {
             Some("1".to_string()),
             "mining.submit",
             vec![
-                json!("kaspatest:qr8example123456789012345678901234567890123456789012345678901234567890.worker1"),
+                json!("marigoldtest:qr8example123456789012345678901234567890123456789012345678901234567890.worker1"),
                 json!("1"),
                 json!("00000000"), // nonce
             ],
@@ -2706,7 +2706,7 @@ mod comprehensive_tests {
         let handler = ShareHandler::new("test-instance".to_string());
         let ctx = create_test_context_sync();
         *ctx.worker_name.lock() = "worker1".to_string();
-        *ctx.wallet_addr.lock() = "kaspatest:test".to_string();
+        *ctx.wallet_addr.lock() = "marigoldtest:test".to_string();
         handler.get_create_stats(&ctx);
 
         // Test minimum difficulty (1.0)
@@ -2732,7 +2732,7 @@ mod comprehensive_tests {
         let handler = ShareHandler::new("test-instance".to_string());
         let ctx = create_test_context_sync();
         *ctx.worker_name.lock() = "worker1".to_string();
-        *ctx.wallet_addr.lock() = "kaspatest:test".to_string();
+        *ctx.wallet_addr.lock() = "marigoldtest:test".to_string();
         handler.get_create_stats(&ctx);
 
         // Set initial difficulty
@@ -2973,7 +2973,7 @@ mod comprehensive_tests {
         let ctx = create_test_context_sync();
 
         // Set wallet and worker
-        *ctx.wallet_addr.lock() = "kaspatest:qr8example123456789012345678901234567890123456789012345678901234567890".to_string();
+        *ctx.wallet_addr.lock() = "marigoldtest:qr8example123456789012345678901234567890123456789012345678901234567890".to_string();
         *ctx.worker_name.lock() = "worker1".to_string();
         *ctx.remote_app.lock() = "BzMiner".to_string();
 
@@ -2981,7 +2981,7 @@ mod comprehensive_tests {
         assert_eq!(summary.remote_addr, "127.0.0.1", "Summary should contain remote address");
         assert_eq!(summary.remote_port, 12345, "Summary should contain remote port");
         assert_eq!(
-            summary.wallet_addr, "kaspatest:qr8example123456789012345678901234567890123456789012345678901234567890",
+            summary.wallet_addr, "marigoldtest:qr8example123456789012345678901234567890123456789012345678901234567890",
             "Summary should contain wallet address"
         );
         assert_eq!(summary.worker_name, "worker1", "Summary should contain worker name");
