@@ -4,7 +4,7 @@ Snapshot of everything decided and built so far, so any fresh coding session on 
 machine can continue from the repo alone. Read this together with [FORK-PLAN.md](../../FORK-PLAN.md).
 Update this file whenever off-repo state changes (domains, accounts, infra).
 
-Last updated: 2026-08-14 (P0.5 complete)
+Last updated: 2026-08-14 (P0.6 complete — Phase 0 done)
 
 ## What this project is
 
@@ -44,21 +44,16 @@ Canonical domain **marigold.cash**.
 
 ## Where execution stands
 
-- **Next step: P0.6** (write the orientation notes file — mostly already satisfied by
-  the running [NOTES.md](NOTES.md) built up across P0.1-P0.5; just review/tidy it).
-  P0.1-P0.5 are all done on Linux (LMDE/Debian). P0.5 was executed via RPC instead of
-  the literal `kaspa-cli` wallet flow — see NOTES.md and the FORK-PLAN.md P0.5 entry for
-  the rationale (kaspa-cli is REPL-only and unscriptable, and its backing
-  `kaspa-wallet-core` seed/key-DB layer is exactly what this project's wallet redesign
-  replaces, so it wasn't worth proving out). See [NOTES.md](NOTES.md) for full details:
-  test baseline (0 failed, 26 pre-existing ignored), devnet ports/app-dir, the
-  `kaspa-cli` REPL gotcha, generating throwaway devnet addresses without a wallet,
-  `kaspa-miner` invocation, and using the built-in `rothschild` tx generator (note its
-  2×-coinbase-maturity requirement and that confirmed balance needs a block mined
-  *after* the tx, not just mempool submission). Windows build was abandoned (MSVC Build
-  Tools installer failures) — development moved to Linux. Linux prereqs:
-  `sudo apt install -y curl git build-essential libssl-dev pkg-config protobuf-compiler libprotobuf-dev clang libclang-dev`
-  then rustup (stable, ≥1.91). No Windows AR.exe/LIBCLANG quirks apply on Linux.
+- **Next step: P1.1** (Phase 0 — environment & orientation — is complete: P0.1-P0.6 all
+  done on Linux, LMDE/Debian). For environment setup, working commands, and every
+  build/test/devnet/wallet gotcha hit along the way, **read [NOTES.md](NOTES.md) first**
+  — it's the orientation doc Phase 0 exists to produce, kept current as the single
+  source of truth for "how do I actually run this." Don't duplicate its content here;
+  update it (not this file) when new build/run findings turn up.
+- P0.5 was executed via RPC instead of the literal `kaspa-cli` wallet flow — see the
+  FORK-PLAN.md P0.5 entry and NOTES.md for the rationale (kaspa-cli is REPL-only and
+  unscriptable, and its backing `kaspa-wallet-core` seed/key-DB layer is exactly what
+  this project's wallet redesign replaces, so it wasn't worth proving out).
 - wasm-pack / wasm32 target only needed for WASM SDK steps, not for `kaspad`.
 - Phases 0–4 are bite-size sessions by design; use stronger models for Phase 5 spec
   work, ⚠️ HARD steps (P6.4, P6.11), and review gates.

@@ -111,7 +111,7 @@ is fork-specific; it de-risks everything after.*
   real keypair, mine to it, and send a signed transaction — verified the recipient's
   balance via `get_balance_by_address` RPC.
 
-- [ ] **P0.6 — Write the orientation notes file.**
+- [x] **P0.6 — Write the orientation notes file.**
   Create `docs/x-fork/NOTES.md` recording: build quirks encountered, the exact miner used,
   commands that worked. Future sessions start by reading it.
   ✅ *Verify:* file exists and includes the working run commands.

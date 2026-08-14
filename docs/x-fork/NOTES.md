@@ -1,9 +1,61 @@
 # Orientation notes
 
-Running log of build/test findings for future sessions. Append to this file as later
-Phase 0 steps run (P0.6 formalizes it further).
+Start here. This file has two parts: a **quick-start** block below with the exact
+commands that work on this machine today, and a **detailed step log** (P0.1 onward)
+with the reasoning, gotchas, and dead ends behind them — read the log when a quick-start
+command surprises you. Append to the log as later steps run; keep the quick-start block
+in sync when commands change (e.g. once P2 rebrands ports/prefixes/app-dir).
 
-## P0.1 — Build
+## Environment
+
+- Platform: Linux (Debian/LMDE). Windows was abandoned (MSVC Build Tools installer
+  failures) — this fork is developed on Linux.
+- Toolchain: Rust 1.97.1 (≥1.91 required), protoc 3.21.12, clang 19. Prereqs installed via:
+  ```
+  sudo apt install -y curl git build-essential libssl-dev pkg-config protobuf-compiler libprotobuf-dev clang libclang-dev
+  ```
+  then rustup (stable). No Windows AR.exe/LIBCLANG quirks apply here.
+- CPU miner: `kaspa-miner` (elichai/kaspa-miner) installed separately at
+  `~/.cargo/bin/kaspa-miner` — not part of this workspace's `cargo build`.
+
+## Quick start (copy-paste, in order)
+
+Everything below targets **devnet**, still using upstream's unmodified `kaspa`/`kaspadev`
+prefixes and `161*0`-family ports (Phase 2 hasn't rebranded these yet).
+
+```bash
+# Build the node
+cargo build --release --bin kaspad
+
+# Run the full test suite (cargo-nextest not installed; plain `cargo test` works fine)
+cargo test --release
+
+# Start a devnet node (GRPC :16610, P2P :16611, WRPC-borsh :17610; app dir ~/.rusty-kaspa/kaspa-devnet/)
+target/release/kaspad --devnet --enable-unsynced-mining --rpclisten-borsh=127.0.0.1 --utxoindex
+
+# Mine to an address (kaspa-cli can't generate one — see "kaspa-cli is REPL-only" below;
+# use rothschild --network devnet with no --private-key against a running node instead,
+# or the throwaway kaspa-addresses example described under P0.4 if you just need bytes
+# with no real key)
+kaspa-miner --mining-address <devnet-address> --kaspad-address 127.0.0.1 --port 16610 --threads 4 --mine-when-not-synced
+
+# Generate a real keypair + address, then (after funding + maturity) send transactions
+target/release/rothschild --network devnet
+target/release/rothschild --network devnet --private-key <hex> --to-addr <addr> --tps 1
+
+# Ad-hoc RPC checks (kaspa-cli is not usable for this — see below): point
+# rpc/grpc/examples/simple_client at grpc://localhost:16610 (devnet) instead of its
+# hardcoded mainnet default of 16110, `cargo run --release -p kaspa-grpc-simple-client-example`
+```
+
+**`kaspa-cli` is REPL-only and cannot be scripted** (`cli/src/main.rs` ignores argv,
+always opens an interactive `$` prompt that needs a real TTY). Don't reach for it in
+any non-interactive workflow — use a gRPC/wRPC client, or `rothschild` for anything
+requiring a signed transaction. Full detail under P0.3.
+
+## Detailed step log
+
+### P0.1 — Build
 
 - Platform: Linux (Debian/LMDE), Rust 1.97.1, protoc 3.21.12, clang 19. All prerequisites
   were already installed on this machine — no `apt install` needed.
@@ -11,7 +63,7 @@ Phase 0 steps run (P0.6 formalizes it further).
 - Note: `kaspad --version` prints the version string but exits with code 1 (harmless
   quirk of upstream's arg parsing — not fork-caused; don't rely on its exit code in scripts).
 
-## P0.2 — Test suite baseline (2026-08-14)
+### P0.2 — Test suite baseline (2026-08-14)
 
 `cargo test --release` (cargo-nextest not installed; plain `cargo test` used instead,
 plan allows either). Full log saved at test time in the session scratchpad.
@@ -32,7 +84,7 @@ plan allows either). Full log saved at test time in the session scratchpad.
 - **Baseline established: any test that goes red after this point in the fork is ours
   to fix** (Ground rule / P0.2 verify instruction).
 
-## P0.3 — Devnet node (2026-08-14)
+### P0.3 — Devnet node (2026-08-14)
 
 Command from the plan:
 ```
@@ -64,7 +116,7 @@ cargo run --release --bin kaspad -- --devnet --enable-unsynced-mining --rpcliste
   network `devnet`, UTXO indexing on, genesis-only DAG (block/header count 0, DAA score
   0) — expected for a node with no mined blocks yet.
 
-## P0.4 — Mine devnet blocks (2026-08-14)
+### P0.4 — Mine devnet blocks (2026-08-14)
 
 Used the installed `kaspa-miner` (elichai/kaspa-miner, at `~/.cargo/bin/kaspa-miner`)
 against a P0.3-style devnet node, rather than `simpa`.
@@ -94,7 +146,7 @@ against a P0.3-style devnet node, rather than `simpa`.
   `pgrep -x <exact-binary-name>` (matches `/proc/*/comm`, not the full cmdline) when
   killing a process spawned in this workflow.
 
-## P0.5 — Exercise a wallet on devnet (2026-08-14)
+### P0.5 — Exercise a wallet on devnet (2026-08-14)
 
 **Substituted RPC-direct testing for the `kaspa-cli` wallet flow** (user-approved
 deviation from the plan's literal text). Two reasons: (1) P0.3 already established
