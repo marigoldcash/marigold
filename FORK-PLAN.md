@@ -91,7 +91,7 @@ is fork-specific; it de-risks everything after.*
   ✅ *Verify:* node starts, logs show devnet params, RPC answers (e.g. connect `cargo run
   --release -p kaspa-cli` and run `rpc get-info` equivalent).
 
-- [ ] **P0.4 — Mine devnet blocks.**
+- [x] **P0.4 — Mine devnet blocks.**
   Use the community CPU miner (github.com/elichai/kaspa-miner or equivalent) pointed at the
   devnet node, or use `simpa` for in-process simulation:
   `cargo run --release --bin simpa -- -t=10 -d=2 -b=8 -n=500`.

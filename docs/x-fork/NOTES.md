@@ -63,3 +63,33 @@ cargo run --release --bin kaspad -- --devnet --enable-unsynced-mining --rpcliste
   checkout --` revert, not a committed change). Output confirmed: server version 2.0.1,
   network `devnet`, UTXO indexing on, genesis-only DAG (block/header count 0, DAA score
   0) — expected for a node with no mined blocks yet.
+
+## P0.4 — Mine devnet blocks (2026-08-14)
+
+Used the installed `kaspa-miner` (elichai/kaspa-miner, at `~/.cargo/bin/kaspa-miner`)
+against a P0.3-style devnet node, rather than `simpa`.
+
+- **Mining address**: `kaspa-cli` can't produce one non-interactively (P0.3's REPL
+  finding), and no wallet exists yet (P0.5 territory). Generated a syntactically valid
+  address directly with the `kaspa-addresses` crate (`Address::new(Prefix::Devnet,
+  Version::PubKey, &payload)` with an arbitrary 32-byte payload — no real keypair needed,
+  since nothing will ever spend from it) via a throwaway `cargo run --example`, deleted
+  immediately after. Result used for this run:
+  `kaspadev:qqxkanesj8e98dq4wmtn3x06tw7p6lklgzssyc7yykrwwj9fpf4uc9j5wmw8s` (no known
+  private key — coinbase-only sink address, don't reuse it as a real wallet address).
+- **Miner invocation**: `kaspa-miner` has no devnet-specific port default (only
+  mainnet=16110/testnet=16210), so pass `--port 16610` explicitly (devnet's GRPC port,
+  per P0.3). Also needs `--mine-when-not-synced` on the miner side to pair with the
+  node's `--enable-unsynced-mining`:
+  ```
+  kaspa-miner --mining-address <addr> --kaspad-address 127.0.0.1 --port 16610 --threads 4 --mine-when-not-synced
+  ```
+- **Result**: miner found 221 blocks in well under a minute (devnet's genesis difficulty
+  is trivial by design); node log showed matching `Accepted N blocks ... via submit
+  block` lines throughout. Cross-checked via RPC (same gRPC example client as P0.3):
+  block count 221, header count 221, virtual DAA score 221, `is_synced: true`.
+- **Gotcha**: `pgrep -f <pattern>` / `kill $(pgrep -f ...)` can self-match the wrapping
+  shell command that contains the same pattern text (the whole `kill $(pgrep -f "...")`
+  string is itself searched), killing the wrong thing or the shell itself. Prefer
+  `pgrep -x <exact-binary-name>` (matches `/proc/*/comm`, not the full cmdline) when
+  killing a process spawned in this workflow.

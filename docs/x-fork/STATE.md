@@ -4,7 +4,7 @@ Snapshot of everything decided and built so far, so any fresh coding session on 
 machine can continue from the repo alone. Read this together with [FORK-PLAN.md](../../FORK-PLAN.md).
 Update this file whenever off-repo state changes (domains, accounts, infra).
 
-Last updated: 2026-08-14 (P0.3 complete)
+Last updated: 2026-08-14 (P0.4 complete)
 
 ## What this project is
 
@@ -44,13 +44,16 @@ Canonical domain **marigold.cash**.
 
 ## Where execution stands
 
-- **Next step: P0.4** (mine devnet blocks). P0.1 (build), P0.2 (test baseline), and P0.3
-  (devnet node + RPC check) are done on Linux (LMDE/Debian) — see [NOTES.md](NOTES.md) for
-  details (test baseline: 0 failed, 26 pre-existing ignored; devnet: default ports,
-  app dir, and the finding that `kaspa-cli` is REPL-only and can't be driven
-  non-interactively — use a gRPC client for scripted RPC checks instead). Windows build
-  was abandoned (MSVC Build Tools installer failures) — development moved to Linux.
-  Linux prereqs:
+- **Next step: P0.5** (exercise a wallet on devnet — will hit the `kaspa-cli` REPL
+  limitation head-on since it's the only wallet frontend; plan accordingly, e.g. explore
+  whether a real terminal/pty is available in-session, or drive it via the wrpc-client
+  crate instead of the REPL). P0.1 (build), P0.2 (test baseline), P0.3 (devnet node + RPC
+  check), and P0.4 (mining, via the installed `kaspa-miner`) are done on Linux
+  (LMDE/Debian) — see [NOTES.md](NOTES.md) for details (test baseline: 0 failed, 26
+  pre-existing ignored; devnet ports/app-dir; `kaspa-cli` REPL-only gotcha; how to
+  generate a throwaway devnet address without a wallet; exact miner invocation and
+  flags). Windows build was abandoned (MSVC Build Tools installer failures) —
+  development moved to Linux. Linux prereqs:
   `sudo apt install -y curl git build-essential libssl-dev pkg-config protobuf-compiler libprotobuf-dev clang libclang-dev`
   then rustup (stable, ≥1.91). No Windows AR.exe/LIBCLANG quirks apply on Linux.
 - wasm-pack / wasm32 target only needed for WASM SDK steps, not for `kaspad`.
