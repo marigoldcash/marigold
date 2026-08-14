@@ -173,10 +173,14 @@ decision to record in `docs/x-fork/DECISIONS.md` (create it in P1.1). No code ch
   Endgame posture recorded: anchors → emission → circulation fees. Full math and
   considered but rejected alternatives in [DECISIONS.md](docs/x-fork/DECISIONS.md).
 
-- [ ] **P1.5 — Launch allocation.** Fair launch (mine from zero), premine %, or airdrop?
+- [x] **P1.5 — Launch allocation.** Fair launch (mine from zero), premine %, or airdrop?
   This is an economics/credibility/legal decision, not code. If premine: how much, vesting,
   and to what governance. Record it. *Note: honesty + large premine is a hard sell;
   fair launch or small transparent dev fund (<10%) is the defensible zone.*
+  **Executed 2026-08-14: fair launch from zero.** No premine, no dev fund, no airdrop —
+  every MAGLD is mined via the P1.4 emission schedule starting at genesis. No
+  vesting/governance question applies (nothing is pre-allocated). Recorded in
+  [DECISIONS.md](docs/x-fork/DECISIONS.md).
 
 - [ ] **P1.6 — Denominations.** For the coin pool recommend powers of ten in whole
   coins: {0.01, 0.1, 1, 10, 100, 1000}. Record the set.
