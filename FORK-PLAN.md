@@ -190,8 +190,10 @@ decision to record in `docs/x-fork/DECISIONS.md` (create it in P1.1). No code ch
   small-payment end while sparing large holders from managing piles of 1000-notes.
   Rationale in [DECISIONS.md](docs/x-fork/DECISIONS.md).
 
-- [ ] **P1.7 — Transparent tier policy.** The fork launches transparent-only (Phases 2–4)
+- [x] **P1.7 — Transparent tier policy.** The fork launches transparent-only (Phases 2–4)
   and adds the pool (Phases 5–7).
+  **Confirmed as-is, 2026-08-14** — no change to the phase structure. Recorded in
+  [DECISIONS.md](docs/x-fork/DECISIONS.md).
 
 - [ ] **P1.8 — Fee policy.** Keep fees (near-zero like Kaspa). We established zero-fee +
   reward-per-action is a spam machine; this plan keeps Kaspa's fee market untouched. Record
