@@ -182,8 +182,13 @@ decision to record in `docs/x-fork/DECISIONS.md` (create it in P1.1). No code ch
   vesting/governance question applies (nothing is pre-allocated). Recorded in
   [DECISIONS.md](docs/x-fork/DECISIONS.md).
 
-- [ ] **P1.6 — Denominations.** For the coin pool recommend powers of ten in whole
+- [x] **P1.6 — Denominations.** For the coin pool recommend powers of ten in whole
   coins: {0.01, 0.1, 1, 10, 100, 1000}. Record the set.
+  **Executed 2026-08-14 — extended above the recommended set.** Final set:
+  **{0.01, 0.1, 1, 10, 100, 1000, 10000, 100000}** (8 tiers). Since split/merge moves
+  exactly 10× either direction, extending the ladder upward costs nothing at the
+  small-payment end while sparing large holders from managing piles of 1000-notes.
+  Rationale in [DECISIONS.md](docs/x-fork/DECISIONS.md).
 
 - [ ] **P1.7 — Transparent tier policy.** The fork launches transparent-only (Phases 2–4)
   and adds the pool (Phases 5–7).
