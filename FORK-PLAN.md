@@ -76,7 +76,7 @@ by a less capable coder in a single coding session.
 *Goal: build, test, and run a private network of the unmodified code. Nothing here
 is fork-specific; it de-risks everything after.*
 
-- [ ] **P0.1 — Build the workspace.**
+- [x] **P0.1 — Build the workspace.**
   Install prerequisites per [README.md](README.md) (Windows section: protoc, LLVM with the
   `AR.exe` copy trick, Rust ≥ 1.91). Then `cargo build --release --bin kaspad`.
   ✅ *Verify:* `cargo build --release --bin kaspad` exits 0.
