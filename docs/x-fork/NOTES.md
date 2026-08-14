@@ -433,3 +433,75 @@ same crate, so likely gets swept up there. Recorded here so it isn't silently lo
 between now and then. Whoever picks this up should also run a full workspace
 `cargo test` once, since this discovery method (grep + spot-check one crate) doesn't
 guarantee it's the *only* other affected crate.
+
+### P2.6 — Reset fork activations (2026-08-14)
+
+The flag flip (`crescendo_activation`/`toccata_activation` → `ForkActivation::always()`
+for mainnet + testnet) is one line each, but flipping it surfaced **5 real test
+failures**, none of them fake — each traced to a genuine stale-legacy-value issue.
+Worth understanding the mechanism, since it'll recur for anyone touching activation
+state again.
+
+**Root mechanism**: `ForkedParam::before()` (params.rs:116) already self-corrects —
+its doc comment says exactly this: "Returns the value before activation (=pre unless
+activation = always)." So when activation is `always()`, `.before()` returns `post`,
+not `pre`. This is *not* where the bugs were. The actual bugs were **stale
+`pre`-side values that were never updated to be self-consistent with an
+always-active fork**, only ever exercised now that mainnet/testnet joined
+simnet/devnet in using `always()`.
+
+**Bug 1 — `pre_crescendo_target_time_per_block` still said 1000 (1 BPS, real
+Kaspa's actual historical pre-crescendo rate)** for mainnet/testnet, while
+`blockrate` said 10 BPS. Simnet/devnet already avoid this exact trap — both set
+`pre_crescendo_target_time_per_block: TenBps::target_time_per_block()`, i.e. *the
+same* as their post-value, because they don't have real pre-crescendo history either.
+Fixed mainnet/testnet the same way.
+
+**Bug 2 — `deflationary_phase_daa_score` still said `15778800 - 259200`** (real
+Kaspa's actual historical value, derived from Kaspa's real launch date and a real
+3-day network outage shortly after — see the removed comment for the exact
+derivation) for both mainnet and testnet, and `pre_deflationary_phase_base_subsidy`
+was still the raw, un-scaled `50000000000` (Kaspa's real 1-BPS-era flat per-block
+subsidy). Together these meant: any block before that (meaningless, real-Kaspa-only)
+DAA score would get a flat, wrongly-large (10x too high — 500 KAS/sec instead of the
+intended 50 KAS/sec-equivalent) subsidy. **Fix: `deflationary_phase_daa_score: 0` for
+both** — this is not a new economics decision, it *implements* the P1.4 decision
+already locked in ("no pre-deflationary phase"), just mechanically, ahead of P3.2's
+real subsidy-table work. `pre_deflationary_phase_base_subsidy` becomes dead/unused
+once `daa_score` is 0 (matches devnet's existing pattern) — set to
+`TenBps::pre_deflationary_phase_base_subsidy()` as a harmless placeholder, same as
+devnet.
+
+**Bug 3 — a test-infrastructure gap, not a production bug.**
+`TestConsensus::build_header_with_parents` (consensus/src/consensus/test_consensus.rs)
+builds a header via `header_from_precomputed_hash`, which ultimately calls
+`Header::from_precomputed_hash` — a generic constructor that hardcodes
+`version: BLOCK_VERSION` (the pre-toccata constant) unconditionally, with no
+awareness of network or activation state. This was never exercised before because no
+test using this helper against `MAINNET_PARAMS` had previously hit real block
+version *validation* against an always-active toccata fork. Fix: set
+`header.version = self.params.block_version().get(header.daa_score);` right after
+`header.daa_score` is computed in that same function — correctly derives the version
+for *any* network/activation state, not just ours. This is arguably a latent
+correctness gap worth reporting upstream too, since it would bite any future Kaspa
+network config that activates toccata from genesis.
+
+**Bugs 4/5 — two hardcoded subsidy literals**, `50000000000` and `44000000000`, in
+`consensus/src/pipeline/body_processor/body_validation_in_context.rs`'s
+`validate_body_in_context_test`. Both are direct, correctly-scaled consequences of
+Bug 2's fix (`50000000000/10=5000000000`, `44000000000/10=4400000000` — confirmed via
+`TenBps::pre_deflationary_phase_base_subsidy()`'s actual source before hardcoding,
+not guessed). Simple literal updates once Bug 2's fix was understood.
+
+**Verification beyond the plan's stated commands**: `cargo test -p kaspa-consensus`
+(72/72), plus re-checked `kaspa-consensus-core` and `kaspa-mining` (both touch
+subsidy/params too) — all green. Ran a full `cargo build --workspace` (given the
+P2.1 wallet-core lesson above: targeted checks miss cross-crate breaks) — clean, no
+new errors anywhere (the known wallet-core *test* failures are runtime assertions,
+not compile errors, so a build-only pass doesn't re-surface them — still open,
+tracked separately above). **Live check used real mainnet mode, not devnet** — devnet
+wasn't touched by P2.6 at all, so testing against it would have proven nothing about
+this step specifically. Generated a throwaway mainnet address (same
+`kaspa-addresses` example-then-delete pattern as P0.4/P2.5), started a sandboxed
+`--appdir` mainnet node, mined with `kaspa-miner` pointed at the real mainnet port
+(26110) — blocks accepted at genuine 10 BPS pace, no version or subsidy rejections.

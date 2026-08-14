@@ -348,7 +348,7 @@ small, mechanical, and individually testable.*
   `daa_score: 0` like every other network — no pre-genesis history to splice in).
   See [NOTES.md](docs/x-fork/NOTES.md) for the full writeup.
 
-- [ ] **P2.6 — Reset fork activations.**
+- [x] **P2.6 — Reset fork activations.**
   In [params.rs](consensus/core/src/config/params.rs) set for your mainnet/testnet:
   `crescendo_activation: ForkActivation::always()` and
   `toccata_activation: ForkActivation::always()` — a new chain starts with all upgrades
@@ -356,6 +356,25 @@ small, mechanical, and individually testable.*
   opcodes from genesis and deletes an entire class of fork-transition complexity.
   ✅ *Verify:* `cargo test -p kaspa-consensus` passes;
   `grep -n "activation" consensus/core/src/config/params.rs` shows always() for your nets.
+  **Executed 2026-08-14.** The flag flip itself was one line each, but it surfaced 5
+  real test failures needing genuine investigation, not blind acceptance — full
+  root-cause writeup in [NOTES.md](docs/x-fork/NOTES.md). Summary: (1)
+  `pre_crescendo_target_time_per_block` was still real Kaspa's 1-BPS legacy value,
+  inconsistent with `always()` — fixed to match `blockrate` (mirrors simnet/devnet's
+  existing self-consistent pattern). (2) `deflationary_phase_daa_score` was still real
+  Kaspa's non-zero legacy checkpoint — set to `0` for both networks, which
+  *implements the already-locked P1.4 decision* ("no pre-deflationary phase"), not a
+  new economics call; the real subsidy table stays P3.2's job. (3) A test-only helper,
+  `TestConsensus::build_header_with_parents`, hardcoded the pre-toccata block version
+  via a generic `Header::from_precomputed_hash` default — fixed to derive it from
+  `params.block_version().get(daa_score)`; a latent test-infra gap, not a production
+  bug, just never exercised against an always()-active mainnet/testnet before. (4)
+  Two tests had subsidy literals (`50000000000`→`5000000000`,
+  `44000000000`→`4400000000`) needing the same BPS-scaling already applied elsewhere.
+  `cargo test -p kaspa-consensus` 72/72, `kaspa-consensus-core` and `kaspa-mining`
+  also rechecked green, full `cargo build --workspace` clean. Live check: rebuilt
+  `kaspad`, mined on a **sandboxed real mainnet-mode node** (not devnet, which P2.6
+  doesn't touch) — 10 BPS acceptance confirmed, no version/subsidy rejections.
 
 - [ ] **P2.7 — User-facing rebrand pass 1 (node).**
   Grep `kaspad/src`, `core/src`, `daemon/src` for user-visible strings: application name,

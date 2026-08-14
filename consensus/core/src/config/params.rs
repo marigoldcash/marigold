@@ -685,27 +685,26 @@ pub const MAINNET_PARAMS: Params = Params {
 
     storage_mass_parameter: STORAGE_MASS_PARAMETER,
 
-    // deflationary_phase_daa_score is the DAA score after which the pre-deflationary period
-    // switches to the deflationary period. This number is calculated as follows:
-    // We define a year as 365.25 days
-    // Half a year in seconds = 365.25 / 2 * 24 * 60 * 60 = 15778800
-    // The network was down for three days shortly after launch
-    // Three days in seconds = 3 * 24 * 60 * 60 = 259200
-    deflationary_phase_daa_score: 15778800 - 259200,
-    pre_deflationary_phase_base_subsidy: 50000000000,
+    // Deflationary from genesis (P1.4 decision: "no pre-deflationary phase") — this is a
+    // from-scratch chain with no launch-outage history to protect, unlike real Kaspa's
+    // value here (which encoded a real 3-day post-launch network outage). The real
+    // subsidy table (P3.2) defines emission from block 0; pre_deflationary_phase_base_subsidy
+    // is unused when deflationary_phase_daa_score is 0, kept as a harmless placeholder.
+    deflationary_phase_daa_score: 0,
+    pre_deflationary_phase_base_subsidy: TenBps::pre_deflationary_phase_base_subsidy(),
     skip_proof_of_work: false,
     max_block_level: 225,
     pruning_proof_m: 1000,
 
     blockrate: BlockrateParams::new::<10>(),
 
-    pre_crescendo_target_time_per_block: 1000,
+    // Matches `blockrate` — no real pre-crescendo history exists on a from-scratch
+    // chain, so "before" and "after" are the same rate (mirrors simnet/devnet).
+    pre_crescendo_target_time_per_block: TenBps::target_time_per_block(),
 
-    // Roughly 2025-05-05 1500 UTC
-    crescendo_activation: ForkActivation::new(110_165_000),
-
-    // Roughly 2026-06-30 1615 UTC
-    toccata_activation: ForkActivation::new(474_165_565),
+    // A new chain starts with all upgrades active from block 0 — no history to protect (P2.6).
+    crescendo_activation: ForkActivation::always(),
+    toccata_activation: ForkActivation::always(),
 };
 
 pub const TESTNET_PARAMS: Params = Params {
@@ -740,14 +739,9 @@ pub const TESTNET_PARAMS: Params = Params {
     block_lane_limits: BlockLaneLimits { lanes_per_block: DEFAULT_LANES_PER_BLOCK_LIMIT, gas_per_lane: DEFAULT_GAS_PER_LANE_LIMIT },
 
     storage_mass_parameter: STORAGE_MASS_PARAMETER,
-    // deflationary_phase_daa_score is the DAA score after which the pre-deflationary period
-    // switches to the deflationary period. This number is calculated as follows:
-    // We define a year as 365.25 days
-    // Half a year in seconds = 365.25 / 2 * 24 * 60 * 60 = 15778800
-    // The network was down for three days shortly after launch
-    // Three days in seconds = 3 * 24 * 60 * 60 = 259200
-    deflationary_phase_daa_score: 15778800 - 259200,
-    pre_deflationary_phase_base_subsidy: 50000000000,
+    // Deflationary from genesis — see MAINNET_PARAMS' comment above (same rationale).
+    deflationary_phase_daa_score: 0,
+    pre_deflationary_phase_base_subsidy: TenBps::pre_deflationary_phase_base_subsidy(),
     skip_proof_of_work: false,
     max_block_level: 250,
     pruning_proof_m: 1000,
@@ -756,11 +750,9 @@ pub const TESTNET_PARAMS: Params = Params {
 
     pre_crescendo_target_time_per_block: 1000,
 
-    // 18:30 UTC, March 6, 2025
-    crescendo_activation: ForkActivation::new(88_657_000),
-
-    // ~16:00 UTC, May 18, 2026
-    toccata_activation: ForkActivation::new(467_579_632),
+    // A new chain starts with all upgrades active from block 0 — no history to protect (P2.6).
+    crescendo_activation: ForkActivation::always(),
+    toccata_activation: ForkActivation::always(),
 };
 
 pub const SIMNET_PARAMS: Params = Params {

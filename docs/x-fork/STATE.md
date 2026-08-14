@@ -4,7 +4,7 @@ Snapshot of everything decided and built so far, so any fresh coding session on 
 machine can continue from the repo alone. Read this together with [FORK-PLAN.md](../../FORK-PLAN.md).
 Update this file whenever off-repo state changes (domains, accounts, infra).
 
-Last updated: 2026-08-14 (P2.5 complete)
+Last updated: 2026-08-14 (P2.6 complete)
 
 ## What this project is
 
@@ -79,41 +79,36 @@ substitute for it.
 
 ## Where execution stands
 
-- **Next step: P2.6** (reset fork activations — set `crescendo_activation`/
-  `toccata_activation` to `ForkActivation::always()` for mainnet/testnet in
-  `params.rs`, so all upgrades — 10 BPS, covenants, ZK opcodes — are active from
-  block 0; no history to protect on a fresh chain). **Phase 2 so far: P2.1-P2.5
-  done** — this fork is now a genuinely separate network at the identity/protocol
-  level (own address prefixes, ports, P2P handshake name — confirmed live against a
-  real Kaspa mainnet peer, explicit rejection — no more Kaspa DNS seeders) *and* has
-  its own from-scratch genesis (mainnet motto: *"Hell is other people's monetary
-  policy. — Sartre"*; testnet: `marigold-testnet`; **P9.5 will regenerate these with
-  the real launch timestamp — today's are Phase-2-milestone placeholders, not
-  final**). A bug found during P2.5 (`consensus/src/consensus/mod.rs`'s
-  `get_chain_block_samples()` hardcoding 16 real Kaspa-mainnet-2021 checkpoint
-  `(daa_score, timestamp)` pairs into the `get_daa_score_timestamp_estimate` RPC) is
-  **fixed** (separate commit, same session) — branch removed entirely, no
-  pre-genesis history to splice in on a from-scratch chain. Own DNS seeders are a
-  P9.2 future item (see "Live infrastructure" above for the Cloudflare-delegation
-  mechanism).
-  **⚠️ Known regression, not yet fixed: P2.1's address-prefix rebrand broke 22 tests
-  in `kaspa-wallet-core`** (`cargo test -p kaspa-wallet-core`) — hardcoded
-  `"kaspa:..."` test addresses in `tx/generator/test.rs` and legacy-wallet-import
-  fixtures in `compat/gen1.rs`/`gen0` tests now fail on `InvalidPrefix` instead of
-  parsing. **Not caught at P2.1 time because its own verify step only checked
-  `cargo test -p kaspa-addresses`, not the whole workspace** — no P2.x step since has
-  run a full-workspace test pass either. Some of these may need real recomputed test
-  vectors (legacy wallet import fixtures may be format-meaningful, not arbitrary),
-  not just a prefix swap — needs real attention, likely folded into P2.8 ("user-facing
-  rebrand pass 2: wallet + CLI") since it's the same crate, but flagging now so it
-  isn't silently forgotten. See NOTES.md for the full failing-test list.
-  **Full gotcha log for P2.1-P2.5 is in [NOTES.md](NOTES.md)** — worth skimming before
-  continuing Phase 2, especially: always rebuild `kaspad` before a live-network test
-  (a stale binary gave a false pass once already), use `--appdir=<scratch>` for any
-  mainnet-mode testing (there's a pre-existing unrelated real mainnet datadir on this
-  machine, untouched), and **run full-workspace `cargo test` periodically, not just
-  the crate a step names** — targeted verify commands can miss regressions like this
-  one in unrelated downstream crates.
+- **Next step: P2.7** (user-facing rebrand pass 1 (node) — grep `kaspad/src`,
+  `core/src`, `daemon/src` for user-visible strings: app name, log banner, `--help`
+  text, default app-dir name via `app_dir`/`get_app_dir`; display strings only, not
+  crate/module names per Ground rule 1). **Phase 2 so far: P2.1-P2.6 done** — this
+  fork is now a genuinely separate network end-to-end: own address prefixes, ports,
+  P2P handshake name (confirmed live against a real Kaspa mainnet peer — explicit
+  rejection), no Kaspa DNS seeders, own from-scratch genesis (mainnet motto: *"Hell
+  is other people's monetary policy. — Sartre"*; testnet: `marigold-testnet`; **P9.5
+  regenerates both with the real launch timestamp — today's are placeholders**), and
+  all forks (10 BPS, covenants, ZK opcodes) active from block 0 — confirmed live by
+  mining on a real sandboxed mainnet-mode node. Own DNS seeders remain a P9.2 future
+  item (see "Live infrastructure" above for the Cloudflare-delegation mechanism).
+  **Two bugs found and fixed along the way** (both real-Kaspa legacy constants left
+  inconsistent with a from-scratch chain — see NOTES.md for full root-cause writeups):
+  a `get_chain_block_samples()` RPC feed hardcoding 16 real Kaspa 2021 checkpoint
+  timestamps (P2.5), and P2.6's activation flip surfacing 5 test failures from stale
+  pre-crescendo/pre-deflationary legacy values plus one latent test-infra gap
+  (`TestConsensus` hardcoding the pre-toccata block version).
+  **⚠️ Known regression, still open: P2.1 broke 22 tests in `kaspa-wallet-core`**
+  (hardcoded `"kaspa:..."` test fixtures) — not caught at P2.1 time since its verify
+  step only checked `cargo test -p kaspa-addresses`. Some fixtures (legacy
+  wallet-import tests) may need real judgment, not a blind prefix swap. Flagged for
+  P2.8 (same crate). Full failing-test list in NOTES.md.
+  **Full gotcha log for P2.1-P2.6 is in [NOTES.md](NOTES.md)** — worth skimming
+  before continuing Phase 2: always rebuild `kaspad` before a live-network test (a
+  stale binary gave a false pass once), use `--appdir=<scratch>` for mainnet-mode
+  testing (a pre-existing unrelated real mainnet datadir exists on this machine,
+  untouched), and periodically run full-workspace `cargo test`/`cargo build`, not
+  just the crate a step names — targeted checks have already missed one real
+  cross-crate regression this phase.
   **Phases 0 and 1 are both complete.** Phase 0: P0.1-P0.6, see
   [NOTES.md](NOTES.md) — the single source of truth for build/test/devnet/wallet
   commands and gotchas (notably: `kaspa-cli` is REPL-only and unscriptable, P0.5 was
