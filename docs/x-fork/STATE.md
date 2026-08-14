@@ -4,7 +4,7 @@ Snapshot of everything decided and built so far, so any fresh coding session on 
 machine can continue from the repo alone. Read this together with [FORK-PLAN.md](../../FORK-PLAN.md).
 Update this file whenever off-repo state changes (domains, accounts, infra).
 
-Last updated: 2026-08-14 (P1.3 complete)
+Last updated: 2026-08-14 (P1.4 complete)
 
 ## What this project is
 
@@ -47,9 +47,12 @@ pre-decision). Canonical domain **marigold.cash**.
 
 ## Where execution stands
 
-- **Next step: P1.4** (supply & emission — 🧑‍⚖️ needs a human choice: total cap,
-  emission duration, initial per-second reward; not pre-decided anywhere yet). P1.1-P1.3
-  are done — see DECISIONS.md for the full ticker collision-check trail. Phase 0
+- **Next step: P1.5** (launch allocation — 🧑‍⚖️ fair launch vs premine vs airdrop; an
+  economics/credibility/legal call, not code; plan notes fair launch or a small
+  transparent dev fund <10% is the defensible zone for a privacy coin). P1.1-P1.4 are
+  done — see DECISIONS.md for the ticker collision trail and the P1.4 emission math
+  (210M cap, 3-yr halving, no tail, ≈1.5228 MAGLD/s initial — plus a flag that P5.2
+  must spec how pool ops pay fees). Phase 0
   (environment & orientation) is complete: P0.1-P0.6 all done on Linux, LMDE/Debian.
   For environment setup, working commands, and every build/test/devnet/wallet gotcha hit
   along the way, **read [NOTES.md](NOTES.md) first** — it's the orientation doc Phase 0

@@ -14,6 +14,10 @@ needed; this file is the authority on *what was chosen* and *when*.
 | Address prefix (testnet) | `marigoldtest` | Mirrors upstream's `kaspa`/`kaspatest` convention (mainnet prefix + `test` suffix). | 2026-08-14 |
 | Decimal precision | 8 decimals (1 marigold = 10⁸ base units) | Keep Kaspa's precision unchanged — no reason to diverge; simplifies porting wallet/RPC display code (amount formatting, `SOMPI_PER_KASPA`-style constants) with only a rename, no rescaling logic. | 2026-08-14 |
 | Base unit name | `petal` | Fits the marigold/flower branding (a flower's petals are its smallest, most numerous parts — mirrors how sompi are Kaspa's smallest unit); short, pronounceable, not already a unit name in this codebase or in wallet/RPC display code elsewhere. | 2026-08-14 |
+| Supply cap | 210,000,000 MAGLD — hard cap, **no tail emission** | 10× Bitcoin's cap. At any given market cap the unit is 10× cheaper than a 21M cap would make it, keeping the smallest pool note (0.01, per the P1.6 recommended set) usable for sub-dollar private payments and letting prices read in whole marigolds — granularity matters more for an everyday-cash coin than maximum scarcity branding. Hard cap kept for fair-launch credibility; a Dogecoin-style tail could only ever be added by explicit future hard fork if circulation fees demonstrably fail to carry security (recorded openly here so it's never a quiet change). | 2026-08-14 |
+| Emission curve | Smooth geometric decay from genesis: reward halves every **3 years** via monthly steps (monthly factor 2^(−1/36)); **no pre-deflationary phase** | No cliff moments ever — fee share grows as subsidy fades. ~20.6% of supply mined in year 1 (Bitcoin-comparable front-loading; Kaspa's 1-yr halving shape would have mined ~50% in year 1 into a tiny launch hashrate — stealth-premine optics), ~90% by year 10, per-block reward quantizes below 1 petal around **year ~72**, so subsidy outlives the P5.8 finality-anchor sunset by decades. Deflationary from genesis is also the simplest P3.2 implementation. | 2026-08-14 |
+| Initial block reward | ≈ **1.5228 MAGLD/sec** (≈ 0.15228 MAGLD/block at 10 BPS); exact petal value fixed by the P3.2 generator so total emission ≤ cap | Derived, not independently chosen: cap ÷ Σ(monthly decay series) = 210,000,000 ÷ ~137.9M-seconds-equivalent. P3.2's generator computes the exact table and asserts the cap. | 2026-08-14 |
+| Security endgame posture | Three-phase: **anchors guard youth → emission guards middle age → circulation fees guard maturity** | Marigold is a circulation coin: every payment is an on-chain rotate op paying a fee, so a *successful* cash economy is a permanent fee base — unlike store-of-value coins whose activity (and fee revenue) dries up at maturity. The ~72-year smooth subsidy runway is the bridge to that fee-funded maturity. This is the bet, stated openly. | 2026-08-14 |
 
 ## Notes
 
@@ -41,3 +45,31 @@ Checked on CoinGecko and CoinMarketCap, per the plan's instruction, before locki
   a thematic near-miss even though technically inactive.
 - **Final choice: MAGLD** — zero collisions of any kind (name or ticker, active or
   dead) found on either CoinGecko or CoinMarketCap.
+
+### P1.4 — Emission math & the security endgame
+
+The working formula (P3.2 implements this exactly): with initial rate `R` MAGLD/sec,
+monthly decay factor `r = 2^(−1/36)` (halving every 36 months), and
+`S = 2,629,800` seconds per month (365.25-day year), total emission is the convergent
+geometric series `R·S/(1−r) ≈ R × 137.9M`. Solving for the 210M cap gives
+`R ≈ 1.5228 MAGLD/sec`. Front-loading: year 1 mines `1 − 2^(−1/3) ≈ 20.6%`,
+10 years ≈ 90.1%. The per-block reward (R/10 at 10 BPS) falls below 1 petal (10⁻⁸)
+around year 72, which is where emission effectively ends — a quantization fade-out,
+not a cliff, and the hard cap holds throughout because the series converges.
+
+Alternatives considered and rejected:
+- **Tail emission (Dogecoin-style)** — guarantees a perpetual security floor and
+  replaces lost bearer notes, but forfeits the hard-cap credibility line at launch.
+  Held in reserve: adding a tail later via explicit hard fork remains possible if
+  circulation fees demonstrably fail; the reverse (launching with a tail, later
+  claiming scarcity) is not. Lost-note deflation is accepted as cash-like (physical
+  cash economies lose notes too).
+- **Kaspa's 1-year halving shape** — would mine ~50% of supply in year 1 into a tiny
+  launch hashrate (stealth-premine optics) and leave only ~22 years of runway.
+
+**⚠️ Flag for P5.2/P5.3 (spec phase):** the P5.2 sketch says rotate/split/merge ops
+"touch no transparent value" — but the endgame posture above depends on pool ops
+actually *paying fees*. The spec must define the fee-payment mechanism for pool ops
+(e.g. each op also consumes a small transparent input for the fee, or fees are drawn
+from a note top-up rule). Do not let the fee mechanism fall through the cracks between
+"no transparent value moves" and "every op pays a fee."

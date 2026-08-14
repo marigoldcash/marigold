@@ -158,11 +158,20 @@ decision to record in `docs/x-fork/DECISIONS.md` (create it in P1.1). No code ch
   Kaspa's 8 decimals; base unit **petal** — 1 marigold = 10⁸ petals. Recorded in
   [DECISIONS.md](docs/x-fork/DECISIONS.md).
 
-- [ ] **P1.4 — Supply & emission.** Decision has to be made on fixed cap (any round
+- [x] **P1.4 — Supply & emission.** Decision has to be made on fixed cap (any round
   cap works), smooth geometric decay like Kaspa's "chromatic" schedule (halving the
   block reward every N months) rather than Bitcoin cliff-halvings — smoother miner economics.
   Choose: **total cap**, **emission duration** (e.g. ~30 years), **initial per-second 
   reward**. Record all three. (Implementation is P3.2.)
+  **Executed 2026-08-14.** Cap **210,000,000 MAGLD** (chosen over the 21M for
+  note-denomination granularity — keeps the 0.01 smallest note usable for sub-dollar
+  private payments at realistic unit prices), hard cap, **no tail emission**. Smooth
+  geometric decay from genesis, **halving every 3 years** (monthly factor 2^(−1/36)),
+  no pre-deflationary phase — ~20.6% mined in year 1, ~90% by year 10, reward quantizes below 
+  1 petal ≈ year 72 (fade-out, not cliff). Initial reward derived:
+  ≈ **1.5228 MAGLD/sec** (exact petal value fixed by P3.2's cap-asserting generator).
+  Endgame posture recorded: anchors → emission → circulation fees. Full math and
+  considered but rejected alternatives in [DECISIONS.md](docs/x-fork/DECISIONS.md).
 
 - [ ] **P1.5 — Launch allocation.** Fair launch (mine from zero), premine %, or airdrop?
   This is an economics/credibility/legal decision, not code. If premine: how much, vesting,
@@ -366,8 +375,12 @@ should settle its size and how it is assigned (e.g. hash of the minting tx + out
   the target serial(s), the new pubkey(s), and a signature by the **old** key over the
   whole op (must cover new pk + a recent block hash or daa-score to prevent replay).
   Split/merge is a transfer with a different denomination multiset in vs. out.
+  *(Flag from P1.4: "touch no transparent value" must not mean "pay no fee" — the
+  security-endgame posture depends on pool ops paying fees, so this spec must define
+  the fee-payment mechanism for rotate/split/merge; see DECISIONS.md P1.4 notes.)*
   ✅ *Verify:* section covers all five ops with worked byte-size estimates; total tx size
   target ≤ a few KB — confirm against mass limits and payload size limits in params.rs.
+  Fee mechanism for zero-transparent-value ops explicitly specified.
 
 - [ ] **P5.3 — Spec: consensus rules.** Exact validation order per op: serial exists in
   pool state (rotate/split/merge/redeem) or does not yet exist (mint); signature verifies
