@@ -4,7 +4,7 @@ Snapshot of everything decided and built so far, so any fresh coding session on 
 machine can continue from the repo alone. Read this together with [FORK-PLAN.md](../../FORK-PLAN.md).
 Update this file whenever off-repo state changes (domains, accounts, infra).
 
-Last updated: 2026-08-14
+Last updated: 2026-08-14 (P0.2 complete)
 
 ## What this project is
 
@@ -44,8 +44,10 @@ Canonical domain **marigold.cash**.
 
 ## Where execution stands
 
-- **Next step: P0.1** (build workspace). Windows build was abandoned (MSVC Build Tools
-  installer failures) — development moved to Linux (LMDE/Debian). Linux prereqs:
+- **Next step: P0.3** (run a devnet node). P0.1 (build) and P0.2 (test suite baseline)
+  are done on Linux (LMDE/Debian) — see [NOTES.md](NOTES.md) for the test baseline
+  (0 failed, 26 pre-existing ignored tests). Windows build was abandoned (MSVC Build
+  Tools installer failures) — development moved to Linux. Linux prereqs:
   `sudo apt install -y curl git build-essential libssl-dev pkg-config protobuf-compiler libprotobuf-dev clang libclang-dev`
   then rustup (stable, ≥1.91). No Windows AR.exe/LIBCLANG quirks apply on Linux.
 - wasm-pack / wasm32 target only needed for WASM SDK steps, not for `kaspad`.

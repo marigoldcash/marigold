@@ -81,7 +81,7 @@ is fork-specific; it de-risks everything after.*
   `AR.exe` copy trick, Rust ≥ 1.91). Then `cargo build --release --bin kaspad`.
   ✅ *Verify:* `cargo build --release --bin kaspad` exits 0.
 
-- [ ] **P0.2 — Run the test suite once.**
+- [x] **P0.2 — Run the test suite once.**
   `cargo test --release` (or `cargo nextest run --release`). Takes a while; this is your
   baseline — from now on, any red test you cause is yours.
   ✅ *Verify:* suite passes (record any pre-existing skips/failures in a note file).
