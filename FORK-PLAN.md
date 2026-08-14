@@ -86,7 +86,7 @@ is fork-specific; it de-risks everything after.*
   baseline — from now on, any red test you cause is yours.
   ✅ *Verify:* suite passes (record any pre-existing skips/failures in a note file).
 
-- [ ] **P0.3 — Run a devnet node.**
+- [x] **P0.3 — Run a devnet node.**
   `cargo run --release --bin kaspad -- --devnet --enable-unsynced-mining --rpclisten-borsh=127.0.0.1 --utxoindex`
   ✅ *Verify:* node starts, logs show devnet params, RPC answers (e.g. connect `cargo run
   --release -p kaspa-cli` and run `rpc get-info` equivalent).
