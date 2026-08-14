@@ -93,3 +93,63 @@ against a P0.3-style devnet node, rather than `simpa`.
   string is itself searched), killing the wrong thing or the shell itself. Prefer
   `pgrep -x <exact-binary-name>` (matches `/proc/*/comm`, not the full cmdline) when
   killing a process spawned in this workflow.
+
+## P0.5 — Exercise a wallet on devnet (2026-08-14)
+
+**Substituted RPC-direct testing for the `kaspa-cli` wallet flow** (user-approved
+deviation from the plan's literal text). Two reasons: (1) P0.3 already established
+`kaspa-cli` is REPL-only and unscriptable; (2) more fundamentally, `kaspa-cli`'s wallet
+is backed by `kaspa-wallet-core` — a traditional seed-phrase/key-database layer that
+this project's architecture (see FORK-PLAN.md's opening paragraph, and Phase 5-7)
+deliberately replaces with a different model (per-note keys, no seed, wallet = key
+manager). Proving out a component slated for replacement wasn't worth the time; what
+actually matters at this stage is the RPC/consensus path underneath it — mining,
+building/signing a real transaction, submitting it, and observing a balance change.
+
+**Tools used** (both already in the workspace, no new code written):
+- `kaspa-addresses` — generate a recipient address with no known private key (a valid
+  bech32 devnet address is just prefix + version + 32-byte payload + checksum; nothing
+  requires the payload to be a real curve point if nobody will ever sign with it).
+  Same throwaway-example-then-delete pattern as P0.4.
+- `rothschild` (`rothschild/src/main.rs`) — the repo's own transaction-generator tool.
+  Run with no `--private-key` on a live devnet node, it generates a real secp256k1
+  keypair, prints the address, and exits ("send funds and rerun"). Run again with
+  `--private-key <hex> --to-addr <addr> --tps <n>`, it continuously builds, signs, and
+  submits real transactions from that key's UTXOs. **Note: it requires a reachable RPC
+  endpoint even just to generate a throwaway keypair** — start the node first.
+
+**Addresses used this run** (devnet-only, no value, safe to leave in this file):
+- Sender A (rothschild-generated, has known private key
+  `5dd09baab7b23e026e93dd6f0dff67aa60d1eb2a727382e23a45f5b7c7a4ff2e`):
+  `kaspadev:qpctsq0w4ekmz23pz8v8f85x70pyflx7cxj40fcnftfgrhn3c4kschr2q3lhs`
+- Recipient B (keyless, kaspa-addresses-generated):
+  `kaspadev:qrfss0tj5lwpz3nmkrj35nuyh8hzxkydctmjccvkevqr265l6synu3m7qjaqv`
+
+**Gotcha — rothschild needs 2× coinbase maturity, not 1×.** Its `is_utxo_spendable`
+check (`rothschild/src/main.rs:527-533`) uses `coinbase_maturity * 2` as the required
+confirmation depth for coinbase-sourced UTXOs (comment in the source: `TODO: We should
+compare with sink blue score in the case of coinbase` — this is upstream's own
+acknowledged approximation, not a fork bug). Devnet's `coinbase_maturity` is 1000
+blocks (`BPS(10) * COINBASE_MATURITY_SECONDS(100)`), so mining had to reach DAA score
+> ~2000 past a UTXO's block before rothschild would spend it — mining only to 1000-1300
+left it stuck logging "Has not enough funds" in an infinite retry loop. Mined to DAA
+~2200 to clear it comfortably.
+
+**Gotcha — a submitted transaction needs a block mined *after* it to show up in
+balance queries.** `get_balance_by_address` reads confirmed UTXO state, not the
+mempool. After rothschild reported successful submissions ("Tx rate: 1.1/sec..."),
+the recipient's balance was still 0 until a few more blocks were mined to include
+those transactions in the accepted chain.
+
+**Verified end-to-end**: mined ~2200 devnet blocks to address A (`kaspa-miner`,
+reusing the P0.4 invocation), ran `rothschild --network devnet --private-key <A> --to-addr
+<B> --tps 1`, confirmed ~11 successful submissions in its log, mined a few more blocks
+to confirm them, then queried B's balance via a temporary extension of the P0.3/P0.4
+`kaspa-grpc-simple-client-example` (added a `get_balance_by_address` call + the
+`kaspa-addresses` dep, reverted both plus `Cargo.lock` afterward — same
+throwaway-edit-then-`git checkout --`-revert pattern as before):
+**B's balance: 52,797,283,440 sompi** (~527.97 coins), confirming the send worked.
+
+**Process-management note**: this run used two more short-lived background processes
+(`rothschild`, a second `kaspa-miner` invocation) than P0.4 — same stop pattern
+(`pgrep -x <name>` + `kill`) worked fine throughout.

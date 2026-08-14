@@ -97,10 +97,19 @@ is fork-specific; it de-risks everything after.*
   `cargo run --release --bin simpa -- -t=10 -d=2 -b=8 -n=500`.
   ✅ *Verify:* node log shows accepted blocks / simpa completes and prints DAG stats.
 
-- [ ] **P0.5 — Exercise a wallet on devnet.**
+- [x] **P0.5 — Exercise a wallet on devnet.**
   Run `cargo run --release -p kaspa-cli`, create a wallet, get a devnet address, mine to it,
   send a transaction to a second address.
   ✅ *Verify:* second address shows a balance via the CLI.
+  **Executed via RPC instead of `kaspa-cli`** (deliberate substitution — full rationale
+  and transcript in [NOTES.md](docs/x-fork/NOTES.md)): `kaspa-cli` turned out to be
+  REPL-only (P0.3 finding) and can't be scripted; more importantly, the traditional
+  `kaspa-wallet-core` seed/key-DB layer it fronts is exactly what this project's wallet
+  redesign (see the architecture paragraph and Phase 5-7) replaces, so proving it
+  end-to-end wasn't worth the investment. Used `kaspa-addresses` to generate a keyless
+  recipient address and `rothschild` (the repo's built-in tx generator) to generate a
+  real keypair, mine to it, and send a signed transaction — verified the recipient's
+  balance via `get_balance_by_address` RPC.
 
 - [ ] **P0.6 — Write the orientation notes file.**
   Create `docs/x-fork/NOTES.md` recording: build quirks encountered, the exact miner used,

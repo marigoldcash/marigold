@@ -4,7 +4,7 @@ Snapshot of everything decided and built so far, so any fresh coding session on 
 machine can continue from the repo alone. Read this together with [FORK-PLAN.md](../../FORK-PLAN.md).
 Update this file whenever off-repo state changes (domains, accounts, infra).
 
-Last updated: 2026-08-14 (P0.4 complete)
+Last updated: 2026-08-14 (P0.5 complete)
 
 ## What this project is
 
@@ -44,16 +44,19 @@ Canonical domain **marigold.cash**.
 
 ## Where execution stands
 
-- **Next step: P0.5** (exercise a wallet on devnet — will hit the `kaspa-cli` REPL
-  limitation head-on since it's the only wallet frontend; plan accordingly, e.g. explore
-  whether a real terminal/pty is available in-session, or drive it via the wrpc-client
-  crate instead of the REPL). P0.1 (build), P0.2 (test baseline), P0.3 (devnet node + RPC
-  check), and P0.4 (mining, via the installed `kaspa-miner`) are done on Linux
-  (LMDE/Debian) — see [NOTES.md](NOTES.md) for details (test baseline: 0 failed, 26
-  pre-existing ignored; devnet ports/app-dir; `kaspa-cli` REPL-only gotcha; how to
-  generate a throwaway devnet address without a wallet; exact miner invocation and
-  flags). Windows build was abandoned (MSVC Build Tools installer failures) —
-  development moved to Linux. Linux prereqs:
+- **Next step: P0.6** (write the orientation notes file — mostly already satisfied by
+  the running [NOTES.md](NOTES.md) built up across P0.1-P0.5; just review/tidy it).
+  P0.1-P0.5 are all done on Linux (LMDE/Debian). P0.5 was executed via RPC instead of
+  the literal `kaspa-cli` wallet flow — see NOTES.md and the FORK-PLAN.md P0.5 entry for
+  the rationale (kaspa-cli is REPL-only and unscriptable, and its backing
+  `kaspa-wallet-core` seed/key-DB layer is exactly what this project's wallet redesign
+  replaces, so it wasn't worth proving out). See [NOTES.md](NOTES.md) for full details:
+  test baseline (0 failed, 26 pre-existing ignored), devnet ports/app-dir, the
+  `kaspa-cli` REPL gotcha, generating throwaway devnet addresses without a wallet,
+  `kaspa-miner` invocation, and using the built-in `rothschild` tx generator (note its
+  2×-coinbase-maturity requirement and that confirmed balance needs a block mined
+  *after* the tx, not just mempool submission). Windows build was abandoned (MSVC Build
+  Tools installer failures) — development moved to Linux. Linux prereqs:
   `sudo apt install -y curl git build-essential libssl-dev pkg-config protobuf-compiler libprotobuf-dev clang libclang-dev`
   then rustup (stable, ≥1.91). No Windows AR.exe/LIBCLANG quirks apply on Linux.
 - wasm-pack / wasm32 target only needed for WASM SDK steps, not for `kaspad`.
