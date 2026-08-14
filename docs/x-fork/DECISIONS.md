@@ -21,6 +21,7 @@ needed; this file is the authority on *what was chosen* and *when*.
 | Launch allocation | **Fair launch from zero** — no premine, no dev fund, no airdrop; every MAGLD enters circulation via the P1.4 emission schedule from block 0 | Matches the plan's own defensible-zone guidance ("honesty + large premine is a hard sell") at the clean end of the spectrum; strengthens P1.9's regulatory posture and P9.6 legal review (no allocation to a founding entity to justify); mirrors Kaspa's own no-premine launch, which the project already inherits credibility from by forking. No vesting/governance question to resolve since there's no allocation to vest. | 2026-08-14 |
 | Pool denominations | Powers of ten, whole coins: **{0.01, 0.1, 1, 10, 100, 1000, 10000, 100000}** (8 tiers) | Extends the plan's recommended set upward by two tiers (10000, 100000). Since split/merge is always available at an exact 10× factor (per the architecture), adding large denominations costs nothing at the small end — no fragmentation of the anonymity sets for everyday-payment sizes — while saving large holders from managing piles of 1000-notes to represent one big balance which is worse for usability. Also a wallet holding e.g. 50× 1000-notes leaks an approximate balance by note count / UTXO-style clustering that one 100000-note or a few don't. Floor stays at 0.01 (the P5.6/P8.3 smallest-denomination discussion — spam/floor pricing — is unaffected, only the ceiling moved). | 2026-08-14 |
 | Transparent tier policy | Confirmed as-is: fork launches **transparent-only** (Phases 2-4), pool added later (Phases 5-7) | No change from the plan's existing phase structure — confirming it here just makes it an explicit recorded decision rather than an implicit one baked into the phase ordering. | 2026-08-14 |
+| Fee policy | Confirmed as-is: **inherit Kaspa's fee model** (near-zero, mass-based) for the transparent tier. Pool ops (rotate/split/merge) pay via a **small dedicated transparent-value input** riding alongside the op, per the recommended mechanism in "P1.8 — pool-op fee mechanism" below | Zero-fee + reward-per-action was already ruled out as a spam vector (plan's own prior conclusion). Kaspa's fee market needs real transparent value to skim from, and notes are fixed-denomination (can't be fractionally deducted without breaking the anonymity-set property), so pool ops need a small transparent-tier side-payment — recommended default for P5.2/P5.3 to formalize, not a final consensus-level spec. | 2026-08-14 |
 
 ## Notes
 
@@ -72,7 +73,45 @@ Alternatives considered and rejected:
 
 **⚠️ Flag for P5.2/P5.3 (spec phase):** the P5.2 sketch says rotate/split/merge ops
 "touch no transparent value" — but the endgame posture above depends on pool ops
-actually *paying fees*. The spec must define the fee-payment mechanism for pool ops
-(e.g. each op also consumes a small transparent input for the fee, or fees are drawn
-from a note top-up rule). Do not let the fee mechanism fall through the cracks between
-"no transparent value moves" and "every op pays a fee."
+actually *paying fees*. The spec must define the fee-payment mechanism for pool ops.
+Resolved to a recommended default under P1.8 below — see that section for the
+mechanism.
+
+### P1.8 — Pool-op fee mechanism (recommended default for P5.2/P5.3)
+
+Direct question from the user: pool ops touch no transparent value, so *which
+denomination pays their fee*? Worked through here because it's not obvious and the
+answer has a real privacy consequence worth deciding with eyes open, even though the
+binding spec is still P5.2/P5.3's job.
+
+**The fee cannot come from the note itself.** Kaspa's fee mechanism is
+`fee = Σ(transparent inputs) − Σ(transparent outputs)` — it needs real transparent
+value flowing through the transaction. Notes are fixed denominations by design (every
+note of size X must look identical to every other note of size X — that's what gives
+each denomination its anonymity set); shaving a fee off a note would produce an
+off-denomination remainder and break that invariant. Paying a *whole* smaller note as
+the fee (e.g. burn a 0.01 note per rotate) would be wildly more expensive than the
+near-zero mass-based fee Kaspa actually charges — cents-to-dollars per op instead of
+fractions of a petal.
+
+**Recommended mechanism: a small dedicated transparent-value input rides alongside
+the op.** The op transaction carries the note-pool payload (signature, serial(s), new
+pk(s)) *plus* one small transparent input sourced from a wallet-held, non-pooled
+"fee reserve" balance — denominated in ordinary petals, not pool notes. The whole
+input (or input-minus-tiny-change) pays the miner via Kaspa's native mechanism, so no
+new fee machinery needs to be invented. Mint is a natural top-up point since it
+already touches transparent value; the P5.6 wallet spec should define how the fee
+reserve is funded/replenished so users don't have to think about it.
+
+**Privacy cost — must be disclosed in P5.7, not discovered later.** A transparent fee
+input has an address, so every rotate transaction would carry a public transparent
+address alongside its otherwise-anonymous note-pool payload — a leak the P5.7 honest-
+privacy-statement draft doesn't currently account for (it only names mint/redeem edges
+as leak points). It's a smaller leak than mint/redeem — it reveals only "this dust
+address paid a fee around this time," not the note's serial, denomination, or which
+note moved — but it is real and needs an honest line in P5.7, not a silent omission.
+
+Left open for P5.2/P5.3 to formalize: exact input-selection rule, whether change
+comes back to the same fee-reserve address or a fresh one (reuse vs. linkability
+trade-off), and whether the fee-reserve UTXO set needs its own churn/mixing practice
+to limit the timing-correlation leak.

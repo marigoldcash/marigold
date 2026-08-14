@@ -4,7 +4,7 @@ Snapshot of everything decided and built so far, so any fresh coding session on 
 machine can continue from the repo alone. Read this together with [FORK-PLAN.md](../../FORK-PLAN.md).
 Update this file whenever off-repo state changes (domains, accounts, infra).
 
-Last updated: 2026-08-14 (P1.7 complete)
+Last updated: 2026-08-14 (P1.8 complete)
 
 ## What this project is
 
@@ -47,14 +47,16 @@ pre-decision). Canonical domain **marigold.cash**.
 
 ## Where execution stands
 
-- **Next step: P1.8** (fee policy — plan pre-recommends "inherit Kaspa fee model",
-  near-zero mass-based fees; likely a quick confirm, though note the open P1.4 flag
-  that pool ops specifically still need a fee mechanism defined at P5.2, since
-  rotate/split/merge touch no transparent value and could otherwise have zero mass).
-  P1.1-P1.7 are done — see DECISIONS.md for the ticker collision trail, the P1.4
-  emission math (210M cap, 3-yr halving, no tail, ≈1.5228 MAGLD/s initial), P1.5 (fair
-  launch from zero), and P1.6 (denominations extended to {0.01...100000}, 8 tiers).
-  Phase 0
+- **Next step: P1.9** (regulatory posture — one paragraph on jurisdictions, exchange-
+  delisting/AMLR 2027 acknowledgment, DEX-lean distribution; not legal advice, a
+  recorded eyes-open position, real counsel comes later at P9.6). P1.1-P1.8 are done —
+  see DECISIONS.md for the ticker collision trail, the P1.4 emission math (210M cap,
+  3-yr halving, no tail, ≈1.5228 MAGLD/s initial), P1.5 (fair launch from zero), P1.6
+  (denominations extended to {0.01...100000}, 8 tiers), and **P1.8's pool-op fee
+  mechanism** (rotate/split/merge pay via a small dedicated transparent-value input
+  from a wallet-held fee reserve, since fixed-denomination notes can't pay a
+  fractional fee themselves — this attaches a transparent address to each pool op, a
+  privacy cost now flagged into the P5.7 honest-privacy-statement step). Phase 0
   (environment & orientation) is complete: P0.1-P0.6 all done on Linux, LMDE/Debian.
   For environment setup, working commands, and every build/test/devnet/wallet gotcha hit
   along the way, **read [NOTES.md](NOTES.md) first** — it's the orientation doc Phase 0

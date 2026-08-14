@@ -195,9 +195,18 @@ decision to record in `docs/x-fork/DECISIONS.md` (create it in P1.1). No code ch
   **Confirmed as-is, 2026-08-14** — no change to the phase structure. Recorded in
   [DECISIONS.md](docs/x-fork/DECISIONS.md).
 
-- [ ] **P1.8 — Fee policy.** Keep fees (near-zero like Kaspa). We established zero-fee +
+- [x] **P1.8 — Fee policy.** Keep fees (near-zero like Kaspa). We established zero-fee +
   reward-per-action is a spam machine; this plan keeps Kaspa's fee market untouched. Record
   simply: "inherit Kaspa fee model."
+  **Executed 2026-08-14, confirmed as-is for the transparent tier, plus a resolved
+  open question for the pool.** Kaspa's fee model needs real transparent value to
+  skim from, and notes are fixed-denomination (can't pay a fractional fee without
+  breaking the anonymity-set invariant), so rotate/split/merge ops are recommended to
+  carry a small dedicated transparent-value input alongside the op — paid in ordinary
+  petals from a wallet-held fee reserve, not from the note itself. This attaches a
+  transparent address to each pool op, a privacy cost the P5.7 honest-privacy-statement
+  step must disclose (flagged there). Full mechanism and trade-off in
+  [DECISIONS.md](docs/x-fork/DECISIONS.md).
 
 - [ ] **P1.9 — Regulatory posture.** One paragraph: which jurisdictions you'll operate/
   incorporate in and that distribution will depend on CEXs willingness to adopt the coin. 
@@ -501,6 +510,11 @@ should settle its size and how it is assigned (e.g. hash of the minting tx + out
   specific notes** (this is where real-world deanonymization happens),
   and timing/denomination patterns of rotate/split/merge are visible graph structure. The
   anonymity set of a note is roughly "all notes of the same denomination". 
+  *(Flag from P1.8: if the recommended pool-op fee mechanism is adopted — a small
+  transparent-value input riding alongside rotate/split/merge — that attaches a public
+  transparent address to every pool op, not just mint/redeem. Smaller leak than
+  mint/redeem (no serial/denomination/note linkage, just "this address paid a fee
+  around this time"), but it must be named here, not omitted.)*
   ✅ *Verify:* section exists and makes no claim stronger than the design delivers.
 
 - [ ] **P5.8 — Spec: launch finality anchors.** ⚠️ **DECIDED: the fork launches with a
