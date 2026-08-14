@@ -123,7 +123,7 @@ is fork-specific; it de-risks everything after.*
 *Goal: every parameter that code will encode is decided and written down. Each item is a
 decision to record in `docs/x-fork/DECISIONS.md` (create it in P1.1). No code changes.*
 
-- [ ] **P1.1 — Create the decisions file** `docs/x-fork/DECISIONS.md` with a table:
+- [x] **P1.1 — Create the decisions file** `docs/x-fork/DECISIONS.md` with a table:
   Decision / Choice / Rationale / Date.
   ✅ *Verify:* file exists.
 

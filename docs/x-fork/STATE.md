@@ -4,7 +4,7 @@ Snapshot of everything decided and built so far, so any fresh coding session on 
 machine can continue from the repo alone. Read this together with [FORK-PLAN.md](../../FORK-PLAN.md).
 Update this file whenever off-repo state changes (domains, accounts, infra).
 
-Last updated: 2026-08-14 (P0.6 complete — Phase 0 done)
+Last updated: 2026-08-14 (P1.1 complete)
 
 ## What this project is
 
@@ -44,12 +44,14 @@ Canonical domain **marigold.cash**.
 
 ## Where execution stands
 
-- **Next step: P1.1** (Phase 0 — environment & orientation — is complete: P0.1-P0.6 all
-  done on Linux, LMDE/Debian). For environment setup, working commands, and every
-  build/test/devnet/wallet gotcha hit along the way, **read [NOTES.md](NOTES.md) first**
-  — it's the orientation doc Phase 0 exists to produce, kept current as the single
-  source of truth for "how do I actually run this." Don't duplicate its content here;
-  update it (not this file) when new build/run findings turn up.
+- **Next step: P1.2** (name & ticker — mostly pre-decided already, see "Naming" above;
+  P1.2 formalizes it into [DECISIONS.md](DECISIONS.md), created empty by P1.1). Phase 0
+  (environment & orientation) is complete: P0.1-P0.6 all done on Linux, LMDE/Debian).
+  For environment setup, working commands, and every build/test/devnet/wallet gotcha hit
+  along the way, **read [NOTES.md](NOTES.md) first** — it's the orientation doc Phase 0
+  exists to produce, kept current as the single source of truth for "how do I actually
+  run this." Don't duplicate its content here; update it (not this file) when new
+  build/run findings turn up.
 - P0.5 was executed via RPC instead of the literal `kaspa-cli` wallet flow — see the
   FORK-PLAN.md P0.5 entry and NOTES.md for the rationale (kaspa-cli is REPL-only and
   unscriptable, and its backing `kaspa-wallet-core` seed/key-DB layer is exactly what
