@@ -439,7 +439,10 @@ async fn header_in_isolation_validation_test() {
         match consensus.validate_and_insert_block(block.to_immutable()).virtual_state_task.await {
             Err(RuleError::WrongBlockVersion(wrong_version, expected_version)) => {
                 assert_eq!(wrong_version, block_version);
-                assert_eq!(expected_version, BLOCK_VERSION);
+                // MAINNET_PARAMS has toccata_activation active from genesis on this fork, so the
+                // correct/expected version reported here is TOCCATA_BLOCK_VERSION, not the legacy
+                // pre-toccata BLOCK_VERSION.
+                assert_eq!(expected_version, TOCCATA_BLOCK_VERSION);
             }
             res => {
                 panic!("Unexpected result: {res:?}")
