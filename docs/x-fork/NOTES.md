@@ -350,19 +350,86 @@ precious; P9.5 will produce different ones deliberately.
 (mainnet merkle root → mainnet hash → testnet merkle root → testnet hash), each from
 the `assert_hashes_eq` panic's "Got hash [...]" array, pasted straight in.
 
-**Real bug found, deliberately NOT fixed in this step** (different concern —
-`consensus/src/consensus/mod.rs`, not `genesis.rs`; Ground rule 2 says one concern
-per commit): `get_chain_block_samples()` (around line 886) hardcodes a 16-entry
-`POINTS` array of **real Kaspa mainnet 2021 checkpoint `(daa_score, timestamp)`
-pairs**, sourced from Kaspa's own genesis-proof/tx-timestamp-estimation notebooks,
-prepended specifically `if network_type == Mainnet`. This feeds the
-`get_daa_score_timestamp_estimate` RPC call (`rpc/service/src/service.rs:871`) — on
-our fork's mainnet, with a fresh genesis at `daa_score: 0`, these 16 points are from
-a *different chain's* history and will corrupt that RPC's timestamp interpolation.
-Not consensus-critical (doesn't affect block validation or fund safety — it's an
-auxiliary estimate endpoint), but a real data-correctness bug that would ship silently
-broken if not caught before mainnet. **Needs a dedicated follow-up fix** (likely just
-deleting the mainnet-specific `POINTS` block entirely, since Marigold's mainnet has no
-analogous pre-genesis history to splice in) — not yet scheduled against a specific
-plan step; whoever picks up general mainnet-specific-hardcoded-Kaspa-data cleanup
-should grep for other `NetworkType::Mainnet` special-cases nearby too.
+**Real bug found, deliberately fixed as its own separate commit** (different concern
+from `genesis.rs`; Ground rule 2 says one concern per commit): `get_chain_block_samples()`
+(around line 886) hardcoded a 16-entry `POINTS` array of **real Kaspa mainnet 2021
+checkpoint `(daa_score, timestamp)` pairs**, sourced from Kaspa's own genesis-proof/
+tx-timestamp-estimation notebooks, prepended specifically `if network_type == Mainnet`.
+This fed the `get_daa_score_timestamp_estimate` RPC call
+(`rpc/service/src/service.rs:871`) — on our fork's mainnet, with a fresh genesis at
+`daa_score: 0`, these 16 points were from a *different chain's* history and would have
+corrupted that RPC's timestamp interpolation. Not consensus-critical (doesn't affect
+block validation or fund safety — it's an auxiliary estimate endpoint), but a real
+data-correctness bug that would have shipped silently broken.
+
+**Fix (2026-08-14, same session)**: removed the whole `if network_type == Mainnet {
+... } else { ... }` branch — Marigold's mainnet genesis is `daa_score: 0` like every
+other network now (P2.5), so there's no analogous pre-genesis history to splice in;
+the function just always does what the old `else` branch did. Also removed the
+now-unused `network::NetworkType` import. `cargo build -p kaspa-consensus` clean, zero
+warnings; `cargo test -p kaspa-consensus` 72/72 green. Grepped for other
+`NetworkType::Mainnet` special-cases and leftover references to the removed
+checkpoint data — none found; this was the only instance.
+
+### ⚠️ Open regression — P2.1 broke 22 tests in `kaspa-wallet-core` (found 2026-08-14, not yet fixed)
+
+While grepping around the checkpoint-timestamp bug above (searching all
+`NetworkType::Mainnet` usages workspace-wide, looking for similar patterns), found
+this by running `cargo test -p kaspa-wallet-core` directly — it currently fails
+**22 of 49 tests**, all traceable to P2.1's address-prefix rebrand:
+`"kaspa:..."`-prefixed strings hardcoded as test fixtures now fail to parse
+(`InvalidPrefix`) since `"kaspa"` is no longer a registered prefix.
+
+**Why this wasn't caught at P2.1 time**: P2.1's own verify step is explicitly scoped
+to `cargo test -p kaspa-addresses` (per the plan text), which only covers the crate
+where the prefix strings are *defined* — not every downstream crate that happens to
+hardcode a `"kaspa:"` address string as a test fixture. No P2.x step since has run a
+full-workspace `cargo test`. **Lesson: periodically run a full-workspace test pass
+during Phase 2, not just the crate a step names** — targeted verify commands only
+prove the step's own crate compiles/passes; they say nothing about who else depends
+on the string you just changed.
+
+Failing tests as of this writing (`cargo test -p kaspa-wallet-core` output):
+```
+account::tests::gen0_prv_keys
+compat::gen1::test::import_golang_single_wallet_test
+compat::gen1::test::import_golang_multisig_v1_wallet_test
+tx::generator::test::test_generator_compound_100k_random_transactions
+tx::generator::test::test_generator_compound_200k_10kas_transactions
+tx::generator::test::test_generator_dust_1_1
+tx::generator::test::test_generator_empty_utxo_noop
+tx::generator::test::test_generator_fee_rate_compound_200k_10kas_transactions
+tx::generator::test::test_generator_inputs_100_outputs_1_fees_exclude_insufficient_funds
+tx::generator::test::test_generator_inputs_100_outputs_1_fees_exclude_success
+tx::generator::test::test_generator_inputs_100_outputs_1_fees_include_success
+tx::generator::test::test_generator_inputs_1k_outputs_2_fees_exclude
+tx::generator::test::test_generator_inputs_2_outputs_2_fees_exclude
+tx::generator::test::test_generator_inputs_32k_outputs_2_fees_exclude
+tx::generator::test::test_generator_inputs_250k_outputs_2_sweep
+tx::generator::test::test_generator_large_payload_min_relay_fee
+tx::generator::test::test_generator_preserves_output_covenant_binding
+tx::generator::test::test_generator_random_outputs
+tx::generator::test::test_generator_sweep_single_utxo_noop
+tx::generator::test::test_generator_sweep_two_utxos
+tx::generator::test::test_generator_sweep_two_utxos_with_priority_fees_rejection
+utxo::test::test_utxo_generator_empty_utxo_noop
+```
+
+**Not fixed yet — needs real attention, not a blind find-replace.** Two different
+risk levels hide in this list:
+- Most `tx::generator::test::*` and `utxo::test::*` failures likely use arbitrary
+  placeholder `"kaspa:..."` addresses (like P2.1's own `cases()` vectors) — probably
+  safe to fix with the same recompute-from-test-failure technique used in P2.1/P2.5.
+- `compat::gen1::test::import_golang_*` and `account::tests::gen0_prv_keys` sound
+  like **legacy wallet-format compatibility tests** — these may hardcode addresses
+  that are meaningful to a specific historical wallet-file format/version, not
+  arbitrary. Swapping their prefix without understanding what's actually being
+  tested could silently defeat the point of the test. Read what each one actually
+  asserts before touching it.
+
+**Where this probably belongs**: P2.8 ("user-facing rebrand pass 2: wallet + CLI")
+already scopes `wallet/` for `"kaspa"` string cleanup — this regression is in the
+same crate, so likely gets swept up there. Recorded here so it isn't silently lost
+between now and then. Whoever picks this up should also run a full workspace
+`cargo test` once, since this discovery method (grep + spot-check one crate) doesn't
+guarantee it's the *only* other affected crate.

@@ -68,7 +68,6 @@ use kaspa_consensus_core::{
     merkle::calc_hash_merkle_root,
     mining_rules::MiningRules,
     muhash::MuHashExtensions,
-    network::NetworkType,
     pruning::{PruningPointProof, PruningPointTrustedData, PruningPointsList, PruningProofMetadata},
     trusted::{ExternalGhostdagData, TrustedBlock},
     tx::{
@@ -876,36 +875,13 @@ impl ConsensusApi for Consensus {
         let step_divisor: usize = 3; // The number of extra samples we'll get from blocks after last pp header
         let prealloc_len = pp_headers.len() + step_divisor + 1;
 
-        let mut sample_headers;
-
-        // Part 1: Add samples from pruning point headers:
-        if self.config.net.network_type == NetworkType::Mainnet {
-            // For mainnet, we add extra data (16 pp headers) from before checkpoint genesis.
-            // Source: https://github.com/kaspagang/kaspad-py-explorer/blob/main/src/tx_timestamp_estimation.ipynb
-            // For context see also: https://github.com/kaspagang/kaspad-py-explorer/blob/main/src/genesis_proof.ipynb
-            const POINTS: &[DaaScoreTimestamp] = &[
-                DaaScoreTimestamp { daa_score: 0, timestamp: 1636298787842 },
-                DaaScoreTimestamp { daa_score: 87133, timestamp: 1636386662010 },
-                DaaScoreTimestamp { daa_score: 176797, timestamp: 1636473700804 },
-                DaaScoreTimestamp { daa_score: 264837, timestamp: 1636560706885 },
-                DaaScoreTimestamp { daa_score: 355974, timestamp: 1636650005662 },
-                DaaScoreTimestamp { daa_score: 445152, timestamp: 1636737841327 },
-                DaaScoreTimestamp { daa_score: 536709, timestamp: 1636828600930 },
-                DaaScoreTimestamp { daa_score: 624635, timestamp: 1636912614350 },
-                DaaScoreTimestamp { daa_score: 712234, timestamp: 1636999362832 },
-                DaaScoreTimestamp { daa_score: 801831, timestamp: 1637088292662 },
-                DaaScoreTimestamp { daa_score: 890716, timestamp: 1637174890675 },
-                DaaScoreTimestamp { daa_score: 978396, timestamp: 1637260956454 },
-                DaaScoreTimestamp { daa_score: 1068387, timestamp: 1637349078269 },
-                DaaScoreTimestamp { daa_score: 1139626, timestamp: 1637418723538 },
-                DaaScoreTimestamp { daa_score: 1218320, timestamp: 1637495941516 },
-                DaaScoreTimestamp { daa_score: 1312860, timestamp: 1637609671037 },
-            ];
-            sample_headers = Vec::<DaaScoreTimestamp>::with_capacity(prealloc_len + POINTS.len());
-            sample_headers.extend_from_slice(POINTS);
-        } else {
-            sample_headers = Vec::<DaaScoreTimestamp>::with_capacity(prealloc_len);
-        }
+        // Part 1: Add samples from pruning point headers.
+        // Upstream Kaspa adds 16 extra historical (daa_score, timestamp) points here for
+        // mainnet, sourced from real Kaspa mainnet's pre-checkpoint-genesis history (see
+        // https://github.com/kaspagang/kaspad-py-explorer/blob/main/src/tx_timestamp_estimation.ipynb).
+        // This fork's genesis is a genuine from-scratch block (daa_score 0, P2.5) on every
+        // network, so there is no analogous pre-genesis history to splice in here.
+        let mut sample_headers = Vec::<DaaScoreTimestamp>::with_capacity(prealloc_len);
 
         for header in pp_headers.iter() {
             sample_headers.push(DaaScoreTimestamp { daa_score: header.1.daa_score, timestamp: header.1.timestamp });

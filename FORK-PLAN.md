@@ -339,12 +339,14 @@ small, mechanical, and individually testable.*
   merkle root, testnet hash). `cargo test -p kaspa-consensus-core genesis` green,
   plus full crate suite (58/58 + 7/7). Live sanity check: rebuilt `kaspad`, started
   sandboxed mainnet- and testnet-mode nodes on the new genesis — both bootstrap
-  cleanly, no panics. **Found, but deliberately did not fix here (different concern,
-  see [NOTES.md](docs/x-fork/NOTES.md)):** `consensus/src/consensus/mod.rs` hardcodes
-  16 real Kaspa mainnet 2021 checkpoint `(daa_score, timestamp)` pairs specifically
-  for `NetworkType::Mainnet`, feeding the `get_daa_score_timestamp_estimate` RPC —
-  now stale/wrong data for our fictional mainnet genesis. Not consensus-critical, but
-  a real RPC correctness bug; flagged for a dedicated follow-up fix.
+  cleanly, no panics. **Found a real bug along the way** — `consensus/src/consensus/mod.rs`
+  hardcoded 16 real Kaspa mainnet 2021 checkpoint `(daa_score, timestamp)` pairs
+  specifically for `NetworkType::Mainnet`, feeding the `get_daa_score_timestamp_estimate`
+  RPC, now stale/wrong data for our fictional mainnet genesis — deliberately not fixed
+  in this commit (different file/concern), **fixed immediately after as its own
+  commit**: removed the whole special-case branch (Marigold's mainnet genesis is
+  `daa_score: 0` like every other network — no pre-genesis history to splice in).
+  See [NOTES.md](docs/x-fork/NOTES.md) for the full writeup.
 
 - [ ] **P2.6 — Reset fork activations.**
   In [params.rs](consensus/core/src/config/params.rs) set for your mainnet/testnet:

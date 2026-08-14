@@ -89,18 +89,31 @@ substitute for it.
   its own from-scratch genesis (mainnet motto: *"Hell is other people's monetary
   policy. — Sartre"*; testnet: `marigold-testnet`; **P9.5 will regenerate these with
   the real launch timestamp — today's are Phase-2-milestone placeholders, not
-  final**). **⚠️ Known bug found during P2.5, not yet fixed** (different concern,
-  flagged rather than scope-crept): `consensus/src/consensus/mod.rs`'s
-  `get_chain_block_samples()` hardcodes 16 real Kaspa-mainnet-2021 checkpoint
-  `(daa_score, timestamp)` pairs for `NetworkType::Mainnet`, feeding the
-  `get_daa_score_timestamp_estimate` RPC — now wrong data for our fictional genesis.
-  Not consensus-critical, but needs a dedicated follow-up fix before mainnet;
-  see NOTES.md. Own DNS seeders are a P9.2 future item (see "Live infrastructure"
-  above for the Cloudflare-delegation mechanism). **Full gotcha log for P2.1-P2.5 is
-  in [NOTES.md](NOTES.md)** — worth skimming before continuing Phase 2, especially:
-  always rebuild `kaspad` before a live-network test (a stale binary gave a false
-  pass once already), use `--appdir=<scratch>` for any mainnet-mode testing (there's
-  a pre-existing unrelated real mainnet datadir on this machine, untouched).
+  final**). A bug found during P2.5 (`consensus/src/consensus/mod.rs`'s
+  `get_chain_block_samples()` hardcoding 16 real Kaspa-mainnet-2021 checkpoint
+  `(daa_score, timestamp)` pairs into the `get_daa_score_timestamp_estimate` RPC) is
+  **fixed** (separate commit, same session) — branch removed entirely, no
+  pre-genesis history to splice in on a from-scratch chain. Own DNS seeders are a
+  P9.2 future item (see "Live infrastructure" above for the Cloudflare-delegation
+  mechanism).
+  **⚠️ Known regression, not yet fixed: P2.1's address-prefix rebrand broke 22 tests
+  in `kaspa-wallet-core`** (`cargo test -p kaspa-wallet-core`) — hardcoded
+  `"kaspa:..."` test addresses in `tx/generator/test.rs` and legacy-wallet-import
+  fixtures in `compat/gen1.rs`/`gen0` tests now fail on `InvalidPrefix` instead of
+  parsing. **Not caught at P2.1 time because its own verify step only checked
+  `cargo test -p kaspa-addresses`, not the whole workspace** — no P2.x step since has
+  run a full-workspace test pass either. Some of these may need real recomputed test
+  vectors (legacy wallet import fixtures may be format-meaningful, not arbitrary),
+  not just a prefix swap — needs real attention, likely folded into P2.8 ("user-facing
+  rebrand pass 2: wallet + CLI") since it's the same crate, but flagging now so it
+  isn't silently forgotten. See NOTES.md for the full failing-test list.
+  **Full gotcha log for P2.1-P2.5 is in [NOTES.md](NOTES.md)** — worth skimming before
+  continuing Phase 2, especially: always rebuild `kaspad` before a live-network test
+  (a stale binary gave a false pass once already), use `--appdir=<scratch>` for any
+  mainnet-mode testing (there's a pre-existing unrelated real mainnet datadir on this
+  machine, untouched), and **run full-workspace `cargo test` periodically, not just
+  the crate a step names** — targeted verify commands can miss regressions like this
+  one in unrelated downstream crates.
   **Phases 0 and 1 are both complete.** Phase 0: P0.1-P0.6, see
   [NOTES.md](NOTES.md) — the single source of truth for build/test/devnet/wallet
   commands and gotchas (notably: `kaspa-cli` is REPL-only and unscriptable, P0.5 was
