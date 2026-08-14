@@ -21,7 +21,7 @@ needed; this file is the authority on *what was chosen* and *when*.
 | Launch allocation | **Fair launch from zero** — no premine, no dev fund, no airdrop; every MAGLD enters circulation via the P1.4 emission schedule from block 0 | Matches the plan's own defensible-zone guidance ("honesty + large premine is a hard sell") at the clean end of the spectrum; strengthens P1.9's regulatory posture and P9.6 legal review (no allocation to a founding entity to justify); mirrors Kaspa's own no-premine launch, which the project already inherits credibility from by forking. No vesting/governance question to resolve since there's no allocation to vest. | 2026-08-14 |
 | Pool denominations | Powers of ten, whole coins: **{0.01, 0.1, 1, 10, 100, 1000, 10000, 100000}** (8 tiers) | Extends the plan's recommended set upward by two tiers (10000, 100000). Since split/merge is always available at an exact 10× factor (per the architecture), adding large denominations costs nothing at the small end — no fragmentation of the anonymity sets for everyday-payment sizes — while saving large holders from managing piles of 1000-notes to represent one big balance which is worse for usability. Also a wallet holding e.g. 50× 1000-notes leaks an approximate balance by note count / UTXO-style clustering that one 100000-note or a few don't. Floor stays at 0.01 (the P5.6/P8.3 smallest-denomination discussion — spam/floor pricing — is unaffected, only the ceiling moved). | 2026-08-14 |
 | Transparent tier policy | Confirmed as-is: fork launches **transparent-only** (Phases 2-4), pool added later (Phases 5-7) | No change from the plan's existing phase structure — confirming it here just makes it an explicit recorded decision rather than an implicit one baked into the phase ordering. | 2026-08-14 |
-| Fee policy | Confirmed as-is: **inherit Kaspa's fee model** (near-zero, mass-based) for the transparent tier. Pool ops (rotate/split/merge) pay via a **small dedicated transparent-value input** riding alongside the op, per the recommended mechanism in "P1.8 — pool-op fee mechanism" below | Zero-fee + reward-per-action was already ruled out as a spam vector (plan's own prior conclusion). Kaspa's fee market needs real transparent value to skim from, and notes are fixed-denomination (can't be fractionally deducted without breaking the anonymity-set property), so pool ops need a small transparent-tier side-payment — recommended default for P5.2/P5.3 to formalize, not a final consensus-level spec. | 2026-08-14 |
+| Fee policy | **Inherit Kaspa's fee model** (near-zero, mass-based) for the transparent tier. Pool ops pay with **fee stamps**: whole small-denomination notes consumed inside the op (an embedded redeem-with-no-transparent-output — the stamp's value becomes the miner fee through Kaspa's native value-in-minus-value-out mechanism). Unified conservation rule across all ops: Σ(note in) + Σ(transparent in) = Σ(note out) + Σ(transparent out) + fee. **REVISED same-day**: supersedes the earlier "small transparent-value input from a wallet-held fee reserve" answer, which violated the core no-wallet principle (it would have required every wallet to hold a transparent balance with an address — reintroducing exactly what the design removes). See "P1.8 — pool-op fee mechanism (revised: fee stamps)" below. | Zero-fee + reward-per-action was already ruled out as a spam vector. Notes are fixed-denomination (can't be fractionally shaved without destroying the anonymity set), so fees must be whole small notes. Stamps keep the wallet a pure key manager (a stamp is just another note key), put no transparent address on any pool op (mint/redeem return to being the only transparent touchpoints, as originally designed), need zero new miner-payment machinery, and still support congestion pricing (attach more stamps = higher fee/mass priority — a denomination-quantized fee market). | 2026-08-14 |
 
 ## Notes
 
@@ -77,41 +77,63 @@ actually *paying fees*. The spec must define the fee-payment mechanism for pool 
 Resolved to a recommended default under P1.8 below — see that section for the
 mechanism.
 
-### P1.8 — Pool-op fee mechanism (recommended default for P5.2/P5.3)
+### P1.8 — Pool-op fee mechanism (revised: fee stamps)
 
 Direct question from the user: pool ops touch no transparent value, so *which
-denomination pays their fee*? Worked through here because it's not obvious and the
-answer has a real privacy consequence worth deciding with eyes open, even though the
-binding spec is still P5.2/P5.3's job.
+denomination pays their fee*? First answer (same day) was a wallet-held transparent
+"fee reserve" — **rejected by the user as violating the non-negotiable core
+principle** that the wallet is a pure key manager holding nothing but note keys: no
+transparent balance, no address, no second thing to back up. Revised to the mechanism
+below, which formalizes the user's own proposals (wallet splits bills to fee-payable
+size / sender adds a small fee coin on top so the receiver's note arrives intact).
 
-**The fee cannot come from the note itself.** Kaspa's fee mechanism is
-`fee = Σ(transparent inputs) − Σ(transparent outputs)` — it needs real transparent
-value flowing through the transaction. Notes are fixed denominations by design (every
-note of size X must look identical to every other note of size X — that's what gives
-each denomination its anonymity set); shaving a fee off a note would produce an
-off-denomination remainder and break that invariant. Paying a *whole* smaller note as
-the fee (e.g. burn a 0.01 note per rotate) would be wildly more expensive than the
-near-zero mass-based fee Kaspa actually charges — cents-to-dollars per op instead of
-fractions of a petal.
+**Constraint (unchanged):** the fee cannot be shaved off a note. Notes are fixed
+denominations by design — every note of size X must be indistinguishable from every
+other — so an off-denomination 99.999-note can never exist. Fees must therefore be
+paid in *whole* small notes.
 
-**Recommended mechanism: a small dedicated transparent-value input rides alongside
-the op.** The op transaction carries the note-pool payload (signature, serial(s), new
-pk(s)) *plus* one small transparent input sourced from a wallet-held, non-pooled
-"fee reserve" balance — denominated in ordinary petals, not pool notes. The whole
-input (or input-minus-tiny-change) pays the miner via Kaspa's native mechanism, so no
-new fee machinery needs to be invented. Mint is a natural top-up point since it
-already touches transparent value; the P5.6 wallet spec should define how the fee
-reserve is funded/replenished so users don't have to think about it.
+**Mechanism — fee stamps.** A pool-op transaction consumes one or more whole
+small-denomination notes ("stamps") via an embedded **redeem with no transparent
+output**: the stamp is destroyed and its value automatically becomes the miner's fee
+through Kaspa's native `fee = value-in − value-out` accounting. No transparent
+address appears anywhere; the payer never holds transparent value; miners need no new
+payment machinery. This yields one conservation rule unifying all five ops (the shape
+the P6.6 value-conservation test already anticipates):
 
-**Privacy cost — must be disclosed in P5.7, not discovered later.** A transparent fee
-input has an address, so every rotate transaction would carry a public transparent
-address alongside its otherwise-anonymous note-pool payload — a leak the P5.7 honest-
-privacy-statement draft doesn't currently account for (it only names mint/redeem edges
-as leak points). It's a smaller leak than mint/redeem — it reveals only "this dust
-address paid a fee around this time," not the note's serial, denomination, or which
-note moved — but it is real and needs an honest line in P5.7, not a silent omission.
+> Σ(note inputs) + Σ(transparent inputs) = Σ(note outputs) + Σ(transparent outputs) + fee
 
-Left open for P5.2/P5.3 to formalize: exact input-selection rule, whether change
-comes back to the same fee-reserve address or a fresh one (reuse vs. linkability
-trade-off), and whether the fee-reserve UTXO set needs its own churn/mixing practice
-to limit the timing-correlation leak.
+Congestion pricing works natively: attaching more/larger stamps raises the tx's
+fee-per-mass in the existing mempool ordering — a denomination-quantized fee market,
+no protocol-fixed fee needed.
+
+**Fee-inclusive vs fee-additive is wallet UX, not protocol.** "Receiver gets 99.99 in
+valid change denominations" (fee taken from the amount) and "sender attaches a stamp
+on top, receiver gets the intact 100" (fee added) are the same chain mechanism; the
+wallet exposes the toggle, like cash registers vs stamped envelopes.
+
+**Bootstrap (first stamp problem):** a fresh receiver holding one bearer note needs a
+stamp to rotate it. Three composing answers, for P5.2/P5.6 to formalize:
+1. **Value-touching ops self-fund** — any op that changes the denomination multiset
+   can pay its fee from the value passing through, e.g. deep-split
+   100 → 9×10 + 9×1 + 9×0.1 + 9×0.01 (= 99.99) + 0.01 fee. One split yields stamps
+   forever; only the pure rotate requires a pre-existing stamp.
+2. **Handovers include a stamp** — the paper/QR bearer bundle carries the note key
+   plus a stamp key (cash etiquette: the stamped return envelope).
+3. **Mint produces stamps** — wallets mint a strip of stamps alongside big notes by
+   default.
+
+**Stamp sizing (deliberately open until P6.6/P8.3 fee calibration):** with inherited
+relay params (~100 base-units/gram, small-tx mass) a pool op's fee lands around
+0.001–0.003 MAGLD, so either the 0.01 note is the standard stamp (clears comfortably)
+or the ladder gains a 0.001 tier. Relay-fee constants are ours to tune in the fork, so
+this is a calibration decision, not a design decision — the P1.6 set stands unchanged
+until then, with the 0.001 fee tier recorded as a live option.
+
+**True to principle (strictly better than the rejected fee-reserve).** No transparent 
+address attaches to any pool op — mint and redeem return to being the only transparent
+touchpoints, exactly as the architecture originally claimed. What remains: a stamp's
+lineage is public like any note's, so ops sharing stamp ancestry are linkable within
+the note graph. That is the same class of visibility as the already-disclosed
+rotate/split/merge graph structure (not a new category of leak), but P5.7 should name
+it explicitly, and P5.6 wallet hygiene can mitigate (don't pay for unrelated ops from
+one linkable stamp strip).

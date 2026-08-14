@@ -198,15 +198,14 @@ decision to record in `docs/x-fork/DECISIONS.md` (create it in P1.1). No code ch
 - [x] **P1.8 — Fee policy.** Keep fees (near-zero like Kaspa). We established zero-fee +
   reward-per-action is a spam machine; this plan keeps Kaspa's fee market untouched. Record
   simply: "inherit Kaspa fee model."
-  **Executed 2026-08-14, confirmed as-is for the transparent tier, plus a resolved
-  open question for the pool.** Kaspa's fee model needs real transparent value to
-  skim from, and notes are fixed-denomination (can't pay a fractional fee without
-  breaking the anonymity-set invariant), so rotate/split/merge ops are recommended to
-  carry a small dedicated transparent-value input alongside the op — paid in ordinary
-  petals from a wallet-held fee reserve, not from the note itself. This attaches a
-  transparent address to each pool op, a privacy cost the P5.7 honest-privacy-statement
-  step must disclose (flagged there). Full mechanism and trade-off in
-  [DECISIONS.md](docs/x-fork/DECISIONS.md).
+  **Executed 2026-08-14 (revised same day).** Transparent tier: inherit Kaspa's fee
+  model as-is. Pool ops: pay with **fee stamps** — whole small-denomination notes
+  consumed inside the op via an embedded redeem-with-no-transparent-output, whose
+  value becomes the miner fee through Kaspa's native value-in-minus-value-out
+  accounting. One conservation rule across all ops: Σ(note in) + Σ(transparent in) =
+  Σ(note out) + Σ(transparent out) + fee. The wallet holds nothing but note keys. Bootstrap, 
+  stamp sizing (possible 0.001 tier, deferred to P6.6/P8.3 calibration), and the
+  stamp-lineage note are in [DECISIONS.md](docs/x-fork/DECISIONS.md).
 
 - [ ] **P1.9 — Regulatory posture.** One paragraph: which jurisdictions you'll operate/
   incorporate in and that distribution will depend on CEXs willingness to adopt the coin. 
@@ -395,12 +394,15 @@ should settle its size and how it is assigned (e.g. hash of the minting tx + out
   the target serial(s), the new pubkey(s), and a signature by the **old** key over the
   whole op (must cover new pk + a recent block hash or daa-score to prevent replay).
   Split/merge is a transfer with a different denomination multiset in vs. out.
-  *(Flag from P1.4: "touch no transparent value" must not mean "pay no fee" — the
-  security-endgame posture depends on pool ops paying fees, so this spec must define
-  the fee-payment mechanism for rotate/split/merge; see DECISIONS.md P1.4 notes.)*
+  *(Flag from P1.8: every op pays its fee via **fee stamps** — the op format must
+  admit attached small-denomination note inputs consumed as an embedded
+  redeem-with-no-transparent-output, under the unified conservation rule
+  Σ(note in) + Σ(transparent in) = Σ(note out) + Σ(transparent out) + fee. Also spec
+  the self-funding form of value-touching ops and the bootstrap conventions —
+  DECISIONS.md P1.8 notes.)*
   ✅ *Verify:* section covers all five ops with worked byte-size estimates; total tx size
   target ≤ a few KB — confirm against mass limits and payload size limits in params.rs.
-  Fee mechanism for zero-transparent-value ops explicitly specified.
+  Fee-stamp mechanics explicitly specified for every op, including bootstrap.
 
 - [ ] **P5.3 — Spec: consensus rules.** Exact validation order per op: serial exists in
   pool state (rotate/split/merge/redeem) or does not yet exist (mint); signature verifies
@@ -510,11 +512,11 @@ should settle its size and how it is assigned (e.g. hash of the minting tx + out
   specific notes** (this is where real-world deanonymization happens),
   and timing/denomination patterns of rotate/split/merge are visible graph structure. The
   anonymity set of a note is roughly "all notes of the same denomination". 
-  *(Flag from P1.8: if the recommended pool-op fee mechanism is adopted — a small
-  transparent-value input riding alongside rotate/split/merge — that attaches a public
-  transparent address to every pool op, not just mint/redeem. Smaller leak than
-  mint/redeem (no serial/denomination/note linkage, just "this address paid a fee
-  around this time"), but it must be named here, not omitted.)*
+  *(Flag from P1.8: fee stamps put no transparent address on pool ops — mint/redeem
+  remain the only transparent touchpoints — but a stamp's lineage is public like any
+  note's, so ops sharing stamp ancestry are linkable within the note graph. Same class
+  as the disclosed rotate/split/merge graph visibility, not a new category, but name
+  it explicitly here; P5.6 wallet hygiene mitigates.)*
   ✅ *Verify:* section exists and makes no claim stronger than the design delivers.
 
 - [ ] **P5.8 — Spec: launch finality anchors.** ⚠️ **DECIDED: the fork launches with a
