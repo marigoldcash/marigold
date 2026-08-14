@@ -4,7 +4,7 @@ Snapshot of everything decided and built so far, so any fresh coding session on 
 machine can continue from the repo alone. Read this together with [FORK-PLAN.md](../../FORK-PLAN.md).
 Update this file whenever off-repo state changes (domains, accounts, infra).
 
-Last updated: 2026-08-14 (P2.1 complete)
+Last updated: 2026-08-14 (P2.2 complete)
 
 ## What this project is
 
@@ -74,14 +74,19 @@ substitute for it.
 
 ## Where execution stands
 
-- **Next step: P2.2** (network ports — edit `consensus/core/src/network.rs`'s
-  `default_rpc_port`/`default_borsh_rpc_port`/`default_json_rpc_port`/
-  `default_p2p_port` to the P1.10 numbers). **P2.1 done** (address prefix: `Prefix`
-  enum in `crypto/addresses/src/lib.rs` + `wasm.rs` now emit `marigold`/
-  `marigoldtest`/`marigoldsim`/`marigolddev`; also caught and fixed a stale prefix in
-  `benches/bench.rs` that wasn't in the step's stated file list — see NOTES.md for the
-  bech32-checksum-recomputation technique, which will recur at future rebrand steps).
-  **Phases 0 and 1 are both complete.** Phase 0 (environment & orientation): P0.1-P0.6,
+- **Next step: P2.3** (P2P network isolation — the handshake exchanges a network name
+  derived from `NetworkId` like `kaspa-mainnet`; grep `protocol/p2p` and
+  `consensus/core/src/network.rs` for `network_name()`/`to_prefixed()` and change the
+  base string to something like `marigold-mainnet`; verify needs both a unit-test pass
+  and an integration check — start a node, `--addpeer` a **public real Kaspa node**,
+  confirm a network-mismatch rejection in the log — a genuine outbound connection to
+  external infrastructure, worth being deliberate about when executing). **P2.1-P2.2
+  done**: address prefixes (`marigold`/`marigoldtest`/`marigoldsim`/`marigolddev` —
+  also fixed a stale prefix in `benches/bench.rs`, outside the step's stated file
+  list; see NOTES.md for the bech32-checksum-recomputation technique, which recurs at
+  future rebrand steps) and network ports (26xxx/27xxx/28xxx per P1.10, confirmed live
+  on a devnet node: GRPC 26610, P2P 26611, WRPC 27610). **Phases 0 and 1 are both
+  complete.** Phase 0 (environment & orientation): P0.1-P0.6,
   see [NOTES.md](NOTES.md) — the single source of truth for build/test/devnet/wallet
   commands and gotchas (notably: `kaspa-cli` is REPL-only and unscriptable, P0.5 was
   done via RPC/rothschild instead). Phase 1 (design decisions): P1.1-P1.10, see

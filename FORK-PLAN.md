@@ -261,12 +261,18 @@ small, mechanical, and individually testable.*
   `cargo test -p kaspa-addresses` (3/3 + doctests) and `cargo check --benches` both
   green; confirmed a freshly generated address starts with `marigold:`.
 
-- [ ] **P2.2 — Network ports.**
+- [x] **P2.2 — Network ports.**
   Edit [consensus/core/src/network.rs](consensus/core/src/network.rs):
   `default_rpc_port`, `default_borsh_rpc_port`, `default_json_rpc_port`, `default_p2p_port`
   → your P1.10 numbers.
   ✅ *Verify:* `cargo test -p kaspa-consensus-core network` passes; started node logs show
   new ports.
+  **Executed 2026-08-14.** All four functions updated to the P1.10 26xxx/27xxx/28xxx
+  scheme (mainnet/testnet/simnet/devnet, including the testnet suffix-dependent P2P
+  cases). `cargo test -p kaspa-consensus-core network` — 2/2 green (neither test
+  touches port numbers directly, both are network-ID string parsing, unaffected).
+  Rebuilt `kaspad` and started a devnet node: log confirmed GRPC `26610`, P2P `26611`,
+  WRPC(borsh) `27610` — matches the devnet row of the P1.10 table exactly.
 
 - [ ] **P2.3 — P2P network isolation.**
   The P2P handshake exchanges a network name derived from `NetworkId` (e.g.
