@@ -281,3 +281,39 @@ one (`seeder2.kaspad.net`); several of the *other* configured seeder hostnames n
 longer resolve at all (stale/decommissioned volunteer infrastructure) — not a problem
 for us since P2.4 removes this whole list regardless, but don't assume every
 configured seeder is still alive if this comes up again before P2.4 runs.
+
+### P2.4 — DNS seeders removed (2026-08-14)
+
+Both `MAINNET_PARAMS.dns_seeders` and `TESTNET_PARAMS.dns_seeders` set to `&[]`
+(SIMNET/DEVNET were already empty upstream). `cargo build` clean; confirmed on a live
+mainnet-mode node (sandboxed `--appdir`) that startup now produces zero seeder-lookup
+log lines, where before (P2.3's live test) the populated list would have triggered
+queries against Kaspa's real seeders.
+
+**Own seeders come later, at P9.2 — but here's how they'll actually work, since the
+question came up early.** A "DNS seeder" is not a static DNS record you type into a
+dashboard — it's custom server software (Kaspa's own `dnsseeder` tool, which P9.2
+notes "works unmodified against your network once P2.3's handshake name is set")
+that crawls the live P2P network and answers DNS `A`-record queries *dynamically*,
+returning a rotating set of currently-known-good peer IPs. It has to run as the
+actual authoritative nameserver for whatever hostname it answers for.
+
+**Can Cloudflare host this?** Not directly through the normal records dashboard (that
+only serves static A/AAAA/CNAME/TXT/etc. entries), but Cloudflare is still exactly
+the right place to *point* at it: create an **NS delegation record** for a subdomain
+— e.g. `seed.marigold.cash` or `seed1.marigold.cash` — pointing at the nameserver(s)
+of a small VPS running the `dnsseeder` binary. DNS queries for that subdomain get
+referred by Cloudflare to the VPS, which then answers dynamically. This is exactly
+how Kaspa's own seeders work today (e.g. `seeder2.kaspad.net` is a delegated
+subdomain served by someone's own node, not a Cloudflare-hosted static record) — the
+domain registrar/parent-zone host and the seeder server are different things, and
+that's fine; Cloudflare stays the registrar/parent zone, a separate small VPS runs
+the seeder software.
+
+**What P9.2 will actually need**: ≥2 independent VPS instances (independent
+infra/geo, mirroring the P5.8 finality-anchor trustee independence principle),
+`dnsseeder` built and pointed at a synced Marigold node, an NS delegation per seeder
+subdomain created in the Cloudflare dashboard for marigold.cash, then those
+hostnames populated into `dns_seeders` in `params.rs` (reversing this step). Nothing
+to action now — just recording the mechanism so it's not re-derived from scratch at
+P9.2.

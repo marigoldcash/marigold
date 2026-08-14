@@ -651,26 +651,10 @@ impl From<NetworkId> for Params {
 }
 
 pub const MAINNET_PARAMS: Params = Params {
-    dns_seeders: &[
-        // This DNS seeder is run by Denis Mashkevich
-        "mainnet-dnsseed-1.kaspanet.org",
-        // This DNS seeder is run by Denis Mashkevich
-        "mainnet-dnsseed-2.kaspanet.org",
-        // This DNS seeder is run by Georges Künzli
-        "seeder1.kaspad.net",
-        // This DNS seeder is run by Georges Künzli
-        "seeder2.kaspad.net",
-        // This DNS seeder is run by Georges Künzli
-        "seeder3.kaspad.net",
-        // This DNS seeder is run by Georges Künzli
-        "seeder4.kaspad.net",
-        // This DNS seeder is run by Tim
-        "kaspadns.kaspacalc.net",
-        // This DNS seeder is run by supertypo
-        "n-mainnet.kaspa.ws",
-        // This DNS seeder is run by -gerri-
-        "dnsseeder-kaspa-mainnet.x-con.at",
-    ],
+    // Kaspa's DNS seeders removed (P2.4) — this is a different network, their seeders
+    // would only ever return Kaspa peers, which P2.3's handshake now rejects anyway.
+    // Marigold's own seeders are stood up at P9.2, near mainnet launch.
+    dns_seeders: &[],
     net: NetworkId::new(NetworkType::Mainnet),
     genesis: GENESIS,
     timestamp_deviation_tolerance: TIMESTAMP_DEVIATION_TOLERANCE,
@@ -725,14 +709,8 @@ pub const MAINNET_PARAMS: Params = Params {
 };
 
 pub const TESTNET_PARAMS: Params = Params {
-    dns_seeders: &[
-        // This DNS seeder is run by Tiram
-        "seeder1-tn.kaspad.net",
-        // This DNS seeder is run by -gerri-
-        "dnsseeder-kaspa-testnet.x-con.at",
-        // This DNS seeder is run by supertypo
-        "n-testnet-10.kaspa.ws",
-    ],
+    // Kaspa's DNS seeders removed (P2.4) — same rationale as MAINNET_PARAMS above.
+    dns_seeders: &[],
     net: NetworkId::with_suffix(NetworkType::Testnet, 10),
     genesis: TESTNET_GENESIS,
     timestamp_deviation_tolerance: TIMESTAMP_DEVIATION_TOLERANCE,

@@ -297,10 +297,17 @@ small, mechanical, and individually testable.*
   (First attempt gave a false pass — actually connected and started IBD — because the
   `kaspad` binary hadn't been rebuilt since the source edit; see NOTES.md.)
 
-- [ ] **P2.4 — Strip Kaspa's DNS seeders.**
+- [x] **P2.4 — Strip Kaspa's DNS seeders.**
   In [consensus/core/src/config/params.rs](consensus/core/src/config/params.rs), set
   `dns_seeders: &[]` for MAINNET_PARAMS and TESTNET_PARAMS (you'll add your own in P9.2).
   ✅ *Verify:* `cargo build` passes; node starts and logs no Kaspa seeder lookups.
+  **Executed 2026-08-14.** Both lists emptied (SIMNET/DEVNET were already `&[]`
+  upstream). `cargo build --release --bin kaspad` clean; started a mainnet node
+  (sandboxed `--appdir`) and confirmed zero seeder-lookup log lines, vs. the seeder
+  queries P2.3's live test incidentally showed happening with the old populated list.
+  `cargo test -p kaspa-consensus-core` — 58/58 + 7/7 green, nothing else affected.
+  Own seeders come later at P9.2 — see the coder's Cloudflare-delegation question
+  answered in NOTES.md, which sketches the mechanism ahead of that step.
 
 - [ ] **P2.5 — New genesis blocks (mainnet + testnet).**
   Edit [consensus/core/src/config/genesis.rs](consensus/core/src/config/genesis.rs). For each

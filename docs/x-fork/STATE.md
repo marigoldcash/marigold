@@ -4,7 +4,7 @@ Snapshot of everything decided and built so far, so any fresh coding session on 
 machine can continue from the repo alone. Read this together with [FORK-PLAN.md](../../FORK-PLAN.md).
 Update this file whenever off-repo state changes (domains, accounts, infra).
 
-Last updated: 2026-08-14 (P2.3 complete)
+Last updated: 2026-08-14 (P2.4 complete)
 
 ## What this project is
 
@@ -71,37 +71,37 @@ substitute for it.
   Open items: `_dmarc` record on marigold.cash; create `security@` and `dmarc@` routes.
 - Open item: social handles (`marigoldcash` + `marigoldcoin` on X, Telegram, Discord,
   Reddit, YouTube, Docker Hub, npm). marigoldcash.io deliberately not registered (revisit P9).
+- **Future (P9.2)**: DNS seeders will be ≥2 independent VPS instances running Kaspa's
+  `dnsseeder` software, reached via an NS delegation record per seeder subdomain
+  (e.g. `seed1.marigold.cash`) created in this Cloudflare account — Cloudflare stays
+  registrar/parent zone, the seeder software runs elsewhere. Mechanism detail in
+  NOTES.md's P2.4 entry. Nothing to provision yet.
 
 ## Where execution stands
 
-- **Next step: P2.4** (strip Kaspa's DNS seeders — set `dns_seeders: &[]` for
-  MAINNET_PARAMS/TESTNET_PARAMS in `consensus/core/src/config/params.rs`; you'll add
-  your own in P9.2; simple deletion, low risk). **P2.1-P2.3 done**: address prefixes
-  (`marigold`/`marigoldtest`/`marigoldsim`/`marigolddev`), network ports
-  (26xxx/27xxx/28xxx), and P2P handshake network name (`kaspa-` → `marigold-` in
-  `NetworkId::to_prefixed()`/`from_prefixed()` — this is upstream of everything else,
-  so `Config::network_name()`, gRPC, and `RpcNetworkId` all inherited it for free).
-  **Kaspa addresses and peers are now genuinely invalid on this fork** — confirmed
-  live: `--addpeer`'d a real, currently-online Kaspa mainnet node
-  (`seeder2.kaspad.net`) and got back an explicit reject:
-  `Network mismatch - local: kaspa-mainnet, remote: marigold-mainnet`. See NOTES.md
-  for real gotchas hit along the way worth internalizing before Phase 2 continues: (1)
-  a stale un-rebuilt `kaspad` binary gave a false pass on the first live-network test
-  (green `cargo test` doesn't mean the binary on disk matches current source — rebuild
-  before every live run from here on), (2) there's a pre-existing, unrelated real
-  Kaspa mainnet datadir on this machine at `~/.rusty-kaspa/kaspa-mainnet/` (predates
-  this project, dated March 2025) — always use `--appdir=<scratch>` for mainnet-mode
-  testing rather than touching it, (3) the P2.1/P0.3 devnet app-dir subfolder name was
-  actually renamed by *this* step (`kaspa-devnet` → `marigold-devnet`), not P2.7 as
-  originally guessed back in P0.3 — corrected in NOTES.md. **Phases 0 and 1 are both
-  complete.** Phase 0 (environment & orientation): P0.1-P0.6,
-  see [NOTES.md](NOTES.md) — the single source of truth for build/test/devnet/wallet
+- **Next step: P2.5** (new genesis blocks — write a fresh `coinbase_payload` genesis
+  motto for mainnet + testnet in `consensus/core/src/config/genesis.rs`; this alone
+  changes all genesis hashes, so it's an iterate-run-test/paste-hash-from-failure
+  dance, same pattern as P2.1's bech32 checksums). **Phase 2 so far: P2.1-P2.4 done**
+  — this fork is now a genuinely separate network at the identity/protocol level:
+  its own address prefixes, ports, P2P handshake name (confirmed live against a real
+  Kaspa mainnet peer — explicit rejection), and no more Kaspa DNS seeders. Own
+  seeders are a P9.2 future item (see "Live infrastructure" above for the
+  Cloudflare-delegation mechanism). **Full gotcha log for P2.1-P2.4 is in
+  [NOTES.md](NOTES.md)** — worth skimming before continuing Phase 2, especially: always
+  rebuild `kaspad` before a live-network test (a stale binary gave a false pass once
+  already), use `--appdir=<scratch>` for any mainnet-mode testing (there's a
+  pre-existing unrelated real mainnet datadir on this machine, untouched), and check
+  NOTES.md before assuming which step owns a given rename (the devnet data-subfolder
+  rename turned out to be P2.3's doing, not P2.7's, despite an earlier guess).
+  **Phases 0 and 1 are both complete.** Phase 0: P0.1-P0.6, see
+  [NOTES.md](NOTES.md) — the single source of truth for build/test/devnet/wallet
   commands and gotchas (notably: `kaspa-cli` is REPL-only and unscriptable, P0.5 was
-  done via RPC/rothschild instead). Phase 1 (design decisions): P1.1-P1.10, see
-  "Locked parameters" above and [DECISIONS.md](DECISIONS.md) for full rationale —
-  **the fee-stamp mechanism and the "wallet holds nothing but note keys" constraint
-  are load-bearing for everything from here on**, worth re-reading before any step
-  touching wallets, fees, or transaction format (P5.2 onward).
+  done via RPC/rothschild instead). Phase 1: P1.1-P1.10, see "Locked parameters"
+  above and [DECISIONS.md](DECISIONS.md) for full rationale — **the fee-stamp
+  mechanism and the "wallet holds nothing but note keys" constraint are load-bearing
+  for everything from here on**, worth re-reading before any step touching wallets,
+  fees, or transaction format (P5.2 onward).
 - wasm-pack / wasm32 target only needed for WASM SDK steps, not for `kaspad`.
 - Phases 0–4 are bite-size sessions by design; use stronger models for Phase 5 spec
   work, ⚠️ HARD steps (P6.4, P6.11), and review gates.
