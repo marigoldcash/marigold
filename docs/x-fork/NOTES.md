@@ -975,3 +975,43 @@ Scratch appdir/logs under the session scratchpad only, nothing added to the repo
 This closes Phase 3 (P3.1-P3.3). Marigold's own emission schedule is now
 understood, implemented, capped by a permanent test, and confirmed correct against
 a real running node over RPC — not just unit-tested in isolation.
+
+## Phase 4 — MILESTONE: transparent chain running end-to-end
+
+### P4.1 — Testnet-in-a-box script (2026-08-15)
+
+Wrote both scripts fresh (no prior scripts/ directory existed). Extended the
+two-node pattern from P2.9 to three: node1 keeps every default devnet port, node2
+and node3 each get their P2P/gRPC/borsh-wRPC/JSON-wRPC ports shifted by +10/+20
+respectively (26621/26631 for P2P, etc.) to avoid bind collisions on one host, and
+both peer to node1 via `--addpeer` (a star topology — simplest reliable way to get
+"3 synced nodes," and P2.9 already confirmed devnet peers sync cleanly).
+
+**Design choices:**
+- **Auto-builds `kaspad` if missing** rather than just failing/instructing the user
+  to build it first — the plan's own verify condition ("running the script from a
+  clean checkout yields 3 synced nodes") implies a clean checkout with no prior
+  `cargo build` should still work end-to-end.
+- **Reusable data dir**, not wiped on each run — `x-testnet-local-data/` persists
+  across restarts (stop with `pkill -x kaspad` / `Get-Process kaspad | Stop-Process`,
+  relaunch the script later to resume the same chain state). Deleting the directory
+  is the documented way to get a clean start. Added to `.gitignore`.
+- **Mining instructions point at `rothschild --network devnet`** for getting a real
+  keypair/address, not the internal throwaway-`cargo run --example` trick used
+  elsewhere in this session — `rothschild` is an actual committed repo tool, the
+  officially-supported way for an external user to get a funded devnet address,
+  whereas the throwaway-example approach is a debugging convenience for sessions
+  with direct repo access, not something to hand to a future script's end user.
+
+**Verification.** Ran the bash script from a clean state (data dir removed first).
+All 3 nodes peered immediately (no retry needed). Generated a throwaway
+`marigolddev:` address (P0.4/P2.9-style, no real key needed) and mined 12 blocks
+against node1 with `kaspa-miner`; `grep -c "via relay"` on node2 and node3's logs
+both showed exactly 12 — every mined block relayed to both peers. Cross-checked
+over gRPC (same throwaway-edit-then-revert on `rpc/grpc/examples/simple_client` as
+P2.9/P3.3, port made a CLI arg): all three nodes' block count (64), virtual DAA
+score (64), and sink hash matched exactly. Stopped all three cleanly, reverted the
+example edit, removed the test data dir. Did not test the PowerShell script live
+(no Windows environment available this session) — written to the same structure/
+flags as the verified bash version, but flagging this as unverified until run on
+Windows.

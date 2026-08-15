@@ -548,10 +548,21 @@ small, mechanical, and individually testable.*
 capped-supply chain, with wallet and miner. This is the moment the project is demo-able and
 the natural checkpoint before the hard part.*
 
-- [ ] **P4.1 — Testnet-in-a-box script.** Write `scripts/x-testnet-local.ps1` (and `.sh`)
-  that launches 3 nodes on one machine (distinct ports/appdirs, peered), plus miner
-  instructions.
-  ✅ *Verify:* running the script from a clean checkout yields 3 synced nodes.
+- [x] **P4.1 — Testnet-in-a-box script.** Executed 2026-08-15.
+  Wrote [scripts/x-testnet-local.sh](scripts/x-testnet-local.sh) and
+  [scripts/x-testnet-local.ps1](scripts/x-testnet-local.ps1). Both launch 3 devnet nodes on one
+  machine with distinct appdirs/ports (node1 on the P2.2 defaults — gRPC 26610, P2P 26611;
+  node2/node3 shifted to 26620/26621 and 26630/26631, both `--addpeer`'d to node1), auto-build
+  `kaspad` if the release binary is missing (so a clean checkout works unmodified), wait and
+  report per-node peering status, then print RPC endpoints, log paths, mining instructions (via
+  `rothschild --network devnet` for a real keypair + `kaspa-miner`), and the stop command. Data
+  dir defaults to repo-relative `x-testnet-local-data/` (gitignored), reusable across restarts.
+  ✅ *Verify:* ran the bash script from a clean state (`rm -rf x-testnet-local-data` first) —
+  all 3 nodes peered on the first try. Mined 12 blocks against node1 with `kaspa-miner`; all 12
+  relayed to both node2 and node3 (`grep -c "via relay"` = 12 on each). Cross-checked over gRPC
+  (throwaway-edit-then-revert on `rpc/grpc/examples/simple_client`, same pattern as P2.9/P3.3):
+  all three nodes report identical block count (64), virtual DAA score (64), and sink hash.
+  Stopped cleanly, throwaway edit reverted, test data dir removed.
 
 - [ ] **P4.2 — Full user-journey test.** Documented manual script in `docs/x-fork/SMOKE.md`:
   create wallet → mine to it → wait maturity → send to second wallet → restart node →

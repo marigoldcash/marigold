@@ -4,7 +4,7 @@ Snapshot of everything decided and built so far, so any fresh coding session on 
 machine can continue from the repo alone. Read this together with [FORK-PLAN.md](../../FORK-PLAN.md).
 Update this file whenever off-repo state changes (domains, accounts, infra).
 
-Last updated: 2026-08-15 (Phase 3 complete — P3.3 done)
+Last updated: 2026-08-15 (P4.1 complete)
 
 ## What this project is
 
@@ -79,9 +79,19 @@ substitute for it.
 
 ## Where execution stands
 
-- **Next step: P4.1 — start of Phase 4 (MILESTONE: transparent chain running
-  end-to-end).** Write `scripts/x-testnet-local.ps1`/`.sh` launching 3 nodes on one
-  machine (distinct ports/appdirs, peered) plus miner.
+- **Next step: P4.2 — full user-journey test.** Write `docs/x-fork/SMOKE.md`: a
+  documented manual script (create wallet → mine to it → wait maturity → send to a
+  second wallet → restart node → balances persist), verified by walking through it
+  on the P4.1 local testnet.
+- **P4.1 is done.** [scripts/x-testnet-local.sh](../../scripts/x-testnet-local.sh)
+  and [.ps1](../../scripts/x-testnet-local.ps1) launch 3 peered devnet nodes on one
+  machine (distinct ports/appdirs, star-topology `--addpeer` to node1), auto-build
+  `kaspad` if missing, and print mining instructions (`rothschild --network devnet`
+  for a real address, then `kaspa-miner`). Verified live: all 3 nodes peered
+  immediately, 12 mined blocks relayed to both peers, and block count/DAA
+  score/sink hash matched exactly across all three over RPC. **The `.ps1` script is
+  unverified** — written to match the tested bash version but no Windows
+  environment was available this session to actually run it.
 - **Phase 3 (P3.1-P3.3) is fully done.** The real emission mechanism was understood
   (P3.1), replaced with Marigold's own P1.4 schedule (P3.2), and confirmed correct
   against a real running node over RPC (P3.3). `SUBSIDY_BY_MONTH_TABLE` is now a
