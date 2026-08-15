@@ -177,6 +177,11 @@ pub const SUBNETWORK_ID_COINBASE: SubnetworkId = CoinbaseSubnetwork::SUBNETWORK_
 /// The subnetwork ID which is used for adding new sub networks to the registry
 pub const SUBNETWORK_ID_REGISTRY: SubnetworkId = RegistrySubnetwork::SUBNETWORK_ID;
 
+/// The user-lane subnetwork ID for Marigold note-pool operations (mint/transfer/redeem
+/// — see `docs/x-fork/POOL-SPEC.md` P5.2). Namespace bytes spell "POOL" in ASCII,
+/// chosen only for memorability — any unclaimed namespace is equally valid.
+pub const SUBNETWORK_ID_NOTE_POOL: SubnetworkId = SubnetworkId::from_namespace([0x50, 0x4f, 0x4f, 0x4c]);
+
 /// Uninhabited marker types for reserved system subnetworks.
 /// Per KIP-21, subnetwork IDs with a 19-byte zero suffix (`[x, 0×19]`) are reserved:
 /// only [`NativeSubnetwork::FIRST_BYTE`] and [`CoinbaseSubnetwork::FIRST_BYTE`] are

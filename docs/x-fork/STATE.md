@@ -4,7 +4,7 @@ Snapshot of everything decided and built so far, so any fresh coding session on 
 machine can continue from the repo alone. Read this together with [FORK-PLAN.md](../../FORK-PLAN.md).
 Update this file whenever off-repo state changes (domains, accounts, infra).
 
-Last updated: 2026-08-15 (Phase 5 complete — spec tagged pool-spec-v1.1, P5.9 closed, Phase 6 unblocked)
+Last updated: 2026-08-16 (P6.1 complete — note-pool wire types implemented)
 
 ## What this project is
 
@@ -79,11 +79,25 @@ substitute for it.
 
 ## Where execution stands
 
-- **Next step: P6.1 — start of Phase 6 (Pool: consensus implementation ⚠️).** Note
-  types & wire encoding in `consensus/core`: `Note`, the op enum, borsh serialization,
-  the dedicated subnetwork ID — pure data, no validation logic yet. Verify: round-trip
-  encode/decode tests including maximum-size instances; byte sizes match the spec's
-  P5.1/P5.2 tables. Implement against **`pool-spec-v1.1`** (the tag, not memory).
+- **Next step: P6.2 — pool state store + commitment.** A RocksDB-backed store (follow
+  patterns in `consensus/src/model/stores/`) holding `sn → (d, pk)`, an SMT root over
+  it via `crypto/smt` as the pool commitment, and a `PoolDiff` type (mutations + their
+  inverses, same discipline as `UtxoDiff`) so state applies/unapplies per chain block.
+  **Needs a new `NotePoolSmt` BLAKE3 hasher pair added to `crypto/smt/build.rs`'s
+  `KNOWN_HASHERS` list first** — `SmtHasher` impls are build-time generated for a
+  hardcoded list of known hashers, confirmed by reading that file during P6.1; this
+  isn't optional, `crypto/smt`'s tree can't be instantiated for a new domain without it.
+- **P6.1 is done.** [consensus/core/src/notepool.rs](../../consensus/core/src/notepool.rs)
+  implements `pool-spec-v1.1`'s P5.1/P5.2 wire types verbatim — `DenominationTag`,
+  `Note`, `NewNote`, `SignedGroup`, `FreshnessAnchor`, and the 3-variant `PoolOp`
+  (`Mint`/`Transfer`/`Redeem` — note this supersedes FORK-PLAN's own older "5-op"
+  P6.1 phrasing, written before Phase 5 unified rotate/split/merge into one
+  `TransferOp`; implemented against the spec, the frozen source of truth, not the
+  plan's pre-Phase-5 prose). `SUBNETWORK_ID_NOTE_POOL` added to `subnets.rs`. 17 new
+  tests pass, including exact byte-size assertions matching all seven of P5.2's worked
+  examples (38, 170, 150, 182, 1,305, 1,385, 177 bytes) — a second, independent
+  confirmation of the spec's own arithmetic. SMT/store work explicitly deferred to
+  P6.2; the 1,000-item collection cap deferred to P6.3 (validation-time, not data-layer).
 - **Phase 5 (P5.1-P5.9) is fully done — the spec survived external review.**
   [POOL-SPEC.md](POOL-SPEC.md) is tagged **`pool-spec-v1.1`** after a full review
   cycle: two independent external reviews, a cross-review concurrence, and a

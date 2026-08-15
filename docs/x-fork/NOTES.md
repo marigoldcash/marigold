@@ -1210,3 +1210,47 @@ different-shaped gaps, and the malleability finding shows the field-audit techni
 intuition nor single-bug review does — Phase 6's conformance tests inherit both
 reviewers' test matrices for exactly this reason. Phase 6 is unblocked; implement
 against the `pool-spec-v1.1` tag, not memory of it.
+
+## Phase 6 — Pool: consensus implementation (2026-08-16)
+
+### P6.1 — Note types & wire encoding
+
+Straightforward once the spec existed — this is exactly what "spec-first makes
+implementation steps bite-sized" (the plan's own words for why Phase 5 came before
+Phase 6) was supposed to deliver, and it did. Implemented `pool-spec-v1.1`'s P5.1/P5.2
+wire types verbatim in [notepool.rs](../../consensus/core/src/notepool.rs): no design
+decisions needed, only faithful transcription — every struct field, every byte size,
+every borsh discriminant assignment was already pinned down by the spec.
+
+**One real judgment call**: FORK-PLAN.md's own P6.1 text (written before Phase 5
+finalized the design) still describes a 5-variant op enum
+("Mint/Rotate/Split/Merge/Redeem"). The spec supersedes this — `PoolOp` has exactly
+three variants (`Mint`, `Transfer`, `Redeem`), with rotate/split/merge unified into one
+`TransferOp` wire shape (P5.2's "Unifying rotate/split/merge" section). Implemented
+against the spec, not the plan's older phrasing, and said so explicitly in the plan
+entry rather than silently diverging — the spec is the frozen, reviewed, versioned
+source of truth for exactly this kind of detail; the plan's prose predates it.
+
+**Verification doubled as a second, independent check on the spec's own arithmetic.**
+Rather than just asserting round-trip equality, every test also asserts the exact
+serialized byte length against P5.2's worked-example table (38, 170, 150, 182, 1,305,
+1,385, 177 bytes) — these numbers were hand-computed (and independently verified with
+a Python calculator) during spec-writing; having the real borsh encoder reproduce them
+exactly is a second, stronger confirmation than either of those. All matched on the
+first run — no spec arithmetic errors survived to implementation.
+
+Also added `SUBNETWORK_ID_NOTE_POOL` to `subnets.rs` (the `SubnetworkId::from_namespace`
+mechanism P5.2 specified, spelling "POOL" in ASCII) — grepped existing
+`from_namespace(...)` call sites first (mempool test fixtures use small integer
+namespaces like `[1,1,0,0]`) to confirm no collision before picking the constant.
+
+**Deliberately deferred, per the plan's own "pure data, no validation logic yet"
+framing**: the SMT hasher (`NotePoolSmt`, needs a `crypto/smt/build.rs` entry — checked
+directly and confirmed `SmtHasher` impls are build-time generated for a hardcoded list
+of known BLAKE3 hashers, `KNOWN_HASHERS` in that file, so this isn't optional wiring,
+it's a real build-script change P6.2 owns) and the pool state store belong to P6.2;
+the 1,000-item consumed/produced collection cap (P5.2) is a validation-time bound
+belonging to P6.3, not a fact about the data layer itself.
+
+17 new unit tests, all passing; full crate suite (75 tests) and full
+`cargo build --workspace` both clean.

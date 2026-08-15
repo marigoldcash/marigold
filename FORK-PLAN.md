@@ -943,13 +943,28 @@ should settle its size and how it is assigned (e.g. hash of the minting tx + out
 store → validation → pipeline → mempool → sync → RPC. Every step lands with its tests
 (Ground rule 3). Do not start before the P5.9 gate.*
 
-- [ ] **P6.1 — Note types & wire encoding.** In `consensus/core`: `Note`, the op enum
-  (Mint/Rotate/Split/Merge/Redeem — rotate as a list of `(serial, new_pk)` pairs under one
-  signature per P5.2/P5.6), borsh serialization, and a dedicated subnetwork ID in
-  [consensus/core/src/subnets.rs](consensus/core/src/subnets.rs). Pure data — no validation
-  logic yet.
-  ✅ *Verify:* round-trip encode/decode unit tests pass for every op, including maximum-size
-  instances; byte sizes match the P5.1/P5.2 spec tables.
+- [x] **P6.1 — Note types & wire encoding.** Executed 2026-08-16.
+  Added [consensus/core/src/notepool.rs](consensus/core/src/notepool.rs), implementing
+  `pool-spec-v1.1`'s P5.1/P5.2 wire types exactly: `DenominationTag` (8-variant fieldless
+  enum, borsh discriminants 0-7 matching the spec's table, plus a `DENOMINATION_PETALS`
+  const lookup table and a `petals()` accessor), `Note`/`NewNote`/`SignedGroup`/
+  `FreshnessAnchor`, and `PoolOp` — the spec's unified 3-variant enum
+  (`Mint`/`Transfer`/`Redeem`, not 5; rotate/split/merge collapse into one `TransferOp`
+  shape per the spec, superseding this step's own older 5-op phrasing written before
+  Phase 5 finalized the design). Added `SUBNETWORK_ID_NOTE_POOL` to
+  [subnets.rs](consensus/core/src/subnets.rs) (a user-lane namespace spelling "POOL" in
+  ASCII, per spec) — grepped first for existing `from_namespace` usages to confirm no
+  collision. Deliberately out of scope per "pure data, no validation logic yet": the SMT
+  hasher/pool-state store (P6.2's job) and the 1,000-item collection-size cap (a
+  validation-time bound, not a data-layer fact).
+  ✅ *Verify:* 17 unit tests, all passing — round-trip encode/decode for every op
+  (including empty/degenerate and a large multi-group maximum-size `Transfer`),
+  malformed-discriminant and trailing-byte rejection (borsh's derive handles both
+  automatically, satisfying P5.1's "malformed encodings are consensus-invalid, not
+  coerced" rule for free), and **exact byte-size assertions matching all seven of
+  P5.2's worked examples** (38, 170, 150, 182, 1,305, 1,385, 177 bytes) — this also
+  cross-validated the spec's own arithmetic a second time, independently. Full
+  `cargo build --workspace` clean.
 
 - [ ] **P6.2 — Pool state store + commitment.** A RocksDB-backed store (follow the store
   patterns in `consensus/src/model/stores/`) holding `sn → (d, pk)`, with an SMT root over
