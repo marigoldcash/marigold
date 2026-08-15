@@ -830,10 +830,10 @@ should settle its size and how it is assigned (e.g. hash of the minting tx + out
   `ForkActivation` pattern and the `Version`-field precedent from Kaspa addresses, rather
   than transcribing content that doesn't exist. Recorded in DECISIONS.md.
 
-- [ ] **P5.7 — Spec: honest privacy statement.** One section stating exactly what is and
-  is not private: denominations, serials, and every op are public; no sender/receiver
-  addresses exist in the pool, but **mint and redeem edges link transparent coins to
-  specific notes** (this is where real-world deanonymization happens),
+- [x] **P5.7 — Spec: honest privacy statement.** Executed 2026-08-15. One section stating 
+  exactly what is and is not private: denominations, serials, and every op are public; 
+  no sender/receiver addresses exist in the pool, but **mint and redeem edges link transparent 
+  coins to specific notes** (this is where real-world deanonymization happens),
   and timing/denomination patterns of rotate/split/merge are visible graph structure. The
   anonymity set of a note is roughly "all notes of the same denomination". 
   *(Flag from P1.8: fee stamps put no transparent address on pool ops — mint/redeem
@@ -842,6 +842,12 @@ should settle its size and how it is assigned (e.g. hash of the minting tx + out
   as the disclosed rotate/split/merge graph visibility, not a new category, but name
   it explicitly here; P5.6 wallet hygiene mitigates.)*
   ✅ *Verify:* section exists and makes no claim stronger than the design delivers.
+  **Done**: [POOL-SPEC.md](docs/x-fork/POOL-SPEC.md)'s P5.7 section. Explicitly adds one
+  point not in the plan's own wording but load-bearing for the claim's honesty: pruning
+  discards old block bodies from typical nodes but is a storage optimization, not a
+  privacy mechanism — an adversary running one archival node retains the full operation
+  graph back to genesis regardless. So the statement is legible to a non-cryptographer 
+  reader, not just a checklist of properties.
 
 - [ ] **P5.8 — Spec: launch finality anchors.** ⚠️ **DECIDED: the fork launches with a
   federated finality guard.** Rationale: a young PoW network can be 51%-attacked by any

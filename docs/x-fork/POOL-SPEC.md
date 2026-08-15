@@ -1010,3 +1010,103 @@ questions — every flow (backup/restore, receive, spend, POS sweep, cross-walle
 mitigation, future key migration) is specified in terms of primitives already fully
 defined in P5.1-P5.5 (`TransferOp`, `SignedGroup`, `PoolState` lookups, the existing
 `encrypt_xchacha20poly1305`), with no step left as "figure this out later."
+
+---
+
+## P5.7 — Honest privacy statement
+
+This section is the project's public claim about what the note pool does and does not
+hide. It must not claim more than the design actually delivers — every item below follows
+directly from mechanisms already specified in P5.1-P5.6, not from aspiration.
+
+### What is public
+
+- **Every note's denomination and current `pk`.** `PoolState` (P5.1) is plaintext,
+  consensus-maintained state every full node holds in full — there is no encrypted or
+  hidden portion of it. Anyone can enumerate every note currently under a given `pk`.
+- **Every operation, ever performed, in full detail.** Every `Mint`, `Transfer` (whichever
+  of rotate/split/merge it happens to be), and `Redeem` is an ordinary, fully visible
+  on-chain transaction (P5.2) — which serials were consumed, which were produced, their
+  denominations, and exact timing (the block's timestamp/DAA score) are all public, for
+  the same reason every Kaspa/Marigold transaction already is.
+- **This is not softened by pruning.** Pruning discards old block *bodies* from typical
+  nodes' storage — it is a storage optimization, not a privacy mechanism. An adversary
+  who observes the network in real time, or who runs one archival node, or who simply
+  downloads the chain before old blocks age out, retains the complete operation graph
+  back to genesis regardless of what an ordinary pruned node keeps. No claim in this spec
+  should be read as "old activity becomes unlinkable once pruned" — it does not.
+
+### What is not private — and where the real exposure is
+
+**No sender/receiver "address" exists in the pool the way a transparent UTXO output has
+one** — a note's only on-chain identity is its `sn` and current `pk`, and `pk` changing on
+every rotation is precisely what prevents a note from accumulating a named, persistent
+"account" the way a reused address would. This is real, and it's the core principle that
+gives the coin the cash like property the design provides.
+
+**But `Mint` and `Redeem` are where a specific note's identity meets a real transparent
+coin history**, and this is where real-world deanonymization actually happens — exactly
+the same structural weak point every other non private coin has and these edges are fully
+public by construction: a `Mint`'s transparent inputs came from *somewhere* — an
+exchange withdrawal, a previous transparent-tier transaction, anywhere with an existing
+real-world or on-chain history — and that history is now directly, permanently linked to
+the specific `sn`(s) that mint created. Symmetrically, a `Redeem`'s transparent outputs go
+*somewhere* traceable onward. Everything a note does *between* a mint and an eventual
+redeem is unlinkable to that originating/terminating transparent history only in the
+narrow sense that `pk` doesn't persist — the mint and redeem edges themselves are not
+hidden at all.
+
+**Rotate/split/merge graph structure is visible, and it is real structure an adversary
+can analyze**, not just individually-anonymous events: exact timing, which denominations
+moved, how many serials a `Transfer` consumed vs. produced, and any batching pattern (a
+merchant's POS sweep, P5.6, is a recognizable shape — one `SignedGroup` covering N same-
+`pk` serials, moving to N fresh cold keys, at a predictable business-hours cadence) are
+all plainly visible graph structure, not encrypted or aggregated away. Timing correlation
+alone (a mint, followed shortly by a rotate of a newly-created serial of the same
+denomination) can narrow a note's anonymity set well below "every note of that
+denomination," even though no cryptographic link between them exists.
+
+### The anonymity set
+
+**A note's anonymity set is, at best, roughly "every other currently-live note of the
+same denomination."** Nothing in the design distinguishes one 1-MAGLD note from another
+1-MAGLD note beyond their (different) `sn` and current `pk` — an observer who has *not*
+otherwise correlated a specific note via mint/redeem linkage or timing analysis (above)
+genuinely cannot tell them apart. This bound is real, but it is an upper bound, not a
+guarantee: any timing or amount correlation an adversary can perform narrows it, exactly
+as described above, and the design does nothing to actively defeat such correlation
+(no batching delays, no decoy transactions, no fixed-interval operation scheduling) —
+naming this absence explicitly rather than leaving it implied.
+
+### Fee-stamp lineage (P1.8 flag, named explicitly per its own instruction)
+
+A fee stamp (P5.2) is an ordinary note with its own history like any other — attaching it
+to an op does not create a new category of leak, but it does mean **ops sharing one
+stamp's ancestry become linkable to each other** through that shared lineage, the same way
+any two operations touching a common serial's history already are. Concretely: a wallet
+that repeatedly draws stamps from the same original mint batch links every one of those
+otherwise-unrelated payments together in the note graph. This is the same class of
+visibility as the rotate/split/merge graph structure above, not a new mechanism — P5.6's
+wallet hygiene guidance (don't pay for unrelated operations from one linkable stamp
+source) is the mitigation, at the wallet-implementation layer, not the protocol layer;
+the protocol makes no attempt to hide stamp lineage.
+
+### What this design is, stated plainly
+
+This is a **transparent, note-based bearer system with unlinkable ownership transfer
+between mint and redeem, and no protection at all for the mint/redeem edges themselves**.
+It is not a shielded pool, provides no zero-knowledge unlinkability, and does not resist a
+well-resourced adversary correlating timing, denomination, and mint/redeem history across
+the whole (permanently public, pruning notwithstanding) chain. Its privacy is closer to 
+cash than to Zcash's or Monero's — real, useful against casual observation and 
+address-reuse-style tracking, and honestly bounded by exactly the same edges every 
+coin has always been bounded by.
+
+✅ *Verify:* the section exists and states, with no claim stronger than the design
+delivers: what's fully public (denominations, `pk`s, every operation, unaffected by
+pruning); the real deanonymization vector (mint/redeem linking notes to transparent
+history, the same structural weakness as any coin); that rotate/split/merge graph
+structure (timing, denomination, batching shape) is visible and analyzable; the
+anonymity-set bound and its explicit lack of any active correlation-resistance; and the
+fee-stamp lineage leak named explicitly, per the P1.8 flag's own instruction, as the same
+class of leak as the disclosed graph visibility rather than a new category.
