@@ -312,3 +312,44 @@ async fn duplicate_mint_across_parallel_blocks_accepted_once() {
 
     consensus.shutdown(join_handles);
 }
+
+/// P6.5 has two independent pool-commitment computation paths that must always agree:
+/// the fast incremental tracking store (`DbNotePoolSmtStore`, used for virtual's own
+/// `pool_root()`) and the from-scratch rebuild (`recompute_pool_commitment`, used both
+/// at template-build time to fill `header.pool_commitment` and again at verification
+/// time). Every successful block insertion already implicitly cross-checks these — a
+/// disagreement would make the node reject its own mined block — but this test asserts
+/// it directly and permanently.
+///
+/// The comparison is offset by one block, not same-block: a block's own
+/// `header.pool_commitment` reflects its *ancestors'* state (the standard GHOSTDAG
+/// commitment shape — `calculate_utxo_state`'s mergeset walk always replays the
+/// selected parent's own transactions but never the current block's own body; a block's
+/// own transactions only surface in ITS descendants' commitments). So block N+1's header
+/// commitment must equal `pool_root()` as it stood right after block N — not after N+1.
+#[tokio::test]
+async fn incremental_and_full_rebuild_commitments_agree() {
+    let consensus = TestConsensus::new(&config());
+    let join_handles = consensus.init();
+    let genesis = consensus.params().genesis.hash;
+
+    let alice = Wallet::new(1);
+    let bob = Wallet::new(2);
+
+    let mint = mint_tx(vec![alice.note(DenominationTag::D1), alice.note(DenominationTag::D10)]);
+    let sn0 = produced_serial(&mint, 0);
+    // Block 10's ancestor (genesis) has an empty pool — matches the canonical empty root.
+    consensus.add_utxo_valid_block_with_parents(10.into(), vec![genesis], vec![mint]).await.unwrap();
+    let root_after_10 = consensus.pool_root();
+
+    let rotate = pool_tx(&alice.rotate(vec![sn0], vec![bob.note(DenominationTag::D1)], 0));
+    consensus.add_utxo_valid_block_with_parents(11.into(), vec![10.into()], vec![rotate]).await.unwrap();
+
+    // Block 11's own commitment reflects its ancestor (block 10)'s state, i.e. exactly
+    // what pool_root() was right after block 10 — not block 11's own rotate.
+    assert_eq!(consensus.header_pool_commitment(11.into()), root_after_10);
+    // ...while virtual's own live root (which replays block 11's own tx too) has moved on.
+    assert_ne!(consensus.pool_root(), root_after_10);
+
+    consensus.shutdown(join_handles);
+}

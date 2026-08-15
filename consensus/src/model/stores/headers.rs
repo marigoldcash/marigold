@@ -72,6 +72,10 @@ impl From<HeaderWithBlockLevel2> for HeaderWithBlockLevel {
                 hash_merkle_root: value.header.hash_merkle_root,
                 accepted_id_merkle_root: value.header.accepted_id_merkle_root,
                 utxo_commitment: value.header.utxo_commitment,
+                // Legacy rows (the `Header2` pre-`CompressedParents` shape) necessarily
+                // predate the note-pool feature entirely, so the empty pool's root is the
+                // only consistent backfill (mirrors genesis's treatment, FORK-PLAN P6.5).
+                pool_commitment: <kaspa_hashes::NotePoolSmt as kaspa_smt::SmtHasher>::empty_root(),
                 timestamp: value.header.timestamp,
                 bits: value.header.bits,
                 nonce: value.header.nonce,

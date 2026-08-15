@@ -78,6 +78,7 @@ impl_verbosity_from! {
         include_hash_merkle_root:        (RpcDataVerbosityLevel::High),
         include_accepted_id_merkle_root: (RpcDataVerbosityLevel::High),
         include_utxo_commitment:         (RpcDataVerbosityLevel::Full),
+        include_pool_commitment:         (RpcDataVerbosityLevel::Full),
         include_pruning_point:           (RpcDataVerbosityLevel::Full),
     }
 }

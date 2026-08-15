@@ -227,9 +227,19 @@ impl TestConsensus {
         self.consensus.storage.smt_metadata_store.get(block_hash).unwrap()
     }
 
-    /// The note pool's commitment root at virtual (FORK-PLAN P6.4).
+    /// The note pool's commitment root at virtual (FORK-PLAN P6.4), via the fast
+    /// incremental tracking store.
     pub fn pool_root(&self) -> Hash {
         self.consensus.storage.virtual_stores.read().pool_smt.current_root().unwrap()
+    }
+
+    /// A stored block header's `pool_commitment` field (FORK-PLAN P6.5) — computed via
+    /// the independent full-rebuild path (`recompute_pool_commitment`) at template-build
+    /// time and re-verified the same way on insertion. Comparing this against
+    /// [`Self::pool_root`] for the sink block cross-checks the two independent
+    /// commitment-computation mechanisms agree.
+    pub fn header_pool_commitment(&self, block_hash: Hash) -> Hash {
+        self.consensus.headers_store.get_header(block_hash).unwrap().pool_commitment
     }
 
     /// A note from the virtual pool state map (`sn -> (d, pk)`), if live.

@@ -30,6 +30,7 @@ export interface IHeader {
     hashMerkleRoot: HexString;
     acceptedIdMerkleRoot: HexString;
     utxoCommitment: HexString;
+    poolCommitment: HexString;
     timestamp: bigint;
     bits: number;
     nonce: bigint;
@@ -53,6 +54,7 @@ export interface IRawHeader {
     hashMerkleRoot: HexString;
     acceptedIdMerkleRoot: HexString;
     utxoCommitment: HexString;
+    poolCommitment: HexString;
     timestamp: bigint;
     bits: number;
     nonce: bigint;
@@ -215,6 +217,16 @@ impl Header {
         self.inner_mut().utxo_commitment = Hash::from_slice(&js_value.try_as_vec_u8().expect("utxo commitment"));
     }
 
+    #[wasm_bindgen(getter = poolCommitment)]
+    pub fn get_pool_commitment_as_hex(&self) -> String {
+        self.inner().pool_commitment.to_hex()
+    }
+
+    #[wasm_bindgen(setter = poolCommitment)]
+    pub fn set_pool_commitment_from_js_value(&mut self, js_value: JsValue) {
+        self.inner_mut().pool_commitment = Hash::from_slice(&js_value.try_as_vec_u8().expect("pool commitment"));
+    }
+
     #[wasm_bindgen(getter = pruningPoint)]
     pub fn get_pruning_point_as_hex(&self) -> String {
         self.inner().pruning_point.to_hex()
@@ -304,6 +316,10 @@ impl TryCastFromJs for Header {
                         .get_value("utxoCommitment")?
                         .try_into_owned()
                         .map_err(|err| Error::convert("utxoCommitment", err))?,
+                    pool_commitment: object
+                        .get_value("poolCommitment")?
+                        .try_into_owned()
+                        .map_err(|err| Error::convert("poolCommitment", err))?,
                     nonce: object.get_u64("nonce")?,
                     timestamp: object.get_u64("timestamp")?,
                     daa_score: object.get_u64("daaScore")?,

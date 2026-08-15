@@ -427,7 +427,15 @@ async fn block_window_test() {
 #[tokio::test]
 async fn header_in_isolation_validation_test() {
     init_allocator_with_default_settings();
-    let config = ConfigBuilder::new(MAINNET_PARAMS).edit_consensus_params(|p| p.skip_proof_of_work = true).build();
+    let config = ConfigBuilder::new(MAINNET_PARAMS)
+        .edit_consensus_params(|p| {
+            p.skip_proof_of_work = true;
+            // Isolate this test's own toccata-version assertions from the note-pool fork
+            // (FORK-PLAN P6.5): MAINNET_PARAMS has pool_activation active from genesis by
+            // default, which would make block_version() report NOTE_POOL_BLOCK_VERSION here.
+            p.pool_activation = ForkActivation::never();
+        })
+        .build();
     let consensus = TestConsensus::new(&config);
     let wait_handles = consensus.init();
     let block = consensus.build_header_only_block_with_parents(1.into(), vec![config.genesis.hash]);
@@ -512,7 +520,11 @@ async fn header_version_is_enforced_by_activation() {
     let activation = MAINNET_PARAMS.genesis.daa_score + 10;
     let config = ConfigBuilder::new(MAINNET_PARAMS)
         .skip_proof_of_work()
-        .edit_consensus_params(|p| p.toccata_activation = ForkActivation::new(activation))
+        .edit_consensus_params(|p| {
+            p.toccata_activation = ForkActivation::new(activation);
+            // See the identical note in header_in_isolation_validation_test above.
+            p.pool_activation = ForkActivation::never();
+        })
         .build();
     let consensus = TestConsensus::new(&config);
     let wait_handles = consensus.init();
@@ -1190,6 +1202,7 @@ async fn difficulty_test() {
             hash_merkle_root: 0.into(),
             accepted_id_merkle_root: 0.into(),
             utxo_commitment: 0.into(),
+            pool_commitment: 0.into(),
             timestamp: 0,
             bits: 0,
             nonce: 0,

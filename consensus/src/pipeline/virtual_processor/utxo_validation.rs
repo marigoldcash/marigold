@@ -3,7 +3,7 @@ use crate::{
     errors::{
         BlockProcessResult,
         RuleError::{
-            BadAcceptedIDMerkleRoot, BadCoinbaseTransaction, BadUTXOCommitment, InvalidTransactionsInUtxoContext,
+            BadAcceptedIDMerkleRoot, BadCoinbaseTransaction, BadPoolCommitment, BadUTXOCommitment, InvalidTransactionsInUtxoContext,
             WrongHeaderPruningPoint, WrongSelectedParentOrder,
         },
     },
@@ -12,6 +12,7 @@ use crate::{
         daa::DaaStoreReader,
         ghostdag::{CompactGhostdagData, GhostdagData},
         headers::HeaderStoreReader,
+        notepool::DbNotePoolStore,
     },
     processes::{
         pruning::PruningPointReply,
@@ -29,7 +30,7 @@ use kaspa_consensus_core::{
     hashing,
     header::Header,
     muhash::MuHashExtensions,
-    notepool::{PoolDiff, PoolOp, PoolStateView, PoolViewComposition, validate_stateful},
+    notepool::{PoolCollection, PoolDiff, PoolOp, PoolStateView, PoolViewComposition, leaf_hash, validate_stateful},
     subnets::SUBNETWORK_ID_NOTE_POOL,
     tx::{MutableTransaction, PopulatedTransaction, Transaction, ValidatedTransaction, VerifiableTransaction},
     utxo::{
@@ -38,8 +39,11 @@ use kaspa_consensus_core::{
     },
 };
 use kaspa_core::{info, trace};
-use kaspa_hashes::Hash;
+use kaspa_hashes::{Hash, NotePoolSmt};
 use kaspa_muhash::MuHash;
+use kaspa_smt::SmtHasher;
+use kaspa_smt::store::{BTreeSmtStore, LeafUpdate, SortedLeafUpdates};
+use kaspa_smt::tree::compute_root_update;
 use kaspa_utils::refs::Refs;
 
 use crate::model::services::seq_commit_accessor::SeqCommitAccessor;
@@ -212,11 +216,14 @@ impl VirtualStateProcessor {
     ///     3. The block header includes the expected `pruning_point`.
     ///     4. The block coinbase transaction rewards the mergeset blocks correctly.
     ///     5. All non-coinbase block transactions are valid against its own UTXO view.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn verify_expected_utxo_state<V: UtxoView + Sync, P: PoolStateView + Sync>(
         &self,
         ctx: &mut UtxoProcessingContext,
         selected_parent_utxo_view: &V,
         selected_parent_pool_view: &P,
+        pool_state: &DbNotePoolStore,
+        pool_diff: &PoolDiff,
         header: &Header,
     ) -> BlockProcessResult<Option<kaspa_smt_store::processor::SmtBuild>> {
         // Verify header UTXO commitment
@@ -225,6 +232,12 @@ impl VirtualStateProcessor {
             return Err(BadUTXOCommitment(header.hash, header.utxo_commitment, expected_commitment));
         }
         trace!("correct commitment: {}, {}", header.hash, expected_commitment);
+
+        // Verify header pool commitment (POOL-SPEC.md P5.1, FORK-PLAN P6.5)
+        let expected_pool_commitment = self.recompute_pool_commitment(pool_state, pool_diff, &ctx.mergeset_pool_diff);
+        if expected_pool_commitment != header.pool_commitment {
+            return Err(BadPoolCommitment(header.hash, header.pool_commitment, expected_pool_commitment));
+        }
 
         let (expected_accepted_id_merkle_root, smt_build) = if self.toccata_activation.is_active(header.daa_score) {
             // KIP-21: compute seq_commit from SMT lane processing
@@ -736,6 +749,48 @@ impl VirtualStateProcessor {
         );
 
         Ok((hash, build))
+    }
+
+    /// Recomputes the note-pool commitment for a block from scratch (POOL-SPEC.md P5.1,
+    /// FORK-PLAN P6.5): materializes the live pool-entry set at `selected_parent` (via
+    /// `pool_state`'s persisted base plus the accumulated `pool_diff`) extended by this
+    /// block's own `mergeset_pool_diff`, then builds a fresh in-memory SMT over the whole
+    /// set and returns its root.
+    ///
+    /// Deliberately NOT an incremental update against any persisted SMT branch-node
+    /// store: `DbNotePoolSmtStore` (used only for virtual's own fast root tracking) is
+    /// single-current-state, exactly like `pool_state` itself, so its persisted branch
+    /// nodes only correctly reflect whichever branch was most recently committed to
+    /// virtual. Reading them here would silently return a stale root whenever
+    /// `selected_parent` sits on a different branch than virtual's last commit — exactly
+    /// the situation `calculate_utxo_state_relatively`'s reorg walk explores. Rebuilding
+    /// from the flat, diff-composable state map (the same state P6.4's `PoolStateView`
+    /// composition already proves correct for any walked position) sidesteps the
+    /// branch-versioning problem entirely, at O(pool size) cost per verified block —
+    /// accepted for now as a documented, correctness-first tradeoff (see NOTES.md's P6.5
+    /// entry); a proper incremental, multi-branch-aware store is future optimization
+    /// work, not required by this step's own verify condition.
+    pub(super) fn recompute_pool_commitment(&self, pool_state: &DbNotePoolStore, pool_diff: &PoolDiff, mergeset_pool_diff: &PoolDiff) -> Hash {
+        let mut entries: PoolCollection = pool_state.iterator().map(|r| r.unwrap()).collect();
+        for sn in pool_diff.remove.keys() {
+            entries.remove(sn);
+        }
+        for (sn, note) in pool_diff.add.iter() {
+            entries.insert(*sn, *note);
+        }
+        for sn in mergeset_pool_diff.remove.keys() {
+            entries.remove(sn);
+        }
+        for (sn, note) in mergeset_pool_diff.add.iter() {
+            entries.insert(*sn, *note);
+        }
+
+        let leaf_updates = SortedLeafUpdates::from_unsorted(
+            entries.iter().map(|(sn, note)| LeafUpdate { key: *sn, leaf_hash: leaf_hash(note.d, &note.pk) }),
+        );
+        let empty_store = BTreeSmtStore::new();
+        let (root, _) = compute_root_update::<NotePoolSmt, _>(&empty_store, NotePoolSmt::empty_root(), leaf_updates).unwrap();
+        root
     }
 
     /// Calculates the accepted_id_merkle_root based on the current DAA score and the accepted tx ids

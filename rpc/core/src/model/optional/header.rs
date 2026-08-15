@@ -21,6 +21,8 @@ pub struct RpcOptionalHeader {
     pub accepted_id_merkle_root: Option<Hash>,
     /// Level: Full
     pub utxo_commitment: Option<Hash>,
+    /// Level: Full
+    pub pool_commitment: Option<Hash>,
     /// Level: Low - Timestamp is in milliseconds
     pub timestamp: Option<u64>,
     /// Level: Low
@@ -45,6 +47,7 @@ impl RpcOptionalHeader {
             && self.hash_merkle_root.is_none()
             && self.accepted_id_merkle_root.is_none()
             && self.utxo_commitment.is_none()
+            && self.pool_commitment.is_none()
             && self.timestamp.is_none()
             && self.bits.is_none()
             && self.nonce.is_none()
@@ -70,6 +73,7 @@ impl From<Header> for RpcOptionalHeader {
             hash_merkle_root: Some(header.hash_merkle_root),
             accepted_id_merkle_root: Some(header.accepted_id_merkle_root),
             utxo_commitment: Some(header.utxo_commitment),
+            pool_commitment: Some(header.pool_commitment),
             timestamp: Some(header.timestamp),
             bits: Some(header.bits),
             nonce: Some(header.nonce),
@@ -90,6 +94,7 @@ impl From<&Header> for RpcOptionalHeader {
             hash_merkle_root: Some(header.hash_merkle_root),
             accepted_id_merkle_root: Some(header.accepted_id_merkle_root),
             utxo_commitment: Some(header.utxo_commitment),
+            pool_commitment: Some(header.pool_commitment),
             timestamp: Some(header.timestamp),
             bits: Some(header.bits),
             nonce: Some(header.nonce),
@@ -120,6 +125,9 @@ impl TryFrom<RpcOptionalHeader> for Header {
             utxo_commitment: header
                 .utxo_commitment
                 .ok_or(RpcError::MissingRpcFieldError("RpcHeader".to_owned(), "utxo_commitment".to_owned()))?,
+            pool_commitment: header
+                .pool_commitment
+                .ok_or(RpcError::MissingRpcFieldError("RpcHeader".to_owned(), "pool_commitment".to_owned()))?,
             timestamp: header.timestamp.ok_or(RpcError::MissingRpcFieldError("RpcHeader".to_owned(), "timestamp".to_owned()))?,
             bits: header.bits.ok_or(RpcError::MissingRpcFieldError("RpcHeader".to_owned(), "bits".to_owned()))?,
             nonce: header.nonce.ok_or(RpcError::MissingRpcFieldError("RpcHeader".to_owned(), "nonce".to_owned()))?,
@@ -153,6 +161,9 @@ impl TryFrom<&RpcOptionalHeader> for Header {
             utxo_commitment: header
                 .utxo_commitment
                 .ok_or(RpcError::MissingRpcFieldError("RpcHeader".to_owned(), "utxo_commitment".to_owned()))?,
+            pool_commitment: header
+                .pool_commitment
+                .ok_or(RpcError::MissingRpcFieldError("RpcHeader".to_owned(), "pool_commitment".to_owned()))?,
             timestamp: header.timestamp.ok_or(RpcError::MissingRpcFieldError("RpcHeader".to_owned(), "timestamp".to_owned()))?,
             bits: header.bits.ok_or(RpcError::MissingRpcFieldError("RpcHeader".to_owned(), "bits".to_owned()))?,
             nonce: header.nonce.ok_or(RpcError::MissingRpcFieldError("RpcHeader".to_owned(), "nonce".to_owned()))?,
@@ -176,6 +187,7 @@ impl Serializer for RpcOptionalHeader {
         store!(Option<Hash>, &self.hash_merkle_root, writer)?;
         store!(Option<Hash>, &self.accepted_id_merkle_root, writer)?;
         store!(Option<Hash>, &self.utxo_commitment, writer)?;
+        store!(Option<Hash>, &self.pool_commitment, writer)?;
         store!(Option<u64>, &self.timestamp, writer)?;
         store!(Option<u32>, &self.bits, writer)?;
         store!(Option<u64>, &self.nonce, writer)?;
@@ -198,6 +210,7 @@ impl Deserializer for RpcOptionalHeader {
         let hash_merkle_root = load!(Option<Hash>, reader)?;
         let accepted_id_merkle_root = load!(Option<Hash>, reader)?;
         let utxo_commitment = load!(Option<Hash>, reader)?;
+        let pool_commitment = load!(Option<Hash>, reader)?;
         let timestamp = load!(Option<u64>, reader)?;
         let bits = load!(Option<u32>, reader)?;
         let nonce = load!(Option<u64>, reader)?;
@@ -213,6 +226,7 @@ impl Deserializer for RpcOptionalHeader {
             hash_merkle_root,
             accepted_id_merkle_root,
             utxo_commitment,
+            pool_commitment,
             timestamp,
             bits,
             nonce,

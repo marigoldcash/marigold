@@ -227,6 +227,11 @@ impl ConsensusConverter {
             } else {
                 Default::default()
             },
+            pool_commitment: if verbosity.include_pool_commitment.unwrap_or(false) {
+                Some(header.pool_commitment)
+            } else {
+                Default::default()
+            },
             timestamp: if verbosity.include_timestamp.unwrap_or(false) { Some(header.timestamp) } else { Default::default() },
             bits: if verbosity.include_bits.unwrap_or(false) { Some(header.bits) } else { Default::default() },
             nonce: if verbosity.include_nonce.unwrap_or(false) { Some(header.nonce) } else { Default::default() },

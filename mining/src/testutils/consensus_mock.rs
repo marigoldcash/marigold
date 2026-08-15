@@ -99,6 +99,7 @@ impl ConsensusApi for ConsensusMock {
             hash_merkle_root,
             ZERO_HASH,
             ZERO_HASH,
+            ZERO_HASH,
             now,
             123456789u32,
             0,

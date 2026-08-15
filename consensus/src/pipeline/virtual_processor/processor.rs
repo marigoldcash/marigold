@@ -89,7 +89,7 @@ use super::bounds::SeqCommitBounds;
 use super::errors::{PruningImportError, PruningImportResult};
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use itertools::Itertools;
-use kaspa_consensus_core::config::params::ForkedParam;
+use kaspa_consensus_core::config::params::BlockVersionParam;
 use kaspa_consensus_core::tx::ValidatedTransaction;
 use kaspa_utils::binary_heap::BinaryHeapExtensions;
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
@@ -124,7 +124,7 @@ pub struct VirtualStateProcessor {
     pub(super) mergeset_size_limit: u64,
     pub(super) finality_depth: u64,
     pub(super) mempool_mass_cofactors: kaspa_consensus_core::config::params::ForkedParam<kaspa_consensus_core::mass::MassCofactors>,
-    pub(super) block_version: ForkedParam<u16>,
+    pub(super) block_version: BlockVersionParam,
 
     // Stores
     pub(super) statuses_store: Arc<RwLock<DbStatusesStore>>,
@@ -494,7 +494,14 @@ impl VirtualStateProcessor {
                     let mut ctx = UtxoProcessingContext::new(mergeset_data.into(), selected_parent_multiset_hash);
 
                     self.calculate_utxo_state(&mut ctx, &selected_parent_utxo_view, &selected_parent_pool_view, pov_daa_score);
-                    let res = self.verify_expected_utxo_state(&mut ctx, &selected_parent_utxo_view, &selected_parent_pool_view, &header);
+                    let res = self.verify_expected_utxo_state(
+                        &mut ctx,
+                        &selected_parent_utxo_view,
+                        &selected_parent_pool_view,
+                        &stores.pool_state,
+                        pool_diff,
+                        &header,
+                    );
 
                     match res {
                         Err(rule_error) => {
@@ -1479,11 +1486,21 @@ impl VirtualStateProcessor {
             (TemplateBuildMode::Standard, true) | (TemplateBuildMode::Infallible, _) => {}
         }
 
+        // Virtual's own pool commitment (POOL-SPEC.md P5.1, FORK-PLAN P6.5): `virtual_read.pool_state`
+        // directly holds virtual's own live state (unlike `selected_parent`-relative stores), so no
+        // diff overlay is needed here — mirrors `recompute_pool_commitment`'s full-rebuild approach for
+        // consistency with what `verify_expected_utxo_state` will check once this block is submitted.
+        let pool_commitment = self.recompute_pool_commitment(
+            &virtual_read.pool_state,
+            &kaspa_consensus_core::notepool::PoolDiff::default(),
+            &kaspa_consensus_core::notepool::PoolDiff::default(),
+        );
+
         // At this point we can safely drop the read lock
         drop(virtual_read);
 
         // Build the template
-        self.build_block_template_from_virtual_state(virtual_state, miner_data, txs, calculated_fees)
+        self.build_block_template_from_virtual_state(virtual_state, miner_data, txs, calculated_fees, pool_commitment)
     }
 
     pub(crate) fn validate_block_template_transactions(
@@ -1509,6 +1526,7 @@ impl VirtualStateProcessor {
         miner_data: MinerData,
         mut txs: Vec<Transaction>,
         calculated_fees: Vec<u64>,
+        pool_commitment: Hash,
     ) -> Result<BlockTemplate, RuleError> {
         // [`calc_block_parents`] can use deep blocks below the pruning point for this calculation, so we
         // need to hold the pruning lock.
@@ -1553,6 +1571,7 @@ impl VirtualStateProcessor {
             hash_merkle_root,
             accepted_id_merkle_root,
             utxo_commitment,
+            pool_commitment,
             u64::max(min_block_time, unix_now()),
             virtual_state.bits,
             0,

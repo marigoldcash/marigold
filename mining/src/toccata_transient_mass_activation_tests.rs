@@ -144,6 +144,7 @@ impl ConsensusApi for MassPolicyTestConsensus {
             calc_hash_merkle_root(txs.iter()),
             ZERO_HASH,
             ZERO_HASH,
+            ZERO_HASH,
             now,
             0,
             0,

@@ -36,6 +36,8 @@ message RpcBlockHeader {
   uint64 blueScore = 13;
   string pruningPoint = 14;
   string hash = 15;
+  // The note-pool commitment (POOL-SPEC.md P5.1, FORK-PLAN P6.5).
+  string poolCommitment = 16;
 }
 
 message RpcBlockLevelParents {
@@ -1003,6 +1005,8 @@ message RpcOptionalHeader {
   optional string blueWork = 12;
   optional uint64 blueScore = 13;
   optional string pruningPoint = 14;
+  // The note-pool commitment (POOL-SPEC.md P5.1, FORK-PLAN P6.5).
+  optional string poolCommitment = 15;
 }
 
 message RpcOptionalTransactionOutpoint {

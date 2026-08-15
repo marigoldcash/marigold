@@ -7,6 +7,10 @@ pub const BLOCK_VERSION: u16 = 1;
 // TODO(post-toccata): Remove this and change BLOCK_VERSION to 2.
 pub const TOCCATA_BLOCK_VERSION: u16 = 2;
 
+/// The block version activated alongside the note-pool feature (POOL-SPEC.md P5.1,
+/// FORK-PLAN P6.5): headers carry a meaningful `pool_commitment` field from here on.
+pub const NOTE_POOL_BLOCK_VERSION: u16 = 3;
+
 /// TX_VERSION is the current latest supported transaction version.
 pub const TX_VERSION: u16 = 0;
 

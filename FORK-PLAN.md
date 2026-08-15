@@ -1121,7 +1121,7 @@ store → validation → pipeline → mempool → sync → RPC. Every step lands
   passed, consensus 86 passed, workspace 1,206 passed across 142 binaries, integration
   suite green, `cargo build --workspace` clean.
 
-- [ ] **P6.5 — Commitment placement.** 🧑‍⚖️ **DECISION + implementation.** Where does the
+- [x] **P6.5 — Commitment placement.** 🧑‍⚖️ **DECISION + implementation.** Where does the
   pool root live: a new header field beside `utxo_commitment` (clean; changes header
   serialization/hashing — fine for a fresh network but touches mining/stratum code and
   requires redoing the P2.5 genesis hashes) or inside the coinbase payload (no header
@@ -1129,6 +1129,79 @@ store → validation → pipeline → mempool → sync → RPC. Every step lands
   [bridge](bridge/) for the new header, regenerate genesis constants.
   ✅ *Verify:* `cargo test -p kaspa-consensus-core` (genesis + header tests) passes; a
   mined block on local devnet carries the correct pool root.
+  **Executed** (header field, per the recommendation). `Header` gained a `pool_commitment:
+  Hash` field, hashed right after `utxo_commitment` in
+  `hashing::header::hash_override_nonce_time` — the FIRST genuinely new field ever added to
+  this hash preimage in this fork's history (every prior extension, including seq-commit,
+  reinterpreted an existing field rather than adding one; confirmed by reading the actual
+  hashing code, not assumed). Gated by a new, independent `pool_activation: ForkActivation`
+  (not a reuse of `toccata_activation` — same "one field, one meaning" reasoning
+  `pool_commitment` itself follows) and a third block version tier,
+  `NOTE_POOL_BLOCK_VERSION = 3`; `block_version()`'s `ForkedParam<u16>` (a strictly binary
+  pre/post construct) couldn't express a third tier, so it's now a small dedicated
+  `BlockVersionParam` with an explicit priority chain. `pool_activation` is `always()` on
+  mainnet/testnet/simnet (matching `toccata_activation`'s own precedent — a fresh chain has
+  no history to protect) and `never()` on devnet.
+  **The real design problem, found during implementation, not anticipated by the plan
+  text**: verifying `pool_commitment` for an arbitrary chain block during a reorg's
+  exploratory walk needs SMT branch nodes consistent with THAT block's own position — but
+  P6.2's `DbNotePoolSmtStore` is deliberately single-current-state (mirroring
+  `DbUtxoSetStore`), so it only ever correctly reflects whichever branch was most recently
+  committed to virtual. Reading its persisted branch nodes to verify an off-canonical-branch
+  block would silently return a stale root (confirmed as a real, not theoretical, bug — it
+  broke this step's own new reorg cross-check test before the fix). UTXO's `utxo_commitment`
+  sidesteps this because MuHash is an algebraic accumulator (order/branch-independent
+  composition); an SMT root has no equivalent property — recomputing it needs either
+  historical branch-node storage (the `consensus/smt-store` machinery P6.2 deliberately
+  avoided) or a from-scratch rebuild. Chose the latter: `recompute_pool_commitment`
+  materializes the live pool-entry set (the persisted `pool_state` flat map plus the
+  accumulated diff — flat maps compose correctly regardless of branch, unlike SMT
+  structure) and builds a fresh in-memory SMT over the whole set, at O(pool size) cost per
+  verified block — a documented, correctness-first tradeoff acceptable for a fresh, early
+  network; a proper incremental multi-branch-aware store is future optimization work, not
+  required by this step's own verify condition. `DbNotePoolSmtStore` is kept as-is for
+  virtual's own fast root query (`pool_root()`), which has no branch-divergence risk since
+  virtual only ever moves through its own linear commit history — a
+  `incremental_and_full_rebuild_commitments_agree` test pins that the two independent
+  mechanisms produce identical roots for the same state.
+  Also found: `build_block_template_from_virtual_state` originally read
+  `virtual_stores.pool_smt.current_root()` directly — correct for real mining (virtual_state
+  IS the real virtual) but wrong for `TestBlockBuilder`'s "template for arbitrary parents"
+  path (used by every reorg/parallel-block test), which builds a *hypothetical* virtual
+  state that may not match what's actually persisted. Fixed by making `pool_commitment` an
+  explicit parameter each caller computes correctly for its own context, rather than an
+  internal guess.
+  Full wire propagation required (all genuinely necessary for network function, not
+  optional): p2p.proto's `BlockHeader` (field 15) plus its converter, `RpcRawHeader`/
+  `RpcHeader`/`RpcOptionalHeader` (+ `RpcHeaderVerbosity`) in `rpc-core`, `rpc.proto`'s
+  `RpcBlockHeader`/`RpcOptionalHeader` (fields 16/15) plus `rpc-grpc-core`'s converters, and
+  the WASM SDK's `IHeader`/`IRawHeader` JS-facing types (`consensus/client`) — its
+  `finalize()` computes real header hashes via the same canonical function, so a missing
+  field there would silently mis-hash for any JS/WASM caller, not just fail to compile.
+  `bridge/src/hasher.rs::serialize_block_header` — a hand-rolled, independent
+  reimplementation of the hash preimage for the pre-PoW hash handed to external
+  stratum-connected miners — updated in the identical field position; missing this would
+  have made real miners' submitted shares hash-mismatch and get silently rejected node-side.
+  Genesis regenerated for all four networks via the established test-and-paste loop
+  (`cargo test -p kaspa-consensus-core genesis`, no script exists); confirmed via
+  FORK-PLAN's own P9.5 entry that this is explicitly another placeholder pass, not a
+  "final" regen — P9.5 regenerates mainnet again with the real launch timestamp regardless.
+  ✅ *Verify:* `cargo test -p kaspa-consensus-core` (121 passed, including all 4 regenerated
+  genesis hashes). Devnet verify done via a real `kaspad --devnet` binary + live gRPC round
+  trip (not just the test harness): confirmed the regenerated devnet genesis hash matches
+  live, and genesis's `pool_commitment` is a well-formed, non-garbage 32-byte value served
+  correctly over the wire. Deep pool-commitment correctness (mint/rotate, deterministic
+  conflict resolution, reorg convergence, cross-mechanism agreement) is covered by the
+  `skip_proof_of_work()`-based `TestConsensus` suite — this project's established
+  methodology for consensus-logic verification throughout every prior phase — rather than
+  by solving real devnet PoW, which tests nothing about commitment correctness that the
+  faster harness doesn't already cover more thoroughly (real Schnorr signatures, deep
+  reorgs, exact-root cross-checks). Full `cargo test --workspace` (minus the slow
+  integration crate, checked separately): 1,207 passed, 0 failed, across 142 binaries.
+  Integration suite green after fixing three more tests whose `MAINNET_PARAMS`-based configs
+  needed `pool_activation = ForkActivation::never()` to isolate their own
+  `toccata_activation`-specific version-transition assertions from the now-also-active pool
+  fork. Full `cargo build --workspace` clean.
 
 - [ ] **P6.6 — Mint/redeem value binding.** Mint consumes ordinary transparent outputs
   summing exactly to the notes created; redeem mints transparent outputs from destroyed

@@ -4,7 +4,7 @@ Snapshot of everything decided and built so far, so any fresh coding session on 
 machine can continue from the repo alone. Read this together with [FORK-PLAN.md](../../FORK-PLAN.md).
 Update this file whenever off-repo state changes (domains, accounts, infra).
 
-Last updated: 2026-08-16 (P6.4 complete — pool ops live in the virtual pipeline; next step P6.5 is a 🧑‍⚖️ DECISION)
+Last updated: 2026-08-16 (P6.5 complete — pool_commitment header field live end-to-end; next step P6.6)
 
 ## What this project is
 
@@ -79,13 +79,69 @@ substitute for it.
 
 ## Where execution stands
 
-- **Next step: P6.5 — commitment placement.** 🧑‍⚖️ **DECISION + implementation**:
-  where the pool root lives — a new header field beside `utxo_commitment` (the plan
-  and POOL-SPEC.md P5.1 both recommend this; consensus-breaking header change, new
-  block version, touches mining/stratum + regenerates the P2.5 genesis hashes) vs.
-  inside the coinbase payload. The virtual pool root is already maintained
-  incrementally (P6.4), so this step is "surface an existing value in the header and
-  verify it per block", not new state machinery.
+- **Next step: P6.6 — Mint/redeem value binding.** bite-size (not HARD).
+  Binds mint's transparent inputs to exactly the notes it creates, redeem's
+  transparent outputs to exactly the notes it destroys, and assigns real mass costs
+  per op (rotate ≈ 1-input tx; split priced against note-inflation spam). Pool ops
+  currently contribute 0 to `calculated_fee` — P6.6 makes conservation/fees real on
+  the transparent side. Also the step that retires P6.4's "produced-serial existence
+  check is an active rule for now" caveat (mint duplication becomes a genuine UTXO
+  double-spend once mint must spend real inputs).
+- **P6.5 is done.** `Header` gained `pool_commitment: Hash`, hashed right after
+  `utxo_commitment` in `hashing::header::hash_override_nonce_time` — confirmed via
+  direct code reading (not assumed) that this is the FIRST genuinely new field this
+  fork has ever added to the header hash preimage; every prior change (seq-commit,
+  `CompressedParents`) reinterpreted or re-encoded an existing field instead. Gated
+  by a new independent `pool_activation: ForkActivation` (always() mainnet/testnet/
+  simnet, never() devnet, matching `toccata_activation`'s own precedent) and a third
+  block-version tier `NOTE_POOL_BLOCK_VERSION = 3` (`ForkedParam<u16>` couldn't
+  express a 3-way chain, so `block_version()` now returns a small dedicated
+  `BlockVersionParam`).
+  **The real design problem, found via a failing test, not anticipated**: verifying
+  `pool_commitment` for an arbitrary chain block during a reorg's exploratory walk
+  needs branch-node structure consistent with THAT block's own position — but
+  `DbNotePoolSmtStore` (P6.2's deliberately single-current-state design) only ever
+  reflects whichever branch was most recently committed to virtual. Reading it for
+  an off-canonical-branch block would silently return a stale root — confirmed real,
+  not theoretical, since it broke this step's own new cross-check test. UTXO's
+  `utxo_commitment` avoids this because MuHash is an algebraic accumulator (branch-
+  independent composition); SMT roots have no equivalent property. Fixed via
+  `recompute_pool_commitment`: materialize the full live pool-entry set (persisted
+  flat map + accumulated diff — correctly branch-independent, unlike SMT structure)
+  and rebuild a fresh in-memory SMT from scratch, O(pool size) per verified block —
+  a documented, correctness-first tradeoff for a fresh/early network, not silently
+  punted (a proper incremental multi-branch store is named future work).
+  `DbNotePoolSmtStore` is kept for virtual's own fast root query, which has no
+  branch-divergence risk (virtual only ever advances linearly). A second bug found
+  by the same investigation: `build_block_template_from_virtual_state` originally
+  read `pool_smt.current_root()` directly — correct for real mining but wrong for
+  `TestBlockBuilder`'s "template for arbitrary parents" path every reorg test uses,
+  where the hypothetical virtual state may not match what's persisted. Fixed by
+  making `pool_commitment` an explicit per-caller parameter.
+  Full wire propagation was required for the workspace to compile at all (not
+  deferrable to P6.9 as originally hoped): p2p.proto's `BlockHeader`, `rpc-core`'s
+  `RpcRawHeader`/`RpcHeader`/`RpcOptionalHeader`/`RpcHeaderVerbosity`, `rpc-grpc-core`'s
+  two proto messages + converters, `rpc-service`'s verbosity adapter, the WASM SDK's
+  `IHeader`/`IRawHeader` (genuinely hash-affecting — `finalize_js` calls the real
+  canonical hash function), and `bridge/src/hasher.rs`'s hand-rolled preimage
+  (updated in the identical field position, or real miners' shares would
+  hash-mismatch and get silently rejected).
+  Genesis regenerated for all four networks via the established test-and-paste loop;
+  confirmed via P9.5's own entry this is explicitly another placeholder pass, not
+  final. New `incremental_and_full_rebuild_commitments_agree` test pins the two
+  commitment mechanisms to agree exactly. Three MAINNET_PARAMS-based tests (one in
+  `consensus`, two in the integration suite) needed `pool_activation =
+  ForkActivation::never()` added to isolate their own toccata-version assertions
+  from the now-also-default-active pool fork.
+  ✅ *Verify*: `cargo test -p kaspa-consensus-core` 121 passed (all 4 genesis hashes
+  regenerated and verified). Full `cargo test --workspace` (minus integration): 1,207
+  passed across 142 binaries. Integration suite: 42/42 passed. Real `kaspad --devnet`
+  binary verified live via gRPC — regenerated genesis hash matches, `pool_commitment`
+  served correctly over the wire as a well-formed value. Deep correctness (mint/
+  rotate/reorg/cross-mechanism agreement) covered by the `skip_proof_of_work()`
+  `TestConsensus` suite — this project's established methodology — rather than
+  solving real devnet PoW, a deliberate, documented scoping call. Full `cargo build
+  --workspace` clean.
 - **P6.4 is done (⚠️ HARD — done with a stronger model per the plan's flag).** Pool
   ops are live in the virtual pipeline end-to-end. The core: validation happens
   inside `validate_transaction_in_utxo_context` against a composed pool view

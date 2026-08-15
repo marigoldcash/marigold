@@ -38,7 +38,7 @@ use kaspa_consensus_core::{
     blockstatus::BlockStatus::{self, StatusHeaderOnly, StatusInvalid},
     config::{
         genesis::GenesisBlock,
-        params::{ForkActivation, ForkedParam},
+        params::{BlockVersionParam, ForkActivation},
     },
     header::Header,
 };
@@ -116,7 +116,7 @@ pub struct HeaderProcessor {
     pub(super) max_block_level: BlockLevel,
     pub(crate) toccata_activation: ForkActivation,
     pub(crate) toccata_logger: ForkLogger,
-    pub(super) block_version: ForkedParam<u16>,
+    pub(super) block_version: BlockVersionParam,
 
     // DB
     db: Arc<DB>,

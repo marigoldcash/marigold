@@ -148,6 +148,9 @@ pub enum RuleError {
     #[error("block {0} UTXO commitment is invalid - block header indicates {1}, but calculated value is {2}")]
     BadUTXOCommitment(Hash, Hash, Hash),
 
+    #[error("block {0} pool commitment is invalid - block header indicates {1}, but calculated value is {2}")]
+    BadPoolCommitment(Hash, Hash, Hash),
+
     #[error("block {0} accepted ID merkle root is invalid - block header indicates {1}, but calculated value is {2}")]
     BadAcceptedIDMerkleRoot(Hash, Hash, Hash),
 

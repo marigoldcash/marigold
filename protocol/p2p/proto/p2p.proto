@@ -86,6 +86,8 @@ message BlockHeader{
   bytes blueWork = 10;
   Hash pruningPoint = 14;
   uint64 blueScore = 13;
+  // The note-pool commitment (POOL-SPEC.md P5.1, FORK-PLAN P6.5).
+  Hash poolCommitment = 15;
 }
 
 message BlockLevelParents {

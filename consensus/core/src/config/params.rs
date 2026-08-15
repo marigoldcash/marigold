@@ -5,7 +5,7 @@ pub use super::{
 };
 use crate::{
     BlockLevel, KType,
-    constants::{BLOCK_VERSION, STORAGE_MASS_PARAMETER, TOCCATA_BLOCK_VERSION},
+    constants::{BLOCK_VERSION, NOTE_POOL_BLOCK_VERSION, STORAGE_MASS_PARAMETER, TOCCATA_BLOCK_VERSION},
     mass::{BlockLaneLimits, BlockMassLimits, MassCofactors},
     network::{NetworkId, NetworkType},
 };
@@ -145,6 +145,32 @@ impl<T: Copy> From<T> for ForkedParam<T> {
     }
 }
 
+/// The block version as a function of DAA score, across a genuine three-tier version
+/// history (pre-Toccata → Toccata/KIP-21 → note-pool, FORK-PLAN P6.5). Not expressed as
+/// a second `ForkedParam<u16>` layered on the first: `ForkedParam` is a strictly binary
+/// pre/post construct tied to one activation, and a third tier needs an explicit
+/// priority chain (most-recently-activated fork wins), not another independent pair.
+#[derive(Clone, Copy, Debug)]
+pub struct BlockVersionParam {
+    pre_toccata: u16,
+    toccata: u16,
+    pool: u16,
+    toccata_activation: ForkActivation,
+    pool_activation: ForkActivation,
+}
+
+impl BlockVersionParam {
+    pub fn get(&self, daa_score: u64) -> u16 {
+        if self.pool_activation.is_active(daa_score) {
+            self.pool
+        } else if self.toccata_activation.is_active(daa_score) {
+            self.toccata
+        } else {
+            self.pre_toccata
+        }
+    }
+}
+
 impl<T: Copy + Ord> ForkedParam<T> {
     /// Returns the min of `pre` and `post` values. Useful for non-consensus initializations
     /// which require knowledge of the value bounds.
@@ -267,6 +293,9 @@ pub struct OverrideParams {
     pub crescendo_activation: Option<ForkActivation>,
 
     pub toccata_activation: Option<ForkActivation>,
+
+    /// Note-pool activation DAA score (POOL-SPEC.md P5.1, FORK-PLAN P6.5)
+    pub pool_activation: Option<ForkActivation>,
 }
 
 impl From<Params> for OverrideParams {
@@ -299,6 +328,7 @@ impl From<Params> for OverrideParams {
             blockrate: Some(p.blockrate),
             crescendo_activation: Some(p.crescendo_activation),
             toccata_activation: Some(p.toccata_activation),
+            pool_activation: Some(p.pool_activation),
         }
     }
 }
@@ -368,6 +398,16 @@ pub struct Params {
     pub crescendo_activation: ForkActivation,
 
     pub toccata_activation: ForkActivation,
+
+    /// Note-pool activation DAA score (POOL-SPEC.md P5.1, FORK-PLAN P6.5) — from this
+    /// score onward, block headers carry a meaningful `pool_commitment` and blocks are
+    /// mined at `NOTE_POOL_BLOCK_VERSION`. Modeled as its own `ForkActivation`, not a
+    /// reuse of `toccata_activation`, per the same "one field, one meaning" reasoning
+    /// `pool_commitment` itself follows — pool ops already require Toccata to be active
+    /// (the user-lane subnetwork check gates on `TX_VERSION_TOCCATA`), so in practice
+    /// this activates no earlier than Toccata on every network, but it is a genuinely
+    /// separate switch.
+    pub pool_activation: ForkActivation,
 }
 
 impl Params {
@@ -531,8 +571,14 @@ impl Params {
         min(self.blockrate.pruning_depth, anticone_finalization_depth)
     }
 
-    pub fn block_version(&self) -> ForkedParam<u16> {
-        ForkedParam::new(BLOCK_VERSION, TOCCATA_BLOCK_VERSION, self.toccata_activation)
+    pub fn block_version(&self) -> BlockVersionParam {
+        BlockVersionParam {
+            pre_toccata: BLOCK_VERSION,
+            toccata: TOCCATA_BLOCK_VERSION,
+            pool: NOTE_POOL_BLOCK_VERSION,
+            toccata_activation: self.toccata_activation,
+            pool_activation: self.pool_activation,
+        }
     }
 
     pub fn network_name(&self) -> String {
@@ -606,6 +652,7 @@ impl Params {
 
             crescendo_activation: overrides.crescendo_activation.unwrap_or(self.crescendo_activation),
             toccata_activation: overrides.toccata_activation.unwrap_or(self.toccata_activation),
+            pool_activation: overrides.pool_activation.unwrap_or(self.pool_activation),
         }
     }
 }
@@ -705,6 +752,7 @@ pub const MAINNET_PARAMS: Params = Params {
     // A new chain starts with all upgrades active from block 0 — no history to protect (P2.6).
     crescendo_activation: ForkActivation::always(),
     toccata_activation: ForkActivation::always(),
+    pool_activation: ForkActivation::always(),
 };
 
 pub const TESTNET_PARAMS: Params = Params {
@@ -753,6 +801,7 @@ pub const TESTNET_PARAMS: Params = Params {
     // A new chain starts with all upgrades active from block 0 — no history to protect (P2.6).
     crescendo_activation: ForkActivation::always(),
     toccata_activation: ForkActivation::always(),
+    pool_activation: ForkActivation::always(),
 };
 
 pub const SIMNET_PARAMS: Params = Params {
@@ -807,6 +856,7 @@ pub const SIMNET_PARAMS: Params = Params {
 
     crescendo_activation: ForkActivation::always(),
     toccata_activation: ForkActivation::always(),
+    pool_activation: ForkActivation::always(),
 };
 
 pub const DEVNET_PARAMS: Params = Params {
@@ -851,6 +901,7 @@ pub const DEVNET_PARAMS: Params = Params {
 
     crescendo_activation: ForkActivation::always(),
     toccata_activation: ForkActivation::never(),
+    pool_activation: ForkActivation::never(),
 };
 
 #[cfg(test)]

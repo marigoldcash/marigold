@@ -67,10 +67,21 @@ impl TestBlockBuilder {
             &mut accumulated_diff,
             &mut accumulated_pool_diff,
         )?;
+        // Computed against `accumulated_pool_diff` BEFORE it's moved into the composed view
+        // below — this pov-hypothetical virtual is generally NOT the real committed virtual
+        // (that's the entire point of this method), so it must NOT reuse
+        // `virtual_stores.pool_smt`'s fast incremental root (which only ever tracks the real
+        // one); the same full-rebuild `recompute_pool_commitment` verification will use is the
+        // only mechanism guaranteed correct for an arbitrary pov (POOL-SPEC.md P5.1, FORK-PLAN P6.5).
+        let pool_commitment = self.recompute_pool_commitment(
+            &virtual_read.pool_state,
+            &accumulated_pool_diff,
+            &kaspa_consensus_core::notepool::PoolDiff::default(),
+        );
         let pov_virtual_utxo_view = (&virtual_read.utxo_set).compose(accumulated_diff);
         let pov_virtual_pool_view = PoolViewComposition::compose(&virtual_read.pool_state, accumulated_pool_diff);
         self.validate_block_template_transactions(&txs, &pov_virtual_state, &pov_virtual_utxo_view, &pov_virtual_pool_view)?;
         drop(virtual_read);
-        self.build_block_template_from_virtual_state(pov_virtual_state, miner_data, txs, vec![])
+        self.build_block_template_from_virtual_state(pov_virtual_state, miner_data, txs, vec![], pool_commitment)
     }
 }

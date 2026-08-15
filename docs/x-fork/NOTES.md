@@ -1563,3 +1563,147 @@ plus the happy-path and duplicate-mint tests above.
 Totals: consensus-core 121 passed (+27 this step), consensus 86 passed (+6), full
 workspace 1,206 passed across 142 test binaries, integration suite green, workspace
 build clean.
+
+### P6.5 — Commitment placement (2026-08-16)
+
+The plan's recommendation ("the header field") was already the decision; this step was 
+"implement it," but turned into real design work once the actual requirements became concrete.
+
+**The genuinely new thing about this step**: every prior header-shape change in this
+fork's history — checked directly against `hashing::header::hash_override_nonce_time`,
+not assumed — reinterpreted an EXISTING field rather than adding a new one.
+`accepted_id_merkle_root` is repurposed for seq-commit post-Toccata; `parents_by_level`'s
+RLE compaction (`CompressedParents`) changed the wire/storage representation but the hash
+preimage still expands it back to the original per-level list before hashing, so even that
+wasn't a hash-shape change. `pool_commitment` is the first field this fork has ever
+actually ADDED to the hash preimage. POOL-SPEC.md P5.1 explains why reuse was rejected
+(overloading `accepted_id_merkle_root` a second time would make one field mean two things
+depending on which of two independent forks activated) — confirmed that reasoning still
+holds and implemented accordingly.
+
+**The real engineering problem, not visible until implementation**: how does
+`verify_expected_utxo_state` compute the EXPECTED `pool_commitment` for an arbitrary chain
+block being validated — including ones on a branch that ISN'T currently reflected in
+persisted state, exactly what happens during `calculate_utxo_state_relatively`'s
+exploratory reorg walk? For `utxo_commitment`, this is free: MuHash is an algebraic
+accumulator, so `selected_parent_multiset_hash` (a single value, no branch history needed)
+composed with the accumulated diff is ALWAYS correct regardless of which branch
+`selected_parent` is actually on — set membership commutes. An SMT root has no equivalent
+property. Recomputing it from an old root plus a diff needs READ ACCESS to the actual
+branch-node structure along the changed paths (that's literally what
+`compute_root_update`'s `store: &S` parameter is for) — and `DbNotePoolSmtStore` (P6.2's
+single-current-state design, deliberately NOT block-versioned, mirroring
+`DbUtxoSetStore`) only ever correctly reflects whichever branch was most recently
+committed to virtual. Reading its persisted nodes to verify a DIFFERENT branch's block
+would silently produce the wrong root.
+
+This is not a hypothetical concern — it's exactly why `consensus/smt-store`'s heavier
+`SmtProcessor`/`BranchVersionKey` machinery exists for seq-commit (multi-branch,
+reachability-filtered lookups via `is_smt_canonical`), machinery P6.2 explicitly declined
+to adopt for the pool, reasoning the pool only needs current-state apply/unapply. That
+reasoning holds for the STATE map (a flat structure, correctly diff-composable regardless
+of branch — this is exactly what makes `PoolStateView`/`ComposedPoolView` correct for any
+walked position, proven back in P6.4) but does NOT extend to the SMT ROOT specifically,
+which needs actual tree structure. Found this the concrete way, not the abstract way: the
+first version of this step's own new `incremental_and_full_rebuild_commitments_agree`
+cross-check test (see below) failed, and tracing why led directly to this gap.
+
+**The fix**: `recompute_pool_commitment` doesn't do an incremental update at all — it
+materializes the FULL live pool-entry set (the persisted `pool_state` flat map, iterated,
+plus the accumulated diff applied on top — correctness inherited from the same
+diff-composition argument P6.4 already established) and builds a fresh in-memory SMT
+(`BTreeSmtStore`, zero persistence) from scratch. This sidesteps the branch-versioning
+problem entirely — it never reads any persisted branch-node structure, so there's nothing
+to go stale — at the cost of O(pool size) work per verified block. Accepted as a
+documented, correctness-first tradeoff: P6.5's own verify condition doesn't ask for
+performance, this is a fresh/early network, and a proper incremental multi-branch-aware
+store is real future work, not silently punted — it's named explicitly as a gap in the
+plan entry above. `DbNotePoolSmtStore`'s incremental tracking is KEPT, not removed —
+it's still correct and useful for virtual's own root query (`pool_root()`), since virtual
+only ever advances through ITS OWN linear commit history, never a divergent branch.
+
+**A second real bug, found by the SAME investigation**: `build_block_template_from_virtual_state`
+originally read `self.virtual_stores.read().pool_smt.current_root()` directly inside the
+function — correct for the real mining path (`build_block_template`, where `virtual_state`
+IS the actual persisted virtual) but WRONG for `TestBlockBuilder::build_block_template_with_parents`
+(the "build a template for arbitrary/hypothetical parents" test helper every reorg and
+parallel-block test in this fork uses) — there, `virtual_state` is a POV-hypothetical
+computation that may not match what's actually persisted in `virtual_stores.pool_smt` at
+all. This is precisely the kind of staleness risk flagged (but not yet proven) in P6.4's
+own doc comment about `build_block_template_from_virtual_state`'s `utxo_commitment` field
+— except UTXO's version happens to be safe (virtual_state carries its OWN multiset
+snapshot), while my ad hoc `pool_smt.current_root()` read did not. Fixed by making
+`pool_commitment` an explicit parameter, computed correctly by each caller for its own
+context (the real path uses the direct materialize-from-virtual-state; the test-builder
+path uses `recompute_pool_commitment` against the accumulated pov diff, captured BEFORE
+that diff gets moved into the composed view used for tx validation).
+
+**Mechanically large, not conceptually hard**: every place a `Header` gets constructed or
+converted needed updating:
+`consensus/core`'s own test fixtures, `protocol/p2p`'s proto + converter (new field 15,
+required for the network to actually function post-activation — peers literally cannot
+reconstruct each other's headers without this), `rpc/core`'s `RpcRawHeader`/`RpcHeader`/
+`RpcOptionalHeader` + `RpcHeaderVerbosity` (its own serializer/deserializer AND the
+`impl_verbosity_from!` macro table), `rpc/grpc/core`'s two proto messages (`RpcBlockHeader`
+field 16, `RpcOptionalHeader` field 15) + converters, `rpc/service`'s verbosity-gated
+header adapter, the WASM SDK's `consensus/client` (`IHeader`/`IRawHeader` TS interfaces +
+getter/setter + object-parsing, genuinely hash-affecting since `finalize_js` calls the
+real canonical hash function), and `bridge/src/hasher.rs`'s hand-rolled preimage. None of
+this was in the plan's own text beyond "update the bridge" — the RPC/gRPC/P2P propagation
+turned out to be **required for the workspace to compile at all**, not an optional
+follow-up, once the actual dependency graph became visible. (Originally scoped to defer
+RPC/proto work to P6.9's "add pool-related RPC methods" pass, on the theory that a header
+struct field change wouldn't need wire-format changes — wrong: the field is read/written
+unconditionally by every existing header conversion path, so it breaks compilation
+immediately, not just pool-specific RPC methods.)
+
+Two more real bugs, smaller, both concrete not hypothetical:
+- `calc_storage_mass`'s already-known zero-input path (fixed in P6.4) wasn't touched
+  again here, but the SAME "check real behavior, don't assume" discipline caught two
+  MAINNET_PARAMS-based tests (`block_template_version_changes_to_v2_upon_activation` in
+  `consensus`, plus `header_in_isolation_validation_test` and
+  `header_version_is_enforced_by_activation` in the integration suite) that assert exact
+  block-version transitions. All three broke because `MAINNET_PARAMS` now has
+  `pool_activation: ForkActivation::always()` by default (matching `toccata_activation`'s
+  own "fresh chain, no history to protect" precedent) — meaning `block_version()` jumps
+  straight to `NOTE_POOL_BLOCK_VERSION` regardless of what `toccata_activation` is
+  overridden to. Fixed by having each test also override `pool_activation =
+  ForkActivation::never()`, isolating what each test actually means to exercise.
+- Several `#[cfg(test)]`-only call sites across `parents_builder.rs`, `mining/`, and
+  `testing/integration/` don't get checked by a plain `cargo build --workspace` at all
+  (only by `cargo test`) — caught these via the full `cargo test --workspace` pass, not
+  the build. Standing lesson from earlier phases, reconfirmed: build success doesn't
+  imply test-target compile success; both passes are necessary, in that order, every step.
+
+**Devnet verification, honestly scoped**: ran a real `kaspad --devnet` binary (debug
+build) against a scratch appdir and fetched genesis over live gRPC — confirmed the
+regenerated devnet genesis hash matches what the running binary actually computes (not
+just what the unit test asserts) and that `pool_commitment` is served correctly over the
+wire as a well-formed, non-garbage 32-byte value. Did NOT solve real devnet PoW to mine a
+literal post-genesis block — devnet's real difficulty makes that a CPU-minutes-to-hours
+proposition unrelated to what this step needs verified, and the `TestConsensus`
+`skip_proof_of_work()` suite (this project's established methodology for consensus-logic
+verification every phase since P2) already covers mint/rotate/reorg/cross-mechanism
+correctness far more thoroughly than a single mined devnet block could. Recorded as a
+deliberate scoping call, not a skipped step.
+
+**Genesis regeneration**: same "blank the constant, run the test, paste the panic's hex
+array back in" loop as P2.5, four times (mainnet, testnet, simnet, devnet — devnet's
+comment history now has three generations: the original golang value, P2.5's bits-field
+fix, and this step's pool_commitment-field addition). Confirmed via FORK-PLAN's P9.5 entry
+that mainnet gets regenerated a THIRD time regardless, with the real launch timestamp —
+this step's hashes are explicitly not meant to be precious.
+
+✅ *Verify*: `cargo test -p kaspa-consensus-core` — 121 passed, including
+`test_genesis_hashes` for all four regenerated networks. New
+`incremental_and_full_rebuild_commitments_agree` test pins the two independent
+commitment-computation mechanisms (fast incremental, from-scratch rebuild) to agree
+exactly — the test whose FIRST version failed and led to finding the branch-versioning
+gap above; its final, correct version accounts for the standard GHOSTDAG "a block's
+commitment reflects its ancestors, not its own body" shape (a subtlety that made the
+test's first draft assert the wrong equality — block N+1's header commitment matches
+`pool_root()` as of block N, not as of N+1, since a block's own transactions only surface
+in its descendants' commitments). Full `cargo test --workspace` (minus the slow
+integration crate): 1,207 passed, 0 failed, across 142 binaries. Integration suite green
+after the three MAINNET_PARAMS fixes above. Full `cargo build --workspace` clean. Real
+`kaspad --devnet` binary verified live via gRPC.

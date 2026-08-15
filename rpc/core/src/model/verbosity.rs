@@ -45,6 +45,7 @@ pub struct RpcHeaderVerbosity {
     pub include_hash_merkle_root: Option<bool>,
     pub include_accepted_id_merkle_root: Option<bool>,
     pub include_utxo_commitment: Option<bool>,
+    pub include_pool_commitment: Option<bool>,
     /// Timestamp is in milliseconds
     pub include_timestamp: Option<bool>,
     pub include_bits: Option<bool>,
@@ -65,6 +66,7 @@ impl Serializer for RpcHeaderVerbosity {
         store!(Option<bool>, &self.include_hash_merkle_root, writer)?;
         store!(Option<bool>, &self.include_accepted_id_merkle_root, writer)?;
         store!(Option<bool>, &self.include_utxo_commitment, writer)?;
+        store!(Option<bool>, &self.include_pool_commitment, writer)?;
         store!(Option<bool>, &self.include_timestamp, writer)?;
         store!(Option<bool>, &self.include_bits, writer)?;
         store!(Option<bool>, &self.include_nonce, writer)?;
@@ -87,6 +89,7 @@ impl Deserializer for RpcHeaderVerbosity {
         let include_hash_merkle_root = load!(Option<bool>, reader)?;
         let include_accepted_id_merkle_root = load!(Option<bool>, reader)?;
         let include_utxo_commitment = load!(Option<bool>, reader)?;
+        let include_pool_commitment = load!(Option<bool>, reader)?;
         let include_timestamp = load!(Option<bool>, reader)?;
         let include_bits = load!(Option<bool>, reader)?;
         let include_nonce = load!(Option<bool>, reader)?;
@@ -102,6 +105,7 @@ impl Deserializer for RpcHeaderVerbosity {
             include_hash_merkle_root,
             include_accepted_id_merkle_root,
             include_utxo_commitment,
+            include_pool_commitment,
             include_timestamp,
             include_bits,
             include_nonce,

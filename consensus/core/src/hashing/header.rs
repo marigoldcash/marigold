@@ -18,6 +18,7 @@ pub fn hash_override_nonce_time(header: &Header, nonce: u64, timestamp: u64) -> 
         .update(header.hash_merkle_root)
         .update(header.accepted_id_merkle_root)
         .update(header.utxo_commitment)
+        .update(header.pool_commitment)
         .update(timestamp.to_le_bytes())
         .update(header.bits.to_le_bytes())
         .update(nonce.to_le_bytes())
@@ -44,6 +45,7 @@ mod tests {
         let header = Header::new_finalized(
             1,
             vec![vec![1.into()]].try_into().unwrap(),
+            Default::default(),
             Default::default(),
             Default::default(),
             Default::default(),

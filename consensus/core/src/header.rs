@@ -142,6 +142,16 @@ pub struct Header {
     pub hash_merkle_root: Hash,
     pub accepted_id_merkle_root: Hash,
     pub utxo_commitment: Hash,
+    /// The note-pool commitment (POOL-SPEC.md P5.1, FORK-PLAN P6.5): the SMT root of
+    /// `PoolState` as of this block. A dedicated field, not a reuse of
+    /// `accepted_id_merkle_root` (which seq-commit already reinterprets post-Toccata —
+    /// overloading it a second time would make one field mean two unrelated things
+    /// depending on which of two independent forks activated). Meaningful from
+    /// `pool_activation`'s DAA score onward (`NOTE_POOL_BLOCK_VERSION`); pre-activation
+    /// headers still carry a value (the then-current, always-empty pool's root) since
+    /// this field has no "absent" representation, but it is not consensus-checked
+    /// before activation.
+    pub pool_commitment: Hash,
     /// Timestamp is in milliseconds
     pub timestamp: u64,
     pub bits: u32,
@@ -160,6 +170,7 @@ impl Header {
         hash_merkle_root: Hash,
         accepted_id_merkle_root: Hash,
         utxo_commitment: Hash,
+        pool_commitment: Hash,
         timestamp: u64,
         bits: u32,
         nonce: u64,
@@ -175,6 +186,7 @@ impl Header {
             hash_merkle_root,
             accepted_id_merkle_root,
             utxo_commitment,
+            pool_commitment,
             nonce,
             timestamp,
             daa_score,
@@ -216,6 +228,7 @@ impl Header {
             hash_merkle_root: Default::default(),
             accepted_id_merkle_root: Default::default(),
             utxo_commitment: Default::default(),
+            pool_commitment: Default::default(),
             nonce: 0,
             timestamp: 0,
             daa_score: 0,
@@ -270,6 +283,7 @@ mod tests {
         let header = Header::new_finalized(
             1,
             vec![vec![1.into()]].try_into().unwrap(),
+            Default::default(),
             Default::default(),
             Default::default(),
             Default::default(),

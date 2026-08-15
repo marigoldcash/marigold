@@ -219,10 +219,20 @@ pub fn serialize_block_header(block: &kaspa_consensus_core::block::Block) -> Res
     let _ = header.hash_merkle_root.as_bytes();
     let _ = header.accepted_id_merkle_root.as_bytes();
     let _ = header.utxo_commitment.as_bytes();
+    let _ = header.pool_commitment.as_bytes();
     let _ = header.pruning_point.as_bytes();
 
-    // Write header fields
-    hasher.update(header.hash_merkle_root).update(header.accepted_id_merkle_root).update(header.utxo_commitment);
+    // Write header fields. `pool_commitment` (POOL-SPEC.md P5.1, FORK-PLAN P6.5) MUST be
+    // written here, in exactly this position, to match
+    // `kaspa_consensus_core::hashing::header::hash_override_nonce_time` byte-for-byte —
+    // this is the pre-PoW hash handed to external miners over stratum; any divergence
+    // from the real consensus preimage makes submitted shares hash-mismatch and get
+    // rejected node-side.
+    hasher
+        .update(header.hash_merkle_root)
+        .update(header.accepted_id_merkle_root)
+        .update(header.utxo_commitment)
+        .update(header.pool_commitment);
 
     // Write the struct fields EXACTLY like Go does (lines 74-93 in hasher.go)
     // Go writes: TS(0) + Bits + Nonce(0) + DAAScore + BlueScore as one struct
