@@ -1153,3 +1153,46 @@ wallet-equivalent tooling and mining, verified end to end (not just unit-tested)
 across P2.9's/P4.1's network-sync checks, P3.3's/P4.2's economics-and-persistence
 checks, and P4.3's regression suite. Next up per FORK-PLAN.md: Phase 5, the pool
 specification (⚠️ marked hard — spec-first, no implementation yet).
+
+## Phase 5 — Pool: specification (2026-08-15)
+
+Wrote all of P5.1-P5.8 in one session into
+[POOL-SPEC.md](POOL-SPEC.md) — a complete, ~1,300-line specification of the note pool.
+Unlike other phases, the detailed per-step reasoning lives directly in POOL-SPEC.md
+itself (each `## P5.N` section) and DECISIONS.md (the genuine design choices made along
+the way), rather than duplicated again here — this entry is a pointer and a short
+retrospective, not a re-narration.
+
+**What actually required new design work**, versus formalizing what the plan already
+decided: P5.1's serial-number derivation and pool-commitment field choice; P5.2's
+subnetwork mechanism choice, the rotate/split/merge-into-one-`TransferOp` unification,
+the signature/freshness-anchor scheme (genuinely new — no existing Kaspa sighash
+applies to notes), and the discovery that fee stamps need no new wire concept at all;
+P5.3's mostly-free ride on the real existing UTXO mergeset-conflict mechanism; P5.4's
+finding that the closer precedent is seq-commit's SMT streaming import, not the UTXO
+set's MuHash flow the plan itself pointed at; P5.6's from-scratch key-algorithm-
+deprecation design (the plan's referenced "architecture paragraph" doesn't exist
+anywhere in this repo, checked before writing anything); and P5.8's T-threshold
+refinement (defined against Marigold's own genesis difficulty, not Kaspa mainnet's,
+since the latter isn't on-chain-verifiable data — the plan's own literal suggestion
+would have violated its own "no fuzzy definitions" requirement). P5.5 and P5.7 were
+closer to formalization of already-decided/implied content, done with the same rigor.
+
+**Every factual claim about existing code — file paths, line numbers, function names,
+constant values — was checked directly against the real source before being written
+into the spec**, not recalled from earlier session context or assumed from naming
+conventions. Two citation errors were caught and fixed this way during writing (a wrong
+line-number range, one arithmetic mistake in a worked byte-size example independently
+re-verified with a calculator afterward). This mattered enough to call out as a
+practice, not just a one-off fix: a spec that's about to receive external
+cryptography review is exactly the kind of document where an uncaught "close enough"
+citation does real damage to credibility, separate from whether the underlying design
+is sound.
+
+**P5.9 (the review gate) is the one step this session could not complete.** Tagged
+`pool-spec-v1` (the mechanical "freeze the spec" half of the step) and set up
+`docs/x-fork/reviews/` with instructions, but the actual requirement — review by a
+person with an applied-cryptography background, outside the project — is a genuine
+human action, not something to simulate, fabricate, or skip past. **Phase 6 must not
+begin until that review lands and its feedback is folded into v1.1**, per the plan's
+own explicit instruction. This is where Phase 5 execution stops for now.

@@ -4,7 +4,7 @@ Snapshot of everything decided and built so far, so any fresh coding session on 
 machine can continue from the repo alone. Read this together with [FORK-PLAN.md](../../FORK-PLAN.md).
 Update this file whenever off-repo state changes (domains, accounts, infra).
 
-Last updated: 2026-08-15 (Phase 4 complete — tagged fork-transparent-v0.1)
+Last updated: 2026-08-15 (Phase 5 spec content complete — blocked on P5.9 external review)
 
 ## What this project is
 
@@ -79,13 +79,24 @@ substitute for it.
 
 ## Where execution stands
 
-- **Next step: P5.1 — start of Phase 5 (Pool: specification ⚠️).** Write the Note
-  definition and pool-state map with exact byte layouts (field sizes for `d`, `pk`,
-  `sn`; key scheme — recommend secp256k1 Schnorr, reusing existing Kaspa-address
-  crypto) plus the pool commitment (a hash root, likely via `crypto/smt`, that
-  blocks commit to). This is spec-only — no implementation yet; the whole point of
-  Phase 5 is a complete written spec in `docs/x-fork/POOL-SPEC.md` before any pool
-  code is written, so the implementation phases that follow are bite-sized.
+- **BLOCKED — waiting on a human action before any further plan steps.** P5.1-P5.8 are
+  fully written: [docs/x-fork/POOL-SPEC.md](POOL-SPEC.md) is a complete, ~1,300-line
+  spec of the note pool (data structures, transaction format, consensus rules, state
+  sync/pruning, transfer modes, wallet protocol, an honest privacy statement, and the
+  launch finality-anchor mechanism), frozen at tag `pool-spec-v1`
+  (commit `9d93ab32`, pushed to `origin`). **P5.9 (the review gate) is only half
+  done** — the mechanical freeze is complete, but the actual requirement, review by a
+  person with an applied-cryptography background *outside the project*, is something
+  cannot be performed by the coding agent and must be done by a human. [docs/x-fork/reviews/](reviews/) is
+  ready to receive it (instructions in its `README.md`). **Do not start Phase 6
+  (pool consensus implementation) until that review lands and its feedback is folded
+  into v1.1** — this is the plan's own explicit instruction, not a self-imposed one.
+  Two sections worth the reviewer's particular attention, flagged in the reviews
+  README: P5.2's signature/replay scheme and P5.8's finality-anchor parameters — the
+  two places genuinely new cryptographic/game-theoretic decisions were made rather
+  than existing Kaspa mechanisms extended. Full rationale for every non-obvious
+  parameter (freshness window, T/M/K sunset values, trustee count, etc.) is in
+  [DECISIONS.md](DECISIONS.md)'s P5.1-P5.8 entries.
 - **Phase 4 (P4.1-P4.4) is fully done — "the fork works," tagged and reproducible.**
   Tag `fork-transparent-v0.1` exists on `origin`, and the fresh-clone claim was
   actually tested, not assumed: a genuinely clean `git clone --branch

@@ -904,6 +904,13 @@ should settle its size and how it is assigned (e.g. hash of the minting tx + out
   it reviewed by at least one person with applied-cryptography background **outside the
   project**. Fold feedback into v1.1. Do not start Phase 6 before this.
   ✅ *Verify:* written review exists in `docs/x-fork/reviews/`; issues triaged.
+  **Partially done, 2026-08-15: the mechanical half only.** Tagged `pool-spec-v1` at
+  commit `9d93ab32` and pushed. Created
+  [docs/x-fork/reviews/](docs/x-fork/reviews/) with instructions for the reviewer.
+  **The actual review — a person with applied-cryptography background, outside the
+  project — cannot be performed by coding**, and this step stays unchecked until
+  a genuine external review lands and its feedback is folded into v1.1. **Phase 6 must
+  not start before that happens**, per this step's own explicit instruction.
 
 ---
 
