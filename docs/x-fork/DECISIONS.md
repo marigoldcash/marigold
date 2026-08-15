@@ -235,3 +235,49 @@ peer-to-peer channels**. This posture will need real legal review before mainnet
 particularly once P1.5/P1.8 are cross-checked against P9.1's trustee-ceremony 
 organizing (which may itself imply some jurisdictional footprint even without a 
 formal entity).
+
+### P5.2 — Transaction format decisions
+
+Several smaller, genuine design choices bundled into one spec section
+([POOL-SPEC.md](POOL-SPEC.md)'s P5.2), recorded together since they're tightly coupled:
+
+**Subnetwork mechanism**: a dedicated user-lane namespace
+(`SubnetworkId::from_namespace`), not the reserved `RegistrySubnetwork` path. Checked
+directly (grep) that `SUBNETWORK_ID_REGISTRY` has no active registration/dispatch
+mechanism anywhere in the codebase today — only test-fixture usages — while
+`from_namespace` user lanes are the real, already-implemented mechanism backing
+Toccata's "non-native/non-coinbase subnetworks" feature. Using the mechanism that's
+actually load-bearing today, not the one that merely sounds more official.
+
+**Unifying rotate/split/merge into one `TransferOp`**: the plan's own text already
+frames split/merge as "a transfer with a different multiset in vs. out" — taking that
+literally collapses three near-identical wire shapes into one (consumed notes,
+produced notes, one conservation check), with "rotate"/"split"/"merge" surviving only
+as descriptive labels for what a given `Transfer`'s multiset happened to do. Simpler
+spec, simpler future implementation, and it lets one transaction freely mix e.g.
+split-and-partial-rotate without a fourth wire shape ever being needed.
+
+**Freshness window: 36,000 DAA-score units (≈1 hour at 10 BPS)**, the anti-replay
+anchor every pool-op signature covers. Chosen, not left as a placeholder: long enough
+that no realistic in-person or remote payment flow (which settle in seconds at 10 BPS)
+risks the signature expiring mid-transaction; short enough that a leaked or abandoned
+signed op — a stale invoice, a bearer QR handed over late — stops being a live
+liability within the same session it was created. Same category as P1.8's stamp-sizing
+note: a concrete recommended default subject to real-world calibration at Phase 6/P6.6,
+not a first-principles-derived constant.
+
+**No new "fee stamp" data type**: fee stamps (P1.8) turned out to need zero new wire
+format once `Transfer`'s conservation rule existed — a stamp is simply a consumed
+serial with no matching produced note, and the resulting value gap is fee, by the same
+rule that makes self-funding split/merge work. Discovered while writing the spec, not
+planned in advance; recorded here because it simplifies P1.8's mechanism further than
+that decision's own text anticipated (no "embedded redeem" sub-structure needed — it's
+the same conservation check already required for every other reason).
+
+**Real consensus-rule gap found, not assumed away**: `check_transaction_inputs_count`
+(`consensus/src/processes/transaction_validator/tx_validation_in_isolation.rs:78-80`)
+currently rejects any non-coinbase transaction with zero inputs. A pure
+`Transfer`/`Redeem` has zero transparent inputs by design, so this needs an explicit
+exception before Phase 6 implementation — checked directly against the real validation
+code rather than assuming "touches no transparent value" already worked under existing
+rules. Flagged for P5.3 to formalize as a consensus rule change.

@@ -187,3 +187,261 @@ life" and "unique per note" simultaneously.
 `d`: 1 byte · `pk`: 32 bytes · `sn`: 32 bytes · *pool commitment*: 32 bytes (header field)
 · *SMT leaf value*: 32 bytes (`H(d || pk)`, 33-byte preimage) · *serial preimage*: 36 bytes
 (`tx_id: 32` + `index: u32 LE = 4`).
+
+---
+
+## P5.2 — Transaction format
+
+### Subnetwork and payload encoding
+
+Pool ops ride in ordinary Kaspa/Marigold transactions tagged with a dedicated **user-lane**
+subnetwork ID — `SubnetworkId::from_namespace([0x50, 0x4f, 0x4f, 0x4c])` ("POOL" in ASCII,
+chosen only for memorability; any unclaimed namespace works equally well and Phase 6 may
+substitute one if this happens to collide with something reserved by then). This uses the
+existing, already-implemented namespace mechanism
+([consensus/core/src/subnets.rs](../../consensus/core/src/subnets.rs)) that backs Toccata's
+"non-native/non-coinbase subnetworks (user lanes)" feature
+([consensus/core/src/constants.rs](../../consensus/core/src/constants.rs)) — **not** the
+reserved single-byte `RegistrySubnetwork` path, which (checked directly: `grep` for its only
+non-definition usages) exists solely in test fixtures today, with no active
+registration/dispatch mechanism to build on. The payload is a single Rust enum,
+`PoolOp`, encoded with `borsh::to_vec` — the idiomatic in-repo pattern for "typed struct ⇄
+opaque transaction-payload bytes" (e.g. `wallet/core/src/deterministic.rs`,
+`wallet/macros/src/wallet/server.rs`), used in preference to the coinbase payload's
+hand-rolled little-endian packing (`consensus/src/processes/coinbase.rs`), which is a
+fixed, non-extensible legacy format specific to that one use.
+
+```rust
+enum PoolOp {
+    Mint(MintOp),
+    Transfer(TransferOp),
+    Redeem(RedeemOp),
+}
+```
+
+Only **three** wire-format variants, not five — see "Unifying rotate/split/merge" below for
+why. Borsh enum tag = 1 byte.
+
+### Shared building blocks
+
+```rust
+struct NewNote {
+    d:  DenominationTag,  // 1 byte
+    pk: [u8; 32],           // new owner's public key
+}                              // 33 bytes
+
+struct SignedGroup {
+    serials:   Vec<Hash>,   // sn(s) authorized by `signature`; MUST currently share one pk (P5.3 checks this)
+    signature: [u8; 64],     // BIP340 Schnorr signature by that shared current pk
+}                                // 4 (borsh Vec length prefix) + 32×serials.len() + 64
+
+struct FreshnessAnchor {
+    anchor_daa_score: u64,  // a recent virtual DAA score the signer referenced
+}                               // 8 bytes
+```
+
+`sn` for every note a `PoolOp` creates is *not* stored in the payload — it's derived
+per P5.1's rule, `H(this_tx_id || index_among_all_notes_this_op_creates)`, entirely from
+data already implicit in the enclosing transaction. This is a deliberate space saving (no
+reason to spend 32 bytes writing down a value every node independently computes the same
+way) and, more importantly, removes any possibility of a payload lying about a note's `sn`.
+
+### Unifying rotate/split/merge into one `Transfer` op
+
+The plan's own framing already treats split/merge as "a transfer with a different
+denomination multiset in vs. out" — taken literally, rotate (same multiset), split (one
+note → many smaller), and merge (many notes → one larger) are all just **different
+multiset shapes of the same underlying operation**: consume some notes, produce some notes,
+under one conservation check. Rather than three near-identical wire formats, `Transfer` is
+defined once and "rotate" / "split" / "merge" become purely descriptive labels for what a
+given `Transfer`'s multiset happened to do — a UX/documentation distinction, not a
+protocol one. This also means one `Transfer` transaction can freely mix these (e.g.
+split-and-rotate-part-of-it in one op) without inventing a fourth wire shape.
+
+```rust
+struct TransferOp {
+    consumed:  Vec<SignedGroup>,    // notes being spent — total petal value = Σ over all groups' serials' denominations
+    produced:  Vec<NewNote>,         // notes being created — total petal value = Σ
+    freshness: FreshnessAnchor,       // covered by every group's signature (see below)
+}
+```
+
+**Multiple `SignedGroup`s exist because one transaction may need to spend notes under
+different current `pk`s** — e.g. a customer's wallet holding three notes each with its own
+key. Each group's serials must currently share one `pk` (a single Schnorr signature can
+only verify against one key); a wallet combining differently-keyed notes in one `Transfer`
+supplies one group per distinct key. This is also exactly what P5.6's merchant "sweep"
+flow needs in the *other* direction: many serials sharing **one** `pk` (the POS landing
+pad), authorized by a **single** group with one signature covering all of them.
+
+**Conservation and fee**: valid iff `Σ(consumed note values) ≥ Σ(produced note values)`;
+the difference is the transaction's fee — computed exactly the way Kaspa already computes
+ordinary transparent fees (`value-in − value-out`), just applied to notes' underlying
+petal values instead of UTXO amounts. This single rule is what makes fee stamps require
+*no new mechanism at all* — see "Fee-stamp mechanics" below.
+
+### Mint and Redeem
+
+```rust
+struct MintOp {
+    new_notes: Vec<NewNote>,
+}
+```
+The transaction's ordinary transparent **inputs** (standard signed UTXO spends, verified
+by the existing txscript engine exactly as any transparent transaction) must sum to at
+least `Σ(new_notes' petal values)`; any excess is an ordinary transparent change output or
+the transaction fee, both completely standard Kaspa mechanics — mint needs no note-level
+signature at all, since nothing pre-existing in the pool is being touched. This is the
+"self-funding" value-touching op the P1.8 flag asks P5.2 to spec: mint pays its fee the
+same way any transparent Kaspa transaction always has, no fee stamp required, because it
+already holds transparent value to pay from.
+
+```rust
+struct RedeemOp {
+    consumed:  Vec<SignedGroup>,
+    freshness: FreshnessAnchor,
+}
+```
+The transaction's ordinary transparent **outputs** hold what the redeemed notes become;
+valid iff `Σ(consumed note values) ≥ Σ(transparent outputs) + fee` — the transparent-side
+mirror of `Transfer`'s conservation rule, and, like mint, self-funding: redeem already
+produces transparent value, so it pays its fee from that, no stamp required. Redeem is
+structurally `Mint` read backwards (transparent-in → notes-out vs. notes-in →
+transparent-out), matching the plan's own five-op description exactly.
+
+### Signature scheme and the freshness anchor
+
+A pool-op signature is **not** a Kaspa/Marigold txscript input signature — notes have no
+transparent output/script to spend, so the existing per-input sighash machinery
+(`consensus/core/src/hashing/sighash.rs`) doesn't apply; it signs over transparent inputs,
+outputs, `gas`, and `subnetwork_id`, none of which describe "authorize this note's
+ownership to change." This needs its own domain-separated signing hash, following the
+exact macro convention already used for every other purpose-specific hash in this codebase
+([crypto/hashes/src/hashers.rs](../../crypto/hashes/src/hashers.rs) — `TransactionSigningHash`,
+`MuHashFinalizeHash`, `SeqCommitActiveNode`, …):
+
+```
+NotePoolTransferSigningHash = H(
+    "NotePoolTransferSig"                         // domain tag
+    || sorted(group.serials)                        // this group's own serials, 32 bytes each
+    || op.produced                                    // EVERY note this whole op creates, d||pk, 33 bytes each
+    || freshness.anchor_daa_score                      // 8 bytes, LE
+)
+```
+
+Every `SignedGroup` in a `Transfer`/`Redeem` signs over the **entire** op's `produced` list
+(not just "its share"), not merely its own serials — this is what makes a `Transfer`
+atomic: no signer is vouching for their serials being spent in just *some* context, they're
+vouching for this *exact* whole-transaction shape, so no group's signature can be lifted
+into a transaction with a different produced-notes list. No `tx_id` is signed over (and
+deliberately can't be — the enclosing transaction's ID is a hash that includes this very
+payload, so signing it would be circular); replay safety instead comes from two properties
+working together:
+
+1. **A successfully-executed group's signature can never be reused.** The instant a group
+   executes, every serial it covered now has a different current `pk` (or no longer exists,
+   for redeem), so re-submitting the identical signed message fails P5.3's "signature
+   verifies against the serial's *current* `pk`" check — permanently, not just once.
+2. **A signed-but-never-executed op has a bounded shelf life.** Without anything binding
+   the signature to one specific transaction, a valid signed group could otherwise be
+   broadcast at any arbitrary future time by whoever holds it (the "stale invoice" risk
+   P5.5 names explicitly for sign-to-fresh-pk mode). `freshness.anchor_daa_score` bounds
+   this: P5.3 must reject the op once `current_daa_score − anchor_daa_score` exceeds a
+   fixed **freshness window**.
+
+**Recommended freshness window: 36,000 DAA-score units** (≈1 hour at 10 BPS). Reasoning,
+stated explicitly since the plan calls this a deliberate choice, not a default to leave
+implicit: long enough that no ordinary in-person or remote payment flow is at risk of the
+signature expiring mid-transaction (P5.5's bearer and sign-to-fresh-pk flows both settle
+in seconds at 10 BPS; an hour is generous headroom, not a tight budget), short enough that
+a leaked or abandoned signed op — an unpaid invoice, a bearer QR photographed but not yet
+handed over — stops being a live liability within the same session it was created, not
+days later. Same category of "needs real-world calibration, not a first-principles
+derivation" as P1.8's stamp-sizing note; recorded here as a concrete recommended default,
+adjustable at Phase 6/P6.6 calibration, not a placeholder.
+
+### Fee-stamp mechanics (P1.8 flag — every bootstrap case, worked through the wire format)
+
+No separate "stamp" field or op type exists in this format — a stamp is just an ordinary
+consumed serial in a `Transfer`'s `consumed` list with no matching value in `produced`,
+which the conservation rule (above) already turns into fee automatically. This single
+mechanism covers every case P1.8 named:
+
+- **Pure rotate** (`Transfer` with `consumed` and `produced` denominations identical) has
+  zero natural conservation slack — `Σconsumed = Σproduced` exactly, so it pays *nothing*
+  unless an extra serial is added to `consumed` with no corresponding `produced` entry:
+  that's the "pre-existing stamp" P1.8 says pure rotate requires. Concretely: rotating one
+  0.1-note to a new key, with a 0.01-note attached purely as a stamp, is `consumed: [group
+  for the 0.1 note, group for the 0.01 stamp], produced: [one new 0.1-denomination note]`
+  — the 0.01 simply has no matching output, and its value becomes the fee.
+- **Self-funding split/merge** (P1.8's worked example: `100 → 9×10 + 9×1 + 9×0.1 + 9×0.01
+  (= 99.99) + 0.01 fee`) needs no separate stamp at all — `consumed` lists the one 100-note,
+  `produced` lists the 36 smaller notes summing to 99.99, and the 0.01 gap is the fee
+  automatically, computed exactly like the pure-rotate case but arising from the split's
+  own arithmetic rather than an attached extra serial.
+- **Handovers include a stamp** (P1.8's option 2): the bearer bundle (P5.6) carries a
+  second note's private key alongside the primary note's; the receiver's eventual rotate
+  op lists both serials in `consumed`, only the primary note's denomination in `produced`.
+  No format difference from the pure-rotate case above — "the stamp came bundled with the
+  note" is a wallet/UX fact, not a wire-format one.
+- **Mint produces stamps** (P1.8's option 3): trivially expressible — a `MintOp` whose
+  `new_notes` includes small denominations alongside larger ones; nothing pool-specific to
+  add here since mint already supports minting any combination of denominations in one op.
+
+Congestion pricing (P5.7 will note this as a privacy limitation) falls out for free too:
+attaching a bigger or additional stamp increases `Σconsumed − Σproduced`, which increases
+the transaction's fee, which raises its priority in the existing mempool fee-per-mass
+ordering — no protocol-level fee schedule needed, exactly as P1.8 already concluded.
+
+### A consensus-rule dependency this format creates (flagged for P5.3)
+
+Checked directly against current validation code, not assumed: a pure `Transfer` (or
+`Redeem`) has **zero transparent inputs** by design ("touches no transparent value"), but
+`check_transaction_inputs_count`
+([consensus/src/processes/transaction_validator/tx_validation_in_isolation.rs:78-80](../../consensus/src/processes/transaction_validator/tx_validation_in_isolation.rs))
+currently rejects *any* non-coinbase transaction with `tx.inputs.is_empty()` —
+`TxRuleError::NoTxInputs` — with no existing exception for other subnetworks. (No
+equivalent "zero outputs" rule exists, confirmed by its absence — only inputs are
+currently required to be non-empty for non-coinbase transactions, so `Transfer`'s already-
+empty `tx.outputs` needs no change.) **P5.3 must define an explicit consensus-rule
+exception** — the natural shape mirrors the existing `!tx.is_coinbase()` guard,
+generalizing it to also exempt the pool subnetwork ID from the zero-inputs check — this
+isn't a new category of problem, just the coinbase precedent extended to a second
+subnetwork that also legitimately has no transparent inputs.
+
+### Worked byte-size estimates
+
+All figures are **payload-only** (the pool-specific addition); every op also carries
+standard Kaspa transaction overhead (version, input/output counts, `subnetwork_id`
+(20 bytes), `gas`, `lock_time`) — small and already well-understood/bounded by existing
+Kaspa serialization, not re-derived here. `TransactionOutpoint` (32-byte tx ID + 4-byte
+index = 36 bytes, [consensus/core/src/tx.rs](../../consensus/core/src/tx.rs)) and a
+P2PK-spend signature script (66 bytes, `wallet/core/src/tx/mass.rs`'s
+`SIGNATURE_SIZE = 1 + 64 + 1`) are the only transparent-side costs `Mint`/`Redeem` add
+beyond the payload.
+
+| Op | Shape | Payload bytes |
+|---|---|---|
+| `Mint` | 1 new note | `1 + 4 + 33×1` = **38** |
+| `Mint` | 5 new notes (a mixed-denomination bundle) | `1 + 4 + 33×5` = **170** |
+| `Transfer` | plain rotate (1 group/1 serial, 1 produced note) | `1 + [4+(4+32+64)] + [4+33] + 8` = **150** |
+| `Transfer` | rotate + attached 1-serial stamp (2 serials in 1 group, 1 produced note) | `1 + [4+(4+64+64)] + [4+33] + 8` = **182** |
+| `Transfer` | self-funding split, 1→36 notes (P1.8's worked example) | `1 + [4+(4+32+64)] + [4+33×36] + 8` = **1,305** |
+| `Transfer` | merchant sweep, 20 serials/1 group → 20 fresh-key notes | `1 + [4+(4+32×20+64)] + [4+33×20] + 8` = **1,385** |
+| `Redeem` | 3 serials/1 group, no new notes | `1 + [4+(4+32×3+64)] + 8` = **177** |
+
+Every realistic shape lands from tens of bytes to ~1.4 KB — comfortably inside "a few KB,"
+and negligible against block mass limits: at `mass_per_tx_byte = 1`
+([consensus/core/src/config/params.rs](../../consensus/core/src/config/params.rs)), a
+1.4 KB payload costs ~1,400 mass units against a per-block budget of 500,000 (pre-toccata,
+`prior_block_mass_limits`) to 1,000,000 (`new_transient_mass_limit`) — under 0.3% of a
+single block's budget even for the largest worked example, with no coinbase-style
+dedicated payload-length cap (`max_coinbase_payload_len = 204`) applying here at all, since
+that constant is coinbase-specific.
+
+✅ *Verify (P5.2's own condition): all five ops covered (Mint, and Transfer's three
+descriptive shapes rotate/split/merge, and Redeem) with worked byte sizes; total
+transaction sizes land at tens of bytes to ~1.4 KB, far inside the "few KB" target and a
+small fraction of block mass limits. Fee-stamp mechanics specified for every named
+bootstrap case (pure rotate, self-funding split/merge, bundled handover stamp, mint-produced
+stamps) via one unified mechanism, no case left unaddressed.*

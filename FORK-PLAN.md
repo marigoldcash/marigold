@@ -657,22 +657,35 @@ should settle its size and how it is assigned (e.g. hash of the minting tx + out
   every claim about existing code (`crypto/smt`, `crypto/addresses`, `crypto/hashes`,
   `consensus/smt-store`) checked against real source in this pass, not assumed.
 
-- [ ] **P5.2 — Spec: transaction format.** How a pool op rides in a Kaspa transaction:
-  recommend a dedicated subnetwork ID (see `consensus/core/src/subnets.rs`) with the op
-  borsh-encoded in the payload. Mint consumes ordinary transparent outputs of exactly the
-  note sum; redeem creates them. Rotate/split/merge touch no transparent value and carry:
-  the target serial(s), the new pubkey(s), and a signature by the **old** key over the
-  whole op (must cover new pk + a recent block hash or daa-score to prevent replay).
-  Split/merge is a transfer with a different denomination multiset in vs. out.
-  *(Flag from P1.8: every op pays its fee via **fee stamps** — the op format must
-  admit attached small-denomination note inputs consumed as an embedded
-  redeem-with-no-transparent-output, under the unified conservation rule
-  Σ(note in) + Σ(transparent in) = Σ(note out) + Σ(transparent out) + fee. Also spec
-  the self-funding form of value-touching ops and the bootstrap conventions —
-  DECISIONS.md P1.8 notes.)*
-  ✅ *Verify:* section covers all five ops with worked byte-size estimates; total tx size
-  target ≤ a few KB — confirm against mass limits and payload size limits in params.rs.
-  Fee-stamp mechanics explicitly specified for every op, including bootstrap.
+- [x] **P5.2 — Spec: transaction format.** Executed 2026-08-15.
+  Wrote [docs/x-fork/POOL-SPEC.md](docs/x-fork/POOL-SPEC.md)'s P5.2 section. Subnetwork:
+  a dedicated user-lane namespace (`SubnetworkId::from_namespace`) — the actively-used
+  mechanism backing Toccata's "user lanes" feature — not the essentially-unused
+  `RegistrySubnetwork` path (confirmed via grep: only test-fixture usages exist). Payload:
+  `PoolOp` enum, borsh-encoded. **Unified rotate/split/merge into one `TransferOp`**
+  wire shape (consumed notes, produced notes, one conservation check) rather than three —
+  the plan's own "split/merge is a transfer with a different multiset" framing taken
+  literally; "rotate"/"split"/"merge" become descriptive labels for a `Transfer`'s
+  multiset shape, not distinct formats. Designed a new domain-separated
+  `NotePoolTransferSigningHash` (no existing Kaspa sighash applies, since notes have no
+  transparent script to spend) with a `FreshnessAnchor` (recommended 36,000 DAA-score
+  window ≈1 hour, reasoned explicitly, not left implicit) replacing tx-ID binding (which
+  would be circular) as the anti-replay mechanism. **Fee-stamp mechanics need no new wire
+  concept**: a stamp is just a consumed serial with no matching produced note, and the
+  conservation-rule difference automatically becomes fee — this single mechanism covers
+  every P1.8 bootstrap case (pure rotate needing an attached stamp, self-funding
+  split/merge, bundled handover stamps, mint-produced stamps) without a special-cased
+  data type. **Found and flagged a real consensus-rule dependency**: checked
+  `check_transaction_inputs_count` directly and confirmed it currently rejects any
+  non-coinbase transaction with zero inputs — a pure `Transfer`/`Redeem` needs an explicit
+  exception (mirroring the existing coinbase one), flagged for P5.3 to formalize, not
+  silently assumed to already work. Worked byte-size table for every op shape, arithmetic
+  independently checked with a calculator (caught and fixed one addition error before
+  finalizing): tens of bytes to ~1.4 KB, comfortably under the "few KB" target and well
+  under 1% of block mass limits.
+  ✅ *Verify:* all five ops covered (Mint, Transfer's three descriptive shapes, Redeem)
+  with worked byte-size estimates, confirmed against `params.rs`'s actual mass constants;
+  fee-stamp mechanics explicitly specified for every named bootstrap case.
 
 - [ ] **P5.3 — Spec: consensus rules.** Exact validation order per op: serial exists in
   pool state (rotate/split/merge/redeem) or does not yet exist (mint); signature verifies
