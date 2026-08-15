@@ -584,10 +584,21 @@ the natural checkpoint before the hard part.*
   node1 stopped and restarted with the same `--appdir`, both balances (and the virtual DAA
   score) matched exactly pre- and post-restart.
 
-- [ ] **P4.3 — Integration test suite green.**
-  `cargo nextest run --release -p kaspa-testing-integration` against your params (some tests
-  hardcode Kaspa params/genesis — fix them to use your constants as part of this step).
-  ✅ *Verify:* suite passes.
+- [x] **P4.3 — Integration test suite green.** Executed 2026-08-15.
+  Installed `cargo-nextest` (not present; P0.2 had substituted plain `cargo test` for it back
+  then — now installed per coder's suggestion, for this step and future ones). No test
+  literals needed fixing this time: every hardcoded-Kaspa-params/genesis issue this crate had
+  was already caught and fixed by prior steps this session (P2.6's block-version literal, P3.2's
+  subsidy literal and the 5 `goref_*` real-history tests, correctly `#[ignore]`d rather than
+  "fixed" since real historical Kaspa chain data can never validate against Marigold's own
+  economics). Confirmed clean with both the plain `cargo test --release -p
+  kaspa-testing-integration --lib` and the plan's own specified `cargo nextest run --release -p
+  kaspa-testing-integration` (benchmark modules are `devnet-prealloc`-feature-gated off by
+  default and separately `#[ignore = "bmk"]`d — out of scope for "suite passes," same as any
+  other explicitly-marked benchmark).
+  ✅ *Verify:* `cargo nextest run --release -p kaspa-testing-integration` — 42 tests run, 42
+  passed, 6 skipped (5 `goref_*` + 1 pre-existing manual-only test), 0 failed. Full `cargo build
+  --workspace` also clean.
 
 - [ ] **P4.4 — Tag it.** `git tag fork-transparent-v0.1`. Update NOTES.md with current state.
   ✅ *Verify:* tag exists; fresh clone + script reproduces the testnet.

@@ -4,7 +4,7 @@ Snapshot of everything decided and built so far, so any fresh coding session on 
 machine can continue from the repo alone. Read this together with [FORK-PLAN.md](../../FORK-PLAN.md).
 Update this file whenever off-repo state changes (domains, accounts, infra).
 
-Last updated: 2026-08-15 (P4.2 complete)
+Last updated: 2026-08-15 (P4.3 complete)
 
 ## What this project is
 
@@ -79,11 +79,13 @@ substitute for it.
 
 ## Where execution stands
 
-- **Next step: P4.3 — integration test suite green.** `cargo nextest run --release
-  -p kaspa-testing-integration` against Marigold's own params; some tests hardcode
-  Kaspa params/genesis and need fixing to use our constants as part of this step
-  (the 5 `goref_*` tests already `#[ignore]`d at P3.2 are a separate, permanent
-  case — real historical Kaspa data, not fixable).
+- **Next step: P4.4 — tag it.** `git tag fork-transparent-v0.1`, update NOTES.md
+  with current state. Last step of Phase 4 — closes the "the fork works" milestone.
+- **P4.3 is done.** `cargo-nextest` installed (wasn't present; P0.2 had substituted
+  plain `cargo test`). Nothing needed fixing — every hardcoded-Kaspa-params/genesis
+  issue this crate had was already caught by earlier steps this session (P2.6, and
+  P3.2's `goref_*` `#[ignore]`s). `cargo nextest run --release -p
+  kaspa-testing-integration`: 42 passed, 6 skipped, 0 failed.
 - **P4.2 is done.** [docs/x-fork/SMOKE.md](SMOKE.md) — an 8-step manual
   user-journey script, walked end to end on the P4.1 local testnet: wallet A mined
   and matured, wallet B funded via a real send, node1 restarted with the same

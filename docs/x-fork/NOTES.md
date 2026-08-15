@@ -1086,3 +1086,37 @@ This closes P4.2. The chain now has direct evidence — not just unit tests — 
 normal wallet-holder's experience (receive funds, wait for them to mature, spend
 some, restart your node) works correctly end to end on Marigold's own economics.
 P4.3 (integration test suite) and P4.4 (tag) remain before Phase 4 itself is done.
+
+### P4.3 — Integration test suite green (2026-08-15)
+
+`cargo-nextest` wasn't installed (P0.2 had noted this and substituted plain
+`cargo test`, which "works fine"). Installed it this time (user's suggestion,
+mid-session — "probably helps down the line") via `cargo install cargo-nextest
+--locked`, ~6 minutes to build.
+
+**Anticlimactic in the best way**: the plan's own text warned "some tests hardcode
+Kaspa params/genesis — fix them" — but there was nothing left to fix in this
+crate. It was already caught and dealt with during earlier steps this session,
+each in its own commit at the time: P2.6 fixed a hardcoded block-version literal
+in `consensus_integration_tests.rs`'s `header_in_isolation_validation_test`; P3.2
+found and `#[ignore]`d the five `goref_*` tests in the same file, which replay real
+historical Kaspa chain data and can never validate against a permanently-diverged
+economics schedule (see P3.2's entry above for the full root-cause — that's not a
+literal-fix situation, "fixing" them would mean faking history). This is the
+standing "run the full workspace, not just what a step names" lesson paying off in
+reverse: by the time P4.3 came around specifically looking for exactly this class
+of bug, there genuinely wasn't one left to find.
+
+**Verification.** `cargo test --release -p kaspa-testing-integration --lib`: 42
+passed, 0 failed, 6 ignored (the 5 `goref_*` tests plus 1 pre-existing
+`#[ignore]` in `daemon_integration_tests.rs` unrelated to this project — a
+manual-only test that predates the fork). Then the plan's own literal command,
+`cargo nextest run --release -p kaspa-testing-integration`: 42 tests run, 42
+passed, 6 skipped — same result, confirmed via the actual specified tool.
+Benchmark modules (`mempool_benchmarks`, `subscribe_benchmarks`,
+`rpc_perf_benchmarks`) are gated behind a `devnet-prealloc` feature not enabled by
+either command, and every test inside them is separately marked `#[ignore =
+"bmk"]` regardless — out of scope for "suite passes," consistent with how this
+session has treated other explicitly-marked non-default tests (the crescendo
+emission test, the subsidy-table generator). Full `cargo build --workspace`
+also clean.
