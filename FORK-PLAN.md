@@ -467,13 +467,29 @@ small, mechanical, and individually testable.*
 
 *Goal: your P1.4 supply schedule is enforced by consensus and provably sums below the cap.*
 
-- [ ] **P3.1 — Understand the existing emission.** Read
-  [consensus/src/processes/coinbase.rs](consensus/src/processes/coinbase.rs): subsidy comes
-  from `SUBSIDY_BY_MONTH_TABLE` (426 monthly entries, divided by BPS so per-block reward
-  scales with block rate) after `deflationary_phase_daa_score`, and a flat
-  `pre_deflationary_phase_base_subsidy` before it. Write a summary paragraph into
-  `docs/x-fork/NOTES.md`.
-  ✅ *Verify:* summary exists and correctly states where the table is consumed.
+- [x] **P3.1 — Understand the existing emission.** Executed 2026-08-15.
+  Read [consensus/src/processes/coinbase.rs](consensus/src/processes/coinbase.rs) in full
+  plus its production wiring/call sites. Key findings for P3.2: the pre-deflationary flat
+  subsidy branch is already dead code for us (P2.6 set `deflationary_phase_daa_score = 0` —
+  decay starts at block 1, matching P1.5's fair launch); the BPS-scaling "before" table copy
+  is likewise unused (P2.6 set `crescendo_activation = always()` — 10 BPS from genesis, only
+  `subsidy_by_month_table_after` is ever read); the table already tapers to an exact `0` at
+  its last entry with no separate tail-cutoff logic needed. `calc_block_subsidy()` is consumed
+  at exactly two sites: block validation
+  ([body_validation_in_context.rs:74](consensus/src/pipeline/body_processor/body_validation_in_context.rs))
+  and coinbase-template generation
+  ([virtual_processor/processor.rs:1454](consensus/src/pipeline/virtual_processor/processor.rs),
+  [utxo_validation.rs:304](consensus/src/pipeline/virtual_processor/utxo_validation.rs)), both
+  through one `CoinbaseManager` built once in
+  [services.rs:124](consensus/src/consensus/services.rs) from `Params`. Flagged the open
+  design choice for P3.2: regenerate an equivalent large lookup table (halving boundary +
+  smooth intra-period interpolation, stretched to 3-year/36-entry halving periods) vs. replace
+  with a directly-computed closed-form decay function — not deciding here, bringing it to P3.2
+  explicitly.
+  ✅ *Verify:* summary written to
+  [docs/x-fork/NOTES.md](docs/x-fork/NOTES.md) (P3.1 entry), correctly identifying both
+  consumption sites (validation + template generation) and the one shared `CoinbaseManager`
+  instance they both go through.
 
 - [ ] **P3.2 — Generate your subsidy table.**
   Write a small generator (a `#[test]` or `examples/gen_emission.rs` in
