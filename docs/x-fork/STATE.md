@@ -4,7 +4,7 @@ Snapshot of everything decided and built so far, so any fresh coding session on 
 machine can continue from the repo alone. Read this together with [FORK-PLAN.md](../../FORK-PLAN.md).
 Update this file whenever off-repo state changes (domains, accounts, infra).
 
-Last updated: 2026-08-15 (P5.9 in progress — review 1 triaged and folded in, spec at v1.1-draft, review 2 pending)
+Last updated: 2026-08-15 (P5.9 in progress — both external reviews triaged and folded in; awaiting reviewer sign-off on the new artifacts)
 
 ## What this project is
 
@@ -79,23 +79,28 @@ substitute for it.
 
 ## Where execution stands
 
-- **Waiting on one human input: the second external spec review.** P5.1-P5.8 are fully
-  written; [docs/x-fork/POOL-SPEC.md](POOL-SPEC.md) was frozen at tag `pool-spec-v1`
-  (commit `9d93ab32`) and has since advanced to **v1.1-draft**: the first external
-  review came back (filed at
-  [reviews/pool-spec-v1-review-1.md](reviews/pool-spec-v1-review-1.md), triaged
-  finding-by-finding in
-  [reviews/pool-spec-v1-review-1-TRIAGE.md](reviews/pool-spec-v1-review-1-TRIAGE.md)),
-  all seven substantive findings were accepted and folded into the spec. The headline
-  fix was real: a **Redeem transaction-malleability vector** — the pool-op signature
-  didn't cover the enclosing transaction's transparent outputs, so an interceptor of a
-  signed `RedeemOp` could have redirected the redeemed value; the signing hash now
-  covers transparent outputs uniformly for every op. Second-biggest: the finality-anchor
-  cadence is now DAA-score-defined (not wall-clock), which makes the equivocation rule
-  exactly decidable and partition-safe. **A second expert review is underway (per the
-  user); P5.9 stays open and Phase 6 must not start until it lands, is triaged, and the
-  spec is tagged `pool-spec-v1.1`.** That reviewer should read v1.1-draft (current
-  `POOL-SPEC.md` on `x-fork`), not the v1 tag.
+- **Waiting on one human input: reviewer sign-off on the updated spec.** P5.1-P5.8 are
+  fully written; [docs/x-fork/POOL-SPEC.md](POOL-SPEC.md) was frozen at tag
+  `pool-spec-v1` (commit `9d93ab32`) and is now at **v1.1-draft with both external
+  reviews folded in** (all reviews + finding-by-finding triages under
+  [reviews/](reviews/)). Review 1's headline fix was a real **Redeem
+  transaction-malleability vector** (pool-op signature didn't cover transparent
+  outputs — now covered uniformly). Review 2 (James O'Connell) found **no new flaw**,
+  independently confirmed the review-1 fix, and demanded rigor artifacts that are now
+  written into the spec: the P5.2 **authorization theorem** with proof sketch, a
+  complete **signed/unsigned field matrix** (which surfaced one bounded, documented
+  deviation — consumed-group-set malleability, fee-effects only, flagged `[Open]` for
+  specialist sign-off), an explicit pre-execution-bearerability **threat model**
+  ("signed = spent" as a binding wallet rule), full canonicalization/encoding rules,
+  version+op-type domain separation in the signing hash, state invariants I1-I5, the
+  P5.8 **trust boundary stated first**, the **IBD anchor-ratchet** bootstrap design,
+  and the complete **equivocation-evidence lifecycle**. Its launch-phase demands are
+  gated into the plan (T/M/K sensitivity model → P9.5 hard gate;
+  trustee-independence criteria + one-live-signer rule → P9.1; wallet recovery
+  drills → P8.5; its test matrices → Phase 6 conformance tests). **To close P5.9**:
+  send the updated `POOL-SPEC.md` back to the reviewer(s) for a short confirmation
+  pass on the new artifacts, then tag `pool-spec-v1.1`. Phase 6 stays blocked until
+  then.
 - **Phase 4 (P4.1-P4.4) is fully done — "the fork works," tagged and reproducible.**
   Tag `fork-transparent-v0.1` exists on `origin`, and the fresh-clone claim was
   actually tested, not assumed: a genuinely clean `git clone --branch

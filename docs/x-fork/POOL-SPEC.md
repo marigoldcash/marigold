@@ -25,6 +25,31 @@ second external review before being tagged `pool-spec-v1.1`. Changes from v1:
    mitigation noted; T-multiplier absolute-value sanity check flagged for the external
    reviewer alongside the existing calibration note.
 
+Second batch, from [review 2](reviews/pool-spec-v1.1-review-2-james-o-connell.md)
+(triage: [pool-spec-v1.1-review-2-TRIAGE.md](reviews/pool-spec-v1.1-review-2-TRIAGE.md)):
+
+4. **P5.2**: signing preimage now binds a pool protocol version and the operation
+   discriminant (`NotePoolSigningHash`, replacing `NotePoolTransferSigningHash`) —
+   cheap domain separation against cross-operation reinterpretation under future
+   extensions.
+5. **P5.2 (new artifacts)**: an explicit authorization threat model (pre-execution
+   bearerability stated as accepted, with reasoning); the authorization theorem with
+   proof sketch, written for specialist verification; a complete signed/unsigned field
+   matrix for every transaction and pool-op field, including the one analyzed deviation
+   (consumed-group-set malleability); full canonicalization rules (sort order,
+   duplicate rejection, encoding, limits); and anchor-acceptance semantics clarified
+   (the anchor is a pure integer compared against the P5.3 validation context's DAA
+   score — no block reference, hence no reorg/selected-chain ambiguity).
+6. **P5.1**: "uniqueness" qualified as computational (collision-resistance-based), not
+   mathematical; canonical encoding rules and an explicit state-invariant enumeration
+   added (the invariants are the premises of P5.2's theorem).
+7. **P5.8**: the 3-of-5 trust boundary stated prominently up front; the IBD/bootstrap
+   trust root made explicit (software distribution as root, an anchor-ratchet
+   persistence rule, multi-peer anchor query, suppression → staleness alerting,
+   residual eclipse risk named); equivocation evidence lifecycle specified end to end;
+   the T/M/K quantitative sensitivity model made a hard pre-launch gate (flagged into
+   FORK-PLAN's P9.5).
+
 **The design in one paragraph** (context for every section below): a **note** is
 `(d, pk, sn)` — denomination `d`, current owner's public key `pk`, and a stable serial
 number `sn` that never changes across a note's life. The **pool** is a plaintext,
@@ -116,10 +141,15 @@ for UTXOs; `sn` is that same idea, collapsed into one fixed-size opaque hash ins
 raw pair, because the pool map (P5.1 below) needs a single `Hash`-typed key to match the
 existing `crypto/smt` sparse Merkle tree's key type. Two properties fall out for free:
 
-- **Global uniqueness with zero extra consensus state.** No incrementing counter, no
-  registry of "next available serial" — collision resistance comes from `creating_tx_id`
-  already being unique (transaction IDs are themselves domain-separated hashes over the
-  whole transaction) and the index disambiguating multiple notes from one op.
+- **Global uniqueness (computational, not mathematical — qualified per review 2) with
+  zero extra consensus state.** No incrementing counter, no registry of "next available
+  serial." The precise claim: serials are unique *under the collision resistance of the
+  transaction-ID and serial-hash constructions* — `creating_tx_id` is itself a
+  domain-separated hash over the whole transaction, and the index disambiguates
+  multiple notes from one op, so producing two identical serials requires a hash
+  collision, not merely protocol misuse. This is the same computational-uniqueness
+  standard every hash-derived identifier in this codebase (transaction IDs, block
+  hashes) already rests on — stated explicitly rather than claimed as absolute.
 - **No rotation-of-`sn`.** `sn` is fixed at note creation and never appears as mutable
   state anywhere in this spec — every op that changes a note's `pk` (rotate; split and
   merge produce brand-new notes with brand-new `sn`s, they don't relabel old ones) leaves
@@ -207,6 +237,43 @@ would make "one pk, five notes" inexpressible (a map key can only point to one v
 would leak nothing extra in exchange, since `pk` is already public in the pool regardless
 of which field is the map key. `sn` is the only field satisfying "stable across the note's
 life" and "unique per note" simultaneously.
+
+### Canonical encodings and state invariants (v1.1, per review 2)
+
+**Encodings — one rule, stated once**: every multi-byte integer in this spec is
+**little-endian**, matching both borsh's integer encoding and the existing coinbase
+payload convention; every variable-length collection is length-prefixed exactly as borsh
+encodes it (`u32` LE count followed by elements); every hash is 32-byte Blake2b via a
+domain-separated `crypto/hashes` hasher (the codebase's single hashing convention —
+`NotePoolSerialHash`, `NotePoolLeafHash`, and P5.2's hashes are all instances of the
+same `blake2b_hasher!` macro family). Serial-hash preimage: `creating_tx_id` (32 raw
+bytes) `||` `output_index` (u32 LE) — no length prefixes inside fixed-width preimages.
+Leaf-hash preimage: `d` (1 byte) `||` `pk` (32 raw bytes). **Malformed encodings are
+consensus-invalid, not coerced**: a payload that fails borsh deserialization, carries
+trailing bytes after the deserialized value, or contains out-of-range enum
+discriminants is rejected outright (the transaction is invalid, per P5.3), never
+"interpreted as far as possible."
+
+**State invariants** — enumerated explicitly because they are the premises P5.2's
+authorization theorem and P5.3's validation rules rest on:
+
+- **I1 (key function)**: at any DAA score, a live serial maps to exactly one `(d, pk)`
+  — `PoolState` is a map, and no operation can create a second entry under an existing
+  serial (mint/split/merge derive fresh serials from a fresh `tx_id`; nothing else
+  inserts).
+- **I2 (unconditional serial retirement)**: every operation consuming a serial removes
+  its entry — including a rotation whose produced note lands on the *same* `pk`
+  (produced notes always carry fresh serials, so the consumed serial never survives an
+  operation that touched it).
+- **I3 (denomination immutability)**: a live note's `d` never changes — no operation
+  rewrites an entry in place; value changes shape only by consuming notes and producing
+  new ones under conservation (P5.3).
+- **I4 (conservation)**: for every accepted operation,
+  `Σ(consumed values) + Σ(transparent in) = Σ(produced values) + Σ(transparent out) + fee`,
+  with fee ≥ 0 — the P1.8 unified rule, enforced per P5.3.
+- **I5 (commitment faithfulness)**: after every block, `pool_commitment` is the SMT
+  root of exactly the current `PoolState` — maintained incrementally (P5.3's diff
+  application) and checked at sync (P5.4).
 
 ✅ *Verify (P5.1's own condition): every field has a byte size — restated compactly:*
 `d`: 1 byte · `pk`: 32 bytes · `sn`: 32 bytes · *pool commitment*: 32 bytes (header field)
@@ -346,12 +413,14 @@ exact macro convention already used for every other purpose-specific hash in thi
 `MuHashFinalizeHash`, `SeqCommitActiveNode`, …):
 
 ```
-NotePoolTransferSigningHash = H(
-    "NotePoolTransferSig"                         // domain tag
-    || sorted(group.serials)                        // this group's own serials, 32 bytes each
-    || op.produced                                    // EVERY note this whole op creates, d||pk, 33 bytes each
-    || transparent_outputs_hash                        // 32 bytes — H over the enclosing tx's outputs (below)
-    || freshness.anchor_daa_score                      // 8 bytes, LE
+NotePoolSigningHash = H(
+    "NotePoolSig"                                  // domain tag
+    || pool_protocol_version                         // u8 = 1 (v1.1, per review 2)
+    || op_type                                        // u8 = the PoolOp borsh enum tag: 1=Transfer, 2=Redeem (v1.1)
+    || sorted(group.serials)                           // this group's own serials, 32 bytes each
+    || op.produced                                      // EVERY note this whole op creates, d||pk, 33 bytes each (empty for Redeem)
+    || transparent_outputs_hash                          // 32 bytes — H over the enclosing tx's outputs (below)
+    || freshness.anchor_daa_score                         // 8 bytes, LE
 )
 
 transparent_outputs_hash = H_outputs(
@@ -359,6 +428,28 @@ transparent_outputs_hash = H_outputs(
                                        || script_public_key.script
 )   // over an empty output list (any pure Transfer), this is the domain's empty-input hash
 ```
+
+The `pool_protocol_version` and `op_type` fields (v1.1, adopted from review 2's
+domain-separation recommendation) cost two bytes of preimage and buy structural
+protection against cross-operation reinterpretation: a signature produced for a
+`Transfer` can never verify in a `Redeem` context or vice versa, and any future
+protocol revision that changes signing semantics bumps the version byte rather than
+relying on every other field coincidentally differing. `op_type` reuses the `PoolOp`
+borsh enum tag values verbatim (one canonical numbering, defined once). Review 2 noted
+no demonstrated theft path under the previous shared tag — this is cheap insurance
+against *future* extensions, adopted as such.
+
+**Canonicalization rules** (v1.1, per review 2 — "sorted" alone is not a consensus
+definition): `sorted(group.serials)` means ascending **lexicographic byte order** over
+the raw 32-byte serials (serials are opaque hashes; no other order is meaningful). A
+serial appearing more than once — within one group or across groups of the same op —
+makes the transaction **invalid** (checked in P5.3 step 1; duplicates are never
+deduplicated silently). `op.produced` and `tx.outputs` are committed **in their
+serialized order** — order is signer-chosen, part of the signed message, and not
+renormalized by validators. Collection bounds: an op's total consumed serials and total
+produced notes are each capped at **1,000** — the same bound as the existing
+`max_tx_inputs`/`max_tx_outputs` transaction limits ([consensus/core/src/config/params.rs](../../consensus/core/src/config/params.rs)),
+chosen to reuse an already-reasoned-about scale rather than invent one.
 
 `H_outputs` is a further domain-separated hash (`NotePoolOutputsHash`, same
 `crypto/hashes` macro convention as the rest) whose per-output serialization deliberately
@@ -415,7 +506,123 @@ a leaked or abandoned signed op — an unpaid invoice, a bearer QR photographed 
 handed over — stops being a live liability within the same session it was created, not
 days later. Same category of "needs real-world calibration, not a first-principles
 derivation" as P1.8's stamp-sizing note; recorded here as a concrete recommended default,
-adjustable at Phase 6/P6.6 calibration, not a placeholder.
+adjustable at Phase 6/P6.6 calibration, not a placeholder. **Its classification, stated
+plainly (v1.1, per review 2): 36,000 is a liveness/UX parameter, not a derived security
+constant.** No property of the design breaks at 35,000 or 40,000; what the number tunes
+is the trade-off between payment-flow headroom and the shelf life of a leaked
+authorization. Phase 6/P6.6 calibration should model at minimum the 5-minute,
+15-minute, 1-hour, 6-hour, and 24-hour regimes (review 2's list) against congestion,
+partition recovery, merchant retry flows, and signature-theft exposure before freezing
+it.
+
+### Anchor acceptance semantics (v1.1, pinned completely per review 2)
+
+The freshness anchor is a **pure integer** — `anchor_daa_score: u64` — not a reference
+to any block. This resolves, by construction, every ambiguity review 2 asked to have
+pinned: there is no "anchor block" that must lie on the selected-parent chain, no
+anchor-side reorg case, and no anchor discovery question — the only DAA score the
+validator compares against is the **validation context's own POV DAA score** (P5.3's
+`pov_daa_score`, the same score every other DAA-dependent check in that context already
+uses). The complete rule, restated from P5.3 step 3: valid iff
+`0 ≤ pov_daa_score − anchor_daa_score ≤ 36,000`, inclusive both ends. Consequences,
+spelled out: a transaction delayed in the mempool remains valid until its anchor ages
+past the window in whatever context finally validates it, then becomes permanently
+invalid (expiry is monotone in DAA score — it cannot "un-expire"); under a reorg, the
+same transaction is simply re-evaluated against the new context's POV score by the
+identical arithmetic — since honest anchors are generated at signing time from the
+signer's current view, a reorg deep enough to change the verdict is a reorg deeper than
+the freshness window (≈1 hour), far beyond both the P5.8 anchored-finality depth and
+the existing finality-depth reorg refusal; and a "future" anchor
+(`anchor_daa_score > pov_daa_score`) is invalid everywhere, uniformly. Every node
+computes the identical verdict from `(payload, pov_daa_score)` alone.
+
+### Authorization threat model (v1.1, stated explicitly per review 2)
+
+**Pre-execution bearerability is accepted, deliberately.** Review 2 correctly
+characterizes a signed-but-unbroadcast pool op: until it executes or expires, anyone
+holding the payload — recipient, relay, thief, malware — can broadcast it. The design
+accepts this as an inherent property of offline signed payment authorization, and the
+reason it is *acceptable* is what the signature binds: the payload authorizes **exactly
+one state transition** (fixed consumed serials, fixed produced notes with fixed
+destination keys, fixed transparent outputs, fixed window). Early broadcast by any
+party executes precisely the transfer the signer already intended — the intended
+recipients receive the intended value; nothing can be redirected, split differently, or
+re-denominated (the field matrix below is the systematic argument). The residual
+adversarial power is **timing within the window** (worst case: the payment lands
+earlier than the signer would have chosen) plus the bounded group-set malleability
+analyzed in the matrix. What this implies for wallets (binding on P5.5/P5.6 UX): a
+signed op must be treated as **already spent from the moment it is signed and leaves
+the wallet**, not from broadcast — "sign now, hold, maybe don't send" is not a
+supported pattern, and the sign-to-fresh-pk invoice flow must present the signed
+payload as payment-in-flight, never as a revocable draft. A signer who wants an
+unbroadcast authorization dead before expiry has exactly one tool: rotate the consumed
+serials to fresh keys first (self-spend), which invalidates the outstanding signature
+via invariant I2.
+
+### The authorization theorem (v1.1 — the written claim review 2 asked for, for specialist verification)
+
+**Theorem.** Let `G` be a `SignedGroup` validly signed by the holder of key `k` for an
+op with produced list `P`, transparent outputs hash `O`, and anchor `A`, under protocol
+version `v` and op type `t`. An adversary holding `(G, P, O, A)` (and any number of
+other parties' signed groups) but not `k` can cause, via any transaction accepted in
+any block order, **at most** the following state transitions involving `G`'s serials:
+either (a) no transition, or (b) exactly one execution of the transition
+`(G.serials consumed) → (P created, outputs matching O)`, in some context whose POV DAA
+score lies in `[A, A+36,000]`. In particular the adversary can never redirect,
+re-denominate, or partially execute `G`'s serials, and can never execute the same
+authorization twice.
+
+**Premises** (each tied to its enforcement point):
+- **(1) Current-key verification** — P5.3 steps 1-2: the signature verifies only
+  against the serials' current `pk` in the composed pool view (invariant I1).
+- **(2) Unconditional retirement on execution** — invariant I2: any execution removes
+  `G`'s serials from the pool; produced notes carry fresh serials even if `P` reuses
+  the same `pk`, so a second submission of the identical payload fails premise (1)'s
+  existence check in every subsequent context, including every reorg path (the
+  composed-view mechanism re-derives state per context; in any single context the
+  serials exist at most once).
+- **(3) Complete binding of economic effect** — the signed message covers `v`, `t`,
+  `G`'s serials, all of `P`, and `O`; the only accepted-transaction degrees of freedom
+  outside the signed message are enumerated in the field matrix below and none alters
+  destination, denomination, or amount of `G`'s serials' disposition.
+- **(4) Unambiguous encoding** — P5.1/P5.2 canonicalization: one byte encoding per
+  message, duplicates invalid, malformed payloads rejected outright.
+
+**Proof sketch.** By (4), the signed message determines a unique `(v, t, serials, P,
+O, A)` tuple; any transaction deviating in any of these fails signature verification
+(step 2). By (1), acceptance additionally requires the serials live with `pk = k`'s
+public key in the acceptance context, and by P5.3 step 3, `pov ∈ [A, A+36,000]` —
+giving exactly transition (b) when accepted. By (2), acceptance in any context
+destroys premise (1) for every later context evaluating the same payload, and
+GHOSTDAG's composed-view ordering (P5.3) guarantees every context evaluates each
+serial's state exactly once in a defined order — so at most one acceptance globally.
+Absent acceptance, no pool-state change involving `G`'s serials occurs at all
+(transition (a)). ∎ *(Sketch — a human cryptographer should challenge each premise
+against the Phase 6 validation code before implementation lock; this is the artifact
+to review, not its own confirmation.)*
+
+### Signed/unsigned field matrix (v1.1 — review 2's "most important P5.2 artifact")
+
+Every field of the enclosing transaction and pool op, with its binding status.
+**Committed** = covered by `NotePoolSigningHash`; **harmless** = uncommitted, shown
+unable to alter the authorization's economic/security meaning; **analyzed** =
+uncommitted with a real but bounded effect, documented.
+
+| Field | Status | Argument |
+|---|---|---|
+| `pool_protocol_version`, `op_type` | Committed | In the preimage (v1.1). |
+| `group.serials` (own group) | Committed | Sorted set in the preimage; duplicates invalid. |
+| `op.produced` (entire list) | Committed | Full list, in order — destinations and denominations fixed. |
+| `tx.outputs` (amounts, scripts) | Committed | Via `transparent_outputs_hash` (v1.1). |
+| `freshness.anchor_daa_score` | Committed | In the preimage. |
+| **Other groups' serials** (consumed set composition) | **Analyzed** | A group's signature does not cover *other* groups. Consequences, exhaustively: an adversary may **add** a group they themselves validly sign for the same `(v,t,P,O,A)` (raises fee at their own expense — a donation); or **strip** another party's group (lowers `Σconsumed`, hence fee — if conservation still holds the op executes with the stripped group's serials left untouched and still owned by their holder; if not, the tx is invalid). Neither redirects nor re-denominates anything; the stripped party loses nothing but their intended fee contribution. Worst case is fee-stripping to zero (mempool relay policy then declines it) — a griefing vector, not theft. Full-consumed-set binding was considered and deliberately not chosen: it would forbid collaborative fee attachment (a second party adding a stamp to an op they didn't author) at the cost of closing only this non-theft vector. **[Open — explicitly flagged for specialist sign-off.]** |
+| `tx.subnetwork_id` | Harmless | Changing it stops the payload being interpreted as a pool op at all — no pool transition occurs (transition (a)); the mutated tx is then a zero-input non-coinbase transaction, invalid under existing rules. |
+| `tx.version` | Harmless | User-lane subnetworks require `TX_VERSION_TOCCATA` (≥1); other values are invalid with a user-lane subnetwork ID under existing rules. |
+| `tx.lock_time` | Harmless | Can only delay earliest acceptance; the anchor window bounds total delay — worst case the op expires (transition (a)). |
+| `tx.gas` | Harmless* | Lane budgeting only; does not enter pool validation or alter the transition. *[Open — confirm gas semantics for user-lane txs against Phase 6 code, per review 2's audit instruction.]* |
+| `tx.inputs` (transparent) | Harmless (Transfer/Redeem) | Both op types forbid transparent inputs (P5.2); a tx carrying any is invalid. For `Mint` there are no note signatures at all — see below. |
+| `storage_mass` commitment | Harmless | Independently consensus-checked; cannot alter the pool transition. |
+| `Mint` (whole op) | n/a — differently secured | `Mint` has no note signature; its integrity rides entirely on the **existing** transparent-input sighash, which — verified against [consensus/core/src/hashing/sighash.rs](../../consensus/core/src/hashing/sighash.rs) — already commits to the transaction's `payload` (containing `new_notes`) and outputs. A `Mint`'s funder therefore already signs the exact note set being minted, via the existing mechanism, with no new construction needed. |
 
 ### Fee-stamp mechanics (P1.8 flag — every bootstrap case, worked through the wire format)
 
@@ -560,10 +767,12 @@ have today.
 1. For every `SignedGroup` in `consumed`: every serial in `group.serials` exists in the
    composed pool view, **and** all of them currently share the exact same `pk` — if any
    two differ, the op is invalid (one signature cannot authenticate two different keys).
-2. Recompute `NotePoolTransferSigningHash` (P5.2) over `group.serials`, the op's full
-   `produced` list, the enclosing transaction's `transparent_outputs_hash`, and
-   `freshness.anchor_daa_score`; verify `group.signature` against the shared current `pk`
-   from step 1.
+   No serial may appear more than once across the op's entire consumed set (within or
+   across groups) — a duplicate makes the op invalid (v1.1 canonicalization rule).
+2. Recompute `NotePoolSigningHash` (P5.2) over the protocol version, the op's type
+   discriminant, `group.serials`, the op's full `produced` list, the enclosing
+   transaction's `transparent_outputs_hash`, and `freshness.anchor_daa_score`; verify
+   `group.signature` against the shared current `pk` from step 1.
 3. Freshness: valid iff `0 ≤ pov_daa_score − freshness.anchor_daa_score ≤ 36,000`,
    **inclusive on both ends** (boundary semantics pinned explicitly per review 1: a
    difference of exactly 0 and exactly 36,000 are both valid; 36,001 is not;
@@ -611,6 +820,16 @@ existing cost model (`consensus/core/src/mass/mod.rs`,
   a privacy limitation, restated here as a performance fact) — every pool-op cost is
   either a byte count or a small fixed number of Schnorr signature verifications, the same
   order of magnitude as costs the mempool already charges for today.
+
+### Explicit dependency: P5.2's theorem stands on this section (v1.1, per review 2)
+
+The authorization theorem's premises (1) and (2) — current-key verification and
+unconditional serial retirement — are not free-standing cryptographic properties; they
+are *exactly* steps 1-2 and 6 of the validation orders above, executed inside the
+composed-view walk. Any Phase 6 change to this section's ordering or diff-application
+semantics (including any reorg/rebuild path that re-derives composed state) must be
+re-checked against the theorem, not just against these validation rules in isolation —
+the two sections are one argument split across two headings.
 
 ✅ *Verify (P5.3's own condition): every question in the checklist answered explicitly —
 validation order stated per op (existence, signature, freshness, denomination validity,
@@ -1201,6 +1420,17 @@ because, like the pool, it must be fully spec'd before any implementation begins
 (pool-op replay protection) — same word, different mechanism, never conflate them in any
 document.
 
+**The trust boundary, stated first and plainly** (v1.1 — promoted to the top of this
+section per review 2): **any 3 of the 5 trustee keys, compromised or colluding, can
+sign a false anchor endorsing an attacker's chain — and during IBD, trustee keys
+shipped in the software release are part of the bootstrap trust root, alongside the
+genesis block and DNS seeders.** This is not an implementation defect to be engineered
+away; it is the irreducible security assumption of k-of-n finality, present in every
+mechanism of this class ever deployed. Everything else in this section — trustee
+independence requirements, equivocation disqualification, fail-open, the sunset, the
+20-year hard expiry — exists to bound, surface, and terminate that assumption, never to
+eliminate it. Anyone evaluating this design should start from this paragraph.
+
 **Decided in the plan, restated**: the fork launches with a federated finality guard. A
 young PoW network sized nothing like Kaspa mainnet is trivially 51%-attackable by any
 sliver of Kaspa's own ASIC fleet redirected for an hour; a veto-only, sunsetting trustee
@@ -1278,7 +1508,11 @@ operator action to keep blocks flowing. What *is* required: every node **loudly 
 the moment this fallback engages (a log line at error severity, an exposed RPC/metrics
 flag `finality_anchor_stale: true`, node-operator-facing, not silent) — liveness is never
 sacrificed for finality strictness, but operators must be able to see immediately that the
-extra protection layer is currently absent.
+extra protection layer is currently absent. **This visibility requirement extends to
+wallets** (v1.1, per review 2): the `finality_anchor_stale` flag must be queryable over
+public RPC so wallet software can surface degraded-finality periods to end users — a
+user accepting a large payment during an extended anchor outage is operating under
+plain-PoW guarantees and should be able to know it, not just their node operator.
 
 ### Equivocation and permanent key disqualification
 
@@ -1321,16 +1555,35 @@ produces — regardless of network conditions:
   guidance (one live signer per key, cold standby only) belongs in the P9.1 ceremony
   documentation, flagged here.
 
-**Consensus rule**: any node that includes a valid equivocation proof (in the same
-dedicated subnetwork as anchors themselves) triggers **permanent disqualification** of
-that trustee key — added to a consensus-tracked deny-list; every future anchor
-verification rejects signatures from a disqualified key, forever, with no un-disqualify
-mechanism short of an explicit hard fork. If disqualification ever reduces the count of
-*live* (non-disqualified) trustee keys below 3, the quorum can no longer produce valid
-anchors at all, and the fail-open rule above engages automatically and stays engaged
-until an explicit hard fork replaces the compromised key(s) — a slow, deliberate recovery
-path is correct here; an automatic key-replacement mechanism would just relocate the
-trust assumption, not remove it.
+**Evidence and disqualification lifecycle** (v1.1 — specified end to end per review 2):
+
+- **Evidence format**: the two complete conflicting `FinalityAnchor` messages plus
+  their two signatures from the same trustee key — nothing else; self-contained.
+- **Relay and inclusion**: broadcast as a transaction in the same dedicated anchor
+  subnetwork (and gossiped over P2P like anchors themselves); any party may submit it —
+  enforcement never depends on the honest trustees' cooperation.
+- **Verification is fully objective**: recompute both signing hashes, verify both
+  signatures against the accused key, check the overlap rule (different
+  `anchored_block`, scores < one interval apart). Anything failing any of these — a
+  forged signature, non-conflicting anchors, a wrong key — is simply an **invalid
+  transaction** (rejected like any malformed transaction; false evidence can never
+  disqualify anyone, and carries no penalty beyond its own rejection since it costs its
+  submitter a normal fee).
+- **Activation point, exactly**: disqualification takes effect for all anchor
+  verification performed in validation contexts whose POV chain includes the block
+  containing the accepted evidence — i.e. from that block onward, deterministically.
+  Anchors already accepted in prior contexts are unaffected (no retroactive
+  re-validation of settled history); every node reaches the identical
+  disqualification state at the identical point because the evidence is on-chain data.
+- **Storage**: a consensus-tracked deny-list (part of chain state, committed like any
+  other consensus state, surviving pruning the same way pool state does per P5.4's
+  reasoning).
+- **Permanence**: no un-disqualify mechanism and no key replacement short of an
+  explicit hard fork. If disqualification ever reduces the count of *live* trustee keys
+  below 3, the quorum can no longer produce valid anchors at all, and the fail-open
+  rule above engages automatically and stays engaged until a hard fork replaces the
+  compromised key(s) — a slow, deliberate recovery path is correct here; an automatic
+  key-replacement mechanism would just relocate the trust assumption, not remove it.
 
 ### Trustee DoS
 
@@ -1370,13 +1623,24 @@ flagged as a calibration point subject to revisiting with real early-network dat
 same treatment P1.8's stamp sizing and P2.5's genesis timestamp already received; the
 *mechanism* (a fixed multiplier of Marigold's own genesis difficulty, deterministically
 checkable by every node) is the durable part of this decision, the exact `10⁶` less so.
-**Calibration caveat for the external reviewer** (raised in review 1, adopted): being a
-*relative* multiplier, T's absolute meaning depends entirely on what the actual genesis
-difficulty (P9.5's final regeneration) turns out to be — `10⁶ ×` an extremely low
-cold-launch difficulty can still be modest in absolute hashrate terms. Before this
-parameter freezes for mainnet, sanity-check that `10⁶ × the real genesis difficulty`
-represents hashrate plausibly reachable by organic growth *and* genuinely expensive to
-sustain artificially for six months — if not, the multiplier (not the mechanism) moves.
+**Calibration is a hard pre-launch gate, not a caveat** (raised in review 1, escalated
+to a P0 requirement by review 2 — both adopted): being a *relative* multiplier, T's
+absolute meaning depends entirely on what the actual genesis difficulty (P9.5's final
+regeneration) turns out to be — `10⁶ ×` an extremely low cold-launch difficulty can
+still be modest in absolute hashrate terms. **Before this parameter freezes for mainnet
+(gated into FORK-PLAN's P9.5), a quantitative sensitivity model must be produced**
+covering at minimum multipliers `10⁴, 10⁵, 10⁶, 10⁷, 10⁸ × genesis` under plausible
+launch conditions, estimating for each: sustained hashrate/hardware cost, six-month
+energy cost, rentable-hashpower availability, expected organic trajectory,
+difficulty-manipulation capability, attacker capital before and after the threshold,
+and the probability of reaching the threshold without artificial stimulation
+(review 2's list, verbatim). `10⁶` is the working value, **explicitly not final**
+until that model exists; the multiplier moves if the model says so, the mechanism
+doesn't. The model must also answer review 2's sharpest framing of the core
+game-theoretic question: can a well-funded actor afford to sustain a qualifying
+six-month difficulty window *and* retain enough resources to exploit the weakened
+chain afterward — i.e., the analysis must compare attack cost against
+post-retirement extractable value, not just declare the window "expensive."
 
 **"Sustained," defined exactly** (closing the "months, not moments" loophole precisely):
 reuse the existing difficulty-sampling infrastructure
@@ -1420,7 +1684,47 @@ own instruction: **trust must end even if network growth disappoints.** A chain 
 never reaches the T/M/K retirement trigger simply runs out its full 20-year anchor
 lifespan on plain PoW security alone from that hard-coded point on. **Extending trustee
 life beyond this score requires an explicit hard fork** — the default, unforced outcome
-is always expiry, never renewal.
+is always expiry, never renewal. **Transition obligation** (v1.1, per review 2): the
+final decay stages need a user-facing story, not just a consensus rule — nodes and
+wallets should surface the current stage (via the same RPC channel as
+`finality_anchor_stale`) so the declining protection is visible as it declines, and
+post-expiry, historical anchors retain **no** bootstrap relevance (the ratchet rule
+below simply stops applying at the hard maximum — a fresh node syncing after expiry is
+a plain PoW node, full stop). The wallet/UX detail belongs to the P9.x launch-material
+steps; the consensus-side facts are fixed here.
+
+### IBD / bootstrap trust root and the anchor ratchet (v1.1, per review 2)
+
+Review 2 correctly observes that anchor-aware IBD makes trustee signatures and anchor
+discovery a **bootstrap trust root**, and that querying multiple peers improves
+availability, not cryptographic independence. Made explicit:
+
+- **What a fresh node trusts, and where it comes from**: the 5 trustee public keys (and
+  the deny-list evidence rules) ship in the software release — the same trust root as
+  the genesis block, the network parameters, and the DNS seeder list. A user who cannot
+  trust their software distribution has no security under *any* design; this mechanism
+  adds no new root, it adds new *material* under the existing one. Stated plainly
+  rather than implied.
+- **Anchor discovery**: during IBD the node requests the latest known anchors from
+  **every** connected peer (not just the sync peer) and from the anchor subnetwork's
+  on-chain history as it syncs. It accepts the valid anchor with the highest
+  `anchored_daa_score` seen from any source — anchors are just signed data; a single
+  honest peer (or one on-chain copy) suffices to deliver the newest one.
+- **The anchor ratchet**: a node **persists the highest-scoring valid anchor it has
+  ever accepted** and never adopts a chain conflicting with it — across restarts,
+  resyncs, and reorgs. This is the rollback-resistance rule: once a node has seen an
+  anchor, no adversary can walk it back to a pre-anchor view by suppressing newer
+  anchors later.
+- **Suppression, exactly what it buys an adversary**: an eclipse-level adversary
+  presenting only an *old* valid anchor (or none) to a fresh node cannot forge
+  anchored history — the node still enforces at-or-beyond the newest anchor it *does*
+  hold, and staleness alerting (fail-open rule) fires loudly because that anchor is far
+  behind the presented tips. Suppression degrades a fresh node's protection *toward*
+  plain PoW security (the fail-open floor), never below it, and never silently. The
+  residual risk — a fully eclipsed fresh node fed an attacker chain plus no recent
+  anchors — is the same residual eclipse risk every PoW chain's IBD already carries,
+  now with an alarm attached; naming it honestly rather than claiming the mechanism
+  closes it.
 
 ### Attack cases (P5.8's own verify condition, answered explicitly)
 

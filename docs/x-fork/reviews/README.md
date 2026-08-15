@@ -13,12 +13,20 @@ person with an applied-cryptography background, outside the project**, before Ph
 **Status (2026-08-15):**
 - **Review 1 received and triaged**: [pool-spec-v1-review-1.md](pool-spec-v1-review-1.md),
   triage in [pool-spec-v1-review-1-TRIAGE.md](pool-spec-v1-review-1-TRIAGE.md). All seven
-  substantive findings accepted and folded into the spec (now **v1.1-draft** — see the
-  spec's version header for the change list). Headline fix: the Redeem
+  substantive findings accepted and folded into the spec. Headline fix: the Redeem
   transaction-malleability vector (signature didn't cover transparent outputs).
-- **Review 2 pending** (a second expert is looking the spec over, per the user). The
-  `pool-spec-v1.1` tag and P5.9's closure wait for it; that reviewer should read
-  v1.1-draft (current `POOL-SPEC.md` on `x-fork`), not the v1 tag.
+- **Review 2 (James O'Connell) received and triaged**:
+  [pool-spec-v1.1-review-2-james-o-connell.md](pool-spec-v1.1-review-2-james-o-connell.md),
+  triage in [pool-spec-v1.1-review-2-TRIAGE.md](pool-spec-v1.1-review-2-TRIAGE.md). No
+  new flaw; independently confirms the review-1 fix. Demanded rigor artifacts (theorem,
+  field matrix, threat model, canonicalization, IBD trust-root design, equivocation
+  lifecycle) — all now written into the spec; launch-phase demands gated into
+  FORK-PLAN (P8.5, P9.1, P9.5).
+- **Remaining to close P5.9**: specialist sign-off on the newly written P5.2
+  theorem/field-matrix artifacts — recommended: send the updated `POOL-SPEC.md` (current
+  `x-fork`) back to one or both reviewers for a short confirmation pass, then tag
+  `pool-spec-v1.1` and close. The one **[Open]** design item for that pass:
+  consumed-group-set malleability (see the field matrix in P5.2).
 
 What the reviewer should look at:
 - The full spec (`POOL-SPEC.md`), all eight sections (P5.1-P5.8).

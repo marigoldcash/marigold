@@ -910,9 +910,23 @@ should settle its size and how it is assigned (e.g. hash of the minting tx + out
   [triage](docs/x-fork/reviews/pool-spec-v1-review-1-TRIAGE.md)) — all seven findings
   accepted; headline fix was a real Redeem transaction-malleability vector (the pool-op
   signature didn't cover the transaction's transparent outputs; it now does, uniformly).
-  The spec is at **v1.1-draft**. **A second external review is pending** — this step
-  stays unchecked, and Phase 6 must not start, until it lands and is triaged too, then
-  the spec is tagged `pool-spec-v1.1`.
+  **Review 2 (James O'Connell) received, triaged, and folded in**
+  ([review](docs/x-fork/reviews/pool-spec-v1.1-review-2-james-o-connell.md),
+  [triage](docs/x-fork/reviews/pool-spec-v1.1-review-2-TRIAGE.md)) — no new flaw found;
+  it independently confirms the review-1 fix and the architecture, and demanded rigor
+  artifacts, now written into the spec: the P5.2 authorization theorem + proof sketch, a
+  complete signed/unsigned field matrix (which surfaced and documented one bounded
+  deviation: consumed-group-set malleability, fee-effects only), an explicit
+  pre-execution-bearerability threat model, full canonicalization and encoding rules,
+  op-type/version domain separation in the signing hash, state invariants I1–I5, a
+  prominent 3-of-5 trust-boundary statement, the IBD anchor-ratchet/bootstrap design,
+  and the complete equivocation-evidence lifecycle. Its launch-phase demands are gated
+  into the plan: T/M/K sensitivity model → P9.5 (hard gate), trustee-independence
+  criteria + one-live-signer rule → P9.1, wallet recovery drills → P8.5; its P5.2/P5.8
+  test matrices become Phase 6 conformance-test requirements. **Remaining before this
+  step closes**: specialist sign-off on the new theorem/matrix artifacts (natural
+  choice: send the updated draft back to the same reviewers), then tag
+  `pool-spec-v1.1`. Phase 6 stays blocked until then.
 
 ---
 
@@ -1146,6 +1160,10 @@ stand.*
   *(Flag from P7.0: re-verify here that the legacy-Kaspa import surfaces — KDX/gen0,
   golang-kaspawallet/gen1, `import legacy` CLI flows — were actually removed or
   hard-disabled before any binaries ship to outside users.)*
+  *(Flag from P5.9/review 2: run the wallet **recovery drills** here — device loss,
+  partial restore, rollback to a stale backup, concurrent divergent wallet copies,
+  backup theft — documenting the user-visible outcome and remediation path for each;
+  encryption alone doesn't cover key-management failure modes.)*
   ✅ *Verify:* written threat checklist in `docs/x-fork/reviews/` with each item tested
   or explicitly accepted.
 
@@ -1184,7 +1202,14 @@ stand.*
   jurisdictions — feeds the P9.6 legal review), run a documented key ceremony (HSMs
   recommended; generation, backup, and rotation procedures written down), pin the
   trustee pubkeys + sunset schedule in [params.rs](consensus/core/src/config/params.rs),
-  and stand up the k-of-5 signer daemons on independent infrastructure. Residual
+  and stand up the k-of-5 signer daemons on independent infrastructure.
+  *(Flag from P5.9/review 2: trustee independence must be **operationalized as
+  measurable admission criteria**, not just geography — separate operators,
+  jurisdictions, hosting/cloud providers, key custody/HSM systems, signing software,
+  incident-response paths, disclosure policy. Also: exactly **one live signer per key**
+  — a misconfigured failover running two signer instances against different views can
+  trip the P5.8 equivocation rule and permanently disqualify the key; cold standby
+  only.)* Residual
   mitigations still apply: a friendly-hashrate floor at launch (own/rented ASICs plus
   committed known miners — anchors protect against reorgs, not censorship or difficulty
   whiplash), keep value-at-stake low early, and anchor-liveness + reorg monitoring
@@ -1219,6 +1244,13 @@ stand.*
   decision as implemented: emission table re-verified against the cap (P3.2's assertion),
   ports, prefixes, denominations; then regenerate the mainnet genesis with the real launch
   timestamp and motto, and tag `mainnet-rc1`.
+  *(Hard gate from P5.9/review 2: the P5.8 sunset threshold **T cannot freeze here
+  without the quantitative sensitivity model** — multipliers 10⁴–10⁸ × the real genesis
+  difficulty, modeling sustained hashrate/hardware/energy cost, rentable-hashpower
+  availability, organic-growth trajectory, difficulty-manipulation capability, and
+  attacker capital before/after the threshold vs. post-retirement extractable value.
+  The working 10⁶ value is explicitly not final until that model exists — see
+  POOL-SPEC.md P5.8.)*
   ✅ *Verify:* fresh clone of the tag builds and starts a mainnet node that idles
   correctly (no peers yet); all tests green.
 
