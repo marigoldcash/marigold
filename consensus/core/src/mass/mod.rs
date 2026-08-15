@@ -465,6 +465,14 @@ pub fn calc_storage_mass(
         },
     )?;
 
+    // With no inputs the formula's |I|/A(I) term vanishes, leaving max(0, harmonic_outs).
+    // Reachable only by note-pool op transactions (the one shape allowed zero inputs —
+    // a pure Transfer has no transparent side at all); without this guard the arithmetic
+    // path below divides by a zero ins_plurality.
+    if inputs.len() == 0 {
+        return Some(harmonic_outs);
+    }
+
     /*
         KIP-0009 defines a relaxed formula for the cases:
             |O| = 1  or  |O| <= |I| <= 2

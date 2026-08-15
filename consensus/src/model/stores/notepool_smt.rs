@@ -104,23 +104,33 @@ impl DbNotePoolSmtStore {
     }
 
     /// Applies `updates` (`sn -> leaf_hash`, `ZERO_HASH` meaning "remove") to the tree,
-    /// persisting both the resulting branch-node changes and the new root, and returns
-    /// the new root. Pure add/remove-note callers should go through [`Self::apply_note_diff`];
-    /// this lower-level entry point exists so both apply and unapply (the reversed diff)
-    /// share one code path.
-    fn apply_leaf_updates(&mut self, updates: BTreeMap<Hash, Hash>) -> StoreResult<Hash> {
+    /// staging both the resulting branch-node changes and the new root into `batch`
+    /// (caller commits), and returns the new root. Pure add/remove-note callers should
+    /// go through [`Self::apply_note_diff`]/[`Self::apply_diff_batch`]; this lower-level
+    /// entry point exists so apply and unapply (the reversed diff) share one code path.
+    ///
+    /// NOTE: `CachedDbAccess`/`CachedDbItem` update their in-memory caches immediately,
+    /// before the batch commits — the standard pattern for batch writes in this codebase
+    /// (`DbUtxoSetStore::write_diff_batch` behaves identically), safe under the caller's
+    /// write lock.
+    fn apply_leaf_updates_batch(&mut self, batch: &mut WriteBatch, updates: BTreeMap<Hash, Hash>) -> StoreResult<Hash> {
         let current_root = self.current_root()?;
         let leaf_updates = SortedLeafUpdates::from_sorted_map(&updates, |_, leaf_hash| *leaf_hash);
         let (new_root, changes) = compute_root_update::<NotePoolSmt, Self>(self, current_root, leaf_updates)?;
 
-        let mut batch = WriteBatch::default();
         for (key, node) in changes {
             match node {
-                Some(n) => self.access.write(BatchDbWriter::new(&mut batch), key.into(), NodeBytes::from(n))?,
-                None => self.access.delete(BatchDbWriter::new(&mut batch), key.into())?,
+                Some(n) => self.access.write(BatchDbWriter::new(batch), key.into(), NodeBytes::from(n))?,
+                None => self.access.delete(BatchDbWriter::new(batch), key.into())?,
             }
         }
-        self.root.write(BatchDbWriter::new(&mut batch), &new_root)?;
+        self.root.write(BatchDbWriter::new(batch), &new_root)?;
+        Ok(new_root)
+    }
+
+    fn apply_leaf_updates(&mut self, updates: BTreeMap<Hash, Hash>) -> StoreResult<Hash> {
+        let mut batch = WriteBatch::default();
+        let new_root = self.apply_leaf_updates_batch(&mut batch, updates)?;
         self.db.write(batch)?;
         Ok(new_root)
     }
@@ -143,6 +153,20 @@ impl DbNotePoolSmtStore {
     /// [`kaspa_consensus_core::notepool::leaf_hash`] and set, `remove`'s serials are cleared.
     pub fn apply_diff(&mut self, diff: &PoolDiff) -> StoreResult<Hash> {
         self.apply_note_diff(diff.add.iter().map(|(sn, note)| (*sn, leaf_hash(note.d, &note.pk))), diff.remove.keys().copied())
+    }
+
+    /// Batch variant of [`Self::apply_diff`] — stages into the caller's `WriteBatch` so
+    /// the pool commitment commits atomically with the rest of the virtual state.
+    /// To unapply, pass the reversed diff (`PoolDiff::to_reversed`/`as_reversed`).
+    pub fn apply_diff_batch(&mut self, batch: &mut WriteBatch, diff: &PoolDiff) -> StoreResult<Hash> {
+        let mut updates = BTreeMap::new();
+        for sn in diff.remove.keys() {
+            updates.insert(*sn, ZERO_HASH);
+        }
+        for (sn, note) in diff.add.iter() {
+            updates.insert(*sn, leaf_hash(note.d, &note.pk));
+        }
+        self.apply_leaf_updates_batch(batch, updates)
     }
 
     /// The exact inverse of [`Self::apply_diff`] — applies `diff`'s reversal (add/remove
@@ -244,5 +268,44 @@ mod tests {
 
         let reopened = DbNotePoolSmtStore::new(db, CachePolicy::Count(16));
         assert_eq!(reopened.current_root().unwrap(), root);
+    }
+}
+
+/// Regression guard distilled from a P6.4 pipeline-test investigation: the committed
+/// root must be a pure function of the final leaf set, independent of which apply/unapply
+/// history produced it (no stale branch nodes surviving between applications).
+#[cfg(test)]
+mod history_independence_tests {
+    use super::*;
+    use kaspa_consensus_core::notepool::{DenominationTag, NewNote, PoolDiff};
+    use kaspa_database::create_temp_db;
+    use kaspa_database::prelude::ConnBuilder;
+    use std::collections::HashMap;
+
+    #[test]
+    fn same_final_leaf_set_same_root_regardless_of_history() {
+        let note = |b: u8| NewNote { d: DenominationTag::D1, pk: [b; 32] };
+        let h = |b: u8| Hash::from_bytes([b; 32]);
+        let diff = |add: &[u8], remove: &[u8]| {
+            PoolDiff::new(
+                add.iter().map(|&b| (h(b), note(b))).collect::<HashMap<_, _>>(),
+                remove.iter().map(|&b| (h(b), note(b))).collect::<HashMap<_, _>>(),
+            )
+        };
+
+        // History A: +1; (-1, +2); (-2, +3)
+        let (_l1, db1) = create_temp_db!(ConnBuilder::default().with_files_limit(10));
+        let mut s1 = DbNotePoolSmtStore::new(db1, CachePolicy::Count(16));
+        s1.apply_diff(&diff(&[1], &[])).unwrap();
+        s1.apply_diff(&diff(&[2], &[1])).unwrap();
+        let root_a = s1.apply_diff(&diff(&[3], &[2])).unwrap();
+
+        // History B: +1; (-1, +3)
+        let (_l2, db2) = create_temp_db!(ConnBuilder::default().with_files_limit(10));
+        let mut s2 = DbNotePoolSmtStore::new(db2, CachePolicy::Count(16));
+        s2.apply_diff(&diff(&[1], &[])).unwrap();
+        let root_b = s2.apply_diff(&diff(&[3], &[1])).unwrap();
+
+        assert_eq!(root_a, root_b, "same final leaf set must give same root regardless of history");
     }
 }

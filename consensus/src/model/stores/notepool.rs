@@ -1,6 +1,10 @@
-use kaspa_consensus_core::{BlockHasher, Hash, notepool::{NewNote, PoolDiff}};
-use kaspa_database::prelude::{CachePolicy, CachedDbAccess, DB, DirectDbWriter, StoreResult};
+use kaspa_consensus_core::{
+    BlockHasher, Hash,
+    notepool::{NewNote, PoolDiff, PoolStateView},
+};
+use kaspa_database::prelude::{BatchDbWriter, CachePolicy, CachedDbAccess, DB, DirectDbWriter, StoreResult, StoreResultExt};
 use kaspa_database::registry::DatabaseStorePrefixes;
+use rocksdb::WriteBatch;
 use std::sync::Arc;
 
 /// The pool state map: `sn -> (d, pk)` (POOL-SPEC.md P5.1, FORK-PLAN P6.2). Mirrors
@@ -36,6 +40,24 @@ impl DbNotePoolStore {
 
     pub fn iterator(&self) -> impl Iterator<Item = Result<(Hash, NewNote), Box<dyn std::error::Error>>> + '_ {
         self.access.iterator().map(|res| res.map(|(key, note)| (Hash::from_slice(key.as_ref()), note)).map_err(|e| e.into()))
+    }
+
+    /// Batch variant of [`NotePoolStore::write_diff`] — stages into the caller's
+    /// `WriteBatch` so the virtual pool state commits atomically with the rest of the
+    /// virtual state (mirrors `DbUtxoSetStore::write_diff_batch`).
+    pub fn write_diff_batch(&mut self, batch: &mut WriteBatch, diff: &PoolDiff) -> StoreResult<()> {
+        let mut writer = BatchDbWriter::new(batch);
+        self.access.delete_many(&mut writer, &mut diff.remove.keys().copied())?;
+        self.access.write_many(&mut writer, &mut diff.add.iter().map(|(sn, note)| (*sn, *note)))?;
+        Ok(())
+    }
+}
+
+/// The virtual pool state store is the base view the composed mergeset views stack on
+/// (POOL-SPEC.md P5.3, FORK-PLAN P6.4) — the pool analog of `DbUtxoSetStore: UtxoView`.
+impl PoolStateView for DbNotePoolStore {
+    fn get_note(&self, sn: &Hash) -> Option<NewNote> {
+        self.access.read(*sn).optional().unwrap()
     }
 }
 

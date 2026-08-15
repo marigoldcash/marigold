@@ -29,6 +29,8 @@ use kaspa_consensus_core::{
     hashing,
     header::Header,
     muhash::MuHashExtensions,
+    notepool::{PoolDiff, PoolOp, PoolStateView, PoolViewComposition, validate_stateful},
+    subnets::SUBNETWORK_ID_NOTE_POOL,
     tx::{MutableTransaction, PopulatedTransaction, Transaction, ValidatedTransaction, VerifiableTransaction},
     utxo::{
         utxo_diff::UtxoDiff,
@@ -78,6 +80,10 @@ pub(super) struct UtxoProcessingContext<'a> {
     pub ghostdag_data: Refs<'a, GhostdagData>,
     pub multiset_hash: MuHash,
     pub mergeset_diff: UtxoDiff,
+    /// The note pool's mergeset diff, accumulated in lockstep with `mergeset_diff` during
+    /// the same blue-topological walk (POOL-SPEC.md P5.3's composed pool view, FORK-PLAN
+    /// P6.4).
+    pub mergeset_pool_diff: PoolDiff,
     pub accepted_tx_ids: Vec<TransactionId>,
     pub accepted_tx_versions: Vec<u16>,
     pub mergeset_acceptance_data: Vec<MergesetBlockAcceptanceData>,
@@ -92,6 +98,7 @@ impl<'a> UtxoProcessingContext<'a> {
             ghostdag_data,
             multiset_hash: selected_parent_multiset_hash,
             mergeset_diff: UtxoDiff::default(),
+            mergeset_pool_diff: PoolDiff::default(),
             accepted_tx_ids: Vec::with_capacity(1), // We expect at least the selected parent coinbase tx
             accepted_tx_versions: Vec::with_capacity(1), // We expect at least the selected parent coinbase tx
 
@@ -108,10 +115,11 @@ impl<'a> UtxoProcessingContext<'a> {
 
 impl VirtualStateProcessor {
     /// Calculates UTXO state and transaction acceptance data relative to the selected parent state
-    pub(super) fn calculate_utxo_state<V: UtxoView + Sync>(
+    pub(super) fn calculate_utxo_state<V: UtxoView + Sync, P: PoolStateView + Sync>(
         &self,
         ctx: &mut UtxoProcessingContext,
         selected_parent_utxo_view: &V,
+        selected_parent_pool_view: &P,
         pov_daa_score: u64,
     ) {
         let selected_parent_transactions = self.block_transactions_store.get(ctx.selected_parent()).unwrap();
@@ -131,8 +139,9 @@ impl VirtualStateProcessor {
             )
             .enumerate()
         {
-            // Create a composed UTXO view from the selected parent UTXO view + the mergeset UTXO diff
+            // Create composed views (UTXO and pool) from the selected parent views + the mergeset diffs
             let composed_view = selected_parent_utxo_view.compose(&ctx.mergeset_diff);
+            let composed_pool_view = selected_parent_pool_view.compose(&ctx.mergeset_pool_diff);
 
             // The first block in the mergeset is always the selected parent
             let is_selected_parent = i == 0;
@@ -144,11 +153,14 @@ impl VirtualStateProcessor {
             // Here we only replay them while building the child's UTXO state. The child's POV DAA score is
             // safe for non-script checks because maturity and sequence-lock checks are monotonic. Seqcommit
             // context is not monotonic (the threshold can be crossed), but it is only used by script checks,
-            // which we skip for selected-parent transactions.
+            // which we skip for selected-parent transactions. Note-pool freshness anchors are likewise
+            // non-monotonic, so pool-op signature+freshness checks ride the same skip (see
+            // `validate_stateful`'s docs for why re-imposing freshness at replay would break determinism).
             let validation_flags = if is_selected_parent { TxValidationFlags::SkipScriptChecks } else { TxValidationFlags::Full };
             let (validated_transactions, inner_multiset) = self.validate_transactions_with_muhash_in_parallel(
                 &txs,
                 &composed_view,
+                &composed_pool_view,
                 pov_daa_score,
                 self.headers_store.get_daa_score(merged_block).unwrap(),
                 validation_flags,
@@ -160,6 +172,12 @@ impl VirtualStateProcessor {
             let mut block_fee = 0u64;
             for (validated_tx, _) in validated_transactions.iter() {
                 ctx.mergeset_diff.add_transaction(validated_tx, pov_daa_score).unwrap();
+                if let Some(pool_op) = &validated_tx.validated_pool_op {
+                    // Safe to unwrap: intra-block serial conflicts are excluded at body
+                    // validation, cross-block ones by validation against the composed
+                    // pool view (the loser is simply not in `validated_transactions`).
+                    ctx.mergeset_pool_diff.with_diff_in_place(&pool_op.diff).unwrap();
+                }
                 ctx.accepted_tx_ids.push(validated_tx.id());
                 ctx.accepted_tx_versions.push(validated_tx.version());
                 block_fee += validated_tx.calculated_fee;
@@ -194,10 +212,11 @@ impl VirtualStateProcessor {
     ///     3. The block header includes the expected `pruning_point`.
     ///     4. The block coinbase transaction rewards the mergeset blocks correctly.
     ///     5. All non-coinbase block transactions are valid against its own UTXO view.
-    pub(super) fn verify_expected_utxo_state<V: UtxoView + Sync>(
+    pub(super) fn verify_expected_utxo_state<V: UtxoView + Sync, P: PoolStateView + Sync>(
         &self,
         ctx: &mut UtxoProcessingContext,
         selected_parent_utxo_view: &V,
+        selected_parent_pool_view: &P,
         header: &Header,
     ) -> BlockProcessResult<Option<kaspa_smt_store::processor::SmtBuild>> {
         // Verify header UTXO commitment
@@ -261,9 +280,11 @@ impl VirtualStateProcessor {
         // POV DAA score, and use the selected parent as the seqcommit context. Later, calculate_utxo_state
         // relies on this check when replaying this block as a selected parent.
         let current_utxo_view = selected_parent_utxo_view.compose(&ctx.mergeset_diff);
+        let current_pool_view = selected_parent_pool_view.compose(&ctx.mergeset_pool_diff);
         let validated_transactions = self.validate_transactions_in_parallel(
             &txs,
             &current_utxo_view,
+            &current_pool_view,
             header.daa_score,
             header.daa_score,
             TxValidationFlags::Full,
@@ -307,12 +328,13 @@ impl VirtualStateProcessor {
         if hashing::tx::hash(coinbase) != hashing::tx::hash(&expected_coinbase) { Err(BadCoinbaseTransaction) } else { Ok(()) }
     }
 
-    /// Validates transactions against the provided `utxo_view` and returns a vector with all transactions
-    /// which passed the validation along with their original index within the containing block
-    pub(crate) fn validate_transactions_in_parallel<'a, V: UtxoView + Sync>(
+    /// Validates transactions against the provided `utxo_view`/`pool_view` and returns a vector with all
+    /// transactions which passed the validation along with their original index within the containing block
+    pub(crate) fn validate_transactions_in_parallel<'a, V: UtxoView + Sync, P: PoolStateView + Sync>(
         &self,
         txs: &'a Vec<Transaction>,
         utxo_view: &V,
+        pool_view: &P,
         pov_daa_score: u64,
         block_daa_score: u64,
         flags: TxValidationFlags,
@@ -324,17 +346,18 @@ impl VirtualStateProcessor {
                             // that all txs within each block are independent
                 .enumerate()
                 .skip(1) // Skip the coinbase tx.
-                .filter_map(|(i, tx)| self.validate_transaction_in_utxo_context(tx, &utxo_view, pov_daa_score,block_daa_score, flags, selected_parent).ok().map(|vtx| (vtx, i as u32)))
+                .filter_map(|(i, tx)| self.validate_transaction_in_utxo_context(tx, &utxo_view, pool_view, pov_daa_score,block_daa_score, flags, selected_parent).ok().map(|vtx| (vtx, i as u32)))
                 .collect()
         })
     }
 
     /// Same as validate_transactions_in_parallel except during the iteration this will also
     /// calculate the muhash in parallel for valid transactions
-    pub(crate) fn validate_transactions_with_muhash_in_parallel<'a, V: UtxoView + Sync>(
+    pub(crate) fn validate_transactions_with_muhash_in_parallel<'a, V: UtxoView + Sync, P: PoolStateView + Sync>(
         &self,
         txs: &'a Vec<Transaction>,
         utxo_view: &V,
+        pool_view: &P,
         pov_daa_score: u64,
         block_daa_score: u64,
         flags: TxValidationFlags,
@@ -346,7 +369,7 @@ impl VirtualStateProcessor {
                             // that all txs within each block are independent
                 .enumerate()
                 .skip(1) // Skip the coinbase tx.
-                .filter_map(|(i, tx)| self.validate_transaction_in_utxo_context(tx, &utxo_view, pov_daa_score, block_daa_score, flags, selected_parent).ok().map(|vtx| {
+                .filter_map(|(i, tx)| self.validate_transaction_in_utxo_context(tx, &utxo_view, pool_view, pov_daa_score, block_daa_score, flags, selected_parent).ok().map(|vtx| {
                     let mh = MuHash::from_transaction(&vtx, pov_daa_score);
                     (smallvec![(vtx, i as u32)], mh)
                 }
@@ -362,11 +385,13 @@ impl VirtualStateProcessor {
         })
     }
 
-    /// Attempts to populate the transaction with UTXO entries and performs all utxo-related tx validations
+    /// Attempts to populate the transaction with UTXO entries and performs all utxo-related tx validations,
+    /// plus full stateful note-pool op validation for pool-lane transactions (FORK-PLAN P6.4).
     pub(super) fn validate_transaction_in_utxo_context<'a>(
         &self,
         transaction: &'a Transaction,
         utxo_view: &impl UtxoView,
+        pool_view: &impl PoolStateView,
         pov_daa_score: u64,
         block_daa_score: u64,
         flags: TxValidationFlags,
@@ -381,6 +406,25 @@ impl VirtualStateProcessor {
                 return Err(TxRuleError::MissingTxOutpoints);
             }
         }
+
+        // Note-pool ops validate against the composed pool view (P5.3's validation orders).
+        // On the selected-parent replay (SkipScriptChecks) signature+freshness are skipped
+        // for the same determinism reasons script checks are — see `validate_stateful`.
+        let validated_pool_op = if transaction.subnetwork_id == SUBNETWORK_ID_NOTE_POOL {
+            // Body validation already guaranteed the payload decodes; keep the error path
+            // rather than unwrap so direct callers (e.g. templates) stay total.
+            let op = PoolOp::decode_payload(&transaction.payload).ok_or(TxRuleError::MalformedNotePoolPayload)?;
+            let skip = flags == TxValidationFlags::SkipScriptChecks;
+            match validate_stateful(&op, transaction.id(), &transaction.outputs, pool_view, pov_daa_score, skip) {
+                Ok(validated) => Some(validated),
+                Err(e) => {
+                    info!("Rejecting note-pool transaction {} due to context error: {}", transaction.id(), e);
+                    return Err(TxRuleError::InvalidNotePoolOpInContext(e));
+                }
+            }
+        } else {
+            None
+        };
 
         let populated_tx = PopulatedTransaction::new(transaction, entries);
 
@@ -404,7 +448,10 @@ impl VirtualStateProcessor {
             seq_commit_accessor.as_ref().map(|v| v as _),
         );
         match res {
-            Ok(calculated_fee) => Ok(ValidatedTransaction::new(populated_tx, calculated_fee)),
+            Ok(calculated_fee) => Ok(match validated_pool_op {
+                Some(pool_op) => ValidatedTransaction::new_with_pool_op(populated_tx, calculated_fee, pool_op),
+                None => ValidatedTransaction::new(populated_tx, calculated_fee),
+            }),
             Err(tx_rule_error) => {
                 // TODO (relaxed): aggregate by error types and log through the monitor (in order to not flood the logs)
                 info!("Rejecting transaction {} due to transaction rule error: {}", transaction.id(), tx_rule_error);
@@ -447,6 +494,14 @@ impl VirtualStateProcessor {
         args: &TransactionValidationArgs,
         selected_parent: Hash,
     ) -> TxResult<()> {
+        // Note-pool transactions are consensus-valid when they arrive in blocks (P6.4),
+        // but mempool entry needs the same-serial conflict policy, eviction, and orphan
+        // handling FORK-PLAN P6.7 owns — without those, two conflicting rotates could
+        // both enter the mempool and self-invalidate a locally-built block template.
+        // Reject at the door until P6.7.
+        if mutable_tx.tx.subnetwork_id == SUBNETWORK_ID_NOTE_POOL {
+            return Err(TxRuleError::NotePoolTxNotYetSupportedInMempool);
+        }
         self.populate_mempool_transaction_in_utxo_context(mutable_tx, utxo_view)?;
 
         // Calc the contextual storage mass

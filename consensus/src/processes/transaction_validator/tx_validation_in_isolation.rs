@@ -3,8 +3,9 @@ use super::{
     errors::{TxResult, TxRuleError},
 };
 use crate::constants::{MAX_SOMPI, TX_VERSION_TOCCATA};
+use kaspa_consensus_core::notepool::{PoolOp, validate_stateless};
 use kaspa_consensus_core::subnets::{
-    CoinbaseSubnetwork, NativeSubnetwork, SUBNETWORK_NAMESPACE_LEN, SUBNETWORK_ZERO_TAIL_LEN, Subnetwork,
+    CoinbaseSubnetwork, NativeSubnetwork, SUBNETWORK_NAMESPACE_LEN, SUBNETWORK_ZERO_TAIL_LEN, SUBNETWORK_ID_NOTE_POOL, Subnetwork,
 };
 use kaspa_consensus_core::tx::Transaction;
 use std::collections::HashSet;
@@ -25,7 +26,8 @@ impl TransactionValidator {
         check_gas(tx)?;
         check_transaction_subnetwork(tx)?;
         check_transaction_version(tx)?;
-        check_tx_version_specific_fields(tx)
+        check_tx_version_specific_fields(tx)?;
+        check_note_pool_payload(tx)
     }
 
     fn check_transaction_inputs_in_isolation(&self, tx: &Transaction) -> TxResult<()> {
@@ -76,7 +78,11 @@ impl TransactionValidator {
     }
 
     fn check_transaction_inputs_count(&self, tx: &Transaction) -> TxResult<()> {
-        if !tx.is_coinbase() && tx.inputs.is_empty() {
+        // Note-pool op transactions are the one non-coinbase shape allowed zero
+        // transparent inputs (POOL-SPEC.md P5.2): a pure Transfer touches no transparent
+        // value at all — its authorization is the note-level Schnorr signatures in its
+        // payload, validated in the UTXO context stage (P6.4).
+        if !tx.is_coinbase() && tx.inputs.is_empty() && tx.subnetwork_id != SUBNETWORK_ID_NOTE_POOL {
             return Err(TxRuleError::NoTxInputs);
         }
 
@@ -190,6 +196,18 @@ fn check_transaction_subnetwork(tx: &Transaction) -> TxResult<()> {
         bytes if tx.version >= TX_VERSION_TOCCATA && &bytes[SUBNETWORK_NAMESPACE_LEN..] == ZEROES_16 => Ok(()),
         _ => Err(TxRuleError::SubnetworksDisabled(tx.subnetwork_id)),
     }
+}
+
+/// For note-pool lane transactions (FORK-PLAN P6.4): the payload must borsh-decode to
+/// exactly one `PoolOp` (no trailing bytes — "malformed encodings are consensus-invalid,
+/// not coerced", POOL-SPEC.md P5.1) and pass every stateless P5.3 rule (P6.3's
+/// `validate_stateless`). Other subnetworks' payloads remain free-form.
+fn check_note_pool_payload(tx: &Transaction) -> TxResult<()> {
+    if tx.subnetwork_id != SUBNETWORK_ID_NOTE_POOL {
+        return Ok(());
+    }
+    let op = PoolOp::decode_payload(&tx.payload).ok_or(TxRuleError::MalformedNotePoolPayload)?;
+    validate_stateless(&op).map_err(TxRuleError::InvalidNotePoolOp)
 }
 
 fn check_tx_version_specific_fields(tx: &Transaction) -> TxResult<()> {

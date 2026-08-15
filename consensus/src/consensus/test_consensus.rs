@@ -227,6 +227,17 @@ impl TestConsensus {
         self.consensus.storage.smt_metadata_store.get(block_hash).unwrap()
     }
 
+    /// The note pool's commitment root at virtual (FORK-PLAN P6.4).
+    pub fn pool_root(&self) -> Hash {
+        self.consensus.storage.virtual_stores.read().pool_smt.current_root().unwrap()
+    }
+
+    /// A note from the virtual pool state map (`sn -> (d, pk)`), if live.
+    pub fn pool_note(&self, sn: Hash) -> Option<kaspa_consensus_core::notepool::NewNote> {
+        use kaspa_consensus_core::notepool::PoolStateView;
+        self.consensus.storage.virtual_stores.read().pool_state.get_note(&sn)
+    }
+
     pub fn seq_commit_lane_proof(&self, block_hash: Hash, lane_key: Hash) -> TestSeqCommitLaneProof {
         let header = self.consensus.headers_store.get_header(block_hash).unwrap();
         let selected_parent = header.direct_parents()[0];

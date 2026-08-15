@@ -1403,3 +1403,163 @@ can't pass by rejecting everything.
 
 15 new unit tests, all passing; full `cargo test -p kaspa-consensus-core` (94 tests)
 and full `cargo build --workspace` both clean.
+
+### P6.4 — Stateful validation in the virtual pipeline (2026-08-16) ⚠️ HARD
+
+Done with a stronger model per the plan's flag (the user switched models specifically
+for this step). The largest single step of Phase 6 so far: pool ops now flow through
+the real consensus pipeline end-to-end — validated in context, accepted/rejected per
+GHOSTDAG blue order, applied to a virtual pool state + SMT commitment, and correctly
+unapplied on reorgs.
+
+**The central design decision — and why it made the step tractable**: pool ops are
+validated *inside* `validate_transaction_in_utxo_context`, the same function every
+transaction already passes through during the mergeset walk. That single placement
+means "first accepted wins" needs no new conflict-resolution rule at all: a pool op
+whose serial was already consumed by an earlier-in-blue-order block simply fails
+`SerialNotFound` against the composed pool view and is excluded from that context's
+accepted transactions — byte-for-byte the same mechanism that resolves UTXO
+double-spends between merged blocks today, which is exactly what POOL-SPEC.md P5.3
+promised ("no new conflict-resolution rule is being invented here").
+
+**The subtlest consensus point in the whole step — freshness is non-monotonic.** When
+a chain block replays its selected parent's own transactions, the existing code skips
+script checks (they were fully validated during the parent's chain qualification,
+against the identical state basis) but re-runs maturity/sequence-lock checks, which is
+safe because those are *monotonic* in POV DAA score — once valid, always valid later.
+The pool's freshness anchor is the opposite: an op fresh at the parent's POV can be
+stale at the child's. Re-imposing the freshness check at replay would make a child
+compute different acceptance data than its parent committed — consensus divergence.
+So `validate_stateful` takes a `skip_signature_and_freshness` flag driven by the
+existing `TxValidationFlags::SkipScriptChecks`, and both the signature check (basis
+identical, skip is an optimization) and the freshness check (skip is *correctness*)
+ride the selected-parent replay exemption. Documented in both the function's docs and
+`calculate_utxo_state`'s comment block, next to the existing monotonicity reasoning it
+extends. There's a unit test pinning exactly this
+(`stale_anchor_accepted_on_selected_parent_replay`).
+
+**Two real bugs found in existing/adjacent code, both with tests now:**
+
+1. **`calc_storage_mass` divides by zero on a zero-input transaction**
+   (`sum_ins / ins_plurality` with both zero — the arithmetic-mean path). Unreachable
+   before this fork (native txs must have inputs), but a pure pool `Transfer` is
+   exactly a zero-input/zero-output tx. Fixed with the mathematically consistent
+   generalization: with no inputs the KIP-9 `|I|/A(I)` term vanishes, so storage mass
+   is `max(0, harmonic_outs)` — an early return right after the outputs fold.
+
+2. **A pre-P6.6 soundness hole in the spec's own reasoning.** P5.3 calls mint-serial
+   uniqueness "guaranteed by construction ... not an active check", reasoning that a
+   mint tx's id can't have been used before. That's only true once P6.6's value
+   binding forces mints to spend transparent inputs (making a duplicated mint a UTXO
+   double-spend). Until then, the *same* zero-input mint tx included in two parallel
+   blocks would validate in both contexts and double-add its serial — panicking the
+   diff accumulator. The produced-serial existence check is therefore an **active
+   consensus rule for now** (one map lookup per produced note, also applied to
+   Transfer's produced serials), documented to degrade to spec-permitted cheap
+   insurance after P6.6. `duplicate_mint_across_parallel_blocks_accepted_once` pins
+   the behavior at the consensus level.
+
+**What was built, layer by layer** (mirroring the UTXO machinery at every step):
+
+- **Hashes** (`crypto/hashes` + [hashing.rs](../../consensus/core/src/notepool/hashing.rs)):
+  `NotePoolSerialHash` (`sn = H(tx_id || index u32 LE)`), `NotePoolSigningHash` (P5.2's
+  v1.1 preimage exactly: version || op_type || sorted-serials || whole-produced-list ||
+  transparent_outputs_hash || anchor — the outputs-hash coverage is review 1's Redeem
+  malleability fix), `NotePoolOutputsHash` (amount || spk version || spk script per
+  output, mirroring the sighash field order, pool-domain-separated). The signing-hash
+  function sorts serials internally so signer and validator hash the same canonical
+  message regardless of wire order.
+- **Diff algebra** ([diff.rs](../../consensus/core/src/notepool/diff.rs)): `PoolDiff`
+  gained `UtxoDiff`'s exact `with_diff_in_place` two-phase composition (error checks,
+  then cancel-or-insert), `ImmutablePoolDiff`/`ReversedPoolDiff` for clone-free
+  reverse application on walk-downs, and `add_note`/`remove_note` incremental entry
+  points. Simpler than `UtxoDiff`'s algebra in one honest way: no DAA-score dimension,
+  because a live serial's `(d, pk)` is immutable (invariants I1/I3), so "same key"
+  means "same logical entry" — where `UtxoDiff` must disambiguate recreated outpoints
+  by score, the pool never can see one.
+- **Views** ([view.rs](../../consensus/core/src/notepool/view.rs)): `PoolStateView` /
+  `ComposedPoolView` / `.compose()`, nesting like `UtxoView` composition;
+  `PoolCollection` itself implements the trait for tests.
+- **Stateful validation** ([validate.rs](../../consensus/core/src/notepool/validate.rs)):
+  `validate_stateful` returning `ValidatedPoolOp { diff, consumed_petals,
+  produced_petals }` — existence, same-pk-per-group, BIP340 verification against the
+  *current* pk, inclusive freshness window (`POOL_FRESHNESS_WINDOW = 36_000`,
+  boundaries per review 1), pool-side Transfer conservation, produced-serial freshness,
+  and diff construction with derived serials. 15 new unit tests with real Schnorr keys
+  including signature-lift attacks (produced-list swap fails), op_type domain
+  separation (a Transfer signature can't authorize a Redeem), merchant-sweep
+  (one signature, many serials), and split conservation.
+- **Pipeline threading**: `UtxoProcessingContext.mergeset_pool_diff` accumulates in
+  lockstep with `mergeset_diff`; composed pool views built at every place composed
+  UTXO views already were (`calculate_utxo_state` per merged block,
+  `verify_expected_utxo_state` for the chain block's own txs, virtual calculation,
+  template validation, the test block builder). `ValidatedTransaction` carries an
+  `Option<ValidatedPoolOp>` so acceptance directly folds each accepted op's diff.
+- **Persistence**: per-chain-block diffs in
+  [notepool_diffs.rs](../../consensus/src/model/stores/notepool_diffs.rs) (prefix 93,
+  written in `commit_utxo_state`'s batch — always in lockstep with `utxo_diffs`);
+  virtual pool state (`pool_state` map + `pool_smt` root) inside `VirtualStores`,
+  applied once per resolve in `commit_virtual_state`'s single `WriteBatch`; virtual's
+  own mergeset pool diff as its own `CachedDbItem` (prefix 94) — deliberately NOT a
+  new `VirtualState` field, leaving that type's version-suffixed serialization
+  untouched. Reorg walk-down applies stored diffs reversed; walk-up applies forward
+  or computes-and-commits via the existing KeyNotFound branch.
+- **Admissibility**: user-lane subnetwork + payloads were already consensus-legal
+  (verified against the real isolation checks — only mempool standardness restricts
+  payloads, which is P6.7 anyway). What actually needed changing: the `NoTxInputs`
+  rule (pool txs are the one non-coinbase shape allowed zero inputs), pool-payload
+  decode + P6.3 stateless validation wired into `validate_tx_in_isolation`, and a new
+  body-level `check_block_double_serials` mirroring `check_block_double_spends` —
+  necessary because txs within a block are validated in parallel against the same
+  composed view, so intra-block serial conflicts must be block-invalidity, not a
+  validation-order outcome.
+
+**Deliberately deferred, with the boundaries stated in code comments at each site**:
+transparent-side value binding (mint funding, redeem output sums), fee crediting
+(pool ops currently contribute 0 to `calculated_fee`), and mass costing → P6.6.
+Mempool entry rejects pool txs with a dedicated error until P6.7 — without its
+same-serial conflict policy, two conflicting rotates could both enter the mempool and
+self-invalidate every locally built block template (a self-DoS). Pool state at
+pruning-point import stays empty → P6.8.
+
+**Operational note — old datadirs are now incompatible**: the reorg walks assume the
+lockstep invariant "every UTXO-valid chain block has BOTH a `utxo_diffs` and a
+`notepool_diffs` row" (they're written in one batch), and `.unwrap()` on the pool-diff
+read enforces it loudly — the same posture upstream takes for `utxo_diffs` itself.
+A datadir produced before P6.4 (e.g. leftovers from the P2.9/P3.3/P4.x live tests)
+has chain blocks without pool-diff rows and will panic if a walk crosses them. All
+such datadirs were always disposable scratch state; use fresh `--appdir`s (the
+long-standing Phase 2 practice anyway), and P9.5's genesis regeneration invalidates
+everything pre-launch regardless. Deliberately NOT masked with a default-empty
+fallback: a missing row on a post-P6.4 chain would be a real write bug, and silence
+there means divergent pool state.
+
+**A test-writing gotcha worth remembering**: the first version of the
+double-rotate determinism test failed with different pool roots across its two runs —
+which looked exactly like a state-tracking bug. A store-level reproduction proved the
+SMT history-independent; the real cause was BIP340's *randomized aux nonces*:
+rebuilding "the same" transaction inside the per-run loop re-signed it, producing a
+different signature, hence different tx id, hence different derived serials — two
+genuinely different DAGs. The comparison is only meaningful over identical
+transactions, built once outside the loop. The investigation left behind a permanent
+regression guard (`history_independence_tests` in notepool_smt.rs) and both roots
+matched their own maps throughout — the pipeline was never actually wrong.
+
+✅ *Verify* (all three P6.4 criteria, as consensus tests in
+[notepool_tests.rs](../../consensus/src/pipeline/virtual_processor/notepool_tests.rs)):
+`parallel_double_rotate_resolves_deterministically` — same DAG built twice with
+opposite insertion orders for the conflicting blocks; exactly one rotate accepted in
+the merging block's committed acceptance data, identical winner and identical pool
+root both times. `reorg_past_pool_op_restores_prior_pool_state` — a heavier branch
+carrying a conflicting rotate wins; the losing branch's produced note is fully
+unapplied and the reorged node's pool root **exactly equals a never-forked reference
+node's root** (the strongest form of "restores the prior pool root": convergence with
+zero residue, having passed through the walk-down/unapply path).
+`out_of_window_anchor_op_rejected_in_context` — the freshness gate consensus-side via
+a future anchor (a genuinely *stale* anchor needs 36k mined blocks; its exact
+inclusive boundaries are unit-pinned in consensus-core, where the window is reachable),
+plus the happy-path and duplicate-mint tests above.
+
+Totals: consensus-core 121 passed (+27 this step), consensus 86 passed (+6), full
+workspace 1,206 passed across 142 test binaries, integration suite green, workspace
+build clean.

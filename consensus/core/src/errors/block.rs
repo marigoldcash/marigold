@@ -118,6 +118,9 @@ pub enum RuleError {
     #[error("outpoint {0} is spent more than once on the same block")]
     DoubleSpendInSameBlock(TransactionOutpoint),
 
+    #[error("note-pool serial {0} is consumed more than once in the same block")]
+    DoubleSerialSpendInSameBlock(kaspa_hashes::Hash),
+
     #[error("outpoint {0} is created and spent on the same block")]
     ChainedTransaction(TransactionOutpoint),
 

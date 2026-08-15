@@ -10,10 +10,24 @@
 pub mod diff;
 pub mod hashing;
 pub mod validate;
+pub mod view;
 
-pub use diff::{PoolCollection, PoolDiff};
-pub use hashing::leaf_hash;
-pub use validate::{MAX_POOL_OP_COLLECTION_LEN, validate_stateless};
+pub use diff::{ImmutablePoolDiff, PoolCollection, PoolDiff};
+pub use hashing::{leaf_hash, serial_hash, signing_hash, transparent_outputs_hash};
+pub use validate::{MAX_POOL_OP_COLLECTION_LEN, ValidatedPoolOp, validate_stateful, validate_stateless};
+pub use view::{ComposedPoolView, PoolStateView, PoolViewComposition};
+
+/// The pool protocol version byte committed in every `NotePoolSigningHash` preimage
+/// (POOL-SPEC.md P5.2, v1.1). Any future revision changing signing semantics bumps this
+/// rather than relying on every other field coincidentally differing.
+pub const POOL_PROTOCOL_VERSION: u8 = 1;
+
+/// The freshness window (POOL-SPEC.md P5.2/P5.3): a pool op is valid iff
+/// `0 <= pov_daa_score - freshness.anchor_daa_score <= POOL_FRESHNESS_WINDOW`, inclusive
+/// on both ends. 36,000 DAA-score units ≈ 1 hour at 10 BPS — a liveness/UX parameter,
+/// not a derived security constant (the spec's own classification); P6.6 calibration may
+/// retune it before launch.
+pub const POOL_FRESHNESS_WINDOW: u64 = 36_000;
 
 use crate::Hash;
 use borsh::{BorshDeserialize, BorshSerialize};
@@ -168,6 +182,33 @@ pub enum PoolOp {
     Mint(MintOp),
     Transfer(TransferOp),
     Redeem(RedeemOp),
+}
+
+impl PoolOp {
+    /// Decodes a pool-op transaction payload. `None` on any malformed encoding —
+    /// including trailing bytes after the value ("malformed encodings are
+    /// consensus-invalid, not coerced", POOL-SPEC.md P5.1; `try_from_slice` requires
+    /// the whole slice consumed). Wrapped here so downstream crates need no direct
+    /// borsh dependency.
+    pub fn decode_payload(payload: &[u8]) -> Option<Self> {
+        Self::try_from_slice(payload).ok()
+    }
+
+    /// The inverse of [`Self::decode_payload`] — the exact bytes a pool-op
+    /// transaction's `payload` field carries.
+    pub fn encode_payload(&self) -> Vec<u8> {
+        borsh::to_vec(self).expect("borsh serialization of PoolOp cannot fail")
+    }
+
+    /// This op's canonical type byte — the borsh enum tag, reused verbatim as
+    /// `NotePoolSigningHash`'s `op_type` preimage byte (P5.2).
+    pub fn op_type(&self) -> u8 {
+        match self {
+            PoolOp::Mint(_) => 0,
+            PoolOp::Transfer(_) => 1,
+            PoolOp::Redeem(_) => 2,
+        }
+    }
 }
 
 #[cfg(test)]

@@ -2,7 +2,10 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use super::ghostdag::GhostdagData;
+use super::notepool::DbNotePoolStore;
+use super::notepool_smt::DbNotePoolSmtStore;
 use super::utxo_set::DbUtxoSetStore;
+use kaspa_consensus_core::notepool::PoolDiff;
 use arc_swap::ArcSwap;
 use kaspa_consensus_core::api::stats::VirtualStateStats;
 use kaspa_consensus_core::utxo::pre_toccata::PreToccataUtxoDiff;
@@ -193,14 +196,37 @@ impl LkgVirtualState {
 pub struct VirtualStores {
     pub state: DbVirtualStateStore,
     pub utxo_set: DbUtxoSetStore,
+    /// The note pool's state map at virtual (`sn -> (d, pk)`, FORK-PLAN P6.4) — the pool
+    /// analog of `utxo_set`, updated by the same accumulated-diff application in
+    /// `commit_virtual_state`.
+    pub pool_state: DbNotePoolStore,
+    /// The pool commitment (SMT root + branch nodes) at virtual, kept in lockstep with
+    /// `pool_state`.
+    pub pool_smt: DbNotePoolSmtStore,
+    /// Virtual's own mergeset pool diff — the pool analog of `VirtualState::utxo_diff`
+    /// (applied to the sink's pool state it yields virtual's pool state). Kept as its own
+    /// item rather than a `VirtualState` field to leave that type's versioned
+    /// serialization untouched; committed in the same batch, under the same lock.
+    pub pool_diff: CachedDbItem<PoolDiff>,
 }
 
 impl VirtualStores {
     pub fn new(db: Arc<DB>, lkg_virtual_state: LkgVirtualState, utxoset_cache_policy: CachePolicy) -> Self {
         Self {
             state: DbVirtualStateStore::new(db.clone(), lkg_virtual_state),
-            utxo_set: DbUtxoSetStore::new(db, utxoset_cache_policy, DatabaseStorePrefixes::VirtualUtxoset.into()),
+            utxo_set: DbUtxoSetStore::new(db.clone(), utxoset_cache_policy, DatabaseStorePrefixes::VirtualUtxoset.into()),
+            // Modest fixed cache counts: pool entries are 65 bytes each, and P6.4-era
+            // traffic is test/devnet scale. Revisit sizing alongside P6.8 (pool IBD).
+            pool_state: DbNotePoolStore::new(db.clone(), CachePolicy::Count(100_000)),
+            pool_smt: DbNotePoolSmtStore::new(db.clone(), CachePolicy::Count(100_000)),
+            pool_diff: CachedDbItem::new(db, DatabaseStorePrefixes::VirtualNotePoolDiff.into()),
         }
+    }
+
+    /// Virtual's own mergeset pool diff; an uninitialized store (fresh DB, genesis)
+    /// reads as the empty diff.
+    pub fn virtual_pool_diff(&self) -> PoolDiff {
+        self.pool_diff.read().optional().unwrap().unwrap_or_default()
     }
 }
 

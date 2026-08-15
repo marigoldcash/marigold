@@ -22,6 +22,7 @@ impl BlockBodyProcessor {
         let mass = self.check_block_mass(block)?;
         self.check_duplicate_transactions(block)?;
         self.check_block_double_spends(block)?;
+        self.check_block_double_serials(block)?;
         self.check_no_chained_transactions(block)?;
         Ok(mass)
     }
@@ -128,6 +129,35 @@ impl BlockBodyProcessor {
         for input in block.transactions.iter().flat_map(|tx| &tx.inputs) {
             if !existing.insert(input.previous_outpoint) {
                 return Err(RuleError::DoubleSpendInSameBlock(input.previous_outpoint));
+            }
+        }
+        Ok(())
+    }
+
+    /// The note-pool analog of [`Self::check_block_double_spends`] (FORK-PLAN P6.4): no
+    /// serial may be consumed by two pool-op transactions in one block. Required for the
+    /// same reason the UTXO rule exists — transactions within a block are validated in
+    /// parallel against the same composed view, so intra-block conflicts must be a
+    /// block-validity rule, not a validation-order outcome. (Duplicates *within* one op
+    /// are already tx-invalid via `validate_stateless`, checked per tx in isolation.)
+    fn check_block_double_serials(self: &Arc<Self>, block: &Block) -> BlockProcessResult<()> {
+        use kaspa_consensus_core::notepool::PoolOp;
+        use kaspa_consensus_core::subnets::SUBNETWORK_ID_NOTE_POOL;
+
+        let mut existing = HashSet::new();
+        for tx in block.transactions.iter().filter(|tx| tx.subnetwork_id == SUBNETWORK_ID_NOTE_POOL) {
+            // Malformed payloads are rejected per tx by `check_transactions_in_isolation`
+            // before this runs; skip defensively rather than double-error here.
+            let Some(op) = PoolOp::decode_payload(&tx.payload) else { continue };
+            let consumed_groups = match &op {
+                PoolOp::Mint(_) => continue,
+                PoolOp::Transfer(transfer) => &transfer.consumed,
+                PoolOp::Redeem(redeem) => &redeem.consumed,
+            };
+            for &serial in consumed_groups.iter().flat_map(|g| &g.serials) {
+                if !existing.insert(serial) {
+                    return Err(RuleError::DoubleSerialSpendInSameBlock(serial));
+                }
             }
         }
         Ok(())

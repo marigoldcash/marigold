@@ -30,6 +30,7 @@ use crate::{
             selected_chain::{DbSelectedChainStore, SelectedChainStore},
             statuses::{DbStatusesStore, StatusesStore, StatusesStoreBatchExtensions, StatusesStoreReader},
             tips::{DbTipsStore, TipsStoreReader},
+            notepool_diffs::{DbNotePoolDiffsStore, NotePoolDiffsStoreReader},
             utxo_diffs::{DbUtxoDiffsStore, UtxoDiffsStoreReader},
             utxo_multisets::{DbUtxoMultisetsStore, UtxoMultisetsStoreReader},
             virtual_state::{LkgVirtualState, VirtualState, VirtualStateStoreReader, VirtualStores},
@@ -61,6 +62,7 @@ use kaspa_consensus_core::{
     merkle::calc_hash_merkle_root,
     mining_rules::MiningRules,
     pruning::PruningPointsList,
+    notepool::PoolViewComposition,
     tx::{MutableTransaction, Transaction},
     utxo::{
         utxo_diff::UtxoDiff,
@@ -141,6 +143,8 @@ pub struct VirtualStateProcessor {
     pub(super) utxo_diffs_store: Arc<DbUtxoDiffsStore>,
     pub(super) utxo_multisets_store: Arc<DbUtxoMultisetsStore>,
     pub(super) acceptance_data_store: Arc<DbAcceptanceDataStore>,
+    // Note-pool per-chain-block diffs (FORK-PLAN P6.4), kept in lockstep with `utxo_diffs_store`
+    pub(super) notepool_diffs_store: Arc<DbNotePoolDiffsStore>,
     pub(super) virtual_stores: Arc<RwLock<VirtualStores>>,
     pub(super) pruning_meta_stores: Arc<RwLock<PruningMetaStores>>,
 
@@ -228,6 +232,7 @@ impl VirtualStateProcessor {
             utxo_diffs_store: storage.utxo_diffs_store.clone(),
             utxo_multisets_store: storage.utxo_multisets_store.clone(),
             acceptance_data_store: storage.acceptance_data_store.clone(),
+            notepool_diffs_store: storage.notepool_diffs_store.clone(),
             virtual_stores: storage.virtual_stores.clone(),
             pruning_meta_stores: storage.pruning_meta_stores.clone(),
             lkg_virtual_state: storage.lkg_virtual_state.clone(),
@@ -317,9 +322,20 @@ impl VirtualStateProcessor {
         drop(prune_guard);
         let prev_sink = prev_state.ghostdag_data.selected_parent;
         let mut accumulated_diff = prev_state.utxo_diff.clone().to_reversed();
+        // The pool analog of the line above: virtual's own pool diff, reversed, so the
+        // accumulated pool diff initially transforms virtual's pool state to prev_sink's
+        // (mirrors `VirtualState::utxo_diff`; stored separately, see `VirtualStores::pool_diff`).
+        let mut accumulated_pool_diff = virtual_read.virtual_pool_diff().to_reversed();
 
-        let (new_sink, virtual_parent_candidates) =
-            self.sink_search_algorithm(&virtual_read, &mut accumulated_diff, prev_sink, tips, finality_point, pruning_point);
+        let (new_sink, virtual_parent_candidates) = self.sink_search_algorithm(
+            &virtual_read,
+            &mut accumulated_diff,
+            &mut accumulated_pool_diff,
+            prev_sink,
+            tips,
+            finality_point,
+            pruning_point,
+        );
         let (virtual_parents, virtual_ghostdag_data) = self.pick_virtual_parents(new_sink, virtual_parent_candidates, pruning_point);
         assert_eq!(virtual_ghostdag_data.selected_parent, new_sink);
 
@@ -336,6 +352,7 @@ impl VirtualStateProcessor {
                 virtual_ghostdag_data,
                 sink_multiset,
                 &mut accumulated_diff,
+                &mut accumulated_pool_diff,
                 &chain_path,
             )
             .expect("all possible rule errors are unexpected here");
@@ -395,11 +412,19 @@ impl VirtualStateProcessor {
     }
 
     /// Calculates the UTXO state of `to` starting from the state of `from`.
-    /// The provided `diff` is assumed to initially hold the UTXO diff of `from` from virtual.
+    /// The provided `diff` is assumed to initially hold the UTXO diff of `from` from virtual
+    /// (`pool_diff` likewise for the note pool — the two walk in lockstep everywhere).
     /// The function returns the top-most UTXO-valid block on `chain(to)` which is ideally
     /// `to` itself (with the exception of returning `from` if `to` is already known to be UTXO disqualified).
     /// When returning it is guaranteed that `diff` holds the diff of the returned block from virtual
-    fn calculate_utxo_state_relatively(&self, stores: &VirtualStores, diff: &mut UtxoDiff, from: Hash, to: Hash) -> Hash {
+    fn calculate_utxo_state_relatively(
+        &self,
+        stores: &VirtualStores,
+        diff: &mut UtxoDiff,
+        pool_diff: &mut kaspa_consensus_core::notepool::PoolDiff,
+        from: Hash,
+        to: Hash,
+    ) -> Hash {
         // Avoid reorging if disqualified status is already known
         if self.statuses_store.read().get(to).unwrap() == StatusDisqualifiedFromChain {
             return from;
@@ -417,6 +442,10 @@ impl VirtualStateProcessor {
             let mergeset_diff = self.utxo_diffs_store.get(current).unwrap();
             // Apply the diff in reverse
             diff.with_diff_in_place(&mergeset_diff.as_reversed()).unwrap();
+            // Same walk for the pool diff (written in the same batch as the UTXO diff,
+            // so a UTXO-valid chain block always has both)
+            let mergeset_pool_diff = self.notepool_diffs_store.get(current).unwrap();
+            pool_diff.with_diff_in_place(&mergeset_pool_diff.as_reversed()).unwrap();
         }
 
         let split_point = split_point.expect("chain iterator was expected to reach the reorg split point");
@@ -444,6 +473,8 @@ impl VirtualStateProcessor {
             match self.utxo_diffs_store.get(current) {
                 Ok(mergeset_diff) => {
                     diff.with_diff_in_place(mergeset_diff.deref()).unwrap();
+                    let mergeset_pool_diff = self.notepool_diffs_store.get(current).unwrap();
+                    pool_diff.with_diff_in_place(mergeset_pool_diff.deref()).unwrap();
                     diff_point = current;
                 }
                 Err(StoreError::KeyNotFound(_)) => {
@@ -458,11 +489,12 @@ impl VirtualStateProcessor {
 
                     let selected_parent_multiset_hash = self.utxo_multisets_store.get(selected_parent).unwrap();
                     let selected_parent_utxo_view = (&stores.utxo_set).compose(&*diff);
+                    let selected_parent_pool_view = PoolViewComposition::compose(&stores.pool_state, &*pool_diff);
 
                     let mut ctx = UtxoProcessingContext::new(mergeset_data.into(), selected_parent_multiset_hash);
 
-                    self.calculate_utxo_state(&mut ctx, &selected_parent_utxo_view, pov_daa_score);
-                    let res = self.verify_expected_utxo_state(&mut ctx, &selected_parent_utxo_view, &header);
+                    self.calculate_utxo_state(&mut ctx, &selected_parent_utxo_view, &selected_parent_pool_view, pov_daa_score);
+                    let res = self.verify_expected_utxo_state(&mut ctx, &selected_parent_utxo_view, &selected_parent_pool_view, &header);
 
                     match res {
                         Err(rule_error) => {
@@ -473,18 +505,20 @@ impl VirtualStateProcessor {
                         Ok(smt_build) => {
                             debug!("VIRTUAL PROCESSOR, UTXO validated for {current}");
 
-                            // Accumulate the diff
+                            // Accumulate the diffs
                             diff.with_diff_in_place(&ctx.mergeset_diff).unwrap();
+                            pool_diff.with_diff_in_place(&ctx.mergeset_pool_diff).unwrap();
                             // Update the diff point
                             diff_point = current;
                             // Count lane updates from verified chain blocks
                             if let Some(ref build) = smt_build {
                                 lane_update_counter += build.lane_update_count() as u64;
                             }
-                            // Commit UTXO + SMT data for current chain block
+                            // Commit UTXO + pool + SMT data for current chain block
                             self.commit_utxo_state(
                                 current,
                                 ctx.mergeset_diff,
+                                ctx.mergeset_pool_diff,
                                 ctx.multiset_hash,
                                 ctx.mergeset_acceptance_data,
                                 ctx.pruning_sample_from_pov.expect("verified"),
@@ -509,10 +543,12 @@ impl VirtualStateProcessor {
         diff_point
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn commit_utxo_state(
         &self,
         current: Hash,
         mergeset_diff: UtxoDiff,
+        mergeset_pool_diff: kaspa_consensus_core::notepool::PoolDiff,
         multiset: MuHash,
         acceptance_data: AcceptanceData,
         pruning_sample_from_pov: Hash,
@@ -521,6 +557,7 @@ impl VirtualStateProcessor {
     ) {
         let mut batch = WriteBatch::default();
         self.utxo_diffs_store.insert_batch(&mut batch, current, Arc::new(mergeset_diff)).unwrap();
+        self.notepool_diffs_store.insert_batch(&mut batch, current, Arc::new(mergeset_pool_diff)).unwrap();
         self.utxo_multisets_store.insert_batch(&mut batch, current, multiset).unwrap();
         self.acceptance_data_store.insert_batch(&mut batch, current, Arc::new(acceptance_data)).unwrap();
         // Note we call idempotent since this field can be populated during IBD with headers proof
@@ -540,6 +577,7 @@ impl VirtualStateProcessor {
         drop(write_guard);
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn calculate_and_commit_virtual_state(
         &self,
         virtual_read: RwLockUpgradableReadGuard<'_, VirtualStores>,
@@ -547,19 +585,23 @@ impl VirtualStateProcessor {
         virtual_ghostdag_data: GhostdagData,
         selected_parent_multiset: MuHash,
         accumulated_diff: &mut UtxoDiff,
+        accumulated_pool_diff: &mut kaspa_consensus_core::notepool::PoolDiff,
         chain_path: &ChainPath,
     ) -> Result<Arc<VirtualState>, RuleError> {
-        let new_virtual_state = self.calculate_virtual_state(
+        let (new_virtual_state, virtual_pool_diff) = self.calculate_virtual_state(
             &virtual_read,
             virtual_parents,
             virtual_ghostdag_data,
             selected_parent_multiset,
             accumulated_diff,
+            accumulated_pool_diff,
         )?;
-        self.commit_virtual_state(virtual_read, new_virtual_state.clone(), accumulated_diff, chain_path);
+        self.commit_virtual_state(virtual_read, new_virtual_state.clone(), virtual_pool_diff, accumulated_diff, accumulated_pool_diff, chain_path);
         Ok(new_virtual_state)
     }
 
+    /// Returns the new virtual state together with virtual's own mergeset pool diff (the
+    /// pool analog of `VirtualState::utxo_diff`, stored via `VirtualStores::pool_diff`).
     pub(super) fn calculate_virtual_state(
         &self,
         virtual_stores: &VirtualStores,
@@ -567,8 +609,10 @@ impl VirtualStateProcessor {
         virtual_ghostdag_data: GhostdagData,
         selected_parent_multiset: MuHash,
         accumulated_diff: &mut UtxoDiff,
-    ) -> Result<Arc<VirtualState>, RuleError> {
+        accumulated_pool_diff: &mut kaspa_consensus_core::notepool::PoolDiff,
+    ) -> Result<(Arc<VirtualState>, kaspa_consensus_core::notepool::PoolDiff), RuleError> {
         let selected_parent_utxo_view = (&virtual_stores.utxo_set).compose(&*accumulated_diff);
+        let selected_parent_pool_view = PoolViewComposition::compose(&virtual_stores.pool_state, &*accumulated_pool_diff);
         let mut ctx = UtxoProcessingContext::new((&virtual_ghostdag_data).into(), selected_parent_multiset);
 
         // Calc virtual DAA score, difficulty bits and past median time
@@ -577,10 +621,11 @@ impl VirtualStateProcessor {
         let virtual_past_median_time = self.window_manager.calc_past_median_time(&virtual_ghostdag_data)?.0;
 
         // Calc virtual UTXO state relative to selected parent
-        self.calculate_utxo_state(&mut ctx, &selected_parent_utxo_view, virtual_daa_window.daa_score);
+        self.calculate_utxo_state(&mut ctx, &selected_parent_utxo_view, &selected_parent_pool_view, virtual_daa_window.daa_score);
 
-        // Update the accumulated diff
+        // Update the accumulated diffs
         accumulated_diff.with_diff_in_place(&ctx.mergeset_diff).unwrap();
+        accumulated_pool_diff.with_diff_in_place(&ctx.mergeset_pool_diff).unwrap();
 
         if self.toccata_activation.is_within_range_from_activation(virtual_daa_window.daa_score, 10_000) {
             self.toccata_logger.report_activation();
@@ -596,6 +641,10 @@ impl VirtualStateProcessor {
             ctx.accepted_tx_ids.clone()
         };
 
+        // Take the pool diff out before `virtual_ghostdag_data` is moved below (ctx's
+        // `Refs` borrow of it must end before that move)
+        let virtual_pool_diff = std::mem::take(&mut ctx.mergeset_pool_diff);
+
         // Build the new virtual state
         let virtual_state = Arc::new(VirtualState::new(
             virtual_parents,
@@ -609,7 +658,7 @@ impl VirtualStateProcessor {
             virtual_daa_window.mergeset_non_daa,
             virtual_ghostdag_data,
         ));
-        Ok(virtual_state)
+        Ok((virtual_state, virtual_pool_diff))
     }
 
     /// KIP-21: Compute the sequencing commitment for the virtual block.
@@ -950,7 +999,9 @@ impl VirtualStateProcessor {
         &self,
         virtual_read: RwLockUpgradableReadGuard<'_, VirtualStores>,
         new_virtual_state: Arc<VirtualState>,
+        virtual_pool_diff: kaspa_consensus_core::notepool::PoolDiff,
         accumulated_diff: &UtxoDiff,
+        accumulated_pool_diff: &kaspa_consensus_core::notepool::PoolDiff,
         chain_path: &ChainPath,
     ) {
         let mut batch = WriteBatch::default();
@@ -959,6 +1010,13 @@ impl VirtualStateProcessor {
 
         // Apply the accumulated diff to the virtual UTXO set
         virtual_write.utxo_set.write_diff_batch(&mut batch, accumulated_diff).unwrap();
+
+        // Apply the accumulated pool diff to the virtual pool state + commitment (P6.4):
+        // the state map and SMT root move in lockstep with the UTXO set, in the same batch
+        virtual_write.pool_state.write_diff_batch(&mut batch, accumulated_pool_diff).unwrap();
+        virtual_write.pool_smt.apply_diff_batch(&mut batch, accumulated_pool_diff).unwrap();
+        // Store virtual's own mergeset pool diff (read back, reversed, at the next resolve)
+        virtual_write.pool_diff.write(kaspa_database::prelude::BatchDbWriter::new(&mut batch), &virtual_pool_diff).unwrap();
 
         // Update virtual state
         virtual_write.state.set_batch(&mut batch, new_virtual_state.clone()).unwrap();
@@ -1010,10 +1068,12 @@ impl VirtualStateProcessor {
     /// The function returns with `diff` being the diff of the new sink from previous virtual.
     /// In addition to the found sink the function also returns a queue of additional virtual
     /// parent candidates ordered in descending blue work order.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn sink_search_algorithm(
         &self,
         stores: &VirtualStores,
         diff: &mut UtxoDiff,
+        pool_diff: &mut kaspa_consensus_core::notepool::PoolDiff,
         prev_sink: Hash,
         tips: Vec<Hash>,
         finality_point: Hash,
@@ -1036,7 +1096,7 @@ impl VirtualStateProcessor {
         loop {
             let candidate = heap.pop().expect("valid sink must exist").hash;
             if self.reachability_service.is_chain_ancestor_of(finality_point, candidate) {
-                diff_point = self.calculate_utxo_state_relatively(stores, diff, diff_point, candidate);
+                diff_point = self.calculate_utxo_state_relatively(stores, diff, pool_diff, diff_point, candidate);
                 if diff_point == candidate {
                     // This indicates that candidate has valid UTXO state and that `diff` represents its diff from virtual
 
@@ -1307,14 +1367,16 @@ impl VirtualStateProcessor {
         })
     }
 
-    fn validate_block_template_transactions_in_parallel<V: UtxoView + Sync>(
+    fn validate_block_template_transactions_in_parallel<V: UtxoView + Sync, P: kaspa_consensus_core::notepool::PoolStateView + Sync>(
         &self,
         txs: &[Transaction],
         virtual_state: &VirtualState,
         utxo_view: &V,
+        pool_view: &P,
     ) -> Vec<TxResult<u64>> {
-        self.thread_pool
-            .install(|| txs.par_iter().map(|tx| self.validate_block_template_transaction(tx, virtual_state, &utxo_view)).collect())
+        self.thread_pool.install(|| {
+            txs.par_iter().map(|tx| self.validate_block_template_transaction(tx, virtual_state, &utxo_view, pool_view)).collect()
+        })
     }
 
     fn validate_block_template_transaction(
@@ -1322,6 +1384,7 @@ impl VirtualStateProcessor {
         tx: &Transaction,
         virtual_state: &VirtualState,
         utxo_view: &impl UtxoView,
+        pool_view: &impl kaspa_consensus_core::notepool::PoolStateView,
     ) -> TxResult<u64> {
         // No need to validate the transaction in isolation since we rely on the mining manager to submit transactions
         // which were previously validated through `validate_mempool_transaction_and_populate`, hence we only perform
@@ -1340,6 +1403,7 @@ impl VirtualStateProcessor {
         let ValidatedTransaction { calculated_fee, .. } = self.validate_transaction_in_utxo_context(
             tx,
             utxo_view,
+            pool_view,
             virtual_state.daa_score,
             virtual_state.daa_score,
             TxValidationFlags::Full,
@@ -1366,9 +1430,10 @@ impl VirtualStateProcessor {
         let virtual_read = self.virtual_stores.read();
         let virtual_state = virtual_read.state.get().unwrap();
         let virtual_utxo_view = &virtual_read.utxo_set;
+        let virtual_pool_view = &virtual_read.pool_state;
 
         let mut invalid_transactions = HashMap::new();
-        let results = self.validate_block_template_transactions_in_parallel(&txs, &virtual_state, &virtual_utxo_view);
+        let results = self.validate_block_template_transactions_in_parallel(&txs, &virtual_state, &virtual_utxo_view, virtual_pool_view);
         for (tx, res) in txs.iter().zip(results) {
             match res {
                 Err(e) => {
@@ -1390,7 +1455,7 @@ impl VirtualStateProcessor {
             has_rejections = false;
             let next_batch = tx_selector.select_transactions(); // Note that once next_batch is empty the loop will exit
             let next_batch_results =
-                self.validate_block_template_transactions_in_parallel(&next_batch, &virtual_state, &virtual_utxo_view);
+                self.validate_block_template_transactions_in_parallel(&next_batch, &virtual_state, &virtual_utxo_view, virtual_pool_view);
             for (tx, res) in next_batch.into_iter().zip(next_batch_results) {
                 match res {
                     Err(e) => {
@@ -1426,11 +1491,12 @@ impl VirtualStateProcessor {
         txs: &[Transaction],
         virtual_state: &VirtualState,
         utxo_view: &impl UtxoView,
+        pool_view: &impl kaspa_consensus_core::notepool::PoolStateView,
     ) -> Result<(), RuleError> {
         // Search for invalid transactions
         let mut invalid_transactions = HashMap::new();
         for tx in txs.iter() {
-            if let Err(e) = self.validate_block_template_transaction(tx, virtual_state, utxo_view) {
+            if let Err(e) = self.validate_block_template_transaction(tx, virtual_state, utxo_view, pool_view) {
                 invalid_transactions.insert(tx.id(), e);
             }
         }
@@ -1531,7 +1597,16 @@ impl VirtualStateProcessor {
     /// Note that pruning point-related stores are initialized by `init`
     pub fn process_genesis(self: &Arc<Self>) {
         // Write the UTXO state of genesis
-        self.commit_utxo_state(self.genesis.hash, UtxoDiff::default(), MuHash::new(), AcceptanceData::default(), ZERO_HASH, None, 0);
+        self.commit_utxo_state(
+            self.genesis.hash,
+            UtxoDiff::default(),
+            kaspa_consensus_core::notepool::PoolDiff::default(),
+            MuHash::new(),
+            AcceptanceData::default(),
+            ZERO_HASH,
+            None,
+            0,
+        );
 
         // Init the virtual selected chain store
         let mut batch = WriteBatch::default();
@@ -1547,6 +1622,8 @@ impl VirtualStateProcessor {
         self.commit_virtual_state(
             self.virtual_stores.upgradable_read(),
             Arc::new(VirtualState::from_genesis(&self.genesis, ghostdag_data, accepted_id_digests)),
+            Default::default(),
+            &Default::default(),
             &Default::default(),
             &Default::default(),
         );
@@ -1595,9 +1672,14 @@ impl VirtualStateProcessor {
         // Validate transactions of the pruning point itself.
         // Mirrors the same contextual info used by validate_block_template_transaction and verify_expected_utxo_state.
         let new_pruning_point_transactions = self.block_transactions_store.get(new_pruning_point).unwrap();
+        // Pool state is NOT imported at the pruning point yet (FORK-PLAN P6.8's job) — the
+        // pool view here is the empty local one, so a pruning point whose own txs contain
+        // pool ops would fail validation until P6.8 lands. Acceptable pre-P6.8: no pool
+        // ops exist on any network this code syncs from before then.
         let validated_transactions = self.validate_transactions_in_parallel(
             &new_pruning_point_transactions,
             &virtual_read.utxo_set,
+            &virtual_read.pool_state,
             new_pruning_point_header.daa_score,
             new_pruning_point_header.daa_score,
             TxValidationFlags::Full,
@@ -1635,6 +1717,7 @@ impl VirtualStateProcessor {
             virtual_ghostdag_data,
             imported_utxo_multiset.clone(),
             &mut UtxoDiff::default(),
+            &mut kaspa_consensus_core::notepool::PoolDiff::default(),
             &ChainPath::default(),
         )?;
 

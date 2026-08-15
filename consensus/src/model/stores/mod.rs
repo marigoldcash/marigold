@@ -8,6 +8,7 @@ pub mod ghostdag;
 pub mod headers;
 pub mod headers_selected_tip;
 pub mod notepool;
+pub mod notepool_diffs;
 pub mod notepool_smt;
 pub mod past_pruning_points;
 pub mod pruning;

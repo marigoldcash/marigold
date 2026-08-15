@@ -86,6 +86,8 @@ pub enum DatabaseStorePrefixes {
     NotePoolState = 90,
     NotePoolSmtBranches = 91,
     NotePoolSmtRoot = 92,
+    NotePoolDiffs = 93,
+    VirtualNotePoolDiff = 94,
 
     // ---- Separator ----
     /// Reserved as a separator

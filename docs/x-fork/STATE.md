@@ -4,7 +4,7 @@ Snapshot of everything decided and built so far, so any fresh coding session on 
 machine can continue from the repo alone. Read this together with [FORK-PLAN.md](../../FORK-PLAN.md).
 Update this file whenever off-repo state changes (domains, accounts, infra).
 
-Last updated: 2026-08-16 (P6.3 complete — stateless pool-op validation implemented; next step P6.4 is ⚠️ HARD)
+Last updated: 2026-08-16 (P6.4 complete — pool ops live in the virtual pipeline; next step P6.5 is a 🧑‍⚖️ DECISION)
 
 ## What this project is
 
@@ -79,18 +79,43 @@ substitute for it.
 
 ## Where execution stands
 
-- **Next step: P6.4 — stateful validation in the virtual pipeline.** ⚠️ **HARD** —
-  per the user's own "carry on through step 6 until a step marked HARD" instruction,
-  this is the stopping point for this session/model. Wires pool ops into
-  `consensus/src/pipeline/virtual_processor` (model: `utxo_validation.rs`'s composed-
-  view mergeset walk): serial existence, signature verification against a serial's
-  *current* `pk`, freshness-window comparison against the validation context's own
-  POV DAA score, first-accepted-wins for conflicting ops in merged blocks, actual
-  conservation arithmetic (needs consumed notes' current denominations from the live
-  pool view — genuinely stateful, unlike anything P6.3 could check), and
-  `PoolDiff`/`DbNotePoolSmtStore::apply_diff`/`unapply_diff` wiring on virtual-chain
-  changes (reorgs). Needs a stronger model per the plan's own flag — do not attempt
-  with a bite-size session.
+- **Next step: P6.5 — commitment placement.** 🧑‍⚖️ **DECISION + implementation**:
+  where the pool root lives — a new header field beside `utxo_commitment` (the plan
+  and POOL-SPEC.md P5.1 both recommend this; consensus-breaking header change, new
+  block version, touches mining/stratum + regenerates the P2.5 genesis hashes) vs.
+  inside the coinbase payload. The virtual pool root is already maintained
+  incrementally (P6.4), so this step is "surface an existing value in the header and
+  verify it per block", not new state machinery.
+- **P6.4 is done (⚠️ HARD — done with a stronger model per the plan's flag).** Pool
+  ops are live in the virtual pipeline end-to-end. The core: validation happens
+  inside `validate_transaction_in_utxo_context` against a composed pool view
+  (`PoolStateView`/`ComposedPoolView`, mirrors `UtxoView`), so **first-accepted-wins
+  is the existing composed-view mergeset mechanism** — no new conflict rule, exactly
+  as P5.3 designed. `UtxoProcessingContext` accumulates a `mergeset_pool_diff` in
+  lockstep with the UTXO diff; per-chain-block diffs persist in a new
+  `notepool_diffs` store (prefix 93, same batch as `utxo_diffs`); virtual pool state
+  (map + SMT root) lives in `VirtualStores` (`pool_state`/`pool_smt`/`pool_diff`,
+  prefix 94) and is applied/unapplied via the same accumulated-diff walks as the
+  UTXO set, including reorg walk-downs. New hashers `NotePoolSerialHash`/
+  `NotePoolSigningHash`/`NotePoolOutputsHash` implement P5.2's exact preimages.
+  **Consensus-critical subtlety, documented in code**: freshness is non-monotonic in
+  POV DAA score, so signature+freshness checks are skipped on the selected-parent
+  replay (riding `SkipScriptChecks`) — re-imposing them would fork acceptance data.
+  **Two real fixes**: a div-by-zero in `calc_storage_mass` for zero-input txs (pure
+  transfers are the first-ever such shape; KIP-9's |I|/A(I) term vanishes → mass =
+  max(0, harmonic_outs)); and the mint produced-serial existence check made an
+  *active* rule until P6.6's value binding makes duplicated zero-input mints
+  impossible (the spec's "guaranteed by construction" reasoning presumed P6.6).
+  Body-level `check_block_double_serials` mirrors the UTXO double-spend rule
+  (parallel per-tx validation requires intra-block conflicts to be block-invalid).
+  **Deferred with in-code notes**: transparent value binding/fees/mass → P6.6;
+  mempool rejects pool txs until P6.7 (no conflict policy yet → template self-DoS
+  risk); pool state empty at pruning import until P6.8. All three P6.4 verify
+  criteria have passing consensus tests
+  (`consensus/src/pipeline/virtual_processor/notepool_tests.rs`), including
+  double-rotate determinism under reversed insertion order and reorg convergence to
+  a never-forked reference node's exact pool root. consensus-core 121 / consensus 86
+  / workspace 1,206 tests passing; integration suite green.
 - **P6.3 is done.** [validate.rs](../../consensus/core/src/notepool/validate.rs)'s
   `validate_stateless(&PoolOp)` — checks that hold with zero pool/consensus state.
   Notable finding: three of P6.3's own named checks ("denominations from the P1.6

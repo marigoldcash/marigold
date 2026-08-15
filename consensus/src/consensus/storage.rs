@@ -20,6 +20,7 @@ use crate::{
         smt_metadata::DbSmtMetadataStore,
         statuses::DbStatusesStore,
         tips::DbTipsStore,
+        notepool_diffs::DbNotePoolDiffsStore,
         utxo_diffs::DbUtxoDiffsStore,
         utxo_multisets::DbUtxoMultisetsStore,
         virtual_state::{LkgVirtualState, VirtualStores},
@@ -29,6 +30,7 @@ use crate::{
 
 use super::cache_policy_builder::CachePolicyBuilder as PolicyBuilder;
 use kaspa_consensus_core::{BlockHashSet, blockstatus::BlockStatus};
+use kaspa_database::prelude::CachePolicy;
 use kaspa_database::registry::DatabaseStorePrefixes;
 use kaspa_hashes::Hash;
 use kaspa_smt_store::processor::SmtStores;
@@ -64,6 +66,10 @@ pub struct ConsensusStorage {
     pub utxo_diffs_store: Arc<DbUtxoDiffsStore>,
     pub utxo_multisets_store: Arc<DbUtxoMultisetsStore>,
     pub acceptance_data_store: Arc<DbAcceptanceDataStore>,
+
+    // Note-pool stores (FORK-PLAN P6.4): per-chain-block pool diffs, the pool analog of
+    // `utxo_diffs_store`. The virtual pool state itself lives inside `virtual_stores`.
+    pub notepool_diffs_store: Arc<DbNotePoolDiffsStore>,
 
     // Block window caches
     pub block_window_cache_for_difficulty: Arc<BlockWindowCacheStore>,
@@ -214,6 +220,8 @@ impl ConsensusStorage {
         // Txs
         let block_transactions_store = Arc::new(DbBlockTransactionsStore::new(db.clone(), transactions_builder.build()));
         let utxo_diffs_store = Arc::new(DbUtxoDiffsStore::new(db.clone(), utxo_diffs_builder.build()));
+        // Pool diffs are far smaller than UTXO diffs (65 bytes/entry); a modest count cache suffices for P6.4-era scale.
+        let notepool_diffs_store = Arc::new(DbNotePoolDiffsStore::new(db.clone(), CachePolicy::Count(10_000)));
         let utxo_multisets_store = Arc::new(DbUtxoMultisetsStore::new(db.clone(), block_data_builder.build()));
         let acceptance_data_store = Arc::new(DbAcceptanceDataStore::new(db.clone(), acceptance_data_builder.build()));
 
@@ -268,6 +276,7 @@ impl ConsensusStorage {
             depth_store,
             pruning_samples_store,
             utxo_diffs_store,
+            notepool_diffs_store,
             utxo_multisets_store,
             block_window_cache_for_difficulty,
             block_window_cache_for_past_median_time,

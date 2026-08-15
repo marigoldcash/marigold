@@ -55,6 +55,9 @@ blake3_hasher! {
     struct NotePoolLeafHash => b"NotePoolLeaf",
     struct NotePoolSmt => b"NotePoolSmt",
     struct NotePoolSmtCollapsed => b"NotePoolSmtCollapsed",
+    struct NotePoolSerialHash => b"NotePoolSerial",
+    struct NotePoolSigningHash => b"NotePoolSig",
+    struct NotePoolOutputsHash => b"NotePoolOutputs",
 }
 
 #[macro_export]

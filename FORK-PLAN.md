@@ -1048,7 +1048,7 @@ store → validation → pipeline → mempool → sync → RPC. Every step lands
   all three op kinds. Full `cargo test -p kaspa-consensus-core` (94 passed) and full
   `cargo build --workspace` clean.
 
-- [ ] **P6.4 — Stateful validation in the virtual pipeline.** ⚠️ **HARD.** Wire pool ops
+- [x] **P6.4 — Stateful validation in the virtual pipeline.** ⚠️ **HARD.** Wire pool ops
   into [consensus/src/pipeline/virtual_processor](consensus/src/pipeline/virtual_processor/processor.rs)
   (model: how `utxo_validation.rs` resolves UTXO double-spends at the accepted-transaction
   level): serial exists / doesn't (mint), signature verifies against current pk, freshness
@@ -1056,6 +1056,70 @@ store → validation → pipeline → mempool → sync → RPC. Every step lands
   merged blocks, and `PoolDiff` application/rollback on virtual-chain changes (reorgs).
   ✅ *Verify:* consensus tests: parallel-block double-rotate resolves deterministically;
   a reorg past a pool op restores the prior pool root; stale-anchor ops rejected.
+  **Executed.** Pool ops now validate inside `validate_transaction_in_utxo_context`
+  ([utxo_validation.rs](consensus/src/pipeline/virtual_processor/utxo_validation.rs)),
+  so "first accepted wins" falls out of the *existing* composed-view mergeset walk with
+  no new conflict rule — exactly P5.3's design. The full plumbing, layer by layer:
+  **(1) Hashing** — three new blake3 hashers (`NotePoolSerialHash`/`NotePoolSigningHash`/
+  `NotePoolOutputsHash`) + [hashing.rs](consensus/core/src/notepool/hashing.rs) functions
+  implementing P5.2's exact preimages (`sn = H(tx_id||index)`; the v1.1 signing hash
+  covering version, op_type, sorted serials, the whole produced list, the transparent
+  outputs hash — review 1's malleability fix — and the anchor).
+  **(2) Stateful validation** — `validate_stateful`
+  ([validate.rs](consensus/core/src/notepool/validate.rs)): existence, same-`pk`-per-group,
+  BIP340 verify against the serial's *current* pk, inclusive freshness window
+  (`POOL_FRESHNESS_WINDOW = 36_000`), pool-side Transfer conservation, and `PoolDiff`
+  construction with derived serials. A `skip_signature_and_freshness` flag rides
+  `TxValidationFlags::SkipScriptChecks` for the selected-parent replay — consensus-critical
+  because freshness is **non-monotonic** in POV DAA score (unlike maturity): re-imposing
+  it at replay would make a child's acceptance diverge from what its parent committed.
+  **(3) Diff algebra + views** — `PoolDiff` gained `UtxoDiff`'s exact `with_diff_in_place`
+  composition algebra (minus the DAA-score dimension, which the pool doesn't have) and
+  `PoolStateView`/`ComposedPoolView` mirror `UtxoView`
+  ([view.rs](consensus/core/src/notepool/view.rs)).
+  **(4) Pipeline threading** — `UtxoProcessingContext` accumulates `mergeset_pool_diff`
+  in lockstep with `mergeset_diff`; the accumulated pool diff walks with the UTXO diff
+  through `sink_search_algorithm`/`calculate_utxo_state_relatively` (reorg walk-down
+  unapplies both, walk-up applies both), commits per chain block into a new
+  [notepool_diffs](consensus/src/model/stores/notepool_diffs.rs) store (prefix 93), and
+  applies to the virtual pool state + SMT root in `commit_virtual_state`'s single batch
+  (`VirtualStores` gained `pool_state`/`pool_smt`/`pool_diff`, the last mirroring
+  `VirtualState::utxo_diff` as its own item, prefix 94, leaving the versioned
+  `VirtualState` serialization untouched).
+  **(5) Admissibility** — pool-lane txs may have zero transparent inputs (a pure
+  `Transfer`'s only authorization is its note signatures); found and fixed a real
+  div-by-zero panic in `calc_storage_mass` for zero-input txs (the KIP-9 |I|/A(I) term
+  vanishes → mass = max(0, harmonic_outs)); payload decode + P6.3 stateless checks run
+  per-tx in `validate_tx_in_isolation`; a new body-level `check_block_double_serials`
+  mirrors `check_block_double_spends` (required: txs within a block validate in
+  parallel, so intra-block serial conflicts must be block-invalid).
+  **(6) A closed soundness hole** — P5.3 calls mint-serial uniqueness "guaranteed by
+  construction", but that reasoning assumes P6.6's value binding; until then a zero-input
+  mint duplicated across parallel blocks would validate in both. The produced-serial
+  existence check is therefore an *active* consensus rule for now (degrading to spec-
+  permitted cheap insurance once P6.6 lands), with a dedicated test.
+  **Deferred by design**: transparent-side value binding + fee crediting + mass costing
+  (P6.6 — pool ops currently contribute 0 to tx fee); mempool entry rejects pool txs
+  until P6.7's conflict policy exists (without it, two conflicting rotates could enter
+  the mempool and self-invalidate locally built templates); pool state at pruning-point
+  import stays empty until P6.8.
+  ✅ *Verify:* all three criteria have passing consensus tests
+  ([notepool_tests.rs](consensus/src/pipeline/virtual_processor/notepool_tests.rs)):
+  `parallel_double_rotate_resolves_deterministically` (two parallel blocks rotating one
+  serial to different keys; exactly one accepted in the merging block's committed
+  acceptance data, identical outcome under reversed insertion order — the first draft of
+  this test failed for a subtle non-bug reason worth recording: BIP340 aux-randomized
+  signing made per-run re-signed txs *different transactions*, so the cross-run root
+  comparison was comparing different DAGs; fixed by building txs once);
+  `reorg_past_pool_op_restores_prior_pool_state` (heavier conflicting branch; the losing
+  rotate is unapplied and the reorged node's pool root exactly equals a never-forked
+  reference node's — no residue); `out_of_window_anchor_op_rejected_in_context` (future
+  anchor exercises the same `check_freshness` gate consensus-side; the stale side's exact
+  inclusive boundaries are unit-pinned in consensus-core, since real staleness needs 36k
+  mined blocks); plus `mint_and_rotate_update_pool_state_and_root` and
+  `duplicate_mint_across_parallel_blocks_accepted_once`. Full suites: consensus-core 121
+  passed, consensus 86 passed, workspace 1,206 passed across 142 binaries, integration
+  suite green, `cargo build --workspace` clean.
 
 - [ ] **P6.5 — Commitment placement.** 🧑‍⚖️ **DECISION + implementation.** Where does the
   pool root live: a new header field beside `utxo_commitment` (clean; changes header

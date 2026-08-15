@@ -563,16 +563,27 @@ pub struct ValidatedTransaction<'a> {
     pub tx: &'a Transaction,
     pub entries: Vec<UtxoEntry>,
     pub calculated_fee: u64,
+    /// `Some` iff this is a note-pool op transaction (FORK-PLAN P6.4): the op's validated
+    /// pool-state mutation, ready to fold into the mergeset's accumulated `PoolDiff`.
+    pub validated_pool_op: Option<crate::notepool::ValidatedPoolOp>,
 }
 
 impl<'a> ValidatedTransaction<'a> {
     pub fn new(populated_tx: PopulatedTransaction<'a>, calculated_fee: u64) -> Self {
-        Self { tx: populated_tx.tx, entries: populated_tx.entries, calculated_fee }
+        Self { tx: populated_tx.tx, entries: populated_tx.entries, calculated_fee, validated_pool_op: None }
+    }
+
+    pub fn new_with_pool_op(
+        populated_tx: PopulatedTransaction<'a>,
+        calculated_fee: u64,
+        validated_pool_op: crate::notepool::ValidatedPoolOp,
+    ) -> Self {
+        Self { tx: populated_tx.tx, entries: populated_tx.entries, calculated_fee, validated_pool_op: Some(validated_pool_op) }
     }
 
     pub fn new_coinbase(tx: &'a Transaction) -> Self {
         assert!(tx.is_coinbase());
-        Self { tx, entries: Vec::new(), calculated_fee: 0 }
+        Self { tx, entries: Vec::new(), calculated_fee: 0, validated_pool_op: None }
     }
 }
 

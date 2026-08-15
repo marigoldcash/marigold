@@ -1,4 +1,5 @@
 use crate::constants::MAX_SOMPI;
+use crate::errors::notepool::{PoolOpContextError, PoolOpValidationError};
 use crate::subnets::SubnetworkId;
 use crate::tx::TransactionOutpoint;
 use kaspa_txscript_errors::{CovenantsError, TxScriptError};
@@ -8,6 +9,18 @@ use thiserror::Error;
 pub enum TxRuleError {
     #[error("transaction has no inputs")]
     NoTxInputs,
+
+    #[error("note-pool transaction payload is not a validly encoded PoolOp")]
+    MalformedNotePoolPayload,
+
+    #[error("note-pool op failed stateless validation: {0}")]
+    InvalidNotePoolOp(PoolOpValidationError),
+
+    #[error("note-pool op failed validation in context: {0}")]
+    InvalidNotePoolOpInContext(PoolOpContextError),
+
+    #[error("note-pool transactions are not accepted into the mempool yet (FORK-PLAN P6.7)")]
+    NotePoolTxNotYetSupportedInMempool,
 
     #[error("transaction has duplicate inputs")]
     TxDuplicateInputs,
