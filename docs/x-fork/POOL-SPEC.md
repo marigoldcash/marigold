@@ -5,6 +5,26 @@ frozen and externally reviewed (P5.9) before any implementation begins (Phase 6+
 `## P5.N` section below is that plan step's deliverable — do not implement against this
 document until P5.9 has closed.
 
+**Version: v1.1-draft** (2026-08-15). `pool-spec-v1` (tag, commit `9d93ab32`) is the
+frozen review baseline; this draft folds in the accepted findings from
+[review 1](reviews/pool-spec-v1-review-1.md) (triage:
+[pool-spec-v1-review-1-TRIAGE.md](reviews/pool-spec-v1-review-1-TRIAGE.md)) and awaits a
+second external review before being tagged `pool-spec-v1.1`. Changes from v1:
+1. **P5.2/P5.3 (critical fix)**: the pool-op signing hash now covers the enclosing
+   transaction's transparent outputs, closing a Redeem transaction-malleability vector
+   (an interceptor of a signed `RedeemOp` could previously redirect the redeemed value
+   to their own transparent output; the signature didn't cover the outputs).
+2. **P5.8 (tightened)**: anchor cadence is now defined in DAA-score units rather than
+   wall-clock, which makes the equivocation rule exactly decidable (a precise overlap
+   criterion replaces the previous informal "depth/timing windows overlap") and keeps
+   trustee behavior well-defined when block production stalls; anchor staleness
+   (fail-open trigger) is likewise DAA-score-defined.
+3. **P5.1/P5.2/P5.6/P5.7/P5.8 (minor)**: denomination-tag extension explicitly stated
+   to be a hard fork; freshness-window boundary semantics pinned (inclusive both ends);
+   `known_serials`-loss recovery path stated explicitly; optional merchant sweep-jitter
+   mitigation noted; T-multiplier absolute-value sanity check flagged for the external
+   reviewer alongside the existing calibration note.
+
 **The design in one paragraph** (context for every section below): a **note** is
 `(d, pk, sn)` — denomination `d`, current owner's public key `pk`, and a stable serial
 number `sn` that never changes across a note's life. The **pool** is a plaintext,
@@ -47,12 +67,17 @@ A `u8` enum indexing the fixed P1.6 denomination ladder, not the raw petal amoun
 | 6   | 10,000   | 1,000,000,000,000       |
 | 7   | 100,000  | 10,000,000,000,000      |
 
-Tags 8-255 are reserved (unassigned) — a future denomination-set extension (e.g. via
-hard fork, matching how the ladder itself could grow) fits in the same 1-byte field without
-widening the Note struct. A tag is a **lookup index into a consensus-defined constant
-table**, not a value nodes compute — this makes the table itself the single source of
-truth for "what denominations exist," directly mirroring how `SUBSIDY_BY_MONTH_TABLE`
-(P3.2) is one canonical const array rather than a formula recomputed ad hoc.
+Tags 8-255 are reserved (unassigned) — a future denomination-set extension fits in the
+same 1-byte field without widening the Note struct. **Assigning any reserved tag is
+inherently a hard fork, never a backward-compatible extension** (stated explicitly so
+nobody later assumes otherwise): the tag→value table is referenced by validation
+(conservation arithmetic, P5.3) and by the pool commitment's meaning, so a node that
+doesn't know a new tag's value cannot validate ops using it — every node must upgrade,
+which is the definition of a hard fork. A tag is a **lookup index into a
+consensus-defined constant table**, not a value nodes compute — this makes the table
+itself the single source of truth for "what denominations exist," directly mirroring how
+`SUBSIDY_BY_MONTH_TABLE` (P3.2) is one canonical const array rather than a formula
+recomputed ad hoc.
 
 #### `pk` — owner public key (32 bytes)
 
@@ -325,18 +350,50 @@ NotePoolTransferSigningHash = H(
     "NotePoolTransferSig"                         // domain tag
     || sorted(group.serials)                        // this group's own serials, 32 bytes each
     || op.produced                                    // EVERY note this whole op creates, d||pk, 33 bytes each
+    || transparent_outputs_hash                        // 32 bytes — H over the enclosing tx's outputs (below)
     || freshness.anchor_daa_score                      // 8 bytes, LE
 )
+
+transparent_outputs_hash = H_outputs(
+    for each tx.outputs[i], in order: amount (u64 LE) || script_public_key.version (u16 LE)
+                                       || script_public_key.script
+)   // over an empty output list (any pure Transfer), this is the domain's empty-input hash
 ```
 
+`H_outputs` is a further domain-separated hash (`NotePoolOutputsHash`, same
+`crypto/hashes` macro convention as the rest) whose per-output serialization deliberately
+mirrors the field order the existing transaction sighash already commits outputs with
+(`consensus/core/src/hashing/sighash.rs`'s `outputs_hash` covers amount + script version
++ script — same data, pool-domain-separated here rather than reusing the transparent
+sighash function directly, which carries `SigHashType` semantics this scheme doesn't
+want).
+
+**Why the signed message covers the enclosing transaction's transparent outputs**
+(v1.1 — this closes a real transaction-malleability vector found in external review 1):
+a `RedeemOp`'s value lands in `tx.outputs`, which live *outside* the pool-op payload —
+under v1's payload-only signed message, an interceptor of a signed-but-unbroadcast
+`RedeemOp` could rebuild the transaction with their own address in `tx.outputs` (same
+consumed serials, same freshness anchor, same still-valid signature) and redirect the
+redeemed value. The signature authenticated that the notes were consumed, but not where
+the resulting transparent value went — exactly the asymmetry review 1 identified
+(`Transfer`'s destination `pk`s were signed; `Redeem`'s destination scripts were not).
+Covering `tx.outputs` in every pool-op signature closes this uniformly: for `Redeem` it
+binds the transparent destinations; for a pure `Transfer` (no transparent outputs by
+design) it binds the output list to *being empty*, which costs nothing and future-proofs
+any later op shape that touches the transparent side. Note this is **not** circular the
+way signing the `tx_id` would be: `tx.outputs` does not contain the pool-op payload —
+only the payload contains the signature — so the signer can compute this hash before
+signing without any self-reference.
+
 Every `SignedGroup` in a `Transfer`/`Redeem` signs over the **entire** op's `produced` list
-(not just "its share"), not merely its own serials — this is what makes a `Transfer`
-atomic: no signer is vouching for their serials being spent in just *some* context, they're
-vouching for this *exact* whole-transaction shape, so no group's signature can be lifted
-into a transaction with a different produced-notes list. No `tx_id` is signed over (and
-deliberately can't be — the enclosing transaction's ID is a hash that includes this very
-payload, so signing it would be circular); replay safety instead comes from two properties
-working together:
+and the transaction's transparent outputs (not just "its share"), not merely its own
+serials — this is what makes a `Transfer`/`Redeem` atomic: no signer is vouching for their
+serials being spent in just *some* context, they're vouching for this *exact*
+whole-transaction shape — note destinations *and* transparent destinations — so no
+group's signature can be lifted into a transaction with a different produced-notes list
+or different transparent outputs. No `tx_id` is signed over (and deliberately can't be —
+the enclosing transaction's ID is a hash that includes this very payload, so signing it
+would be circular); replay safety instead comes from two properties working together:
 
 1. **A successfully-executed group's signature can never be reused.** The instant a group
    executes, every serial it covered now has a different current `pk` (or no longer exists,
@@ -504,12 +561,15 @@ have today.
    composed pool view, **and** all of them currently share the exact same `pk` — if any
    two differ, the op is invalid (one signature cannot authenticate two different keys).
 2. Recompute `NotePoolTransferSigningHash` (P5.2) over `group.serials`, the op's full
-   `produced` list, and `freshness.anchor_daa_score`; verify `group.signature` against the
-   shared current `pk` from step 1.
-3. Freshness: `pov_daa_score − freshness.anchor_daa_score` is in `[0, 36000]` (the P5.2
-   window) — reject both a stale anchor (too far in the past) and a future one
-   (`anchor_daa_score > pov_daa_score`, which could otherwise let a signer pre-date a
-   signature to extend its effective shelf life).
+   `produced` list, the enclosing transaction's `transparent_outputs_hash`, and
+   `freshness.anchor_daa_score`; verify `group.signature` against the shared current `pk`
+   from step 1.
+3. Freshness: valid iff `0 ≤ pov_daa_score − freshness.anchor_daa_score ≤ 36,000`,
+   **inclusive on both ends** (boundary semantics pinned explicitly per review 1: a
+   difference of exactly 0 and exactly 36,000 are both valid; 36,001 is not;
+   `anchor_daa_score > pov_daa_score` is not) — rejecting both a stale anchor (too far in
+   the past) and a future one (which could otherwise let a signer pre-date a signature to
+   extend its effective shelf life).
 4. Every `produced[i].d` is a valid denomination tag.
 5. Conservation: `Σ(consumed notes' current petal values, from the composed view) −
    Σ(produced notes' petal values) ≥ 0`; the result is the fee (same relay-fee policy note
@@ -831,6 +891,21 @@ that entry. No merkle-scanning, no trial-decryption, no synchronization protocol
 spec already assumes the wallet can do freely (the pool being plaintext is precisely what
 makes this restore this simple).
 
+**Recovery when `known_serials` is lost but keys survive** (stated explicitly per
+review 1, rather than left implied): the paper-backup format above stores `(serial, sk,
+d)` triples, so a normal restore never faces this — but a wallet that somehow retains
+private keys without their serial list (a key-only export, a partially corrupted DB) is
+still fully recoverable, because the pool is plaintext: enumerate every serial currently
+under each held key's `pk` and adopt that as the new explicit `known_serials` list. This
+is the **one sanctioned use of pk-enumeration to establish ownership** — it happens
+interactively at restore time and its *output* is a rebuilt explicit serial list; it is
+not an exception to the "ownership is tracked by serial, never inferred by pk" spending
+rule below, which governs ongoing spend/sweep selection, not one-time recovery. Keys
+restored this way are Hot by provenance (they crossed a wallet boundary), so the
+same-key-hazard rule below already forces immediate rotation of everything recovered —
+which also cleanly resolves any serials another wallet sharing the key might have
+contested.
+
 Two properties worth stating explicitly, since they're easy to get backwards:
 
 - **Rotation doubles as backup revocation.** A leaked printout only endangers notes that
@@ -1064,7 +1139,12 @@ merchant's POS sweep, P5.6, is a recognizable shape — one `SignedGroup` coveri
 all plainly visible graph structure, not encrypted or aggregated away. Timing correlation
 alone (a mint, followed shortly by a rotate of a newly-created serial of the same
 denomination) can narrow a note's anonymity set well below "every note of that
-denomination," even though no cryptographic link between them exists.
+denomination," even though no cryptographic link between them exists. A wallet *may*
+blur its own fingerprints at the margin — e.g. a merchant varying sweep batch sizes or
+adding timing jitter (per review 1's suggestion) — but any such mitigation is
+wallet-layer behavior, best-effort, and never a protocol guarantee; the protocol makes
+no attempt to hide this structure, and no claim in this section is softened by the
+possibility of wallets partially obscuring their own patterns.
 
 ### The anonymity set
 
@@ -1144,11 +1224,21 @@ redirect it.
 **Anchors**: a 3-of-5 signature over the hash of a block already **600 DAA-score-units
 deep** (~1 minute at genesis-era 10 BPS — deep enough that the anchored block has already
 cleared the chain's own natural early-confirmation noise, not the literal tip), produced
-**every 30 seconds** at launch (300 blocks per anchor at 10 BPS). Published two ways,
-redundantly: as a tiny transaction in a dedicated subnetwork (the same
-`SubnetworkId::from_namespace` mechanism P5.2 uses for pool ops — a second, independent
-namespace, not the pool's) *and* gossiped directly over P2P, so an anchor's availability
-doesn't depend on it having been mined into a block yet.
+once per **cadence interval of 300 DAA-score-units** at launch (~30 seconds at nominal
+10 BPS). **The cadence is defined in DAA-score units, not wall-clock time** (v1.1 —
+tightened per review 1): an honest trustee signs at most one anchor per cadence
+interval, advancing only as the chain's DAA score advances. This is not cosmetic — it is
+what makes the equivocation rule below *exactly decidable* (two anchors' cadence
+relationship is a pure function of on-chain data, no inferred wall-clock signing times
+needed), and it keeps trustee behavior well-defined when block production stalls: on a
+slowed chain a DAA-keyed trustee simply signs less often in wall-clock terms, rather
+than piling up multiple wall-clock-scheduled anchors inside one DAA interval — which
+under the equivocation rule below would otherwise make *honest* behavior on a stalled
+chain indistinguishable from double-signing. Published two ways, redundantly: as a tiny
+transaction in a dedicated subnetwork (the same `SubnetworkId::from_namespace` mechanism
+P5.2 uses for pool ops — a second, independent namespace, not the pool's) *and* gossiped
+directly over P2P, so an anchor's availability doesn't depend on it having been mined
+into a block yet.
 
 **Consensus rule**: a chain conflicting with the latest valid anchor is invalid,
 regardless of accumulated proof-of-work — a second, faster-triggering enforcement of the
@@ -1176,11 +1266,14 @@ require `signatures.len() >= 3` with no repeated signer.
 
 ### Fail-open liveness
 
-**No anchor arriving is never a halt condition.** If no new valid `FinalityAnchor`
-appears within **3× the current cadence interval** (90 seconds at launch) of the last one,
-the anchor-conflict consensus rule simply stops being enforced until a new anchor arrives
-— the chain falls back to ordinary PoW/finality-depth security alone, exactly as if the
-mechanism didn't exist, for however long the gap lasts. This is automatic and requires no
+**No anchor arriving is never a halt condition.** Staleness is DAA-score-defined (v1.1,
+consistent with the cadence redefinition above): the anchor-conflict rule is enforced
+only while `tip_daa_score − latest_valid_anchor.anchored_daa_score ≤ depth + 3×interval`
+(at launch: `600 + 3×300 = 1,500` DAA-score-units, ~2.5 minutes at nominal 10 BPS). The
+moment the latest valid anchor falls further behind than that, the rule simply stops
+being enforced until a fresh anchor arrives — the chain falls back to ordinary
+PoW/finality-depth security alone, exactly as if the mechanism didn't exist, for however
+long the gap lasts. This is automatic and requires no
 operator action to keep blocks flowing. What *is* required: every node **loudly alerts**
 the moment this fallback engages (a log line at error severity, an exposed RPC/metrics
 flag `finality_anchor_stale: true`, node-operator-facing, not silent) — liveness is never
@@ -1189,12 +1282,44 @@ extra protection layer is currently absent.
 
 ### Equivocation and permanent key disqualification
 
-**Equivocation proof**: two validly-signed messages from the *same* trustee key that
-conflict — concretely, two `FinalityAnchor`-domain signatures from one key over two
-different `anchored_block` values whose depth/timing windows overlap (both could not
-honestly have been "the ~1-minute-deep block" at the time each was signed). Presenting
-both signed messages together is self-contained cryptographic proof, verifiable by any
-node with no external input.
+**Equivocation proof — exact definition** (v1.1, replacing v1's informal "depth/timing
+windows overlap" per review 1): two validly-signed `FinalityAnchor`-domain messages from
+the *same* trustee key where
+
+```
+anchored_block_1 ≠ anchored_block_2
+AND |anchored_daa_score_1 − anchored_daa_score_2| < interval
+```
+
+with `interval` being the cadence interval (in DAA-score units) of the decay stage
+active at `max(anchored_daa_score_1, anchored_daa_score_2)`. Presenting both signed
+messages together is self-contained cryptographic proof, verifiable by any node from
+on-chain data alone — no inferred signing times, no external input.
+
+**Why this is exactly the right boundary, given the DAA-keyed cadence above.** An honest
+trustee signs at most one anchor per cadence interval, so two *different* blocks
+certified at DAA scores less than one interval apart is behavior no honest procedure
+produces — regardless of network conditions:
+
+- **Adjacent honest anchors** certify blocks ≥ one full interval apart in DAA score (the
+  cadence *is* the DAA spacing), so normal sequential anchoring is never flagged.
+- **A stalled/slowed chain** doesn't create false positives: a DAA-keyed trustee signs
+  less often in wall-clock terms on a slow chain, never twice within one DAA interval —
+  this is precisely why the cadence was redefined off wall-clock (above).
+- **Network partitions**: a partition brief enough that both sides' DAA scores stay
+  within one interval of each other cannot yield two honest signatures from one trustee
+  (one signing event per interval, and a single trustee is on one side of a partition at
+  a time); a longer partition yields anchors whose `anchored_daa_score`s differ by more
+  than an interval — outside the rule, correctly not flagged. Honest
+  disagreement-across-views is therefore structurally excluded from the definition
+  rather than adjudicated case-by-case.
+- **The residual honest-risk case is operator error, not protocol ambiguity**: a trustee
+  running two live signer instances against different views (a misconfigured failover,
+  say) *can* trip this rule — and should: from the chain's perspective, one key
+  certifying two different histories inside one interval is exactly the behavior the
+  rule exists to disqualify, whatever its operational cause. Trustee operational
+  guidance (one live signer per key, cold standby only) belongs in the P9.1 ceremony
+  documentation, flagged here.
 
 **Consensus rule**: any node that includes a valid equivocation proof (in the same
 dedicated subnetwork as anchors themselves) triggers **permanent disqualification** of
@@ -1245,6 +1370,13 @@ flagged as a calibration point subject to revisiting with real early-network dat
 same treatment P1.8's stamp sizing and P2.5's genesis timestamp already received; the
 *mechanism* (a fixed multiplier of Marigold's own genesis difficulty, deterministically
 checkable by every node) is the durable part of this decision, the exact `10⁶` less so.
+**Calibration caveat for the external reviewer** (raised in review 1, adopted): being a
+*relative* multiplier, T's absolute meaning depends entirely on what the actual genesis
+difficulty (P9.5's final regeneration) turns out to be — `10⁶ ×` an extremely low
+cold-launch difficulty can still be modest in absolute hashrate terms. Before this
+parameter freezes for mainnet, sanity-check that `10⁶ × the real genesis difficulty`
+represents hashrate plausibly reachable by organic growth *and* genuinely expensive to
+sustain artificially for six months — if not, the multiplier (not the mechanism) moves.
 
 **"Sustained," defined exactly** (closing the "months, not moments" loophole precisely):
 reuse the existing difficulty-sampling infrastructure
@@ -1263,16 +1395,20 @@ dipping below T only briefly outside the sampled instants.
 
 The plan's own example shape, with concrete `ForkActivation`-staged thresholds:
 
-| Stage | Cadence | Trigger |
-|---|---|---|
-| 0 — Launch | 30s | Genesis |
-| 1 — Early easing | 1 hour | Difficulty first sustains ≥ T for M months (the difficulty half of retirement met; the K-year floor not yet required) — a real, if not yet sufficient, signal |
-| 2 — Retirement | 1 day | Full trigger: T sustained for M months **and** K = 5 years elapsed |
-| 3 — Long-tail advisory | 1 week | 2 further years elapsed after Stage 2 (631,152,000 DAA-score-units later) |
-| 4 — Expired | *(none — advisory only)* | Hard maximum DAA score reached (below), unconditionally |
+Cadence intervals are DAA-score-defined at every stage (consistent with the v1.1
+redefinition above); the wall-clock column is the nominal-10-BPS equivalent for
+readability only:
 
-Fail-open alerting thresholds (the "3× cadence" grace window) scale with whatever stage
-is currently active, so the *relative* tolerance for a missed anchor stays constant in
+| Stage | Cadence interval (DAA-score units) | ≈ wall-clock | Trigger |
+|---|---|---|---|
+| 0 — Launch | 300 | 30s | Genesis |
+| 1 — Early easing | 36,000 | 1 hour | Difficulty first sustains ≥ T for M months (the difficulty half of retirement met; the K-year floor not yet required) — a real, if not yet sufficient, signal |
+| 2 — Retirement | 864,000 | 1 day | Full trigger: T sustained for M months **and** K = 5 years elapsed |
+| 3 — Long-tail advisory | 6,048,000 | 1 week | 2 further years elapsed after Stage 2 (631,152,000 DAA-score-units later) |
+| 4 — Expired | *(none — advisory only)* | — | Hard maximum DAA score reached (below), unconditionally |
+
+Fail-open alerting thresholds (the `depth + 3×interval` staleness bound) scale with
+whatever stage is currently active, so the *relative* tolerance for a missed anchor stays constant in
 proportion even as the absolute cadence stretches.
 
 **Hard maximum DAA score: 6,311,520,000** (20 years from genesis at 10 BPS, computed as
@@ -1298,12 +1434,15 @@ is always expiry, never renewal.
   simultaneous majority compromise a real practical barrier, and the entire reason a
   hard-coded sunset exists at all — this trust is bounded in time by design, never
   indefinite.
-- **Equivocation**: any node presenting the two conflicting signed messages from one
-  key triggers permanent disqualification of that key, deterministically and without
-  requiring the honest trustees' cooperation to enforce.
-- **Trustee DoS**: no valid anchor within 3× the current cadence → fail-open (plain PoW
-  security resumes automatically) with a loud, node-operator-visible alert — never a
-  chain halt.
+- **Equivocation**: any node presenting two signed anchors from one key meeting the
+  exact overlap rule (different `anchored_block`, `anchored_daa_score`s less than one
+  cadence interval apart) triggers permanent disqualification of that key,
+  deterministically, from on-chain data alone, without requiring the honest trustees'
+  cooperation to enforce — and the rule structurally excludes honest partition
+  disagreement and normal sequential anchoring (see the exact definition above).
+- **Trustee DoS**: latest valid anchor falls behind the `depth + 3×interval`
+  DAA-score staleness bound → fail-open (plain PoW security resumes automatically)
+  with a loud, node-operator-visible alert — never a chain halt.
 - **Difficulty-inflation-then-attack**: defeated by the dual T-and-K condition — a
   brief inflation fails the M-month sustained-median check; even a genuinely sustained
   one cannot trigger retirement before the K = 5-year floor regardless of how fast it
@@ -1315,9 +1454,11 @@ is always expiry, never renewal.
   rejected outright regardless of accumulated work, so a higher-work anchor-free
   attacker chain loses during sync, exactly as the plan requires.
 
-✅ *Verify:* exact values stated for every named parameter — k=3, n=5, cadence=30s
-(launch), depth=600 DAA-score-units, T=10⁶×genesis difficulty, M=6 months
-(157,788,000 DAA-score-units), K=5 years (1,577,880,000 DAA-score-units), the 5-stage
-cadence-decay schedule, and the hard maximum DAA score (6,311,520,000, 20 years). Every
+✅ *Verify:* exact values stated for every named parameter — k=3, n=5, cadence=300
+DAA-score-units at launch (~30s at nominal 10 BPS), depth=600 DAA-score-units,
+T=10⁶×genesis difficulty, M=6 months (157,788,000 DAA-score-units), K=5 years
+(1,577,880,000 DAA-score-units), the 5-stage cadence-decay schedule (all intervals
+DAA-score-defined), and the hard maximum DAA score (6,311,520,000, 20 years). Every
 named attack case answered explicitly, including an honest (not overstated) account of
-what a genuine majority-quorum compromise can and cannot do.
+what a genuine majority-quorum compromise can and cannot do, and an exactly-decidable
+equivocation rule that structurally excludes honest partition disagreement.

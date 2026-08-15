@@ -4,7 +4,7 @@ Snapshot of everything decided and built so far, so any fresh coding session on 
 machine can continue from the repo alone. Read this together with [FORK-PLAN.md](../../FORK-PLAN.md).
 Update this file whenever off-repo state changes (domains, accounts, infra).
 
-Last updated: 2026-08-15 (Phase 5 spec content complete — blocked on P5.9 external review)
+Last updated: 2026-08-15 (P5.9 in progress — review 1 triaged and folded in, spec at v1.1-draft, review 2 pending)
 
 ## What this project is
 
@@ -79,24 +79,23 @@ substitute for it.
 
 ## Where execution stands
 
-- **BLOCKED — waiting on a human action before any further plan steps.** P5.1-P5.8 are
-  fully written: [docs/x-fork/POOL-SPEC.md](POOL-SPEC.md) is a complete, ~1,300-line
-  spec of the note pool (data structures, transaction format, consensus rules, state
-  sync/pruning, transfer modes, wallet protocol, an honest privacy statement, and the
-  launch finality-anchor mechanism), frozen at tag `pool-spec-v1`
-  (commit `9d93ab32`, pushed to `origin`). **P5.9 (the review gate) is only half
-  done** — the mechanical freeze is complete, but the actual requirement, review by a
-  person with an applied-cryptography background *outside the project*, is something
-  cannot be performed by the coding agent and must be done by a human. [docs/x-fork/reviews/](reviews/) is
-  ready to receive it (instructions in its `README.md`). **Do not start Phase 6
-  (pool consensus implementation) until that review lands and its feedback is folded
-  into v1.1** — this is the plan's own explicit instruction, not a self-imposed one.
-  Two sections worth the reviewer's particular attention, flagged in the reviews
-  README: P5.2's signature/replay scheme and P5.8's finality-anchor parameters — the
-  two places genuinely new cryptographic/game-theoretic decisions were made rather
-  than existing Kaspa mechanisms extended. Full rationale for every non-obvious
-  parameter (freshness window, T/M/K sunset values, trustee count, etc.) is in
-  [DECISIONS.md](DECISIONS.md)'s P5.1-P5.8 entries.
+- **Waiting on one human input: the second external spec review.** P5.1-P5.8 are fully
+  written; [docs/x-fork/POOL-SPEC.md](POOL-SPEC.md) was frozen at tag `pool-spec-v1`
+  (commit `9d93ab32`) and has since advanced to **v1.1-draft**: the first external
+  review came back (filed at
+  [reviews/pool-spec-v1-review-1.md](reviews/pool-spec-v1-review-1.md), triaged
+  finding-by-finding in
+  [reviews/pool-spec-v1-review-1-TRIAGE.md](reviews/pool-spec-v1-review-1-TRIAGE.md)),
+  all seven substantive findings were accepted and folded into the spec. The headline
+  fix was real: a **Redeem transaction-malleability vector** — the pool-op signature
+  didn't cover the enclosing transaction's transparent outputs, so an interceptor of a
+  signed `RedeemOp` could have redirected the redeemed value; the signing hash now
+  covers transparent outputs uniformly for every op. Second-biggest: the finality-anchor
+  cadence is now DAA-score-defined (not wall-clock), which makes the equivocation rule
+  exactly decidable and partition-safe. **A second expert review is underway (per the
+  user); P5.9 stays open and Phase 6 must not start until it lands, is triaged, and the
+  spec is tagged `pool-spec-v1.1`.** That reviewer should read v1.1-draft (current
+  `POOL-SPEC.md` on `x-fork`), not the v1 tag.
 - **Phase 4 (P4.1-P4.4) is fully done — "the fork works," tagged and reproducible.**
   Tag `fork-transparent-v0.1` exists on `origin`, and the fresh-clone claim was
   actually tested, not assumed: a genuinely clean `git clone --branch

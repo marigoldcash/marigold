@@ -904,13 +904,15 @@ should settle its size and how it is assigned (e.g. hash of the minting tx + out
   it reviewed by at least one person with applied-cryptography background **outside the
   project**. Fold feedback into v1.1. Do not start Phase 6 before this.
   ✅ *Verify:* written review exists in `docs/x-fork/reviews/`; issues triaged.
-  **Partially done, 2026-08-15: the mechanical half only.** Tagged `pool-spec-v1` at
-  commit `9d93ab32` and pushed. Created
-  [docs/x-fork/reviews/](docs/x-fork/reviews/) with instructions for the reviewer.
-  **The actual review — a person with applied-cryptography background, outside the
-  project — cannot be performed by coding**, and this step stays unchecked until
-  a genuine external review lands and its feedback is folded into v1.1. **Phase 6 must
-  not start before that happens**, per this step's own explicit instruction.
+  **In progress, 2026-08-15.** Tagged `pool-spec-v1` at commit `9d93ab32`; created
+  [docs/x-fork/reviews/](docs/x-fork/reviews/). **Review 1 received, triaged, and
+  folded in** ([review](docs/x-fork/reviews/pool-spec-v1-review-1.md),
+  [triage](docs/x-fork/reviews/pool-spec-v1-review-1-TRIAGE.md)) — all seven findings
+  accepted; headline fix was a real Redeem transaction-malleability vector (the pool-op
+  signature didn't cover the transaction's transparent outputs; it now does, uniformly).
+  The spec is at **v1.1-draft**. **A second external review is pending** — this step
+  stays unchecked, and Phase 6 must not start, until it lands and is triaged too, then
+  the spec is tagged `pool-spec-v1.1`.
 
 ---
 

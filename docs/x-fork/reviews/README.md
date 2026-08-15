@@ -3,12 +3,22 @@
 This directory holds written external reviews of frozen specs, per FORK-PLAN.md's
 review-gate steps (currently just P5.9).
 
-## P5.9 — Pool spec review (open)
+## P5.9 — Pool spec review (in progress)
 
 [docs/x-fork/POOL-SPEC.md](../POOL-SPEC.md) was frozen at tag `pool-spec-v1`
 (commit `9d93ab32`) on 2026-08-15. Per the plan, it needs review by **at least one
 person with an applied-cryptography background, outside the project**, before Phase 6
 (consensus implementation) begins.
+
+**Status (2026-08-15):**
+- **Review 1 received and triaged**: [pool-spec-v1-review-1.md](pool-spec-v1-review-1.md),
+  triage in [pool-spec-v1-review-1-TRIAGE.md](pool-spec-v1-review-1-TRIAGE.md). All seven
+  substantive findings accepted and folded into the spec (now **v1.1-draft** — see the
+  spec's version header for the change list). Headline fix: the Redeem
+  transaction-malleability vector (signature didn't cover transparent outputs).
+- **Review 2 pending** (a second expert is looking the spec over, per the user). The
+  `pool-spec-v1.1` tag and P5.9's closure wait for it; that reviewer should read
+  v1.1-draft (current `POOL-SPEC.md` on `x-fork`), not the v1 tag.
 
 What the reviewer should look at:
 - The full spec (`POOL-SPEC.md`), all eight sections (P5.1-P5.8).
