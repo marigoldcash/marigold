@@ -1120,3 +1120,36 @@ either command, and every test inside them is separately marked `#[ignore =
 session has treated other explicitly-marked non-default tests (the crescendo
 emission test, the subsidy-table generator). Full `cargo build --workspace`
 also clean.
+
+### P4.4 — Tag it (2026-08-15)
+
+Created an annotated tag (not lightweight — a real message summarizing the whole
+Phase 4 milestone is worth having attached to the ref) at P4.3's commit
+(`d4fe5319`), pushed it to `origin`.
+
+**Verified the fresh-clone claim for real, not just "the tag exists."** The plan's
+verify condition is two things — "tag exists" (trivial) and "fresh clone + script
+reproduces the testnet" (not trivial, and easy to accidentally not actually test:
+running the P4.1 script again in the *existing* working directory, which already
+has a built `kaspad` and cached dependencies, would not have caught a script bug
+that only manifests on a genuinely clean checkout). So: `git clone --branch
+fork-transparent-v0.1 https://github.com/marigoldcash/marigold-node.git` into a
+scratch directory with zero prior history, confirmed no `target/` directory
+existed, then ran `scripts/x-testnet-local.sh` completely unmodified. It correctly
+detected the missing `kaspad` binary, built it from scratch (~10 minutes, every
+dependency compiled from zero — no shared `~/.cargo` registry cache helped here
+since this session already had one, but the actual crate compilation itself was
+100% fresh), and all 3 nodes peered on the very first try — same clean result as
+P4.1's original run. This is real evidence a stranger cloning the repo cold gets a
+working testnet, not just "it still works on my already-set-up machine."
+
+Stopped the fresh-clone's nodes, removed the scratch clone. Nothing added to the
+repo by this verification pass.
+
+**This closes Phase 4.** The milestone the phase's own goal statement named — "the
+fork works" — is now backed by a tagged, reproducible commit: a multi-node private
+testnet of Marigold's renamed, re-parameterized, capped-supply chain, with
+wallet-equivalent tooling and mining, verified end to end (not just unit-tested)
+across P2.9's/P4.1's network-sync checks, P3.3's/P4.2's economics-and-persistence
+checks, and P4.3's regression suite. Next up per FORK-PLAN.md: Phase 5, the pool
+specification (⚠️ marked hard — spec-first, no implementation yet).

@@ -4,7 +4,7 @@ Snapshot of everything decided and built so far, so any fresh coding session on 
 machine can continue from the repo alone. Read this together with [FORK-PLAN.md](../../FORK-PLAN.md).
 Update this file whenever off-repo state changes (domains, accounts, infra).
 
-Last updated: 2026-08-15 (P4.3 complete)
+Last updated: 2026-08-15 (Phase 4 complete — tagged fork-transparent-v0.1)
 
 ## What this project is
 
@@ -79,33 +79,33 @@ substitute for it.
 
 ## Where execution stands
 
-- **Next step: P4.4 — tag it.** `git tag fork-transparent-v0.1`, update NOTES.md
-  with current state. Last step of Phase 4 — closes the "the fork works" milestone.
-- **P4.3 is done.** `cargo-nextest` installed (wasn't present; P0.2 had substituted
-  plain `cargo test`). Nothing needed fixing — every hardcoded-Kaspa-params/genesis
-  issue this crate had was already caught by earlier steps this session (P2.6, and
-  P3.2's `goref_*` `#[ignore]`s). `cargo nextest run --release -p
-  kaspa-testing-integration`: 42 passed, 6 skipped, 0 failed.
-- **P4.2 is done.** [docs/x-fork/SMOKE.md](SMOKE.md) — an 8-step manual
-  user-journey script, walked end to end on the P4.1 local testnet: wallet A mined
-  and matured, wallet B funded via a real send, node1 restarted with the same
-  `--appdir`, both balances (and the DAA score) matched exactly pre/post-restart.
-  Found and fixed two real bugs along the way: `rothschild` needed rebuilding (a
-  stale pre-P2.1 binary printed the old `kaspadev:` prefix — same P2.3 stale-binary
-  trap, different tool), and a genuine compatibility bug where `rothschild`'s
-  hardcoded 10-KAS-equivalent `DEFAULT_SEND_AMOUNT` could never be satisfied from
-  Marigold's much-smaller genesis-era coinbase UTXOs given its `MAX_UTXOS = 8`
-  input cap — fixed by scaling the constant down to 1 MAGLD-equivalent. Full
-  root-cause writeup in [NOTES.md](NOTES.md)'s P4.2 entry.
-- **P4.1 is done.** [scripts/x-testnet-local.sh](../../scripts/x-testnet-local.sh)
-  and [.ps1](../../scripts/x-testnet-local.ps1) launch 3 peered devnet nodes on one
-  machine (distinct ports/appdirs, star-topology `--addpeer` to node1), auto-build
-  `kaspad` if missing, and print mining instructions (`rothschild --network devnet`
-  for a real address, then `kaspa-miner`). Verified live: all 3 nodes peered
-  immediately, 12 mined blocks relayed to both peers, and block count/DAA
-  score/sink hash matched exactly across all three over RPC. **The `.ps1` script is
-  unverified** — written to match the tested bash version but no Windows
-  environment was available this session to actually run it.
+- **Next step: P5.1 — start of Phase 5 (Pool: specification ⚠️).** Write the Note
+  definition and pool-state map with exact byte layouts (field sizes for `d`, `pk`,
+  `sn`; key scheme — recommend secp256k1 Schnorr, reusing existing Kaspa-address
+  crypto) plus the pool commitment (a hash root, likely via `crypto/smt`, that
+  blocks commit to). This is spec-only — no implementation yet; the whole point of
+  Phase 5 is a complete written spec in `docs/x-fork/POOL-SPEC.md` before any pool
+  code is written, so the implementation phases that follow are bite-sized.
+- **Phase 4 (P4.1-P4.4) is fully done — "the fork works," tagged and reproducible.**
+  Tag `fork-transparent-v0.1` exists on `origin`, and the fresh-clone claim was
+  actually tested, not assumed: a genuinely clean `git clone --branch
+  fork-transparent-v0.1` (zero prior build artifacts) auto-built `kaspad` from
+  scratch and got all 3 testnet nodes peered on the first try (P4.4).
+  [scripts/x-testnet-local.sh](../../scripts/x-testnet-local.sh)/`.ps1` (P4.1)
+  launch 3 peered devnet nodes on one machine — verified live twice now (12 mined
+  blocks relayed to all peers, block count/DAA score/sink hash matching exactly).
+  **The `.ps1` script itself remains unverified** — no Windows environment was
+  available this session. [docs/x-fork/SMOKE.md](SMOKE.md) (P4.2) walked a full
+  user-journey (wallet creation → mining → maturity → send → restart → balance
+  persistence) live and confirmed every balance matched exactly across a node
+  restart; found and fixed two real bugs along the way in `rothschild`
+  (stale-binary trap, same root cause as P2.3's; and a genuine incompatibility
+  where its hardcoded 10-KAS-equivalent default send amount could never be
+  satisfied from Marigold's much smaller genesis-era coinbase UTXOs — fixed by
+  scaling it to 1 MAGLD-equivalent). The integration test suite is green (P4.3,
+  `cargo-nextest` now installed) — nothing needed fixing there, every
+  hardcoded-Kaspa-params issue this crate had was already caught by earlier steps.
+  Full detail in NOTES.md's P4.1-P4.4 entries and DECISIONS.md where relevant.
 - **Phase 3 (P3.1-P3.3) is fully done.** The real emission mechanism was understood
   (P3.1), replaced with Marigold's own P1.4 schedule (P3.2), and confirmed correct
   against a real running node over RPC (P3.3). `SUBSIDY_BY_MONTH_TABLE` is now a

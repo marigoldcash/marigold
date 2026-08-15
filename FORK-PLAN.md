@@ -600,8 +600,17 @@ the natural checkpoint before the hard part.*
   passed, 6 skipped (5 `goref_*` + 1 pre-existing manual-only test), 0 failed. Full `cargo build
   --workspace` also clean.
 
-- [ ] **P4.4 — Tag it.** `git tag fork-transparent-v0.1`. Update NOTES.md with current state.
-  ✅ *Verify:* tag exists; fresh clone + script reproduces the testnet.
+- [x] **P4.4 — Tag it.** Executed 2026-08-15.
+  Created an annotated tag `fork-transparent-v0.1` at
+  [d4fe5319](https://github.com/marigoldcash/marigold-node/commit/d4fe5319) (P4.3's commit),
+  summarizing the whole Phase 4 milestone in its message, and pushed it to `origin`.
+  ✅ *Verify:* tag exists on `origin` (`git push origin fork-transparent-v0.1` — confirmed new
+  ref). Fresh-clone reproduction actually tested, not assumed: `git clone --branch
+  fork-transparent-v0.1` into a scratch directory with zero pre-existing build artifacts, then
+  ran `scripts/x-testnet-local.sh` unmodified from that clone — it auto-built `kaspad` from
+  scratch (~10 minutes, no cached dependencies) and all 3 nodes peered immediately on the first
+  try. Cleaned up (stopped nodes, removed the scratch clone) after confirming.
+  **This closes Phase 4 — the fork works, end to end, verified live.**
 
 ---
 
