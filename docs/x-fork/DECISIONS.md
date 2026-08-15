@@ -299,3 +299,58 @@ self-sweep using the exact same rotate mechanism already specified for the
 same-key-in-two-wallets hazard. Deliberately did not design a second key format to
 support today — P5.1 fixes exactly one (secp256k1 Schnorr) at launch; this section specs
 only the *mechanism* a migration would use when one is eventually needed.
+
+### P5.8 — Finality anchor parameters (k, n, cadence, depth, T, M, K, sunset schedule)
+
+The plan's own text decided the *mechanism* (federated finality guard, sunsetting) and
+recommended some values; this session chose the exact numbers, each with reasoning
+recorded here since they're genuinely consequential (real chain security parameters, not
+formatting choices) and P5.9's external cryptography review will need to evaluate them
+specifically, not just the mechanism shape.
+
+- **3-of-5 trustees**: adopted the plan's own recommendation as-is — tolerates 2
+  simultaneous unavailable/uncooperative trustees, requires majority collusion/compromise
+  for any misbehavior, small enough that "independent orgs/geos" stays a checkable
+  property rather than diffuse to meaninglessness.
+- **30-second launch cadence, 600-DAA-score (~1 minute) anchor depth**: the tight end of
+  the plan's own 30-60s range, chosen deliberately — the chain is most vulnerable exactly
+  at launch (smallest honest hashrate, largest relative size of any external ASIC fleet
+  that could be redirected against it), so the strongest protection belongs there; it
+  eases via the staged decay schedule as real security arrives, not by starting loose.
+- **T = 10⁶ × genesis difficulty target, not a fraction of Kaspa mainnet's difficulty.**
+  This is a genuine refinement over the plan's own literal framing ("any sliver of
+  Kaspa's ASIC fleet" suggested comparing to Kaspa's real difficulty), caught while
+  writing the spec: a threshold referencing another chain's difficulty isn't on-chain
+  data Marigold's own consensus can deterministically verify, which would directly
+  violate the plan's own "exact deterministic function of on-chain data" requirement (a
+  fuzzy/external definition is explicitly called out as a chain-split bug). Redefined
+  purely against Marigold's own genesis difficulty instead — fully self-contained,
+  no oracle, no off-chain input, and a million-fold sustained hashrate increase from a
+  cold launch is still a strong organic-adoption signal in its own right. The mechanism
+  (a fixed multiplier of genesis difficulty) is the durable part; the exact `10⁶`
+  multiplier is a calibration point, same treatment as P1.8's stamp sizing and P2.5's
+  genesis timestamp.
+- **M = 6 months, K = 5 years**: M balances catching a fleeting difficulty spike (needs
+  to be long enough that sustaining it is a real, expensive commitment) against not
+  delaying legitimate easing once real security has arrived; K is an independent time
+  floor long enough that any attacker patiently mining honestly toward the T threshold
+  has sunk years of real resources with no guaranteed payoff, short enough not to
+  indefinitely extend the trust period for a chain that's clearly already succeeded.
+  Both are the plan's named parameters with this session's chosen concrete values.
+- **5-stage cadence decay (30s → 1h → 1d → 1wk → advisory-only) and a 20-year hard
+  maximum DAA score (6,311,520,000) for unconditional trustee-key expiry**: the plan's
+  own example shape (30s → hourly → daily → weekly → never), given concrete triggers —
+  Stage 1 on the difficulty condition alone (an early, partial signal), Stage 2 on the
+  full T+M+K retirement trigger, Stage 3 two years after that, Stage 4 at a fixed
+  20-year mark regardless of any network condition, per the plan's explicit "trust must
+  end even if growth disappoints" requirement. 20 years was chosen as a multiple of the
+  K=5-year floor with real margin (allows the full staged decay to play out even for a
+  chain that only just barely clears retirement near the K floor) while still being a
+  genuinely finite, non-indefinite commitment.
+- **Honesty about the limits of a k-of-n federation**: recorded explicitly in the spec,
+  not glossed over — a genuinely compromised 3-of-5 majority *can* sign a false anchor
+  endorsing an attacker's chain. This is the same trust model every k-of-n federation
+  carries; the mitigation is trustee independence (a practical barrier, not a
+  cryptographic guarantee) and the sunset itself (bounding how long that trust is ever
+  extended, not eliminating the need for it during the young-chain phase where it's
+  genuinely the best available option per the plan's own rationale).

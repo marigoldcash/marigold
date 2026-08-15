@@ -849,7 +849,7 @@ should settle its size and how it is assigned (e.g. hash of the minting tx + out
   graph back to genesis regardless. So the statement is legible to a non-cryptographer 
   reader, not just a checklist of properties.
 
-- [ ] **P5.8 — Spec: launch finality anchors.** ⚠️ **DECIDED: the fork launches with a
+- [x] **P5.8 — Spec: launch finality anchors.** Executed 2026-08-15. ⚠️ **DECIDED: the fork launches with a
   federated finality guard.** Rationale: a young PoW network can be 51%-attacked by any
   sliver of Kaspa's ASIC fleet; a veto-only, sunsetting trustee quorum is strictly less
   centralized than one anonymous farm holding 99.9% of hashrate. Precedents: early
@@ -888,6 +888,17 @@ should settle its size and how it is assigned (e.g. hash of the minting tx + out
   cadence-decay schedule, and the hard maximum DAA score, and answers every attack case:
   k-key compromise, equivocation, trustee DoS, difficulty-inflation-then-attack, and an
   anchor-free chain offered to a syncing node.
+  **Done**: [POOL-SPEC.md](docs/x-fork/POOL-SPEC.md)'s P5.8 section — k=3, n=5,
+  cadence=30s (launch), depth=600 DAA-score-units, M=6 months, K=5 years, 5-stage decay
+  schedule, hard maximum DAA score 6,311,520,000 (20 years). **One genuine refinement
+  over the plan's own literal text**: T is defined as `10⁶ × genesis difficulty target`
+  (Marigold's own, self-contained, on-chain-computable) rather than a fraction of Kaspa
+  mainnet's difficulty as the plan's rationale paragraph suggested — the latter isn't
+  on-chain data Marigold's consensus could deterministically verify, which would violate
+  the plan's own explicit "fuzzy definition is a chain-split bug" requirement. Every
+  named attack case answered, including an honest, non-minimized account of what a
+  genuinely compromised 3-of-5 majority quorum can still do. Full reasoning for every
+  chosen number recorded in [DECISIONS.md](docs/x-fork/DECISIONS.md).
 
 - [ ] **P5.9 — Spec review gate.** 🧑‍⚖️ Freeze the spec (tag `pool-spec-v1`), then have
   it reviewed by at least one person with applied-cryptography background **outside the

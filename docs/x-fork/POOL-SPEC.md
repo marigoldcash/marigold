@@ -1110,3 +1110,214 @@ structure (timing, denomination, batching shape) is visible and analyzable; the
 anonymity-set bound and its explicit lack of any active correlation-resistance; and the
 fee-stamp lineage leak named explicitly, per the P1.8 flag's own instruction, as the same
 class of leak as the disclosed graph visibility rather than a new category.
+
+---
+
+## P5.8 — Launch finality anchors ⚠️
+
+**Not a note-pool feature** — a chain-level security mechanism bundled into Phase 5
+because, like the pool, it must be fully spec'd before any implementation begins.
+**Naming**: this section's *finality anchors* are unrelated to P5.2's *freshness anchor*
+(pool-op replay protection) — same word, different mechanism, never conflate them in any
+document.
+
+**Decided in the plan, restated**: the fork launches with a federated finality guard. A
+young PoW network sized nothing like Kaspa mainnet is trivially 51%-attackable by any
+sliver of Kaspa's own ASIC fleet redirected for an hour; a veto-only, sunsetting trustee
+quorum that can never originate a block or spend a coin is strictly less centralized than
+the alternative of one anonymous mining farm quietly holding 99.9% of Marigold's actual
+hashrate. Precedent for this class of mechanism: early Bitcoin's checkpoints,
+Peercoin/Feathercoin checkpointing, Komodo's dPoW, Decred's hybrid PoW/PoS finality.
+
+### Trustee quorum and anchor mechanics
+
+**3-of-5**, independent organizations/geographies (the plan's own recommendation, adopted
+— a 5-party quorum tolerates 2 simultaneous unavailable/uncooperative trustees while
+still requiring collusion or compromise of a *majority* for any misbehavior, and stays
+small enough that "independent orgs/geos" is a real, checkable property, not just a
+number). Trustees **produce no blocks, hold no mining reward, and can only veto** — they
+ratify already-mined history, never select transactions or originate new blocks. This is
+the core of why the mechanism is "strictly less centralized" than the threat it defends
+against: a compromised trustee quorum can deny/delay finality, never mint value or
+redirect it.
+
+**Anchors**: a 3-of-5 signature over the hash of a block already **600 DAA-score-units
+deep** (~1 minute at genesis-era 10 BPS — deep enough that the anchored block has already
+cleared the chain's own natural early-confirmation noise, not the literal tip), produced
+**every 30 seconds** at launch (300 blocks per anchor at 10 BPS). Published two ways,
+redundantly: as a tiny transaction in a dedicated subnetwork (the same
+`SubnetworkId::from_namespace` mechanism P5.2 uses for pool ops — a second, independent
+namespace, not the pool's) *and* gossiped directly over P2P, so an anchor's availability
+doesn't depend on it having been mined into a block yet.
+
+**Consensus rule**: a chain conflicting with the latest valid anchor is invalid,
+regardless of accumulated proof-of-work — a second, faster-triggering enforcement of the
+same principle the existing finality-depth reorg refusal already encodes, just backed by
+an explicit trustee signature instead of pure work-accumulation depth.
+
+### Anchor transaction format and quorum verification
+
+```rust
+struct FinalityAnchor {
+    anchored_block: Hash,        // the block being certified, >= 600 DAA-score-units behind the signer's view of the tip
+    anchored_daa_score: u64,      // that block's DAA score, for unambiguous depth verification
+    signer_bitmap: u8,             // which of the 5 trustee keys signed (bit i = trustee i)
+    signatures: Vec<[u8; 64]>,      // BIP340 Schnorr signatures, one per bit set in signer_bitmap, same order
+}
+```
+Trustee public keys are **hardcoded in software** (shipped with each release, the same
+trust model the genesis block and DNS seeders already use — no on-chain registration
+mechanism, since the whole point is these keys predate and bootstrap trust in the chain,
+not the other way around). Verification: recover the ≥3 signing trustee `XOnlyPublicKey`s
+from `signer_bitmap` against the hardcoded set, verify each signature over
+`H("FinalityAnchor" || anchored_block || anchored_daa_score)` (a new domain-separated
+hash, same macro convention as every other purpose-specific hash in this spec), and
+require `signatures.len() >= 3` with no repeated signer.
+
+### Fail-open liveness
+
+**No anchor arriving is never a halt condition.** If no new valid `FinalityAnchor`
+appears within **3× the current cadence interval** (90 seconds at launch) of the last one,
+the anchor-conflict consensus rule simply stops being enforced until a new anchor arrives
+— the chain falls back to ordinary PoW/finality-depth security alone, exactly as if the
+mechanism didn't exist, for however long the gap lasts. This is automatic and requires no
+operator action to keep blocks flowing. What *is* required: every node **loudly alerts**
+the moment this fallback engages (a log line at error severity, an exposed RPC/metrics
+flag `finality_anchor_stale: true`, node-operator-facing, not silent) — liveness is never
+sacrificed for finality strictness, but operators must be able to see immediately that the
+extra protection layer is currently absent.
+
+### Equivocation and permanent key disqualification
+
+**Equivocation proof**: two validly-signed messages from the *same* trustee key that
+conflict — concretely, two `FinalityAnchor`-domain signatures from one key over two
+different `anchored_block` values whose depth/timing windows overlap (both could not
+honestly have been "the ~1-minute-deep block" at the time each was signed). Presenting
+both signed messages together is self-contained cryptographic proof, verifiable by any
+node with no external input.
+
+**Consensus rule**: any node that includes a valid equivocation proof (in the same
+dedicated subnetwork as anchors themselves) triggers **permanent disqualification** of
+that trustee key — added to a consensus-tracked deny-list; every future anchor
+verification rejects signatures from a disqualified key, forever, with no un-disqualify
+mechanism short of an explicit hard fork. If disqualification ever reduces the count of
+*live* (non-disqualified) trustee keys below 3, the quorum can no longer produce valid
+anchors at all, and the fail-open rule above engages automatically and stays engaged
+until an explicit hard fork replaces the compromised key(s) — a slow, deliberate recovery
+path is correct here; an automatic key-replacement mechanism would just relocate the
+trust assumption, not remove it.
+
+### Trustee DoS
+
+Indistinguishable, at the protocol level, from ordinary unavailability — covered
+completely by "fail-open liveness" above. No separate mechanism exists (or should exist)
+to detect *why* anchors stopped arriving (uncooperative trustees vs. network partition
+vs. coordinated attack are all operationally identical from a syncing node's point of
+view: no valid anchor within the grace window, fall back to plain PoW, alert loudly).
+
+### The hard-coded sunset
+
+**Retirement trigger** (both required, restated from the plan's own framing): sustained
+difficulty ≥ threshold **T** for **M = 6 months**, **and** at least **K = 5 years**
+elapsed since genesis. Both conditions independently defeat the same attack: a patient
+adversary mining honestly to inflate difficulty, tripping a threshold early, then
+attacking the newly-unprotected chain. The **M**-month sustained-median requirement
+defeats a brief spike (six real months of elevated difficulty is a real, expensive,
+sustained cost — not a cheap momentary rental); the **K**-year floor independently caps
+*how early* retirement can ever trigger no matter how fast difficulty rises, giving the
+trustees and community years of runway to observe and react to any anomalous growth
+pattern before real protection is ever removed. Neither condition alone is sufficient;
+this is deliberate, per the plan's own reasoning.
+
+**T, defined without needing an external oracle**: the plan's own rationale motivates
+comparing to Kaspa mainnet's difficulty ("any sliver of Kaspa's ASIC fleet"), but that
+value isn't on-chain data Marigold's own consensus can deterministically verify — a
+threshold referencing it would violate the plan's own "exact deterministic function of
+on-chain data" requirement (a fuzzy/external definition is a chain-split bug, stated
+explicitly in the plan). **T is instead defined purely against Marigold's own genesis
+difficulty**: `T = 10⁶ × genesis difficulty target`. A million-fold sustained increase
+from a cold, near-zero-hashrate launch is a strong, self-contained signal of real organic
+adoption — order-of-magnitude larger than a transient single-farm rental attack could
+plausibly sustain for six months, fully computable from data every node already has
+(no external price feed, no oracle, no off-chain input of any kind). This is a genuine
+refinement over the plan's literal Kaspa-relative framing, not just a restatement of it —
+flagged as a calibration point subject to revisiting with real early-network data, the
+same treatment P1.8's stamp sizing and P2.5's genesis timestamp already received; the
+*mechanism* (a fixed multiplier of Marigold's own genesis difficulty, deterministically
+checkable by every node) is the durable part of this decision, the exact `10⁶` less so.
+
+**"Sustained," defined exactly** (closing the "months, not moments" loophole precisely):
+reuse the existing difficulty-sampling infrastructure
+(`difficulty_window_size`/`DIFFICULTY_SAMPLED_WINDOW_SIZE`,
+[consensus/core/src/config/params.rs](../../consensus/core/src/config/params.rs),
+[consensus/core/src/config/constants.rs](../../consensus/core/src/config/constants.rs) —
+the same windowed-median mechanism already driving real-time difficulty adjustment, not a
+new sampling scheme). The retirement condition is met at the first DAA score where the
+sampled difficulty median has remained `≥ T` at **every** difficulty-window checkpoint
+across a trailing span of `M × 30.4375 days` (157,788,000 DAA-score-units at 10 BPS) —
+checking every checkpoint in the window, not just its two endpoints, is what makes this a
+real sustained-duration test rather than a start/end comparison an attacker could game by
+dipping below T only briefly outside the sampled instants.
+
+### Gradual decay, not a cliff edge
+
+The plan's own example shape, with concrete `ForkActivation`-staged thresholds:
+
+| Stage | Cadence | Trigger |
+|---|---|---|
+| 0 — Launch | 30s | Genesis |
+| 1 — Early easing | 1 hour | Difficulty first sustains ≥ T for M months (the difficulty half of retirement met; the K-year floor not yet required) — a real, if not yet sufficient, signal |
+| 2 — Retirement | 1 day | Full trigger: T sustained for M months **and** K = 5 years elapsed |
+| 3 — Long-tail advisory | 1 week | 2 further years elapsed after Stage 2 (631,152,000 DAA-score-units later) |
+| 4 — Expired | *(none — advisory only)* | Hard maximum DAA score reached (below), unconditionally |
+
+Fail-open alerting thresholds (the "3× cadence" grace window) scale with whatever stage
+is currently active, so the *relative* tolerance for a missed anchor stays constant in
+proportion even as the absolute cadence stretches.
+
+**Hard maximum DAA score: 6,311,520,000** (20 years from genesis at 10 BPS, computed as
+`20 × 12 × 2,629,800 × 10`). At and beyond this score, trustee keys are **consensus-
+expired unconditionally** — no anchor, however validly signed, has any consensus effect
+from this point forward, regardless of Stage 3's actual state or whether the difficulty
+condition was ever even met at all. This is deliberate and non-negotiable per the plan's
+own instruction: **trust must end even if network growth disappoints.** A chain that
+never reaches the T/M/K retirement trigger simply runs out its full 20-year anchor
+lifespan on plain PoW security alone from that hard-coded point on. **Extending trustee
+life beyond this score requires an explicit hard fork** — the default, unforced outcome
+is always expiry, never renewal.
+
+### Attack cases (P5.8's own verify condition, answered explicitly)
+
+- **k-key compromise (< 3 keys)**: no effect — 3-of-5 cannot be satisfied, no valid
+  anchor can be forged.
+- **k-key compromise (≥ 3 keys, i.e. quorum-level compromise)**: stated honestly, not
+  minimized — a genuinely compromised majority quorum *can* sign a false anchor
+  endorsing an attacker's chain, exactly the trust this mechanism places in the
+  trustees. This is the same threat model every k-of-n federation carries; the
+  mitigation is trustee selection (independent orgs/geos, per the plan) making
+  simultaneous majority compromise a real practical barrier, and the entire reason a
+  hard-coded sunset exists at all — this trust is bounded in time by design, never
+  indefinite.
+- **Equivocation**: any node presenting the two conflicting signed messages from one
+  key triggers permanent disqualification of that key, deterministically and without
+  requiring the honest trustees' cooperation to enforce.
+- **Trustee DoS**: no valid anchor within 3× the current cadence → fail-open (plain PoW
+  security resumes automatically) with a loud, node-operator-visible alert — never a
+  chain halt.
+- **Difficulty-inflation-then-attack**: defeated by the dual T-and-K condition — a
+  brief inflation fails the M-month sustained-median check; even a genuinely sustained
+  one cannot trigger retirement before the K = 5-year floor regardless of how fast it
+  arrives.
+- **Anchor-free chain offered to a syncing node**: IBD requires learning the current
+  latest valid anchor *before* evaluating any candidate chain (from hardcoded trustee
+  keys shipped in software, cross-checked against multiple independent bootstrap
+  peers/seeders) — any candidate chain not building at-or-beyond that anchored block is
+  rejected outright regardless of accumulated work, so a higher-work anchor-free
+  attacker chain loses during sync, exactly as the plan requires.
+
+✅ *Verify:* exact values stated for every named parameter — k=3, n=5, cadence=30s
+(launch), depth=600 DAA-score-units, T=10⁶×genesis difficulty, M=6 months
+(157,788,000 DAA-score-units), K=5 years (1,577,880,000 DAA-score-units), the 5-stage
+cadence-decay schedule, and the hard maximum DAA score (6,311,520,000, 20 years). Every
+named attack case answered explicitly, including an honest (not overstated) account of
+what a genuine majority-quorum compromise can and cannot do.
