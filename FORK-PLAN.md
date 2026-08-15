@@ -828,6 +828,28 @@ store → validation → pipeline → mempool → sync → RPC. Every step lands
 *Goal: a person can hold, receive, spend, back up, and restore notes through the CLI
 wallet. WASM/mobile wallets are post-launch — CLI proves the protocol.*
 
+- [ ] **P7.0 — Inherited-wallet surface audit.** 🧑‍⚖️ **DECISION** (added 2026-08-15,
+  prompted by the P2.8 investigation of `compat/gen0.rs`). Decide the fate of the
+  entire inherited seed-phrase wallet stack (`kaspa-wallet-core`'s BIP32/mnemonic
+  accounts, `kaspa-cli`'s wallet commands) now that the note wallet replaces the
+  wallet concept — keep as a transparent-tier power-user tool, feature-gate it, or
+  strip it. Whatever the wallet-stack decision, **the legacy-Kaspa import surfaces
+  must be removed or hard-disabled**: `compat/gen0.rs` (KDX import — a deprecated
+  third-party Kaspa wallet), `compat/gen1.rs` + the four
+  `import_kaspawallet_golang_*` wallet-API functions (Go `kaspawallet` files), and
+  the CLI's `import legacy` / `account import legacy-data` commands. Rationale: on a
+  fair-launch chain these can never find funds — their only possible real-world
+  effect is inviting users to type real Kaspa wallet passwords and expose real Kaspa
+  keys inside Marigold software (key-reuse hazard, and it normalizes exactly the
+  behavior wallet-phishing needs). Deliberately deferred from Phase 2 (the inherited
+  wallet is load-bearing for P4.2's smoke test, and piecemeal deletion would buy
+  upstream-merge friction without settling the real question). **Hard deadline: must
+  close before any binaries reach outside users — P8.7 public testnet at the latest;
+  the P8.5 wallet threat pass must re-verify it happened.**
+  ✅ *Verify:* decision recorded in DECISIONS.md; `grep -ri "kdx\|kaspawallet\|legacy_v0"
+  wallet/ cli/` shows no reachable user-facing import path; `cargo test --workspace`
+  green after removal.
+
 - [ ] **P7.1 — Note key DB.** In `wallet/core`: a serial-keyed store of
   `(serial, sk, denomination, provenance)` with the hot/cold provenance flag from P5.6,
   persisted with the wallet's existing encrypted-storage machinery; subscribes to
@@ -920,6 +942,9 @@ stand.*
   tampering (amount/pk swapped — does the payer's confirm screen bind what's signed?),
   bearer QR shoulder-surfing/photograph, clipboard scraping, malicious restore files,
   and the hot-key rules under every import path. Fix what falls out.
+  *(Flag from P7.0: re-verify here that the legacy-Kaspa import surfaces — KDX/gen0,
+  golang-kaspawallet/gen1, `import legacy` CLI flows — were actually removed or
+  hard-disabled before any binaries ship to outside users.)*
   ✅ *Verify:* written threat checklist in `docs/x-fork/reviews/` with each item tested
   or explicitly accepted.
 
