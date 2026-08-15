@@ -756,3 +756,257 @@ resolution rather than needing a new one; each mode's on-chain shape is given ex
 (both reduce to the identical `TransferOp`); the shared-key window (bearer) and the
 pk-freshness window (sign-to-fresh-pk, tied concretely to P5.2's 36,000-DAA-score
 constant) are both named and distinguished.
+
+---
+
+## P5.6 — Wallet protocol
+
+**The wallet is a key-database manager, not an identity.** No 24-word seed tied to one
+master key; it holds one private key per note (or, under shared-pk policy below, one key
+shared by several notes). This section specs the key DB and its backup, the receive and
+spend flows, QR payload formats, how a wallet tracks its own notes without any
+scanning/trial-decryption (the pool is plaintext — nothing to decrypt), the shared-pk
+policy and its one invariant, the same-key-in-two-wallets hazard and its mitigations, and
+a forward-looking key-algorithm-deprecation story.
+
+### Key database format and the backup story
+
+Minimally, one row per key the wallet holds:
+
+```
+KeyDbEntry {
+    sk: [u8; 32],              // private key (the corresponding pk is derivable, not stored redundantly)
+    provenance: KeyProvenance,  // Cold | Hot — see "same-key-in-two-wallets hazard" below
+    known_serials: Vec<Hash>,   // sn(s) this wallet believes are currently under this key
+}
+```
+
+**State this loudly, as the plan requires**: losing the key database is losing the notes.
+There is no seed phrase to reconstruct it from, no derivation path, nothing but the raw
+private keys themselves — this is the direct consequence of "one key per note" instead of
+one master key deriving everything, and it is the entire reason paper backup (below) is
+not an optional feature but core to the wallet being usable at all.
+
+### Paper backup
+
+**Format**: serialize a chunk of `(serial, sk, denomination)` entries with `borsh`
+(consistent with every other wire format in this spec), encrypt with the wallet's
+existing password-based encryption — reused directly, not reinvented:
+`wallet/core/src/encryption.rs`'s `encrypt_xchacha20poly1305(data, secret)` already does
+exactly this (Argon2-derived key via `argon2_sha256iv_hash`, XChaCha20Poly1305 AEAD, a
+random 24-byte/192-bit nonce prepended to the ciphertext+16-byte auth tag) — this is the
+*same* function the existing wallet already uses to encrypt its own storage, not a
+new crypto primitive introduced for this feature.
+
+**Chunking**: ~40 note entries fit per QR code (a `(serial: 32, sk: 32, d: 1)` entry is 65
+bytes; borsh-encoded + XChaCha20Poly1305 overhead (24-byte nonce + 16-byte tag) keeps a
+40-entry chunk comfortably under a QR code's practical capacity at a scannable error-
+correction level). Each QR carries a small plaintext header before the encrypted payload
+so multi-page restores can detect missing pages without needing the password first:
+
+```
+QrPageHeader {
+    backup_id:     [u8; 8],   // random, generated once per backup session — groups pages together
+    chunk_index:   u16,        // this page's index, 0-based
+    chunk_count:   u16,         // total pages in this backup
+    format_version: u8,          // 1
+}                                    // 15 bytes, plaintext
+```
+
+The password itself may be written on the printed page — this backup's threat model is
+safe physical storage (a drawer, a safe), not a password kept secret from whoever finds
+the paper; encryption still protects the far more likely real-world exposure (a stray
+phone photo of the page, a printer's spool file, a cloud-synced "Downloads" folder).
+
+### Restore flow — self-reconciling against the plaintext pool
+
+Because the pool is plaintext, a restored key doesn't need the wallet to have tracked
+anything continuously — it can ask the chain directly: **for each entry, look up the
+serial's current owner in `PoolState`**; if the current `pk` matches the printed
+key's derived public key, the note is still yours (rotate it immediately — see "backups
+go stale" below); if it doesn't match, someone else's transaction has already moved it on
+(spent since the backup was printed, or the backup is simply stale/superseded), discard
+that entry. No merkle-scanning, no trial-decryption, no synchronization protocol — one
+`PoolState` lookup per restored serial, exactly the passive read every other part of this
+spec already assumes the wallet can do freely (the pool being plaintext is precisely what
+makes this restore this simple).
+
+Two properties worth stating explicitly, since they're easy to get backwards:
+
+- **Rotation doubles as backup revocation.** A leaked printout only endangers notes that
+  haven't been rotated since it was printed — the moment any note on the page is rotated
+  (by the legitimate owner, for any reason), that specific entry in *every* copy of that
+  printout, leaked or not, becomes worthless (its key no longer matches the note's current
+  `pk`). A full self-sweep (rotate everything) is therefore a deliberate, complete
+  invalidation of every prior backup at once — a real recovery action, not just hygiene.
+- **Backups go stale.** Notes *received* after a backup was printed are, by definition,
+  not on it. The wallet should prompt for periodic re-printing (e.g. after N new notes
+  received, or on a time interval) — this is a UX nudge, not a protocol requirement, since
+  nothing about the chain enforces backup freshness.
+
+### Receive flow
+
+1. **Import** — either import a handed-over private key directly (bearer mode, P5.5a), or
+   receive a signed `TransferOp` targeting a `pk` this wallet generated and already holds
+   the private key for (sign-to-fresh-pk mode, P5.5b — the wallet was "watching" that `pk`
+   since generating it, per "unpaid-invoice semantics").
+2. **Verify on-chain state** — look up the relevant serial(s) in `PoolState` (a plain
+   lookup, same mechanism as backup restore above) and confirm the expected `TransferOp`
+   has actually confirmed (not merely broadcast — mempool presence alone isn't settlement,
+   per P5.5's universal settlement rule).
+3. **Rotate if bearer mode** — per P5.5a, a bearer-received note isn't finally the
+   receiver's until they rotate it to a key only they know; the wallet should do this
+   automatically (not leave it as a manual step) the moment step 2 confirms the note is
+   real and spendable, since delaying only extends the shared-key exposure window for no
+   benefit.
+4. **Confirm** — update `known_serials` for the (possibly newly rotated-to) key, mark the
+   entry ready to spend.
+
+### Spend flow
+
+Given a target amount:
+
+1. **Select notes** from `known_serials` whose denominations can combine to at least the
+   target (standard bin-packing over the fixed P1.6 ladder — implementation detail, not
+   specified further here since any correct selection algorithm is protocol-compatible;
+   only the *result* — a valid `TransferOp`/`Redeem` — is consensus-relevant).
+2. **Split as needed** to make exact change — a `Transfer` whose `produced` list includes
+   both the payment-sized note(s) (to the recipient's `pk`) and change note(s) (back to a
+   *fresh* key the wallet controls, not the same key being spent from — reusing a key
+   across a split's own inputs and outputs is never necessary and needlessly narrows the
+   note's key-history). This can be the exact same transaction as the transfer itself
+   (P5.2's `Transfer` already allows an arbitrary `produced` list — "split then pay" is
+   one `TransferOp`, not two sequential ones), or a separate prior split if the wallet
+   prefers to hold pre-split change ready in advance.
+3. **Transfer** — construct and sign the `TransferOp`/`Redeem`, attaching a fee stamp
+   (P5.2's mechanism — an extra consumed serial with no matching produced entry) only if
+   the op doesn't already self-fund (a pure same-denomination payment does not, per P5.2's
+   "pure rotate has zero natural slack" analysis — the wallet should default to attaching
+   a stamp for `Transfer`s that don't naturally produce a fee, and skip it for ones that
+   do, such as any split).
+
+### QR payload formats
+
+Two distinct QR uses appear in this spec, deliberately different formats since they carry
+different trust properties:
+
+- **Backup QR** (above): `QrPageHeader` (15 bytes plaintext) `||` XChaCha20Poly1305
+  ciphertext of a borsh-encoded `Vec<KeyDbEntry-like tuple>` chunk. Multi-page; requires
+  the backup password to read.
+- **Payment-request QR** (P5.5b, POS below): plaintext, no encryption — it's a public
+  invitation to pay, not a secret. `PaymentRequest { pk: [u8; 32], amount_petals: u64
+  }` — 40 bytes; a static day-pk fallback (for printed QRs, P5.5b) omits `amount_petals`
+  (the customer enters it manually) and is simply `{ pk: [u8; 32] }`, 32 bytes.
+
+### How the wallet tracks its notes — no scanning, no trial-decryption
+
+The wallet already knows every serial it holds (they're rows in its own `KeyDbEntry`
+table) — it does not need to discover them by scanning the chain, because nothing about
+receiving a note requires the receiver to have been anonymous to the chain first (unlike
+a shielded-pool design, where a receiver must trial-decrypt every note to find their own).
+It simply watches `PoolState` for changes touching its own known serials (the pool being
+plaintext state every full node already holds makes this a plain, cheap map lookup,
+exactly like a light client watching specific UTXOs today) — confirmed activity on a
+known serial is how "was this rotation accepted" (receive flow step 2) and "did my spend
+confirm" are both answered, with the identical mechanism.
+
+### Shared-pk policy (decided)
+
+**Consensus does not require `pk` uniqueness.** Many notes may share one `pk`; each stays
+an independent `sn → (d, pk)` entry (P5.1), and each remains separately spendable via a
+signed rotation — `TransferOp`'s `SignedGroup` already allows one signature to cover
+multiple serials sharing a `pk` (P5.2), so a merchant sweeping many same-`pk` notes needs
+no re-rotation-per-note first, just one group listing them all.
+
+**The one wallet invariant**: **bearer handover requires a solo key.** Revealing a shared
+`sk` hands over *every* note under that `pk`, not just the one being paid — so before a
+note can be bearer-spent (P5.5a), it must first be isolated onto its own fresh key (one
+ordinary rotation, same-denomination, no fee-stamp-avoiding trick needed since it's a
+pure rotate that can attach a stamp normally). Personal wallets should default to
+generating a fresh `pk` per note received via sign-to-fresh-pk mode specifically to avoid
+ever needing this isolation step later — sharing a `pk` is something a wallet does
+*deliberately* (the POS landing pad below), not a default state personal notes drift
+into.
+
+### POS "landing pad" flow (decided)
+
+1. The register encodes `{pk, amount}` (the `PaymentRequest` QR above) — `pk` fresh **per
+   checkout** when dynamically generated (gives free payment matching: the merchant knows
+   exactly which confirmed rotation corresponds to which sale), falling back to one
+   **static day-`pk`** only for printed/static QR codes, with the customer entering the
+   amount manually in that case.
+2. The customer wallet displays the amount for confirmation, runs the spend flow above
+   (select, split as needed) targeting the register's `pk`.
+3. The merchant wallet watches that `pk` (per "how the wallet tracks its notes," above)
+   and, the instant the payment confirms, **immediately sweeps**: one `TransferOp` with a
+   single `SignedGroup` (all the just-landed notes share the checkout `pk`, so one
+   signature covers all of them) moving every note to its own freshly-generated cold key
+   in `produced`.
+4. The checkout `pk` is therefore only ever a **transient landing pad** — steady state is
+   always one-note-one-key, and the shared-key window lasts only as long as it takes the
+   merchant's own sweep transaction to confirm (seconds, at 10 BPS).
+
+**Sweep per confirmation, not end-of-day**: notes left parked on the POS `pk` between
+sales are exposed to a compromised register device for as long as they sit there — a
+device that's leaked or logged its signing key (or is simply malicious) can spend
+anything still parked on it. Sweeping immediately, transaction by transaction, bounds
+that exposure to the confirmation latency of one transfer, not a business day.
+
+### Same-key-in-two-wallets hazard
+
+Shared-`pk` notes can end up split across wallets that don't know of each other: a
+partial key export between a user's own devices, a restored old backup that predates a
+device split, or a bearer handover of a key that (in violation of the invariant above)
+wasn't actually solo. Since the pool is plaintext, **anyone holding a `pk` can enumerate
+every serial under it** — so either wallet, in this scenario, technically *could* spend
+(or accidentally sweep) notes the other wallet also believes it owns. Two rules make this
+state harmless and self-limiting rather than a live conflict:
+
+1. **Ownership is tracked by serial, never inferred by `pk`.** A wallet's spend/sweep
+   selection (spend flow step 1, POS sweep above) operates *only* on its own explicit
+   `known_serials` list — never derived by scanning what happens to exist under a `pk` it
+   holds. Enumerating a `pk`'s full serial set is useful for audit/debugging, never for
+   deciding what to spend. This alone prevents one wallet from ever accidentally sweeping
+   serials the other wallet added to the same `pk` without this wallet's knowledge.
+2. **Key provenance decides laziness** (the `KeyProvenance` field in `KeyDbEntry`, above).
+   A key generated locally and never exported anywhere is **Cold** — lazy isolation is
+   fine, no urgency to rotate away from a shared state that only this wallet could have
+   caused. Any key that ever crossed a wallet boundary — a bearer import, a cross-device
+   export, a backup restore — is **Hot**, and every one of *this* wallet's serials under
+   that key should be rotated to fresh Cold keys immediately on next opportunity, not
+   lazily, since a Hot key's shared-state history could include another wallet the user
+   doesn't fully control or trust in this moment.
+
+### Key-algorithm-deprecation story (forward-looking; no existing "architecture paragraph" to transcribe — checked, none exists elsewhere in this repo)
+
+P5.1 fixes exactly one key format at launch (32-byte x-only BIP340 Schnorr, reusing
+Kaspa's own). This section specs the *mechanism* a future migration would use, not a
+second format to support today — inventing a multi-algorithm wire format before it's
+needed would be exactly the kind of premature complexity this project avoids elsewhere.
+
+**Signaling**: a future deprecation is a consensus-level event, activated the same way
+every other protocol change in this codebase already is — a `ForkActivation`-gated rule
+(the identical mechanism `crescendo_activation`/`toccata_activation` already use) that,
+from some future DAA score, refuses `Mint`/`Transfer`/`Split`/`Merge` outputs using the
+deprecated key format in `produced`, while continuing to allow existing deprecated-format
+notes to be rotated *away* from it — mirroring exactly how a `Version` field already lets
+Kaspa addresses support multiple coexisting key formats (`Version::PubKey` vs.
+`Version::PubKeyECDSA`, `crypto/addresses`) without breaking anything already using the
+old one. New note creation moves to the new format; old notes remain fully spendable
+throughout, their only path forward being an ordinary rotation to a new-format key.
+
+**Wallet-side**: a wallet learns of an upcoming deprecation the same way it learns of any
+other future consensus rule — shipped in a software update carrying the new
+`ForkActivation`'s DAA score, or (for earlier, update-independent warning) by querying a
+node's RPC for upcoming deprecation schedules, analogous to `get_server_info` today. Once
+aware, the wallet should proactively self-sweep: rotate every note held under the
+deprecated algorithm to freshly-generated new-algorithm keys well before the enforcement
+DAA score, using the *exact same* `TransferOp` mechanism already specified for the
+same-key-hazard self-sweep above — no new wallet operation, just the existing rotate
+applied preemptively and network-wide rather than reactively to one user's own hazard.
+
+✅ *Verify:* a wallet developer can implement receive → detect → spend without further
+questions — every flow (backup/restore, receive, spend, POS sweep, cross-wallet hazard
+mitigation, future key migration) is specified in terms of primitives already fully
+defined in P5.1-P5.5 (`TransferOp`, `SignedGroup`, `PoolState` lookups, the existing
+`encrypt_xchacha20poly1305`), with no step left as "figure this out later."

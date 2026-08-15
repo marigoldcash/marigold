@@ -761,7 +761,7 @@ should settle its size and how it is assigned (e.g. hash of the minting tx + out
   dual role as anti-replay protection *and* invoice/QR expiry — the same 36,000-DAA-score
   constant governs both, not two separately-tuned numbers.
 
-- [ ] **P5.6 — Spec: wallet protocol.** The wallet is a key-database manager, not an
+- [x] **P5.6 — Spec: wallet protocol.** The wallet is a key-database manager, not an
   identity: no 24-word seed tied to one key — it holds one private key per note. Spec: the
   key DB format (and its backup story — losing the DB is losing the notes; state this
   loudly), **paper backup**: the wallet can print its key DB as password-protected QR
@@ -817,6 +817,18 @@ should settle its size and how it is assigned (e.g. hash of the minting tx + out
   how a wallet learns "algorithm X is deprecated, rotate to algorithm Y keys".
   ✅ *Verify:* section lets a wallet dev implement receive-detect-spend without asking
   questions.
+  **Done, executed 2026-08-15**: wrote
+  [POOL-SPEC.md](docs/x-fork/POOL-SPEC.md)'s P5.6 section — key DB format + loud
+  losing-the-DB-means-losing-the-notes warning; paper backup reusing the wallet's own
+  existing `encrypt_xchacha20poly1305`/Argon2 encryption verbatim (not new crypto);
+  restore as a plain `PoolState` lookup per entry (the plaintext pool making this trivial,
+  no scanning needed); receive/spend/QR-format/note-tracking flows; the shared-pk policy
+  and POS sweep-per-confirmation flow as specified in the plan; the same-key-hazard's two
+  mitigating rules. **The "architecture paragraph" the plan references doesn't exist
+  anywhere in this repo** (checked via grep before writing) — designed the
+  key-algorithm-deprecation mechanism from scratch instead, reusing only the existing
+  `ForkActivation` pattern and the `Version`-field precedent from Kaspa addresses, rather
+  than transcribing content that doesn't exist. Recorded in DECISIONS.md.
 
 - [ ] **P5.7 — Spec: honest privacy statement.** One section stating exactly what is and
   is not private: denominations, serials, and every op are public; no sender/receiver

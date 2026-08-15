@@ -282,3 +282,20 @@ currently rejects any non-coinbase transaction with zero inputs. A pure
 exception before Phase 6 implementation — checked directly against the real validation
 code rather than assuming "touches no transparent value" already worked under existing
 rules. Flagged for P5.3 to formalize as a consensus rule change.
+
+### P5.6 — Key-algorithm-deprecation mechanism
+
+New design, not transcribed from anywhere: the plan asks P5.6 to "include the
+network-signaled key-rotation upgrade story from the architecture paragraph," but no such
+paragraph exists anywhere else in this repo (checked via grep before writing anything).
+Designed one from scratch, reusing only mechanisms already specified elsewhere rather
+than inventing new ones: a future key-algorithm deprecation is a `ForkActivation`-gated
+consensus rule (the identical mechanism `crescendo_activation`/`toccata_activation`
+already use) that blocks *new* notes from using a deprecated key format while leaving
+existing deprecated-format notes fully spendable via ordinary rotation — mirroring how
+Kaspa addresses already support multiple coexisting key formats via a `Version` field.
+Wallets learn of the schedule via software updates or RPC query, then proactively
+self-sweep using the exact same rotate mechanism already specified for the
+same-key-in-two-wallets hazard. Deliberately did not design a second key format to
+support today — P5.1 fixes exactly one (secp256k1 Schnorr) at launch; this section specs
+only the *mechanism* a migration would use when one is eventually needed.
