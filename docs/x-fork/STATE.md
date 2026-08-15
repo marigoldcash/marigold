@@ -4,7 +4,7 @@ Snapshot of everything decided and built so far, so any fresh coding session on 
 machine can continue from the repo alone. Read this together with [FORK-PLAN.md](../../FORK-PLAN.md).
 Update this file whenever off-repo state changes (domains, accounts, infra).
 
-Last updated: 2026-08-15 (P5.9 in progress — both external reviews triaged and folded in; awaiting reviewer sign-off on the new artifacts)
+Last updated: 2026-08-15 (Phase 5 complete — spec tagged pool-spec-v1.1, P5.9 closed, Phase 6 unblocked)
 
 ## What this project is
 
@@ -79,34 +79,32 @@ substitute for it.
 
 ## Where execution stands
 
-- **Waiting on one human input: reviewer sign-off on the updated spec.** P5.1-P5.8 are
-  fully written; [docs/x-fork/POOL-SPEC.md](POOL-SPEC.md) was frozen at tag
-  `pool-spec-v1` (commit `9d93ab32`) and is now at **v1.1-draft with both external
-  reviews folded in** (all reviews + finding-by-finding triages under
-  [reviews/](reviews/)). Review 1's headline fix was a real **Redeem
-  transaction-malleability vector** (pool-op signature didn't cover transparent
-  outputs — now covered uniformly). Review 2 (James O'Connell) found **no new flaw**,
-  independently confirmed the review-1 fix, and demanded rigor artifacts that are now
-  written into the spec: the P5.2 **authorization theorem** with proof sketch, a
-  complete **signed/unsigned field matrix** (which surfaced one bounded, documented
-  deviation — consumed-group-set malleability, fee-effects only, flagged `[Open]` for
-  specialist sign-off), an explicit pre-execution-bearerability **threat model**
-  ("signed = spent" as a binding wallet rule), full canonicalization/encoding rules,
-  version+op-type domain separation in the signing hash, state invariants I1-I5, the
-  P5.8 **trust boundary stated first**, the **IBD anchor-ratchet** bootstrap design,
-  and the complete **equivocation-evidence lifecycle**. Its launch-phase demands are
-  gated into the plan (T/M/K sensitivity model → P9.5 hard gate;
-  trustee-independence criteria + one-live-signer rule → P9.1; wallet recovery
-  drills → P8.5; its test matrices → Phase 6 conformance tests). **Cross-review
-  concurrence is in** (reviewer 1's response to review 2, filed with a disposition
-  note in [reviews/](reviews/)): both reviewers converge on the same priority list,
-  and every spec-addressable item on it is already in the current draft — reviewer 1's
-  top ask, the unsigned-field audit ("one fish → the net"), was already implemented as
-  the P5.2 field matrix before the response arrived. **To close P5.9**: send the
-  updated `POOL-SPEC.md` back to the reviewer(s) for a short confirmation pass on the
-  new artifacts (P5.2 theorem + field matrix, the `[Open]` group-set-malleability
-  item, P5.8 IBD/equivocation additions), then tag `pool-spec-v1.1`. Phase 6 stays
-  blocked until then.
+- **Next step: P6.1 — start of Phase 6 (Pool: consensus implementation ⚠️).** Note
+  types & wire encoding in `consensus/core`: `Note`, the op enum, borsh serialization,
+  the dedicated subnetwork ID — pure data, no validation logic yet. Verify: round-trip
+  encode/decode tests including maximum-size instances; byte sizes match the spec's
+  P5.1/P5.2 tables. Implement against **`pool-spec-v1.1`** (the tag, not memory).
+- **Phase 5 (P5.1-P5.9) is fully done — the spec survived external review.**
+  [POOL-SPEC.md](POOL-SPEC.md) is tagged **`pool-spec-v1.1`** after a full review
+  cycle: two independent external reviews, a cross-review concurrence, and a
+  confirmation pass, all filed with finding-by-finding triages under
+  [reviews/](reviews/). Review 1 caught one real vulnerability (Redeem
+  transaction-malleability — pool-op signatures didn't cover transparent outputs; now
+  covered uniformly) and sharpened the equivocation rule (now exactly decidable via
+  DAA-keyed cadence). Review 2 (O'Connell) found no new flaw and demanded the rigor
+  layer, now in the spec: authorization theorem + proof sketch, complete
+  signed/unsigned field matrix, explicit bearerability threat model ("signed = spent"
+  as a binding wallet rule), full canonicalization, version+op-type domain separation,
+  invariants I1-I5, prominent trust-boundary statement, IBD anchor-ratchet, complete
+  equivocation-evidence lifecycle. Reviewer 1's confirmation pass on the updated spec
+  closed the gate: "none of these should block tagging v1.1 and closing P5.9."
+  **Standing obligations carried forward**: consumed-group-set malleability (`[Open]`
+  in the P5.2 field matrix — Phase 6 standing review item; assessed "needs sign-off,
+  not redesign"); gas-semantics confirmation (Phase 6); T/M/K quantitative sensitivity
+  model (P9.5 hard gate — the 10⁶ multiplier is explicitly not final without it);
+  trustee-independence criteria + one-live-signer rule (P9.1); wallet recovery drills
+  (P8.5); reviewer test matrices → Phase 6 conformance tests. Any later reviewer-2
+  feedback on the updated draft folds into a v1.2 via the same triage process.
 - **Phase 4 (P4.1-P4.4) is fully done — "the fork works," tagged and reproducible.**
   Tag `fork-transparent-v0.1` exists on `origin`, and the fresh-clone claim was
   actually tested, not assumed: a genuinely clean `git clone --branch

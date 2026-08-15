@@ -900,7 +900,7 @@ should settle its size and how it is assigned (e.g. hash of the minting tx + out
   genuinely compromised 3-of-5 majority quorum can still do. Full reasoning for every
   chosen number recorded in [DECISIONS.md](docs/x-fork/DECISIONS.md).
 
-- [ ] **P5.9 — Spec review gate.** 🧑‍⚖️ Freeze the spec (tag `pool-spec-v1`), then have
+- [x] **P5.9 — Spec review gate.** 🧑‍⚖️ Freeze the spec (tag `pool-spec-v1`), then have
   it reviewed by at least one person with applied-cryptography background **outside the
   project**. Fold feedback into v1.1. Do not start Phase 6 before this.
   ✅ *Verify:* written review exists in `docs/x-fork/reviews/`; issues triaged.
@@ -923,10 +923,17 @@ should settle its size and how it is assigned (e.g. hash of the minting tx + out
   and the complete equivocation-evidence lifecycle. Its launch-phase demands are gated
   into the plan: T/M/K sensitivity model → P9.5 (hard gate), trustee-independence
   criteria + one-live-signer rule → P9.1, wallet recovery drills → P8.5; its P5.2/P5.8
-  test matrices become Phase 6 conformance-test requirements. **Remaining before this
-  step closes**: specialist sign-off on the new theorem/matrix artifacts (natural
-  choice: send the updated draft back to the same reviewers), then tag
-  `pool-spec-v1.1`. Phase 6 stays blocked until then.
+  test matrices become Phase 6 conformance-test requirements. **Closed 2026-08-15**:
+  reviewer 1's cross-review concurrence and then a confirmation pass on the updated
+  draft (both filed in [docs/x-fork/reviews/](docs/x-fork/reviews/)) delivered the
+  explicit verdict "none of these should block tagging v1.1 and closing P5.9" — the
+  full cycle (review → revision → confirmation by an external
+  applied-cryptography-background reviewer) satisfies this step's requirement. Tagged
+  **`pool-spec-v1.1`**. Three non-blocking items carried forward with homes:
+  consumed-group-set malleability (`[Open]` in the P5.2 field matrix → Phase 6
+  standing review item), gas-semantics confirmation (→ Phase 6), T/M/K quantitative
+  model (→ P9.5 hard gate). Any later feedback from reviewer 2 on the updated draft
+  folds into a v1.2 by the same triage process. **Phase 6 is unblocked.**
 
 ---
 

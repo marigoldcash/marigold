@@ -5,11 +5,15 @@ frozen and externally reviewed (P5.9) before any implementation begins (Phase 6+
 `## P5.N` section below is that plan step's deliverable — do not implement against this
 document until P5.9 has closed.
 
-**Version: v1.1-draft** (2026-08-15). `pool-spec-v1` (tag, commit `9d93ab32`) is the
-frozen review baseline; this draft folds in the accepted findings from
-[review 1](reviews/pool-spec-v1-review-1.md) (triage:
-[pool-spec-v1-review-1-TRIAGE.md](reviews/pool-spec-v1-review-1-TRIAGE.md)) and awaits a
-second external review before being tagged `pool-spec-v1.1`. Changes from v1:
+**Version: v1.1** (2026-08-15, tag `pool-spec-v1.1`). `pool-spec-v1` (tag, commit
+`9d93ab32`) was the frozen review baseline. This version folds in the accepted findings
+of two external reviews plus a cross-review concurrence and a confirmation pass — the
+full trail, with finding-by-finding triages, is under [reviews/](reviews/). P5.9's
+review gate closed on reviewer 1's confirmation verdict ("none of these should block
+tagging v1.1"); three non-blocking items are carried forward as standing obligations
+(the `[Open]`-flagged consumed-group-set malleability → Phase 6 review item;
+gas-semantics confirmation → Phase 6; the T/M/K quantitative model → P9.5 hard gate).
+Changes from v1:
 1. **P5.2/P5.3 (critical fix)**: the pool-op signing hash now covers the enclosing
    transaction's transparent outputs, closing a Redeem transaction-malleability vector
    (an interceptor of a signed `RedeemOp` could previously redirect the redeemed value
@@ -615,7 +619,7 @@ uncommitted with a real but bounded effect, documented.
 | `op.produced` (entire list) | Committed | Full list, in order — destinations and denominations fixed. |
 | `tx.outputs` (amounts, scripts) | Committed | Via `transparent_outputs_hash` (v1.1). |
 | `freshness.anchor_daa_score` | Committed | In the preimage. |
-| **Other groups' serials** (consumed set composition) | **Analyzed** | A group's signature does not cover *other* groups. Consequences, exhaustively: an adversary may **add** a group they themselves validly sign for the same `(v,t,P,O,A)` (raises fee at their own expense — a donation); or **strip** another party's group (lowers `Σconsumed`, hence fee — if conservation still holds the op executes with the stripped group's serials left untouched and still owned by their holder; if not, the tx is invalid). Neither redirects nor re-denominates anything; the stripped party loses nothing but their intended fee contribution. Worst case is fee-stripping to zero (mempool relay policy then declines it) — a griefing vector, not theft. Full-consumed-set binding was considered and deliberately not chosen: it would forbid collaborative fee attachment (a second party adding a stamp to an op they didn't author) at the cost of closing only this non-theft vector. **[Open — explicitly flagged for specialist sign-off.]** |
+| **Other groups' serials** (consumed set composition) | **Analyzed** | A group's signature does not cover *other* groups. Consequences, exhaustively: an adversary may **add** a group they themselves validly sign for the same `(v,t,P,O,A)` (raises fee at their own expense — a donation); or **strip** another party's group (lowers `Σconsumed`, hence fee — if conservation still holds the op executes with the stripped group's serials left untouched and still owned by their holder; if not, the tx is invalid). Neither redirects nor re-denominates anything; the stripped party loses nothing but their intended fee contribution. Worst case is fee-stripping to zero (mempool relay policy then declines it) — a griefing vector, not theft. Full-consumed-set binding was considered and deliberately not chosen: it would forbid collaborative fee attachment (a second party adding a stamp to an op they didn't author) at the cost of closing only this non-theft vector. **[Open — carried into Phase 6 as a standing review item; reviewer 1's confirmation pass assessed it as "needs specialist sign-off, not a redesign" and non-blocking for v1.1.]** |
 | `tx.subnetwork_id` | Harmless | Changing it stops the payload being interpreted as a pool op at all — no pool transition occurs (transition (a)); the mutated tx is then a zero-input non-coinbase transaction, invalid under existing rules. |
 | `tx.version` | Harmless | User-lane subnetworks require `TX_VERSION_TOCCATA` (≥1); other values are invalid with a user-lane subnetwork ID under existing rules. |
 | `tx.lock_time` | Harmless | Can only delay earliest acceptance; the anchor window bounds total delay — worst case the op expires (transition (a)). |

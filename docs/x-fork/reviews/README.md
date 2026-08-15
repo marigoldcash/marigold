@@ -3,7 +3,7 @@
 This directory holds written external reviews of frozen specs, per FORK-PLAN.md's
 review-gate steps (currently just P5.9).
 
-## P5.9 — Pool spec review (in progress)
+## P5.9 — Pool spec review (CLOSED 2026-08-15 — spec tagged `pool-spec-v1.1`)
 
 [docs/x-fork/POOL-SPEC.md](../POOL-SPEC.md) was frozen at tag `pool-spec-v1`
 (commit `9d93ab32`) on 2026-08-15. Per the plan, it needs review by **at least one
@@ -30,14 +30,15 @@ person with an applied-cryptography background, outside the project**, before Ph
   with our triage's positioning-gate treatment). Every actionable item it endorses was
   already implemented in commit `8226721a`, which postdates the spec version reviewer 1
   read — see the disposition note appended to the filed response.
-- **Remaining to close P5.9**: specialist sign-off on the newly written P5.2
-  theorem/field-matrix artifacts — both reviewers have converged on the priority list,
-  and everything spec-addressable on it is in the current draft; what neither has yet
-  seen is the artifacts themselves. Recommended: send the updated `POOL-SPEC.md`
-  (current `x-fork`) to one or both reviewers for a short confirmation pass focused on
-  the P5.2 theorem + field matrix (especially the one **[Open]** item:
-  consumed-group-set malleability) and the P5.8 IBD/equivocation additions, then tag
-  `pool-spec-v1.1` and close.
+- **Confirmation pass received — gate closed**:
+  [pool-spec-review-1-confirmation-pass.md](pool-spec-review-1-confirmation-pass.md) —
+  reviewer 1 read the updated spec including all the new artifacts and delivered the
+  explicit verdict: "None of these should block tagging v1.1 and closing P5.9."
+  Tagged `pool-spec-v1.1`; P5.9 closed. Carried-forward non-blocking items (each with
+  a home): consumed-group-set malleability (`[Open]` in the P5.2 field matrix → Phase
+  6 standing review item), gas semantics (→ Phase 6), T/M/K model (→ P9.5 hard gate).
+  If reviewer 2 later reviews the updated draft, findings fold into a v1.2 by the same
+  triage process.
 
 What the reviewer should look at:
 - The full spec (`POOL-SPEC.md`), all eight sections (P5.1-P5.8).

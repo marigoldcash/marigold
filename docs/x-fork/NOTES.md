@@ -1189,10 +1189,24 @@ cryptography review is exactly the kind of document where an uncaught "close eno
 citation does real damage to credibility, separate from whether the underlying design
 is sound.
 
-**P5.9 (the review gate) is the one step this session could not complete.** Tagged
-`pool-spec-v1` (the mechanical "freeze the spec" half of the step) and set up
-`docs/x-fork/reviews/` with instructions, but the actual requirement — review by a
-person with an applied-cryptography background, outside the project — is a genuine
-human action, not something to simulate, fabricate, or skip past. **Phase 6 must not
-begin until that review lands and its feedback is folded into v1.1**, per the plan's
-own explicit instruction. This is where Phase 5 execution stops for now.
+**P5.9 (the review gate) completed over the following day via a real external review
+cycle** — the full trail lives in `docs/x-fork/reviews/` (two independent reviews, a
+cross-review concurrence, a confirmation pass, and finding-by-finding triages for
+each). Review 1 caught a genuine vulnerability the spec's author-perspective missed:
+Redeem's signature didn't cover the enclosing transaction's transparent outputs
+(destinations lived *outside* the signed payload — "Redeem is Mint read backwards"
+made the payload feel symmetric when it wasn't), fixed by covering
+`transparent_outputs_hash` uniformly. It also forced the finality-anchor cadence onto
+DAA-score footing, which made the equivocation rule exactly decidable. Review 2
+found no new flaw and demanded the written-rigor layer (theorem, field matrix,
+threat model, canonicalization, IBD trust-root design) — all folded in. The field
+matrix surfaced one bounded deviation worth naming (consumed-group-set malleability:
+fee effects only, never redirection; carried into Phase 6 as a standing `[Open]`
+item per the confirmation pass's "needs sign-off, not redesign"). Gate closed on
+reviewer 1's explicit verdict; spec tagged **`pool-spec-v1.1`**. **Lesson worth
+keeping**: the two review styles (bug-hunting vs. rigor-demanding) caught
+different-shaped gaps, and the malleability finding shows the field-audit technique
+("list every unsigned field and prove it harmless") finds things neither author
+intuition nor single-bug review does — Phase 6's conformance tests inherit both
+reviewers' test matrices for exactly this reason. Phase 6 is unblocked; implement
+against the `pool-spec-v1.1` tag, not memory of it.
