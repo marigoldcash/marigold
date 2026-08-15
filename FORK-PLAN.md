@@ -966,13 +966,51 @@ store → validation → pipeline → mempool → sync → RPC. Every step lands
   cross-validated the spec's own arithmetic a second time, independently. Full
   `cargo build --workspace` clean.
 
-- [ ] **P6.2 — Pool state store + commitment.** A RocksDB-backed store (follow the store
+- [x] **P6.2 — Pool state store + commitment.** A RocksDB-backed store (follow the store
   patterns in `consensus/src/model/stores/`) holding `sn → (d, pk)`, with an SMT root over
   it (reuse [crypto/smt](crypto/smt/src/lib.rs)) as the pool commitment, and a `PoolDiff`
   type (mutations + their inverses) so state can be applied and un-applied per chain block
   — same discipline as `UtxoDiff`.
   ✅ *Verify:* store unit tests: apply/unapply round-trips restore the exact prior root;
   commitment is deterministic across insertion orders.
+  **Executed.** `PoolDiff`/`PoolCollection` ([consensus/core/src/notepool/diff.rs](consensus/core/src/notepool/diff.rs))
+  mirror `UtxoDiff`/`UtxoCollection` minimally: `add`/`remove` maps plus `to_reversed()` —
+  no diff-composition logic yet (P6.4's job if ever needed). Corrected a spec-vs-reality
+  gap found during implementation: P5.1's hashing prose calls Blake2b "the codebase's
+  single hashing convention", but `crypto/hashes/src/hashers.rs` actually has two
+  coexisting families (legacy Blake2b, Toccata-era Blake3); as an entirely new
+  Toccata-era feature, the pool follows Blake3 (the `consensus/seq-commit` precedent),
+  not Blake2b — new hasher types `NotePoolLeafHash`/`NotePoolSmt`/`NotePoolSmtCollapsed`
+  added to the `blake3_hasher!` block, with `NotePoolSmt`/`NotePoolSmtCollapsed`
+  registered in [crypto/smt/build.rs](crypto/smt/build.rs)'s `KNOWN_HASHERS` to get a
+  generated `SmtHasher` impl (mirroring seq-commit's `SeqCommitActiveNode` entry exactly).
+  [consensus/core/src/notepool/hashing.rs](consensus/core/src/notepool/hashing.rs) adds
+  `leaf_hash(d, pk) -> Hash` (the external SMT leaf value, `H(d||pk)` — separate from the
+  `NotePoolSmt`/`NotePoolSmtCollapsed` internal branch hashers, same split seq-commit uses
+  between `SeqCommitActiveLeaf` and `SeqCommitActiveNode`).
+  Deliberately did NOT reuse `consensus/smt-store`'s `SmtProcessor`/`BranchVersionKey`
+  apparatus despite P5.4's prose citing it — that crate solves a harder problem
+  (block-versioned, multi-lane SMT state for seq-commit's mergeset processing) than the
+  pool needs. Built two purpose-built stores instead, mirroring `DbUtxoSetStore`:
+  [consensus/src/model/stores/notepool.rs](consensus/src/model/stores/notepool.rs)
+  (`DbNotePoolStore`, `sn -> NewNote`, the flat state map) and
+  [consensus/src/model/stores/notepool_smt.rs](consensus/src/model/stores/notepool_smt.rs)
+  (`DbNotePoolSmtStore`, `BranchKey -> Node` branch storage implementing `SmtStore`, plus
+  a `CachedDbItem<Hash>` singleton for the current root). `DbNotePoolSmtStore::apply_diff`/
+  `unapply_diff` take a `PoolDiff` directly, hash `NewNote`s via `leaf_hash`, and call
+  `crypto/smt`'s `compute_root_update` (the production incremental-update path, not the
+  `#[cfg(test)]`-gated in-memory `SparseMerkleTree`), persisting the returned
+  `SmtNodeChanges` plus new root in one `WriteBatch`. Three new `DatabaseStorePrefixes`
+  entries added ([database/src/registry.rs](database/src/registry.rs)):
+  `NotePoolState = 90`, `NotePoolSmtBranches = 91`, `NotePoolSmtRoot = 92`.
+  ✅ *Verify:* 7 new store unit tests, all passing — `apply_then_unapply_restores_prior_root`
+  and `pool_diff_apply_then_unapply_restores_prior_root` cover the round-trip criterion
+  exactly (add notes, apply, confirm root changed; unapply, confirm root returns to the
+  pre-apply value); `commitment_is_deterministic_across_insertion_order` builds the same
+  leaf set in two different insertion orders across two independent stores and confirms
+  identical roots; `root_persists_across_store_instances` confirms the root survives a
+  store re-open (real RocksDB round-trip, not just in-memory cache). Full `cargo test -p
+  kaspa-consensus` (80 passed) and full `cargo build --workspace` clean.
 
 - [ ] **P6.3 — Stateless op validation.** Parse-and-check without any state: payload
   decodes, signature well-formed, denominations from the P1.6 set, split/merge multiset

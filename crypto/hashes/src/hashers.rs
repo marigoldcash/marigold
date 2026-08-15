@@ -51,6 +51,10 @@ blake3_hasher! {
     struct SeqCommitActiveLeaf => b"SeqCommitActiveLeaf",
     struct SeqCommitActiveNode => b"SeqCommitActiveNode",
     struct SeqCommitActiveCollapsedNode => b"SeqCommitActiveCollapsedNode",
+
+    struct NotePoolLeafHash => b"NotePoolLeaf",
+    struct NotePoolSmt => b"NotePoolSmt",
+    struct NotePoolSmtCollapsed => b"NotePoolSmtCollapsed",
 }
 
 #[macro_export]

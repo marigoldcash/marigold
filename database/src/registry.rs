@@ -82,6 +82,11 @@ pub enum DatabaseStorePrefixes {
     SmtSyncFlag = 75,
     SmtSeqCommitMeta = 76,
 
+    // ---- Note pool ----
+    NotePoolState = 90,
+    NotePoolSmtBranches = 91,
+    NotePoolSmtRoot = 92,
+
     // ---- Separator ----
     /// Reserved as a separator
     Separator = SEPARATOR,

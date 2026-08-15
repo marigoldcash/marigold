@@ -7,8 +7,16 @@
 //! full rationale; this module only implements the byte layouts it fixes.
 //!
 
+pub mod diff;
+pub mod hashing;
+
+pub use diff::{PoolCollection, PoolDiff};
+pub use hashing::leaf_hash;
+
 use crate::Hash;
 use borsh::{BorshDeserialize, BorshSerialize};
+use kaspa_utils::mem_size::MemSizeEstimator;
+use serde::{Deserialize, Serialize};
 
 /// A denomination tag: a `u8` index into the fixed P1.6 denomination ladder, not the
 /// raw petal amount (POOL-SPEC.md P5.1, "`d` — denomination tag"). Tags 8-255 are
@@ -16,8 +24,11 @@ use borsh::{BorshDeserialize, BorshSerialize};
 /// referenced by conservation arithmetic and the pool commitment's meaning).
 ///
 /// Borsh discriminants are assigned by declaration order, 0 through 7, matching the
-/// table below exactly.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, BorshSerialize, BorshDeserialize)]
+/// table below exactly. Also carries `serde` derives (bincode-based) independent of
+/// the borsh wire format — used only for the pool state store's on-disk encoding
+/// (P6.2), the same "two independent serializations for two independent purposes"
+/// pattern `UtxoEntry` already uses in this codebase.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
 pub enum DenominationTag {
     /// 0.01 MAGLD = 1,000,000 petals
     D0_01,
@@ -69,10 +80,20 @@ pub struct Note {
 /// A note about to be created by a `PoolOp` — everything except its `sn`, which every
 /// node derives independently from `(creating_tx_id, index_among_this_op's_notes)`
 /// rather than trusting the payload to state it (POOL-SPEC.md P5.2). 33 bytes.
-#[derive(Debug, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
+///
+/// Also doubles as the pool state map's *value* type (`sn -> (d, pk)`, P5.1) — a live
+/// pool entry is exactly "the (d, pk) of some note," the same shape whether it just
+/// arrived in a `PoolOp` payload or has been sitting in the committed state for years.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
 pub struct NewNote {
     pub d: DenominationTag,
     pub pk: [u8; 32],
+}
+
+impl MemSizeEstimator for NewNote {
+    fn estimate_mem_bytes(&self) -> usize {
+        size_of::<Self>()
+    }
 }
 
 /// One or more serials currently sharing a single `pk`, authorized in one `PoolOp` by

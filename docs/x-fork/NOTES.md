@@ -1254,3 +1254,95 @@ belonging to P6.3, not a fact about the data layer itself.
 
 17 new unit tests, all passing; full crate suite (75 tests) and full
 `cargo build --workspace` both clean.
+
+### P6.2 — Pool state store + commitment (2026-08-16)
+
+**Spec-vs-reality correction, found and fixed during implementation, not silently
+diverged around**: `pool-spec-v1.1`'s P5.1 hashing section states "every hash is 32-byte
+Blake2b ... the codebase's single hashing convention". Direct inspection of
+[crypto/hashes/src/hashers.rs](../../crypto/hashes/src/hashers.rs) shows this is wrong —
+there are two coexisting hasher families, a legacy `blake2b_hasher!` block (pre-Toccata:
+`TransactionHash`, `MuHashFinalizeHash`, etc.) and a newer `blake3_hasher!` block
+(Toccata-era: `SeqCommitMerkleBranch`, `TransactionV1Id`, all the `SeqCommitActive*`
+hashers). Since the pool is an entirely new Toccata-era feature, its closest real
+precedent is seq-commit, not the legacy transaction-hashing path — so all three new pool
+hash types (`NotePoolLeafHash`, `NotePoolSmt`, `NotePoolSmtCollapsed`) were added to the
+`blake3_hasher!` block, not `blake2b_hasher!`. Flagging here rather than quietly using
+blake3: this is a place where the frozen spec's prose is simply inaccurate about the
+codebase, worth a v1.2 addendum at some point, but not worth reopening the review gate
+for a one-line factual correction discovered during implementation.
+
+**Two hash types, not one**, mirroring the split `consensus/seq-commit/src/hashing.rs`
+already uses between `SeqCommitActiveLeaf` (external leaf value) and `SeqCommitActiveNode`
+(the SMT's internal branch-combination hasher, domain-separated from `CollapsedHasher`
+for the single-leaf-subtree optimization): `NotePoolLeafHash` computes the external leaf
+value `H(d||pk)` ([hashing.rs](../../consensus/core/src/notepool/hashing.rs)'s
+`leaf_hash()`), while `NotePoolSmt`/`NotePoolSmtCollapsed` are the tree's own internal
+hashers, registered in [crypto/smt/build.rs](../../crypto/smt/build.rs)'s
+`KNOWN_HASHERS` list to get a build-time-generated `SmtHasher` impl (precomputed
+`EMPTY_HASHES` for all 257 levels) — exactly the same registration `SeqCommitActiveNode`
+already goes through. `leaf_hash()` is never called from `notepool_smt.rs` directly by
+name; `NotePoolSmt`/`NotePoolSmtCollapsed` are only ever driven through
+`compute_root_update`, never called by hand.
+
+**Architectural call: did not reuse `consensus/smt-store`.** P5.4's prose cites
+`consensus/smt-store`'s `SmtProcessor::build` as "the production path" to follow, but
+that crate is built for a harder problem than the pool has — block-versioned, multi-lane
+SMT state (`BranchVersionKey{prefix, depth, node_key, rev_blue_score, block_hash}`) so
+seq-commit can reconstruct tree state as of any past block during mergeset processing.
+The pool doesn't need historical point-in-time queries — the plan's own text asks for
+"a `PoolDiff` type ... so state can be applied and un-applied per chain block — same
+discipline as `UtxoDiff`", which is a single-current-state design, not a versioned one.
+Built two purpose-built stores instead, mirroring `DbUtxoSetStore`
+([consensus/src/model/stores/utxo_set.rs](../../consensus/src/model/stores/utxo_set.rs))
+directly:
+
+- [notepool.rs](../../consensus/src/model/stores/notepool.rs) — `DbNotePoolStore`, the
+  flat `sn -> NewNote` map the plan's P6.2 text names explicitly. `NewNote` already had
+  the derives it needed (borsh from P6.1, `Copy`); added `serde::{Serialize, Deserialize}`
+  since `CachedDbAccess` uses bincode, a second, independent wire format from the borsh
+  consensus encoding — the same "two serializations, two purposes" split `UtxoEntry`
+  already has, documented inline in `notepool/mod.rs`'s doc comments rather than left
+  implicit.
+- [notepool_smt.rs](../../consensus/src/model/stores/notepool_smt.rs) —
+  `DbNotePoolSmtStore`, `BranchKey -> Node` branch storage implementing `crypto/smt`'s
+  `SmtStore` trait, plus a `CachedDbItem<Hash>` singleton for the current committed root
+  (falls back to `NotePoolSmt::empty_root()` on a fresh, never-written store rather than
+  erroring `KeyNotFound`). `Node`'s `to_bytes`/`from_bytes` aren't serde-derived (they're
+  length-discriminated: 32B internal vs. 64B collapsed, no tag byte), so a small
+  `NodeBytes` wrapper bridges them onto `CachedDbAccess`'s bincode-based storage.
+  `apply_diff`/`unapply_diff` take a `PoolDiff` directly and call `compute_root_update`
+  (the pure, production incremental-update function — confirmed the mutable in-memory
+  `SparseMerkleTree::insert`/`remove` path is `#[cfg(any(test, feature="test-utils"))]`-
+  gated only, so not usable here), persisting the returned `SmtNodeChanges` (delete on
+  `None`, write on `Some`) and the new root together in one `WriteBatch`.
+
+Three new `DatabaseStorePrefixes` entries
+([database/src/registry.rs](../../database/src/registry.rs)): `NotePoolState = 90`,
+`NotePoolSmtBranches = 91`, `NotePoolSmtRoot = 92` — picked from unused numbers in a
+fresh "Note pool" section, checked against the existing enum (and its `Separator =
+u8::MAX` sentinel) for collisions before adding.
+
+`PoolDiff`/`PoolCollection`
+([consensus/core/src/notepool/diff.rs](../../consensus/core/src/notepool/diff.rs))
+mirror `UtxoDiff`/`UtxoCollection` deliberately minimally — just `add`/`remove` maps and
+`to_reversed()` (swap the two). Did not port `UtxoDiff`'s `with_diff_in_place`
+conflict-merging logic; nothing in P6.2's own scope needs it, and it belongs with
+whatever P6.4's stateful pipeline work turns out to actually require, not built ahead of
+that need.
+
+✅ *Verify* (P6.2's exact criteria, both covered): `apply_then_unapply_restores_prior_root`
+and `pool_diff_apply_then_unapply_restores_prior_root` apply a diff, confirm the root
+changed, unapply it, confirm the root is back to the pre-apply value — an exact match, not
+just "a plausible-looking hash". `commitment_is_deterministic_across_insertion_order`
+builds an identical leaf set through two different insertion orders in two independent
+temp-DB stores and confirms the two resulting roots are equal (correctness here rests on
+`SortedLeafUpdates` sorting before `compute_root_update` ever runs, so this test is really
+confirming that guarantee holds through the whole store, not just in `crypto/smt` itself).
+`root_persists_across_store_instances` additionally confirms the root survives a real
+store re-open against the same RocksDB directory, not just an in-memory cache hit.
+
+7 new store unit tests, all passing; 3 new hashing unit tests
+(`leaf_hash_is_deterministic`, `leaf_hash_differs_by_denomination`,
+`leaf_hash_differs_by_pk`) plus the `diff.rs` reversal tests, all passing; full
+`cargo test -p kaspa-consensus` (80 tests) and full `cargo build --workspace` both clean.

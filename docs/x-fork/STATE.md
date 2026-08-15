@@ -4,7 +4,7 @@ Snapshot of everything decided and built so far, so any fresh coding session on 
 machine can continue from the repo alone. Read this together with [FORK-PLAN.md](../../FORK-PLAN.md).
 Update this file whenever off-repo state changes (domains, accounts, infra).
 
-Last updated: 2026-08-16 (P6.1 complete — note-pool wire types implemented)
+Last updated: 2026-08-16 (P6.2 complete — pool state store + SMT commitment implemented)
 
 ## What this project is
 
@@ -79,14 +79,41 @@ substitute for it.
 
 ## Where execution stands
 
-- **Next step: P6.2 — pool state store + commitment.** A RocksDB-backed store (follow
-  patterns in `consensus/src/model/stores/`) holding `sn → (d, pk)`, an SMT root over
-  it via `crypto/smt` as the pool commitment, and a `PoolDiff` type (mutations + their
-  inverses, same discipline as `UtxoDiff`) so state applies/unapplies per chain block.
-  **Needs a new `NotePoolSmt` BLAKE3 hasher pair added to `crypto/smt/build.rs`'s
-  `KNOWN_HASHERS` list first** — `SmtHasher` impls are build-time generated for a
-  hardcoded list of known hashers, confirmed by reading that file during P6.1; this
-  isn't optional, `crypto/smt`'s tree can't be instantiated for a new domain without it.
+- **Next step: P6.3 — stateless op validation.** Parse-and-check without any state:
+  payload decodes, signature well-formed, denominations from the P1.6 set,
+  split/merge multiset arithmetic balances, size limits, freshness-anchor field
+  present. Table-driven tests per the P5.3 checklist's malformed-op classes. bite-size
+  appropriate (not marked ⚠️ HARD) — per the user's "carry on through step 6 until
+  a step marked HARD" instruction, next in line after P6.3 is **P6.4, which IS
+  marked ⚠️ HARD and should not be attempted without a stronger model.**
+- **P6.2 is done.** Two new RocksDB stores mirror `DbUtxoSetStore`/`UtxoDiff`
+  exactly: [notepool.rs](../../consensus/src/model/stores/notepool.rs)
+  (`DbNotePoolStore`, flat `sn -> NewNote` map) and
+  [notepool_smt.rs](../../consensus/src/model/stores/notepool_smt.rs)
+  (`DbNotePoolSmtStore`, `BranchKey -> Node` branch storage implementing
+  `crypto/smt`'s `SmtStore`, plus a `CachedDbItem<Hash>` root singleton).
+  `apply_diff`/`unapply_diff` take a `PoolDiff`
+  ([diff.rs](../../consensus/core/src/notepool/diff.rs), mirrors `UtxoDiff`
+  minimally: `add`/`remove` + `to_reversed()`) and call `crypto/smt`'s
+  `compute_root_update` (the production incremental path, not the
+  `#[cfg(test)]`-gated in-memory tree). Three new hasher types
+  (`NotePoolLeafHash`, `NotePoolSmt`, `NotePoolSmtCollapsed`) added to
+  `crypto/hashes/src/hashers.rs`'s `blake3_hasher!` block — **corrected a
+  spec-vs-reality gap found during implementation**: P5.1's prose calls Blake2b
+  "the codebase's single hashing convention", but there are actually two
+  coexisting families (legacy Blake2b, Toccata-era Blake3); as a new Toccata-era
+  feature the pool follows Blake3 (the seq-commit precedent), not Blake2b — worth
+  a v1.2 spec addendum at some point. `NotePoolSmt`/`NotePoolSmtCollapsed`
+  registered in `crypto/smt/build.rs`'s `KNOWN_HASHERS` for the generated
+  `SmtHasher` impl. Deliberately did NOT reuse `consensus/smt-store`'s
+  `SmtProcessor`/`BranchVersionKey` apparatus (despite P5.4's prose citing it) —
+  that crate solves a harder, block-versioned multi-lane problem the pool doesn't
+  have. Three new `DatabaseStorePrefixes` entries: `NotePoolState = 90`,
+  `NotePoolSmtBranches = 91`, `NotePoolSmtRoot = 92`. 7 new store tests pass,
+  including both of P6.2's exact verify criteria (apply/unapply round-trips
+  restore the exact prior root; commitment deterministic across insertion
+  orders) plus a real-RocksDB-reopen persistence check. Full `cargo test -p
+  kaspa-consensus` (80 passed) and full `cargo build --workspace` clean.
 - **P6.1 is done.** [consensus/core/src/notepool.rs](../../consensus/core/src/notepool.rs)
   implements `pool-spec-v1.1`'s P5.1/P5.2 wire types verbatim — `DenominationTag`,
   `Note`, `NewNote`, `SignedGroup`, `FreshnessAnchor`, and the 3-variant `PoolOp`
