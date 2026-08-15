@@ -445,3 +445,118 @@ transaction sizes land at tens of bytes to ~1.4 KB, far inside the "few KB" targ
 small fraction of block mass limits. Fee-stamp mechanics specified for every named
 bootstrap case (pure rotate, self-funding split/merge, bundled handover stamp, mint-produced
 stamps) via one unified mechanism, no case left unaddressed.*
+
+---
+
+## P5.3 — Consensus rules
+
+### The pool diff and composed view (mirrors the existing UTXO mechanism exactly)
+
+Kaspa/Marigold already resolves UTXO double-spends between blocks merged in one GHOSTDAG
+mergeset via a specific, existing mechanism — read directly from
+[consensus/src/pipeline/virtual_processor/utxo_validation.rs](../../consensus/src/pipeline/virtual_processor/utxo_validation.rs)
+(`calculate_utxo_state`, lines 109-165) rather than assumed: blocks in the mergeset are
+visited in GHOSTDAG blue-topological order
+(`ghostdag_data.consensus_ordered_mergeset_without_selected_parent`,
+[consensus/src/model/stores/ghostdag.rs:183](../../consensus/src/model/stores/ghostdag.rs)),
+starting from the selected parent. Each block's transactions are validated against a
+**composed view** — the selected parent's UTXO state overlaid with a `mergeset_diff`
+accumulated from every *already-processed* block earlier in that same ordering
+(`selected_parent_utxo_view.compose(&ctx.mergeset_diff)`, line 131). A transaction whose
+inputs conflict with what's already in `mergeset_diff` simply fails validation and is
+excluded from that block's `accepted_transactions`
+(`MergesetBlockAcceptanceData`/`AcceptedTxEntry`) — the block itself is not rejected, only
+that one transaction. **This is "first accepted wins," concretely**: not a special rule
+invoked on conflict, but the ordinary consequence of validating every block against
+whatever state the blocks before it (in blue order) already committed.
+
+The pool feature needs the exact same shape, one level added: a `PoolDiff` (the pool's
+analog of `UtxoDiff`) accumulated alongside `mergeset_diff` during the same mergeset walk,
+and a composed pool view (selected parent's pool state + accumulated `PoolDiff`) that
+every pool-op transaction validates against, in the same blue-topological order, in the
+same pass — a pool op and an ordinary UTXO spend can appear in the same transaction (mint,
+redeem) and must be validated together, atomically, against both composed views at once.
+**No new conflict-resolution rule is being invented here** — the parallel-blocks case
+(two rotations of the same serial in two blocks of one mergeset) is answered entirely by
+this existing mechanism applied to pool state: whichever block's pool op is processed
+first (blue order) updates the composed pool view; the second block's conflicting op fails
+step 1 below (the serial's current `pk` in the composed view no longer matches what its
+signature was checked against) and is excluded from that block's accepted transactions —
+same "loser becomes a no-op, not an invalid block" outcome real UTXO conflicts already
+have today.
+
+### Validation order — `Mint`
+
+1. Every `new_notes[i].d` is a valid denomination tag (0-7; P5.1's table).
+2. Standard txscript validation of the transaction's transparent inputs against the
+   composed *UTXO* view — completely unchanged, the existing mechanism.
+3. Conservation: `Σ(transparent inputs) − Σ(transparent outputs) − Σ(new_notes petal
+   values) ≥ 0`; the result is the transaction's fee (subject to the same minimum-relay-fee
+   mempool policy as any transaction — not a new consensus rule).
+4. Apply to `PoolDiff`: insert `sn_i → H(d_i || pk_i)` for each new note, where
+   `sn_i = H_serial(this_tx_id || i)` (P5.1). Uniqueness is guaranteed by construction
+   (this transaction's ID cannot already have been used to derive an existing serial) —
+   not an active check, but an invariant implementers should assert in testing.
+
+### Validation order — `Transfer` (rotate/split/merge)
+
+1. For every `SignedGroup` in `consumed`: every serial in `group.serials` exists in the
+   composed pool view, **and** all of them currently share the exact same `pk` — if any
+   two differ, the op is invalid (one signature cannot authenticate two different keys).
+2. Recompute `NotePoolTransferSigningHash` (P5.2) over `group.serials`, the op's full
+   `produced` list, and `freshness.anchor_daa_score`; verify `group.signature` against the
+   shared current `pk` from step 1.
+3. Freshness: `pov_daa_score − freshness.anchor_daa_score` is in `[0, 36000]` (the P5.2
+   window) — reject both a stale anchor (too far in the past) and a future one
+   (`anchor_daa_score > pov_daa_score`, which could otherwise let a signer pre-date a
+   signature to extend its effective shelf life).
+4. Every `produced[i].d` is a valid denomination tag.
+5. Conservation: `Σ(consumed notes' current petal values, from the composed view) −
+   Σ(produced notes' petal values) ≥ 0`; the result is the fee (same relay-fee policy note
+   as `Mint`).
+6. Apply to `PoolDiff`: remove every consumed serial's entry; insert
+   `sn_i → H(d_i || pk_i)` for each produced note, `sn_i` derived the same way as `Mint`.
+
+### Validation order — `Redeem`
+
+1-3. Identical to `Transfer`'s steps 1-3, applied to `Redeem`'s own `consumed` list.
+4. Conservation: `Σ(consumed notes' current petal values) − Σ(transparent outputs) ≥ 0`;
+   the result is the fee — the transparent-side mirror of `Mint`'s rule.
+5. Apply: remove every consumed serial's `PoolDiff` entry; the transparent outputs are
+   applied to the ordinary UTXO diff exactly as any transaction's outputs already are — no
+   change to that existing mechanism.
+
+### Mass and fee costing
+
+The plan's own guidance: "a rotate is one sig verify + one map update — cost it like a
+normal 1-input tx; no special proof costs exist in this design." Concretely, using the
+existing cost model (`consensus/core/src/mass/mod.rs`,
+[consensus/core/src/config/params.rs](../../consensus/core/src/config/params.rs)):
+
+- **Payload bytes** already cost `mass_per_tx_byte` (= 1) each, automatically, since the
+  payload counts toward `transaction_estimated_serialized_size` — no new per-byte rate
+  needed (P5.2's worked byte sizes are therefore already mass estimates, 1:1).
+- **Each `SignedGroup`'s signature verification** costs one sigop-equivalent —
+  `mass_per_sig_op` (=1000) for v0-style costing, or one `ComputeBudget` unit's worth
+  (100 grams = 10,000 script-units, `consensus/core/src/mass/units.rs`) under the v1
+  compute-budget model — charged **once per signature, not once per serial**: a
+  20-serial sweep under one shared `pk` (P5.6) is one signature and therefore one
+  sigop-equivalent, not twenty, which is what makes batch sweeps cheap by design, not an
+  incidental side effect.
+- **`Mint`/`Redeem`'s transparent side** costs exactly what it already would as an
+  ordinary transaction — standard txscript sigops for spent inputs
+  (`mass_per_sig_op`/compute-budget as today), `mass_per_script_pub_key_byte` (=10) for
+  any transparent output scripts. Nothing pool-specific changes on that side.
+- No zero-knowledge proof verification exists anywhere in this design (stated in P5.7 as
+  a privacy limitation, restated here as a performance fact) — every pool-op cost is
+  either a byte count or a small fixed number of Schnorr signature verifications, the same
+  order of magnitude as costs the mempool already charges for today.
+
+✅ *Verify (P5.3's own condition): every question in the checklist answered explicitly —
+validation order stated per op (existence, signature, freshness, denomination validity,
+conservation, in that order); the parallel-blocks double-rotate case is resolved by
+citing and extending the exact existing mechanism (composed view over GHOSTDAG-ordered
+mergeset), not a new rule; signature replay protection restated from P5.2's freshness
+anchor and tied to the concrete consensus check (step 3 above); mass/fee costing defined
+per op using existing cost-model constants, with the batch-sweep cost savings made
+explicit.*

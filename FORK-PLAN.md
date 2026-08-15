@@ -687,17 +687,28 @@ should settle its size and how it is assigned (e.g. hash of the minting tx + out
   with worked byte-size estimates, confirmed against `params.rs`'s actual mass constants;
   fee-stamp mechanics explicitly specified for every named bootstrap case.
 
-- [ ] **P5.3 — Spec: consensus rules.** Exact validation order per op: serial exists in
-  pool state (rotate/split/merge/redeem) or does not yet exist (mint); signature verifies
-  against the note's **current** pk; denomination arithmetic balances per op type; mint's
-  transparent input sum equals note sum, redeem's output sum likewise. Define the
-  parallel-blocks conflict rule: two rotations of the same serial in parallel blocks are
-  resolved at the **accepted-transaction** level, exactly like UTXO double-spends between
-  merged blocks — first accepted wins, the loser becomes a no-op/invalid. Define mass/fee
-  costing per op (a rotate is one sig verify + one map update — cost it like a normal
-  1-input tx; no special proof costs exist in this design).
-  ✅ *Verify:* section answers every question in this checklist explicitly, including the
-  parallel-blocks double-rotate case and signature replay protection.
+- [x] **P5.3 — Spec: consensus rules.** Executed 2026-08-15.
+  Wrote [docs/x-fork/POOL-SPEC.md](docs/x-fork/POOL-SPEC.md)'s P5.3 section. Read the real
+  existing UTXO double-spend/mergeset-conflict mechanism directly
+  (`consensus/src/pipeline/virtual_processor/utxo_validation.rs::calculate_utxo_state`,
+  `consensus_ordered_mergeset_without_selected_parent`) rather than assuming how it works:
+  blocks in a GHOSTDAG mergeset are validated in blue-topological order against a
+  **composed view** accumulated from already-processed blocks earlier in that order — a
+  conflicting later transaction simply fails and is excluded from acceptance, no special
+  rule invoked, the block itself isn't rejected. Specced a `PoolDiff` as the pool's exact
+  analog of the existing `UtxoDiff`/`mergeset_diff`, accumulated the same way, in the same
+  pass — meaning **the parallel-blocks double-rotate case needed no new rule at all**,
+  just this existing, already-proven mechanism extended to a second kind of state. Wrote
+  the exact per-op validation order (existence → signature → freshness → denomination
+  validity → conservation, in that order) for all three payload variants (Mint, Transfer,
+  Redeem). Mass/fee costing defined from existing cost-model constants (payload bytes
+  already cost `mass_per_tx_byte` automatically; one sigop-equivalent charged per
+  *signature*, not per serial — making batch sweeps cheap by design, not incidentally).
+  ✅ *Verify:* every checklist question answered explicitly; the parallel-blocks case is
+  resolved by extending the real, cited existing mechanism rather than inventing one;
+  signature replay protection ties directly to P5.2's freshness anchor via a concrete
+  consensus check (reject anchors outside `[0, 36000]` DAA-score-units of the block, in
+  both directions).
 
 - [ ] **P5.4 — Spec: pool state sync & pruning interaction.** Kaspa nodes prune old
   blocks/UTXO history; the pool map is *current state* (like the UTXO set) and must survive
