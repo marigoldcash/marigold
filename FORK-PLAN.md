@@ -633,14 +633,29 @@ field or whether a note can be identified another way — note that `pk` cannot 
 identifier because it changes on every rotation, so some stable id is required; the spec
 should settle its size and how it is assigned (e.g. hash of the minting tx + output index).
 
-- [ ] **P5.1 — Spec: data structures.** Write the Note definition and the pool-state map
-  with exact byte layouts (field sizes for `d`, `pk`, `sn`; key scheme — recommend
-  secp256k1 Schnorr, same as Kaspa addresses, so existing crypto code is reused). Define
-  the **pool commitment**: a hash root over the pool state (e.g. via the existing
-  `crypto/smt` sparse merkle tree) that blocks commit to, so any two nodes can check they
-  agree and fresh nodes can verify a downloaded pool state.
-  ✅ *Verify:* every field has a byte size; a colleague-level reader could implement the
-  structs from this section alone.
+- [x] **P5.1 — Spec: data structures.** Executed 2026-08-15.
+  Wrote [docs/x-fork/POOL-SPEC.md](docs/x-fork/POOL-SPEC.md)'s P5.1 section. `Note = (d: 1
+  byte, pk: 32 bytes, sn: 32 bytes)`, 65 bytes total. `d` is a `u8` index into a
+  consensus-defined denomination table (not a raw amount — headroom for future tiers
+  without widening the struct). `pk` reuses Kaspa's exact x-only BIP340 Schnorr pubkey
+  format (`Version::PubKey`, `crypto/addresses`), so signing/verification code is directly
+  reused, not reinvented. `sn = H(creating_tx_id || output_index)` — answers the plan's
+  explicit "is `sn` needed" question: yes, since `pk` isn't stable across rotation and
+  (per P5.6) isn't even required to be unique, so it can't double as the map key; `sn`'s
+  value mirrors how Kaspa already treats `(tx_id, output_index)` as a unique UTXO handle,
+  collapsed into one hash for the SMT's key type. Pool state map: `sn → H(d || pk)` via
+  the existing `crypto/smt` sparse Merkle tree — the same crate already proven in
+  production for the seq-commit/KIP-21 feature, confirmed via real file/line citations
+  (`consensus/smt-store`, `compute_root_update`). Pool commitment: a new dedicated 32-byte
+  `Header` field (not reusing `accepted_id_merkle_root`, which seq-commit already
+  overloads — one field, one meaning), explicitly flagged as a hard-fork-requiring
+  addition for Phase 6. Two new domain-separated hash functions specified
+  (`NotePoolSerialHash`, `NotePoolLeafHash`), matching the exact existing
+  `crypto/hashes` macro convention. Verified every cited file path/line/constant against
+  the actual source before writing it down, not from memory.
+  ✅ *Verify:* every field has an exact byte size (stated compactly at the section's end);
+  every claim about existing code (`crypto/smt`, `crypto/addresses`, `crypto/hashes`,
+  `consensus/smt-store`) checked against real source in this pass, not assumed.
 
 - [ ] **P5.2 — Spec: transaction format.** How a pool op rides in a Kaspa transaction:
   recommend a dedicated subnetwork ID (see `consensus/core/src/subnets.rs`) with the op
