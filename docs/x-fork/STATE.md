@@ -97,10 +97,16 @@ substitute for it.
   and the complete **equivocation-evidence lifecycle**. Its launch-phase demands are
   gated into the plan (T/M/K sensitivity model → P9.5 hard gate;
   trustee-independence criteria + one-live-signer rule → P9.1; wallet recovery
-  drills → P8.5; its test matrices → Phase 6 conformance tests). **To close P5.9**:
-  send the updated `POOL-SPEC.md` back to the reviewer(s) for a short confirmation
-  pass on the new artifacts, then tag `pool-spec-v1.1`. Phase 6 stays blocked until
-  then.
+  drills → P8.5; its test matrices → Phase 6 conformance tests). **Cross-review
+  concurrence is in** (reviewer 1's response to review 2, filed with a disposition
+  note in [reviews/](reviews/)): both reviewers converge on the same priority list,
+  and every spec-addressable item on it is already in the current draft — reviewer 1's
+  top ask, the unsigned-field audit ("one fish → the net"), was already implemented as
+  the P5.2 field matrix before the response arrived. **To close P5.9**: send the
+  updated `POOL-SPEC.md` back to the reviewer(s) for a short confirmation pass on the
+  new artifacts (P5.2 theorem + field matrix, the `[Open]` group-set-malleability
+  item, P5.8 IBD/equivocation additions), then tag `pool-spec-v1.1`. Phase 6 stays
+  blocked until then.
 - **Phase 4 (P4.1-P4.4) is fully done — "the fork works," tagged and reproducible.**
   Tag `fork-transparent-v0.1` exists on `origin`, and the fresh-clone claim was
   actually tested, not assumed: a genuinely clean `git clone --branch

@@ -22,11 +22,22 @@ person with an applied-cryptography background, outside the project**, before Ph
   field matrix, threat model, canonicalization, IBD trust-root design, equivocation
   lifecycle) — all now written into the spec; launch-phase demands gated into
   FORK-PLAN (P8.5, P9.1, P9.5).
+- **Cross-review concurrence received**:
+  [pool-spec-review-1-response-to-review-2.md](pool-spec-review-1-response-to-review-2.md)
+  — reviewer 1 read review 2 and endorses its priority list ("the Redeem gap I found
+  was one fish; the audit is the net"), confirms the revision cycle is working, and
+  mildly pushes back only on review 2's P5.7 graph-analysis calibration (concurring
+  with our triage's positioning-gate treatment). Every actionable item it endorses was
+  already implemented in commit `8226721a`, which postdates the spec version reviewer 1
+  read — see the disposition note appended to the filed response.
 - **Remaining to close P5.9**: specialist sign-off on the newly written P5.2
-  theorem/field-matrix artifacts — recommended: send the updated `POOL-SPEC.md` (current
-  `x-fork`) back to one or both reviewers for a short confirmation pass, then tag
-  `pool-spec-v1.1` and close. The one **[Open]** design item for that pass:
-  consumed-group-set malleability (see the field matrix in P5.2).
+  theorem/field-matrix artifacts — both reviewers have converged on the priority list,
+  and everything spec-addressable on it is in the current draft; what neither has yet
+  seen is the artifacts themselves. Recommended: send the updated `POOL-SPEC.md`
+  (current `x-fork`) to one or both reviewers for a short confirmation pass focused on
+  the P5.2 theorem + field matrix (especially the one **[Open]** item:
+  consumed-group-set malleability) and the P5.8 IBD/equivocation additions, then tag
+  `pool-spec-v1.1` and close.
 
 What the reviewer should look at:
 - The full spec (`POOL-SPEC.md`), all eight sections (P5.1-P5.8).
