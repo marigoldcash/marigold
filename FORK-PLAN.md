@@ -730,7 +730,7 @@ should settle its size and how it is assigned (e.g. hash of the minting tx + out
   explicitly what's downloaded (sorted `(sn, d, pk)` chunks) and which committed field
   gates trust (`pool_commitment`, checked incrementally and as a final backstop).
 
-- [ ] **P5.5 — Spec: transfer modes.** **DECIDED: both modes are supported, first-class.**
+- [x] **P5.5 — Spec: transfer modes.** Executed 2026-08-15. **DECIDED: both modes are supported, first-class.**
   The chain-side rotate op is identical for both — the modes are pure wallet-level flows.
   Neither involves identities: only notes have keys, and a "fresh pk" is a new random
   note-keypair generated on the spot. The universal settlement rule (state it once, applies
@@ -754,6 +754,12 @@ should settle its size and how it is assigned (e.g. hash of the minting tx + out
   ✅ *Verify:* decision recorded in DECISIONS.md; spec states the settlement/finality rule
   and per-mode flows unambiguously, including the shared-key window of bearer mode and
   the pk-freshness window of sign-to-fresh-pk.
+  **Done**: [DECISIONS.md](docs/x-fork/DECISIONS.md) row added; both modes formalized in
+  [POOL-SPEC.md](docs/x-fork/POOL-SPEC.md)'s P5.5 against the concrete wire format — both
+  reduce to the identical `TransferOp`, confirming the mode really is invisible to
+  consensus as the plan claimed, not just asserted. Also formalized the freshness anchor's
+  dual role as anti-replay protection *and* invoice/QR expiry — the same 36,000-DAA-score
+  constant governs both, not two separately-tuned numbers.
 
 - [ ] **P5.6 — Spec: wallet protocol.** The wallet is a key-database manager, not an
   identity: no 24-word seed tied to one key — it holds one private key per note. Spec: the

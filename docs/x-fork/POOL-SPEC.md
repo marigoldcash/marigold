@@ -653,3 +653,106 @@ final-root backstop → adopt), citing the two real existing precedents this des
 extends rather than inventing a new one, and stating explicitly which committed header
 field (`pool_commitment`) and which verification mechanism (SMT inclusion proofs,
 incremental *and* final) gate trust in the downloaded state.
+
+---
+
+## P5.5 — Transfer modes
+
+**Decided in the plan (P1.4-era, restated and formalized here against the concrete wire
+format P5.2-P5.3 now define): both modes are first-class, supported equally.** The
+on-chain mechanism for both is the identical `TransferOp` (P5.2) — a `SignedGroup`
+authorizing consumption of some serials, producing new notes. Neither mode is a distinct
+protocol feature; they're two different ways a **wallet** arrives at "who signs the
+`TransferOp`, and with which key," described below. Neither mode involves identities:
+only notes have keys, and "a fresh pk" is nothing more than a newly generated
+note-keypair no different in kind from any other.
+
+### The universal settlement rule
+
+**A note is finally yours when a rotation to a key only you know is confirmed on-chain.**
+Stated once here because it governs both modes identically: until that confirmation, the
+previous holder may still know a key that can authorize spending the note (bearer mode:
+literally the same key you were just handed; sign-to-fresh-pk mode: the sender could
+attempt a conflicting `TransferOp` to a different destination before broadcasting the one
+they showed you). Either way this is the ordinary double-spend case P5.3 already resolves
+— whichever conflicting `TransferOp` is accepted first (GHOSTDAG blue order) wins, the
+other is excluded — so "wait for confirmation" is what actually settles a transfer in
+both modes, and at 10 BPS that wait is seconds, not the minutes-to-hours a slower chain
+would impose on the same guarantee.
+
+### (a) Bearer key-handover
+
+The sender reveals the note's **existing** private key directly to the receiver — printed
+on paper, a QR code, any offline channel. The receiver can be completely passive at the
+moment of handover (the cash-like property this mode exists for: "granny pays with a QR
+secret key printed on paper," no wallet interaction required to *receive*). The note is
+not finally theirs yet per the settlement rule above — the sender still knows the same
+key — so a receiver who needs certainty before releasing goods (point of sale) must
+actively rotate the note to a key of their own and wait for confirmation before treating
+it as settled; a receiver who's fine with implicit trust (a personal handover between
+people who know each other) may simply hold the handed-over key as-is, accepting the
+shared-key risk until they eventually rotate.
+
+**On the wire**: the receiver constructs a `TransferOp` with one `SignedGroup` (the
+handed-over note's serial, signed with the handed-over private key) and one `NewNote` in
+`produced` (their own fresh `pk`) — an ordinary rotate, indistinguishable on-chain from
+any other. Nothing about bearer mode is visible in the transaction format; it's entirely
+a fact about *how the signing key reached the signer's wallet*, invisible to consensus.
+
+### (b) Sign-to-fresh-pk
+
+The receiver generates a fresh `pk` and hands it to the sender (a merchant's QR code;
+a friend's messaged public key) — the **private** key never leaves the receiver's wallet,
+never existing in two places at once. The sender constructs and signs a `TransferOp`
+rotating their own note(s) to that `pk`. A handed-out `pk` that's never used is inert —
+if the sender never broadcasts, the receiver has lost nothing, and the wallet just
+watches that `pk` for activity ("unpaid-invoice" semantics: showing a payment QR is like
+writing an invoice, not like handing over cash).
+
+**On the wire**: identical `TransferOp` shape to bearer mode — one or more `SignedGroup`s
+(the sender's own notes, signed by the sender), `produced` containing the receiver's
+`pk`. The *only* difference from bearer mode is who generated the destination `pk` and
+who holds its private key before broadcast — again invisible to consensus, a wallet-level
+fact only.
+
+### The freshness anchor doubles as invoice expiry
+
+P5.2's `FreshnessAnchor` (36,000-DAA-score / ≈1-hour window) was designed as anti-replay
+protection for the *signer*, but it has a second, equally important role for
+sign-to-fresh-pk mode specifically: it bounds how long a shown `pk` remains a *valid
+target* for the payment it was meant for. A merchant's checkout QR, once its `pk` is
+generated, only makes sense as "pay this exact amount, now" for as long as the customer's
+wallet could still construct a `TransferOp` whose freshness anchor will validate — past
+that window, any signed-but-unbroadcast `TransferOp` targeting that `pk` is rejected by
+P5.3's freshness check regardless of whether the `pk` itself is technically still
+"unused." This is precisely why P5.2 called the window's choice deliberate: it is
+simultaneously anti-replay protection and invoice/QR expiry, and a wallet implementer
+should treat "how long do I show this QR before regenerating it" and "how long is a
+signed-but-unsent payment still valid" as the *same* number, not two separately-tuned
+ones — they're the same protocol parameter.
+
+### The shared-key window (bearer mode) vs. the pk-freshness window (sign-to-fresh-pk)
+
+Both modes have a window of exposure, but to different things, worth stating side by side
+since P5.9's external review will need to weigh them independently:
+
+- **Bearer mode's shared-key window** runs from the moment a private key is handed over
+  until the receiver rotates it — during which *both* parties can authorize spending the
+  note (not a bug, the defining property of a bearer instrument, same as physical cash).
+  Its natural end is receiver-controlled (rotate whenever they choose); nothing in
+  consensus bounds it, which is correct — a paper bearer note in a drawer for a year is
+  still exactly as valid as one spent immediately, exactly like physical cash.
+- **Sign-to-fresh-pk's freshness window** runs from anchor generation until either the
+  `TransferOp` confirms or the anchor expires (≈1 hour, above) — bounded by *consensus*,
+  not by either party's choice, because an unbounded "pay this invoice whenever" QR would
+  mean a merchant's displayed amount could be honored at a wildly different exchange-rate
+  moment than when it was shown, among other staleness problems P5.6's POS flow design
+  (below, in that section) already assumes a short window to avoid.
+
+✅ *Verify:* both modes' decision is recorded (already was, in DECISIONS.md's P1.x-era
+notes — restated here against the concrete wire format); the settlement/finality rule is
+stated once, unambiguously, and shown to reduce to P5.3's existing double-spend
+resolution rather than needing a new one; each mode's on-chain shape is given explicitly
+(both reduce to the identical `TransferOp`); the shared-key window (bearer) and the
+pk-freshness window (sign-to-fresh-pk, tied concretely to P5.2's 36,000-DAA-score
+constant) are both named and distinguished.
