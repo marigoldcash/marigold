@@ -663,3 +663,57 @@ standing lesson from the P2.1 regression that targeted checks miss cross-crate
 breaks — this is exactly what caught the txscript/testing-integration/bridge bugs
 above. Final state: 144 test-result blocks, 0 failures, matching/exceeding the P0.2
 baseline.
+
+### P2.9 — Two-node private network smoke test (2026-08-15)
+
+Rebuilt `kaspad` release fresh first (standing lesson: never trust a binary that
+predates the last edit for a live-network test — real find at P2.3).
+
+**Setup**: two devnet nodes, separate `--appdir`s under the session scratchpad
+(never touches `~/.rusty-kaspa` or the pre-existing real-mainnet datadir). Node A
+used every default port (gRPC 26610, borsh-wRPC 27610, JSON-wRPC 28610, P2P 26611 —
+the P2.2 scheme). Node B needed every listener moved to avoid binding collisions on
+the same host: `--listen=127.0.0.1:26621 --rpclisten=127.0.0.1:26620
+--rpclisten-borsh=127.0.0.1:27620 --rpclisten-json=127.0.0.1:28620
+--addpeer=127.0.0.1:26611`. Both came up and handshook within ~10s of node B's
+start (`Registering p2p flows for peer ... for protocol version 9` on both sides,
+node A inbound / node B outbound) — confirms same-network peers still connect fine
+post-P2.3 (P2.3 only proved *cross*-network rejection).
+
+**Mining address**: same throwaway-`cargo run --example`-then-delete technique as
+P0.4 (`Address::new(Prefix::Devnet, Version::PubKey, &payload)`, arbitrary 32 bytes,
+no real key needed since nothing spends from it) — this time correctly producing a
+`marigolddev:...` address (P2.1's prefix), not the old `kaspadev:...` one P0.4 got.
+
+**Mining gotcha**: `kaspa-miner` speaks gRPC, not borsh-wRPC — first attempt pointed
+`--port` at node A's borsh port (27610) and got `ConnectionRefused`; the correct
+target is the gRPC port (26610, node A's default). Once corrected, mining and
+submission worked immediately (devnet genesis difficulty is trivial by design, same
+as P0.4).
+
+**Sync verification (log-based)**: after ~15s of mining, node A's log shows a
+sequence of `Accepted N blocks ...<hash> via submit block` lines; node B's log
+shows the **identical hashes, in the same order**, each as `Accepted N blocks
+...<hash> via relay`. This is the real verification, not just "both logs mention
+blocks" — same DAG, same order, arrived via P2P relay rather than independent
+mining.
+
+**DAA-score verification (RPC-based)**: same throwaway-edit-then-revert pattern as
+P0.3/P0.4/P2.5/P2.6, this time on `rpc/grpc/examples/simple_client` (which is a
+plain workspace bin, not a Cargo `[[example]]` — confirmed via its `Cargo.toml`
+before trying `cargo run --example`, which fails for it). Hardcoded URL swapped for
+a CLI-arg port, built once, run twice (`26610`, `26620`), diff reverted with `git
+checkout --` immediately after. Result — **every field identical** between the two
+nodes: block count 119, header count 119, virtual DAA score 119, tip hash, sink
+hash, pruning point hash, both `is_synced: true`.
+
+**Cleanup**: `pkill -x kaspad` stopped both cleanly (no orphaned processes); miner
+stopped with `pkill -x kaspa-miner` before the RPC check. Appdirs and all logs live
+under the session scratchpad only — nothing added to the repo, working tree clean
+after the example-file revert.
+
+This closes Phase 2. The fork is now verified, not just argued, to be a real
+independent P2P network: two independently-started nodes with no shared state
+converge to byte-identical DAG views purely through the P2P layer this phase
+rebuilt (own ports, own P2P handshake network name, own genesis, own fork
+activations).

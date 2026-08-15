@@ -4,7 +4,7 @@ Snapshot of everything decided and built so far, so any fresh coding session on 
 machine can continue from the repo alone. Read this together with [FORK-PLAN.md](../../FORK-PLAN.md).
 Update this file whenever off-repo state changes (domains, accounts, infra).
 
-Last updated: 2026-08-14 (P2.8 complete)
+Last updated: 2026-08-15 (Phase 2 complete — P2.9 done)
 
 ## What this project is
 
@@ -79,11 +79,18 @@ substitute for it.
 
 ## Where execution stands
 
-- **Next step: P2.9 — the last step of Phase 2.** Two-node private network smoke
-  test: start two local nodes with `--addpeer` pointing at each other (different
-  appdirs/ports), mine on one. Verify: the second node's log shows it syncing blocks
-  mined by the first, and both report the same virtual DAA score via RPC.
-- **Phase 2 (P2.1-P2.8) is done.** This fork is now a genuinely separate,
+- **Next step: P3.1 — start of Phase 3 (Economics).** Read
+  `consensus/src/processes/coinbase.rs` and write a summary of how
+  `SUBSIDY_BY_MONTH_TABLE`/`deflationary_phase_daa_score`/`pre_deflationary_phase_base_subsidy`
+  currently drive emission, into `docs/x-fork/NOTES.md`. This is prep for P3.2, which
+  generates the real subsidy table from the P1.4 locked parameters (210M cap, 3-year
+  halving, no tail).
+- **Phase 2 (P2.1-P2.9) is fully done**, including the closing smoke test: two
+  independently-started devnet nodes (separate appdirs/ports, `--addpeer`-linked)
+  converged to byte-identical DAG state — same block count, virtual DAA score, tip
+  hash, and sink — purely via the P2P layer this phase rebuilt. Full log evidence in
+  NOTES.md's P2.9 entry.
+- This fork is now a genuinely separate,
   fully-rebranded network end-to-end: own address prefixes, ports, P2P handshake
   name (confirmed live against a real Kaspa mainnet peer — explicit rejection), no
   Kaspa DNS seeders, own from-scratch genesis (mainnet motto: *"Hell is other
@@ -96,10 +103,20 @@ substitute for it.
   cases (WASM API surface, `kaspa_utils` paths) deliberately kept, per Ground rule 1.
   Own DNS seeders remain a P9.2 future item (see "Live infrastructure" above for the
   Cloudflare-delegation mechanism).
-- **A draft GitHub issue for kaspanet/rusty-kaspa is sitting unposted** — reporting
-  the `TestConsensus` block-version test-infra gap found at P2.6 as a potential
-  upstream contribution; awaiting the user's go-ahead to actually post it (posting
-  to a third-party public repo needs explicit confirmation).
+- **The GitHub issue for kaspanet/rusty-kaspa has been posted** (by the user,
+  manually, from the prepared draft) — reporting the `TestConsensus` block-version
+  test-infra gap found at P2.6 as a potential upstream contribution.
+- **New plan step added: P7.0 — Inherited-wallet surface audit** (🧑‍⚖️ DECISION, head
+  of Phase 7). Investigation during P2.8 confirmed the legacy-Kaspa wallet-import
+  code (`compat/gen0.rs`/KDX-format, `compat/gen1.rs`/Go-`kaspawallet`-format) is
+  live and reachable via real CLI commands (`import legacy`, `account import
+  legacy-data`), not dormant — and the user confirmed KDX is deprecated and won't be
+  used by Marigold. Decision: this import surface must be removed or hard-disabled
+  before any binary reaches outside users (deadline: P8.7 at the latest; P8.5's
+  wallet threat pass re-verifies closure). Deliberately not acted on yet — deferred
+  to one coherent Phase-7 decision about the whole inherited wallet stack rather than
+  piecemeal deletion now, given P4.2's smoke-test dependency and upstream-merge
+  friction economics. Full rationale in DECISIONS.md.
 - **Six real bugs found and fixed during Phase 2** (all stale real-Kaspa
   legacy values/assumptions left inconsistent with a from-scratch, rebranded chain —
   full root-cause writeups in NOTES.md, most as their own separate commits per

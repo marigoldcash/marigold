@@ -440,11 +440,26 @@ small, mechanical, and individually testable.*
   blocks, 0 failures) — matches and exceeds the P0.2 baseline. Full writeup in
   [NOTES.md](docs/x-fork/NOTES.md).
 
-- [ ] **P2.9 — Two-node private network smoke test.**
-  Start two local nodes with `--addpeer` pointing at each other (different appdirs/ports via
-  flags), mine on one.
-  ✅ *Verify:* second node's log shows it syncing blocks mined by the first; both report the
-  same virtual DAA score via RPC.
+- [x] **P2.9 — Two-node private network smoke test.** Executed 2026-08-15.
+  Rebuilt `kaspad` fresh (standing lesson). Started two devnet nodes with separate
+  `--appdir`s and non-conflicting ports (node A: defaults — gRPC 26610, borsh-wRPC
+  27610, P2P 26611; node B: `--listen=127.0.0.1:26621 --rpclisten=127.0.0.1:26620
+  --rpclisten-borsh=127.0.0.1:27620 --rpclisten-json=127.0.0.1:28620
+  --addpeer=127.0.0.1:26611`). Generated a throwaway `marigolddev:` sink address the
+  same way as P0.4 (no real key needed), mined ~15s with `kaspa-miner` against node
+  A's gRPC port only. Node B's log showed the identical block hashes node A logged
+  "via submit block" being accepted "via relay" in the same order, confirming real
+  P2P sync rather than independent mining. Both nodes' handshake logged protocol
+  version 9 (`Registering p2p flows ... for protocol version 9`) — the network
+  isolation from P2.3 doesn't block same-network peers, only cross-network ones, as
+  expected.
+  ✅ *Verify:* the same throwaway-edit-then-revert pattern used at P0.3/P0.4/P2.5/P2.6
+  (`rpc/grpc/examples/simple_client`, port made a CLI arg, reverted after) queried
+  both nodes: **identical** block count 119, header count 119, virtual DAA score 119,
+  tip hash, sink, and pruning point hash. Both `is_synced: true`. Both processes
+  stopped cleanly after (`pkill -x kaspad`); scratch appdirs and logs kept under the
+  session scratchpad, nothing added to the repo. Full log excerpts in
+  [NOTES.md](docs/x-fork/NOTES.md).
 
 ---
 
