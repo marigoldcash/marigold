@@ -32,7 +32,15 @@ use tokio::time::{Instant, MissedTickBehavior, interval};
 
 mod gas;
 
-const DEFAULT_SEND_AMOUNT: u64 = 10 * SOMPI_PER_KASPA;
+// Real Kaspa's original value here (10 * SOMPI_PER_KASPA = "10 KAS") assumed a per-block
+// coinbase reward large enough that combining a handful of UTXOs (select_utxos below caps at
+// MAX_UTXOS = 8) could easily cover it. Marigold's P3.2 economics deliberately start much
+// smaller (~0.152 MAGLD/block at genesis, vs Kaspa's ~4.4 KAS/block) — 8 real coinbase UTXOs
+// can never sum to 10 MAGLD, so this must scale down with the schedule or every send silently
+// fails with "Has not enough funds" regardless of how long you mine (found at P4.2). 1 MAGLD is
+// comfortably coverable from ~7 blocks' worth of the genesis-era reward, same margin Kaspa's
+// original constant had relative to its own genesis-era reward.
+const DEFAULT_SEND_AMOUNT: u64 = SOMPI_PER_KASPA;
 const MILLIS_PER_TICK: u64 = 10;
 const ADDRESS_VERSION: Version = Version::PubKey;
 
