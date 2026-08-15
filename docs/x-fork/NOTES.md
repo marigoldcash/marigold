@@ -1015,3 +1015,74 @@ example edit, removed the test data dir. Did not test the PowerShell script live
 (no Windows environment available this session) — written to the same structure/
 flags as the verified bash version, but flagging this as unverified until run on
 Windows.
+
+### P4.2 — Full user-journey test (2026-08-15)
+
+Wrote [SMOKE.md](SMOKE.md) as the deliverable, then actually walked it end to end
+on the P4.1 local testnet (not a fresh ad-hoc setup) before writing down the final
+steps, so every command in SMOKE.md is one that was actually run, not just planned.
+
+**Wallet A.** `rothschild --network devnet --rpcserver 127.0.0.1:26610` (no
+`--private-key`) generated a keypair — but the FIRST attempt printed
+`kaspadev:qrm7ja...` instead of `marigolddev:...`. Immediately recognized this as
+the exact P2.3 stale-binary trap (documented: "always rebuild kaspad before a live
+test"), just hitting `rothschild` instead of `kaspad` this time — confirmed via
+`stat` that `target/release/rothschild` predated the P2.1 address-prefix rebrand by
+about 5.5 hours. Rebuilt (`cargo build --release --bin rothschild`), regenerated —
+correct `marigolddev:` prefix. **Lesson reinforced**: "rebuild before a live test"
+applies to every binary you're about to use, not just the one most recently edited
+— worth calling out explicitly in SMOKE.md's own gotchas section so a future
+session doesn't lose the same few minutes.
+
+**Mining + maturity.** Mined with `kaspa-miner` to wallet A's address until well
+past DAA score 3000 (coinbase_maturity × 2 = 2000, confirmed via rothschild's own
+startup banner: "Coinbase maturity: 1000"). Balance query confirmed
+46,278,150,315 petals — mature and spendable.
+
+**The real bug: sending never worked, no matter how long we waited.** Started
+`rothschild --private-key <A> --to-addr <B> --tps 1` — every single tick logged
+`"Has not enough funds"` / `"Refetching UTXO set"`, even after mining thousands
+more blocks and confirming (via a throwaway extension of the gRPC example client
+to dump `get_utxos_by_addresses`) that wallet A held 3612+ UTXOs, all `is_coinbase:
+true`, with `block_daa_score` values from 2 up to the current tip — i.e., clearly
+mature, spendable-looking UTXOs in abundance. Root-caused by reading
+`rothschild/src/main.rs`'s `select_utxos()` directly rather than guessing further:
+it combines UTXOs one at a time toward a `DEFAULT_SEND_AMOUNT` target
+(`10 * SOMPI_PER_KASPA`, i.e. "10 KAS" in the original code), but gives up
+(`return (vec![], 0)`) once it's combined more than `MAX_UTXOS = 8` without
+reaching the target. Marigold's own genesis-era coinbase reward is only
+15,228,085 petals/block (P3.2) — 8 of them sum to ~121.8M petals (~1.2 MAGLD),
+nowhere near 10 MAGLD. This is a hard mathematical cap, not a timing issue: mining
+longer only creates *more* same-sized UTXOs (the schedule is flat within a month),
+never *bigger* ones, so this would have failed identically after an hour or a
+week of mining. Confirmed the diagnosis by checking `node1.log`'s
+"Processed N blocks" summaries during the failed attempts: `1.00 TPB` (transactions
+per block) throughout — meaning literally zero user transactions were ever being
+included, only coinbase.
+
+Fixed by lowering `DEFAULT_SEND_AMOUNT` to `SOMPI_PER_KASPA` (1 MAGLD-equivalent,
+~7 blocks' worth at genesis — chosen to preserve roughly the same margin below
+`MAX_UTXOS` that Kaspa's original "10 KAS at ~4.4 KAS/block" choice had, not an
+arbitrary round number). Own commit, separate from the SMOKE.md/plan documentation
+commit, per Ground rule 2. Rebuilt, reran the send — `Tx rate: 1.1/sec, avg UTXO
+amount: 15228085, avg UTXOs per tx: 7` confirmed the fix immediately.
+
+**Wallet B and restart persistence.** Wallet B received `3,485,867,022` petals
+across 66 UTXOs from the send. Recorded both wallets' balances and the tip DAA
+score, killed node1's process directly (`kill <pid>`, same as a crash/manual stop),
+relaunched `kaspad` with the identical `--appdir` — the restart log had no
+"Resyncing the utxoindex..." line this time (unlike every fresh-node launch this
+session), a small but reassuring sign it recognized existing state rather than
+starting over. Both wallet balances and the DAA score matched their pre-restart
+values **exactly** — real, working persistence, not just "the node came back up."
+
+**Cleanup.** Stopped all `kaspad` processes, reverted the throwaway
+`get_utxos_by_addresses`/balance-query extension to `rpc/grpc/examples/simple_client`
+(same pattern as every prior live check), removed `x-testnet-local-data/`. The
+`rothschild` fix itself is real and stays committed — it's a genuine compatibility
+bug in a tool this project keeps using, not throwaway debugging code.
+
+This closes P4.2. The chain now has direct evidence — not just unit tests — that a
+normal wallet-holder's experience (receive funds, wait for them to mature, spend
+some, restart your node) works correctly end to end on Marigold's own economics.
+P4.3 (integration test suite) and P4.4 (tag) remain before Phase 4 itself is done.

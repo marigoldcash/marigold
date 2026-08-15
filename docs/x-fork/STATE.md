@@ -4,7 +4,7 @@ Snapshot of everything decided and built so far, so any fresh coding session on 
 machine can continue from the repo alone. Read this together with [FORK-PLAN.md](../../FORK-PLAN.md).
 Update this file whenever off-repo state changes (domains, accounts, infra).
 
-Last updated: 2026-08-15 (P4.1 complete)
+Last updated: 2026-08-15 (P4.2 complete)
 
 ## What this project is
 
@@ -79,10 +79,22 @@ substitute for it.
 
 ## Where execution stands
 
-- **Next step: P4.2 — full user-journey test.** Write `docs/x-fork/SMOKE.md`: a
-  documented manual script (create wallet → mine to it → wait maturity → send to a
-  second wallet → restart node → balances persist), verified by walking through it
-  on the P4.1 local testnet.
+- **Next step: P4.3 — integration test suite green.** `cargo nextest run --release
+  -p kaspa-testing-integration` against Marigold's own params; some tests hardcode
+  Kaspa params/genesis and need fixing to use our constants as part of this step
+  (the 5 `goref_*` tests already `#[ignore]`d at P3.2 are a separate, permanent
+  case — real historical Kaspa data, not fixable).
+- **P4.2 is done.** [docs/x-fork/SMOKE.md](SMOKE.md) — an 8-step manual
+  user-journey script, walked end to end on the P4.1 local testnet: wallet A mined
+  and matured, wallet B funded via a real send, node1 restarted with the same
+  `--appdir`, both balances (and the DAA score) matched exactly pre/post-restart.
+  Found and fixed two real bugs along the way: `rothschild` needed rebuilding (a
+  stale pre-P2.1 binary printed the old `kaspadev:` prefix — same P2.3 stale-binary
+  trap, different tool), and a genuine compatibility bug where `rothschild`'s
+  hardcoded 10-KAS-equivalent `DEFAULT_SEND_AMOUNT` could never be satisfied from
+  Marigold's much-smaller genesis-era coinbase UTXOs given its `MAX_UTXOS = 8`
+  input cap — fixed by scaling the constant down to 1 MAGLD-equivalent. Full
+  root-cause writeup in [NOTES.md](NOTES.md)'s P4.2 entry.
 - **P4.1 is done.** [scripts/x-testnet-local.sh](../../scripts/x-testnet-local.sh)
   and [.ps1](../../scripts/x-testnet-local.ps1) launch 3 peered devnet nodes on one
   machine (distinct ports/appdirs, star-topology `--addpeer` to node1), auto-build

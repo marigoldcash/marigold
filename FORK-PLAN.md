@@ -564,10 +564,25 @@ the natural checkpoint before the hard part.*
   all three nodes report identical block count (64), virtual DAA score (64), and sink hash.
   Stopped cleanly, throwaway edit reverted, test data dir removed.
 
-- [ ] **P4.2 — Full user-journey test.** Documented manual script in `docs/x-fork/SMOKE.md`:
-  create wallet → mine to it → wait maturity → send to second wallet → restart node →
-  balances persist.
-  ✅ *Verify:* every step of SMOKE.md passes on the local testnet.
+- [x] **P4.2 — Full user-journey test.** Executed 2026-08-15.
+  Wrote [docs/x-fork/SMOKE.md](docs/x-fork/SMOKE.md) — 8-step manual script (launch testnet →
+  create wallet A → mine to it → wait maturity → check balance → create wallet B → send A→B →
+  restart node → confirm balances persist), using `rothschild` for keypair generation/sending
+  (`kaspa-cli` remains REPL-only, per P0.3) on the P4.1 local testnet. Found and fixed two real
+  bugs while walking it: (1) `rothschild` needed rebuilding — a stale pre-P2.1 binary silently
+  printed `kaspadev:` addresses instead of `marigolddev:`, the same stale-binary trap as P2.3's
+  `kaspad` gotcha, just hitting a different tool this time. (2) A genuine, non-obvious
+  compatibility bug: `rothschild`'s hardcoded `DEFAULT_SEND_AMOUNT` (originally 10 KAS-equivalent)
+  could never be satisfied from Marigold's own coinbase UTXOs — `select_utxos()`'s
+  `MAX_UTXOS = 8` input cap means 8 combined genesis-era coinbase outputs (15,228,085 petals
+  each) sum to only ~1.2 MAGLD, so every send silently failed with "Has not enough funds"
+  regardless of mining duration (a hard cap, not a timing issue). Fixed by lowering it to 1
+  MAGLD-equivalent, the same proportional margin Kaspa's original constant had. Full root-cause
+  writeup in [NOTES.md](docs/x-fork/NOTES.md).
+  ✅ *Verify:* walked every SMOKE.md step successfully on the local testnet — wallet A mined and
+  matured (65,847,603,983 petals), wallet B funded via a real send (3,485,867,022 petals),
+  node1 stopped and restarted with the same `--appdir`, both balances (and the virtual DAA
+  score) matched exactly pre- and post-restart.
 
 - [ ] **P4.3 — Integration test suite green.**
   `cargo nextest run --release -p kaspa-testing-integration` against your params (some tests
