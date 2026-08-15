@@ -35,8 +35,12 @@ pub const STORAGE_MASS_PARAMETER: u64 = SOMPI_PER_KASPA * 10_000;
 /// block body byte size to 125_000 (KIP-0013).
 pub const TRANSIENT_BYTE_TO_MASS_FACTOR: u64 = 4;
 
-/// MaxSompi is the maximum transaction amount allowed in sompi.
-pub const MAX_SOMPI: u64 = 29_000_000_000 * SOMPI_PER_KASPA;
+/// MaxSompi is the maximum transaction amount allowed in sompi (petals). Real Kaspa's value here
+/// (29_000_000_000 * SOMPI_PER_KASPA) was their own real max supply, used both as a sanity bound
+/// on individual tx outputs/totals and as the `max_sompi` field `get_coin_supply` reports over
+/// RPC — P3.2 set Marigold's actual cap to 210,000,000 MAGLD, so this must match (found via
+/// P3.3's RPC-based emission check).
+pub const MAX_SOMPI: u64 = 210_000_000 * SOMPI_PER_KASPA;
 
 // MAX_TX_IN_SEQUENCE_NUM is the maximum sequence number the sequence field
 // of a transaction input can be.

@@ -522,11 +522,23 @@ small, mechanical, and individually testable.*
   ~15-20-minute `verify_crescendo_emission_schedule`), 0 failed. Full `cargo build --workspace`
   / `cargo test --workspace`: 144 test-result blocks, 0 failures, matching the P2.8 baseline.
 
-- [ ] **P3.3 — Emission integration check.**
-  On a fresh single-node devnet-of-your-network, mine ~1000 blocks; query circulating supply
-  via RPC (or sum coinbase outputs via the utxoindex).
-  ✅ *Verify:* observed issuance per block matches your table's month-0 value ±
-  red-block/merge effects.
+- [x] **P3.3 — Emission integration check.** Executed 2026-08-15.
+  Rebuilt `kaspad` fresh. Fresh single-node `--utxoindex` devnet, mined 1097 real blocks
+  (block/header count 1098 includes genesis, which mints no coinbase) with `kaspa-miner`.
+  Queried `get_coin_supply` over gRPC (throwaway-edit-then-revert on
+  `rpc/grpc/examples/simple_client`, same pattern as prior live checks): **circulating supply
+  16,705,209,245 petals = exactly 1097 × 15,228,085** — the table's month-0 per-block value
+  (`SUBSIDY_BY_MONTH_TABLE[0].div_ceil(10)`) with **zero deviation** (single miner, no
+  red/merged blocks on a linear devnet chain, so no rounding slack to account for). Also caught
+  and fixed a real bug surfaced by this same RPC call: `get_coin_supply`'s `max_sompi` field
+  reported real Kaspa's actual historical cap (`MAX_SOMPI = 29_000_000_000 * SOMPI_PER_KASPA`,
+  also used as the tx-output/tx-total sanity-bound constant) instead of ours — updated to
+  `210_000_000 * SOMPI_PER_KASPA`, confirmed via the same RPC call afterward
+  (`Max supply (petals): 21000000000000000`, exactly 210M MAGLD). Node and miner stopped
+  cleanly; full `cargo build --workspace` clean. Full log in
+  [NOTES.md](docs/x-fork/NOTES.md).
+  ✅ *Verify:* observed issuance per block (15,228,085 petals) exactly matches the table's
+  month-0 value — no red-block/merge deviation to account for on this single-miner run.
 
 ---
 

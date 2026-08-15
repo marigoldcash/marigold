@@ -925,3 +925,53 @@ is far smaller than the ~0.0036 MAGLD-scale precision the generator already aims
 for at the idealized level, and eliminating it would mean abandoning the
 `div_ceil`-based BPS-scaling architecture entirely — out of scope for P3.2, which
 was told to keep the existing table-driven design.
+
+### P3.3 — Emission integration check (2026-08-15)
+
+Rebuilt `kaspad` fresh (standing lesson). Fresh single-node devnet, `--utxoindex`
+enabled (required for `get_coin_supply`), scratch `--appdir`. Generated a throwaway
+`marigolddev:` sink address the same way as P0.4/P2.9 (no real key needed). Mined
+with `kaspa-miner` against the node's gRPC port (26610) until past 1000 blocks
+(~4 minutes wall-clock — slower than P2.9's 15-second burst since that run only
+needed ~120 blocks; devnet difficulty still ramps up as blocks land, so getting to
+1000+ legitimately takes proportionally longer, nothing wrong).
+
+**RPC query.** Extended the usual throwaway-edit-then-revert pattern on
+`rpc/grpc/examples/simple_client` (port-as-CLI-arg, as in P2.9) by also calling
+`get_coin_supply()` (not previously used by this example) and printing
+`circulating_sompi / block_count` as a quick average. Reverted after, as always.
+
+**Result — block/header count 1098, virtual DAA score 1098, circulating supply
+16,705,209,245 petals.** At first glance this doesn't obviously match table[0]'s
+per-block value (15,228,085): naive `circulating / block_count` gives ~15,214,216,
+about 0.09% low. The catch: `block_count` includes genesis (DAA score 0, no
+coinbase reward), so only **1097** of those 1098 blocks actually minted a subsidy.
+`15,228,085 × 1097 = 16,705,209,245` — an **exact** match, confirmed via `python3 -c
+"print(15228085 * 1097)"`. Zero deviation, not even a rounding hair — expected here
+since this was a single-miner, no-parallel-mining devnet run (a purely linear
+chain, no merged/red blocks to introduce the "± red-block/merge effects" slack the
+plan's verify condition anticipates for less controlled setups).
+
+**Real bug caught by this same RPC call.** `get_coin_supply`'s `max_sompi` field
+came back as real Kaspa's actual max supply
+(`consensus/core/src/constants.rs::MAX_SOMPI = 29_000_000_000 * SOMPI_PER_KASPA`,
+~2.9 × 10¹⁸ petals) instead of ours (`210,000,000 * SOMPI_PER_KASPA` = 2.1 × 10¹⁶
+petals) — off by ~138×. `MAX_SOMPI` does double duty: it's both the value
+`get_coin_supply` reports and the sanity-bound used in transaction-output/total
+validation (`tx_validation_in_isolation.rs`, `tx_validation_in_utxo_context.rs`,
+mempool fee capping) — exactly mirroring how real Kaspa used their own actual max
+supply for both purposes, so the correct fix for us is the same pattern with our
+own cap, not a new mechanism. Grepped for other hardcoded references to the old
+literal value first — none found outside the constant's own definition. Fixed,
+rebuilt, reran `cargo test -p kaspa-consensus --lib -- transaction_validator` (13
+passed) and a full `cargo build --workspace` (clean) before the live devnet run, so
+the fix was already verified before it got exercised over real RPC — the RPC output
+above (`Max supply (petals): 21000000000000000` = exactly 210,000,000 MAGLD) is
+confirmation, not the first check.
+
+**Cleanup.** `pkill -x kaspa-miner` then `pkill -x kaspad`, both exited cleanly.
+Scratch appdir/logs under the session scratchpad only, nothing added to the repo.
+
+This closes Phase 3 (P3.1-P3.3). Marigold's own emission schedule is now
+understood, implemented, capped by a permanent test, and confirmed correct against
+a real running node over RPC — not just unit-tested in isolation.
