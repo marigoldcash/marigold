@@ -560,3 +560,96 @@ mergeset), not a new rule; signature replay protection restated from P5.2's fres
 anchor and tied to the concrete consensus check (step 3 above); mass/fee costing defined
 per op using existing cost-model constants, with the batch-sweep cost savings made
 explicit.*
+
+---
+
+## P5.4 — Pool state sync & pruning interaction
+
+### The pool map survives pruning, exactly like the UTXO set
+
+Pruning discards old block bodies/headers beyond the pruning depth; it does **not**
+discard current state — that's precisely what makes pruning safe: the UTXO set is
+*current* state, preserved forward indefinitely, and `utxo_commitment` in each header is
+what lets a node trust a downloaded UTXO set without replaying the discarded history to
+rebuild it. `PoolState` (P5.1) is current state in the exact same sense — every entry
+alive today is alive regardless of which now-pruned block created or last touched it — so
+it survives pruning identically, verified against `pool_commitment` (P5.1) instead of
+`utxo_commitment`.
+
+### Sync flow for a fresh node — real precedent, cited directly
+
+Two existing sync flows in this codebase are directly relevant, and they're not
+interchangeable — the pool's `crypto/smt` structure makes the **second** one the closer
+match, not just an analogy:
+
+1. **UTXO set** (MuHash-based): `protocol/flows/src/ibd/flow.rs`'s
+   `sync_pruning_point_utxoset` (~line 851) requests the set
+   (`RequestPruningPointUtxoSetMessage`), streams it in chunks
+   (`PruningPointUtxosetChunkStream`), and folds each chunk into a running `MuHash` via
+   `Consensus::append_imported_pruning_point_utxos`
+   ([consensus/src/consensus/mod.rs:1115-1128](../../consensus/src/consensus/mod.rs)).
+   Only **after every chunk is received** does `import_pruning_point_utxo_set` compare the
+   final accumulated hash against `utxo_commitment` — MuHash supports no partial/incremental
+   verification, so a corrupt or malicious chunk is only caught at the very end.
+2. **Seq-commit SMT** (KIP-21, already in this codebase — not upstream rusty-kaspa):
+   `import_pruning_point_smt`
+   ([consensus/src/consensus/mod.rs:1134](../../consensus/src/consensus/mod.rs)) calls
+   `kaspa_smt_store::streaming_import::streaming_import`
+   ([consensus/smt-store/src/streaming_import/mod.rs:79](../../consensus/smt-store/src/streaming_import/mod.rs)),
+   which — checked directly, not assumed — does something strictly better: **each
+   streamed entry is checked with an SMT inclusion proof against the target root as it
+   arrives** (`proof.verify::<SeqCommitActiveNode>(&lane_key, Some(leaf_hash), lanes_root)`,
+   line 123), *in addition to* a final `result.root != lanes_root` backstop check after
+   the whole import completes (`consensus/src/consensus/mod.rs:1166`).
+
+Since `PoolState` is an SMT (P5.1), it gets flow 2's stronger property for free: a node
+syncing the pool state can reject a bad or malicious chunk **as it's received**, not only
+after downloading the entire map. This is a real, structural advantage over the UTXO set's
+own sync flow, worth stating explicitly since it's not something the pool feature had to
+design — it inherits it by being built on the same SMT infrastructure seq-commit already
+proved out.
+
+### The pool's own sync flow (extending flow 2, not re-deriving it)
+
+1. A fresh node learns the current pruning point's header, including its
+   `pool_commitment` (P5.1), the same way it already learns `utxo_commitment` today —
+   part of ordinary header sync, no new mechanism.
+2. The node requests the pool state at that pruning point — a new P2P message
+   symmetrical to `RequestPruningPointUtxoSetMessage` (exact wire name is Phase 6's job;
+   spec-level requirement is only that it exists and identifies the same pruning point).
+3. The remote peer streams `(sn, d, pk)` triples in chunks, sorted by `sn` (canonical
+   order — matches how the existing `streaming_import` expects pre-sorted batches for its
+   `StreamingSmtBuilder`), each accompanied by what `streaming_import` already needs to
+   verify incrementally: enough of the tree structure to check the entry's leaf
+   (`H_leaf(d || pk)`, P5.1) against `pool_commitment` via an SMT inclusion proof, using
+   the new `NotePoolSmt` hasher (P5.1) in place of seq-commit's `SeqCommitActiveNode`.
+4. The receiving node feeds each chunk into `streaming_import` (generalized to the
+   `NotePoolSmt` hasher), rejecting the transfer immediately on any proof-verification
+   failure (flow 2's incremental property) rather than only discovering a mismatch after
+   the full download.
+5. After the last chunk, the final computed root is compared against the pruning point
+   header's `pool_commitment` — the same backstop `import_pruning_point_smt` already
+   performs for seq-commit, reused verbatim for the pool's own `SmtStores` instance.
+6. Only after both checks pass does the node adopt the downloaded pool state as trusted
+   current state, exactly mirroring `import_pruning_point_utxo_set`'s "verify-then-adopt"
+   ordering — a downloaded-but-unverified pool state is never partially trusted.
+
+### What is downloaded and which committed hash checks it (P5.4's own verify condition, answered directly)
+
+**Downloaded**: the full `PoolState` map as of the pruning point — every live `(sn, d,
+pk)` triple, streamed in `sn`-sorted chunks, each individually proof-checkable against the
+target root as described above (not just the final root).
+
+**Checked against**: `pool_commitment` — the new 32-byte `Header` field specified in P5.1
+— both incrementally (per-chunk SMT inclusion proofs during streaming) and as a final
+backstop (recomputed root vs. the pruning-point header's committed value), exactly
+mirroring how `utxo_commitment` gates trust in a downloaded UTXO set today, with the
+incremental check as a genuine strengthening the SMT-based design provides over the
+UTXO set's MuHash-only final check.
+
+✅ *Verify:* the fresh-node sync-from-pruning-point flow is described end to end (learn
+commitment → request → stream sorted chunks with incremental proof verification →
+final-root backstop → adopt), citing the two real existing precedents this design
+extends rather than inventing a new one, and stating explicitly which committed header
+field (`pool_commitment`) and which verification mechanism (SMT inclusion proofs,
+incremental *and* final) gate trust in the downloaded state.

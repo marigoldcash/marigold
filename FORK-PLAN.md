@@ -710,13 +710,25 @@ should settle its size and how it is assigned (e.g. hash of the minting tx + out
   consensus check (reject anchors outside `[0, 36000]` DAA-score-units of the block, in
   both directions).
 
-- [ ] **P5.4 — Spec: pool state sync & pruning interaction.** Kaspa nodes prune old
-  blocks/UTXO history; the pool map is *current state* (like the UTXO set) and must survive
-  pruning. Spec how a fresh node syncing from a pruning point downloads the pool state and
-  verifies it against the P5.1 commitment in the pruning-point header — mirror how the
-  UTXO set is synced and verified against `utxo_commitment` today.
-  ✅ *Verify:* section describes the sync-from-pruning-point flow for a fresh node,
-  including what is downloaded and which committed hash checks it.
+- [x] **P5.4 — Spec: pool state sync & pruning interaction.** Executed 2026-08-15.
+  Wrote [docs/x-fork/POOL-SPEC.md](docs/x-fork/POOL-SPEC.md)'s P5.4 section. Found there
+  are **two** relevant existing sync precedents, not one, and that the closer match isn't
+  the UTXO set's MuHash flow the plan itself points at, but the seq-commit (KIP-21) SMT
+  streaming-import flow already in this codebase
+  (`kaspa_smt_store::streaming_import::streaming_import`,
+  `consensus/src/consensus/mod.rs::import_pruning_point_smt`) — since `PoolState` is
+  itself an SMT (P5.1), it inherits that flow's stronger property for free: each streamed
+  entry is checked with an SMT inclusion proof against the target root **as it arrives**
+  (verified directly by reading the real code, not assumed), not only via a final-root
+  comparison the way the UTXO set's MuHash accumulator is limited to. Specced the pool's
+  own sync flow as a direct extension of the seq-commit precedent (learn `pool_commitment`
+  from the header → request → stream `sn`-sorted chunks with incremental proof
+  verification → final-root backstop, reusing `import_pruning_point_smt`'s exact
+  verify-then-adopt ordering → adopt).
+  ✅ *Verify:* the fresh-node sync flow is described end to end, citing both real existing
+  precedents (UTXO/MuHash and seq-commit/SMT) with verified file/line citations, stating
+  explicitly what's downloaded (sorted `(sn, d, pk)` chunks) and which committed field
+  gates trust (`pool_commitment`, checked incrementally and as a final backstop).
 
 - [ ] **P5.5 — Spec: transfer modes.** **DECIDED: both modes are supported, first-class.**
   The chain-side rotate op is identical for both — the modes are pure wallet-level flows.
