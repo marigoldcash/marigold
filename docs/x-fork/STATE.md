@@ -4,7 +4,7 @@ Snapshot of everything decided and built so far, so any fresh coding session on 
 machine can continue from the repo alone. Read this together with [FORK-PLAN.md](../../FORK-PLAN.md).
 Update this file whenever off-repo state changes (domains, accounts, infra).
 
-Last updated: 2026-08-16 (P6.2 complete — pool state store + SMT commitment implemented)
+Last updated: 2026-08-16 (P6.3 complete — stateless pool-op validation implemented; next step P6.4 is ⚠️ HARD)
 
 ## What this project is
 
@@ -79,13 +79,36 @@ substitute for it.
 
 ## Where execution stands
 
-- **Next step: P6.3 — stateless op validation.** Parse-and-check without any state:
-  payload decodes, signature well-formed, denominations from the P1.6 set,
-  split/merge multiset arithmetic balances, size limits, freshness-anchor field
-  present. Table-driven tests per the P5.3 checklist's malformed-op classes. bite-size
-  appropriate (not marked ⚠️ HARD) — per the user's "carry on through step 6 until
-  a step marked HARD" instruction, next in line after P6.3 is **P6.4, which IS
-  marked ⚠️ HARD and should not be attempted without a stronger model.**
+- **Next step: P6.4 — stateful validation in the virtual pipeline.** ⚠️ **HARD** —
+  per the user's own "carry on through step 6 until a step marked HARD" instruction,
+  this is the stopping point for this session/model. Wires pool ops into
+  `consensus/src/pipeline/virtual_processor` (model: `utxo_validation.rs`'s composed-
+  view mergeset walk): serial existence, signature verification against a serial's
+  *current* `pk`, freshness-window comparison against the validation context's own
+  POV DAA score, first-accepted-wins for conflicting ops in merged blocks, actual
+  conservation arithmetic (needs consumed notes' current denominations from the live
+  pool view — genuinely stateful, unlike anything P6.3 could check), and
+  `PoolDiff`/`DbNotePoolSmtStore::apply_diff`/`unapply_diff` wiring on virtual-chain
+  changes (reorgs). Needs a stronger model per the plan's own flag — do not attempt
+  with a bite-size session.
+- **P6.3 is done.** [validate.rs](../../consensus/core/src/notepool/validate.rs)'s
+  `validate_stateless(&PoolOp)` — checks that hold with zero pool/consensus state.
+  Notable finding: three of P6.3's own named checks ("denominations from the P1.6
+  set", "freshness-anchor field present", "signature well-formed") turned out to
+  already be fully guaranteed by the type system once a `PoolOp` decodes at all —
+  confirmed the "signature well-formed" claim by reading `secp256k1` v0.29.1's actual
+  source rather than assuming, found `schnorr::Signature::from_slice` only checks
+  length (already guaranteed by the `[u8; 64]` field type), and removed the dead
+  check rather than ship code that can provably never fail. What's actually enforced
+  at runtime: non-empty collections, the 1,000-item cap deferred from P6.1
+  (`MAX_POOL_OP_COLLECTION_LEN`, a standalone constant chosen to match — not read
+  from — mainnet's `max_tx_inputs`/`max_tx_outputs`), and no duplicate serial within
+  or across an op's `SignedGroup`s (P5.3 step 1's stateless half; the same-`pk`
+  requirement and actual signature verification are P6.4's job). New
+  `PoolOpValidationError` in `consensus/core/src/errors/notepool.rs`, matching
+  `TxRuleError`'s existing `thiserror` convention. 15 new table-driven tests pass.
+  Full `cargo test -p kaspa-consensus-core` (94 passed) and full `cargo build
+  --workspace` clean.
 - **P6.2 is done.** Two new RocksDB stores mirror `DbUtxoSetStore`/`UtxoDiff`
   exactly: [notepool.rs](../../consensus/src/model/stores/notepool.rs)
   (`DbNotePoolStore`, flat `sn -> NewNote` map) and

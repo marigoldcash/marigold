@@ -9,9 +9,11 @@
 
 pub mod diff;
 pub mod hashing;
+pub mod validate;
 
 pub use diff::{PoolCollection, PoolDiff};
 pub use hashing::leaf_hash;
+pub use validate::{MAX_POOL_OP_COLLECTION_LEN, validate_stateless};
 
 use crate::Hash;
 use borsh::{BorshDeserialize, BorshSerialize};

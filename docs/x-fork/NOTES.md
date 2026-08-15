@@ -1346,3 +1346,60 @@ store re-open against the same RocksDB directory, not just an in-memory cache hi
 (`leaf_hash_is_deterministic`, `leaf_hash_differs_by_denomination`,
 `leaf_hash_differs_by_pk`) plus the `diff.rs` reversal tests, all passing; full
 `cargo test -p kaspa-consensus` (80 tests) and full `cargo build --workspace` both clean.
+
+### P6.3 — Stateless op validation (2026-08-16)
+
+**The real work here was figuring out how little of P6.3's own plan-text checklist
+needed actual runtime code**, not writing the code once that was clear. Went and read
+the real library source for each claim rather than assuming:
+
+- "Denominations from the P1.6 set": already proven by P6.1's own
+  `malformed_denomination_tag_discriminant_rejected` test — a bad `DenominationTag`
+  discriminant can't survive borsh decoding, so there is no runtime state in which a
+  `PoolOp` exists with an out-of-range tag to check against.
+- "Freshness-anchor field present": `FreshnessAnchor` is a required struct field on
+  `TransferOp`/`RedeemOp`, never `Option` — there's no wire shape lacking it.
+- "Signature well-formed": this one took actually reading `secp256k1` v0.29.1's source
+  (`src/schnorr.rs`), not just assuming a signature-parsing library does real
+  validation. `Signature::from_slice` checks exactly one thing — the input is
+  `SCHNORR_SIGNATURE_SIZE` (64) bytes — and `SignedGroup.signature`'s `[u8; 64]` field
+  type already guarantees that unconditionally. No curve or field-element validation
+  happens at parse time at all; that only occurs during actual verification against a
+  message and public key. Wrote the check first, believing it would reject a
+  malformed/degenerate signature — a test using an all-zero `[0u8; 64]` signature
+  (reasoning: `r = 0` "obviously" isn't a valid curve x-coordinate) — and it failed,
+  because the library doesn't check that at parse time either. Rather than keep code
+  that can provably never return `Err` (confirmed by reading the exact match arms:
+  length either equals 64 and returns `Ok`, or doesn't and hits the one `Err` path),
+  removed it and documented why in `validate.rs`'s module doc comment instead of
+  leaving a misleadingly-named dead function call in the validation path.
+
+**What P6.3 actually enforces at runtime**, once the above was cleared away:
+non-empty collections (an empty `Transfer.consumed` would be indistinguishable from
+unauthorized minting — nothing backs the produced notes), the 1,000-item collection
+cap P6.1 explicitly deferred here (`MAX_POOL_OP_COLLECTION_LEN` — a standalone
+protocol constant matching mainnet's current `max_tx_inputs`/`max_tx_outputs` value by
+choice, not a live read of that field, since `params.rs`'s tx-shape limit and the
+pool's collection limit are conceptually independent even though they currently
+agree), and no duplicate serial within or across an op's `SignedGroup`s — the
+stateless half of P5.3 step 1 ("no serial may appear more than once across the op's
+entire consumed set"); the other half of that same step (every group's serials must
+currently share one `pk`) is inherently stateful (needs the live pool view to know
+each serial's current owner) and stays P6.4's job, along with actual signature
+verification.
+
+New `PoolOpValidationError`
+([errors/notepool.rs](../../consensus/core/src/errors/notepool.rs)) follows
+`TxRuleError`'s existing convention in this codebase exactly — `thiserror`, one
+`#[error("...")]` variant per distinct violation — rather than inventing a new error
+style for one more feature.
+
+✅ *Verify* (P5.3's own malformed-op checklist, the part that's actually stateless):
+15 new table-driven tests — every combination of empty-collection, oversized-collection
+(both "one past the cap" and "exactly at the cap, still valid"), and duplicate-serial
+(within one group, across two groups) rejected with its own distinct error variant,
+across all three op kinds, plus a valid-shape positive test per op kind so the suite
+can't pass by rejecting everything.
+
+15 new unit tests, all passing; full `cargo test -p kaspa-consensus-core` (94 tests)
+and full `cargo build --workspace` both clean.

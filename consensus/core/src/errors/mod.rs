@@ -4,6 +4,7 @@ pub mod config;
 pub mod consensus;
 pub mod difficulty;
 pub mod header;
+pub mod notepool;
 pub mod pruning;
 pub mod sync;
 pub mod traversal;

@@ -1012,12 +1012,41 @@ store → validation → pipeline → mempool → sync → RPC. Every step lands
   store re-open (real RocksDB round-trip, not just in-memory cache). Full `cargo test -p
   kaspa-consensus` (80 passed) and full `cargo build --workspace` clean.
 
-- [ ] **P6.3 — Stateless op validation.** Parse-and-check without any state: payload
+- [x] **P6.3 — Stateless op validation.** Parse-and-check without any state: payload
   decodes, signature well-formed, denominations from the P1.6 set, split/merge multiset
   arithmetic balances, size limits, freshness-anchor field present. Fail-fast and
   fuzz-friendly (this parser is fuzzed in P8.1).
   ✅ *Verify:* table-driven tests — every malformed-op class from the P5.3 checklist is
   rejected with a distinct error.
+  **Executed.** [consensus/core/src/notepool/validate.rs](consensus/core/src/notepool/validate.rs)
+  adds `validate_stateless(&PoolOp) -> Result<(), PoolOpValidationError>`. Three of this
+  step's own named checks turned out to already be fully guaranteed by the type system
+  once a `PoolOp` decodes at all — verified against the actual library source, not
+  assumed, before leaving them out as runtime checks: "denominations from the P1.6 set"
+  (a malformed `DenominationTag` discriminant is already a decode-time borsh error,
+  P6.1's own test proves it); "freshness-anchor field present" (`FreshnessAnchor` is a
+  required struct field, never `Option`); and "signature well-formed" — read
+  `secp256k1` v0.29.1's `schnorr::Signature::from_slice` source directly and confirmed
+  it only checks the input is 64 bytes, which `SignedGroup.signature`'s `[u8; 64]` field
+  type already guarantees unconditionally, so calling it would be dead code that can
+  never return `Err`. What P6.3 actually enforces at runtime: every op's collections are
+  non-empty (an empty `Transfer.consumed` would be unauthorized minting under another
+  name), the 1,000-item collection-size cap explicitly deferred from P6.1 (new
+  `MAX_POOL_OP_COLLECTION_LEN` const — a separate protocol constant chosen to match
+  mainnet's current `max_tx_inputs`/`max_tx_outputs` value, not a live read of it, so
+  the two bounds can't silently drift together), and no duplicate serial within or
+  across an op's `SignedGroup`s (P5.3 step 1's stateless half — the same-`pk`
+  requirement and actual signature verification are P6.4's job, since both need the
+  live pool view). New `PoolOpValidationError`
+  ([consensus/core/src/errors/notepool.rs](consensus/core/src/errors/notepool.rs))
+  follows the existing `TxRuleError` convention exactly (`thiserror`, one variant per
+  distinct violation).
+  ✅ *Verify:* 15 new table-driven tests, all passing — every stateless malformed-op
+  class actually checkable without state (empty collections, oversized collections at
+  and past the cap, duplicate serials within one group and across groups) rejected with
+  its own distinct `PoolOpValidationError` variant, plus valid-shape positive cases for
+  all three op kinds. Full `cargo test -p kaspa-consensus-core` (94 passed) and full
+  `cargo build --workspace` clean.
 
 - [ ] **P6.4 — Stateful validation in the virtual pipeline.** ⚠️ **HARD.** Wire pool ops
   into [consensus/src/pipeline/virtual_processor](consensus/src/pipeline/virtual_processor/processor.rs)
