@@ -4,7 +4,7 @@ Snapshot of everything decided and built so far, so any fresh coding session on 
 machine can continue from the repo alone. Read this together with [FORK-PLAN.md](../../FORK-PLAN.md).
 Update this file whenever off-repo state changes (domains, accounts, infra).
 
-Last updated: 2026-08-15 (Phase 2 complete — P2.9 done)
+Last updated: 2026-08-15 (P3.2 complete)
 
 ## What this project is
 
@@ -79,12 +79,26 @@ substitute for it.
 
 ## Where execution stands
 
-- **Next step: P3.1 — start of Phase 3 (Economics).** Read
-  `consensus/src/processes/coinbase.rs` and write a summary of how
-  `SUBSIDY_BY_MONTH_TABLE`/`deflationary_phase_daa_score`/`pre_deflationary_phase_base_subsidy`
-  currently drive emission, into `docs/x-fork/NOTES.md`. This is prep for P3.2, which
-  generates the real subsidy table from the P1.4 locked parameters (210M cap, 3-year
-  halving, no tail).
+- **Next step: P3.3 — emission integration check.** On a fresh single-node devnet,
+  mine ~1000 blocks and confirm observed issuance per block matches the table's
+  month-0 value (15,228,085 petals/block at 10 BPS) ± red-block/merge effects. Last
+  step of Phase 3.
+- **P3.1 and P3.2 are done.** The real emission mechanism is now understood
+  (P3.1) and replaced with Marigold's own P1.4 schedule (P3.2): `SUBSIDY_BY_MONTH_TABLE`
+  is now a 1016-month table (base ≈1.5228084263 MAGLD/sec, 3-year/36-month halving,
+  tapers to an exact 0 at ~84.6 years), enforced under the 210,000,000 MAGLD cap by a
+  permanent test (`total_emission_stays_under_cap`). Mainnet/testnet/devnet have no
+  pre-deflationary phase (decay from block 0, per P1.5); **simnet is the one
+  exception** — it deliberately keeps a real flat pre-deflationary phase, since it's
+  an internal PoW-skipped benchmark harness (not a real network) and a real
+  integration test depends on that flat subsidy. Three more real bugs found and
+  fixed via full-workspace + `--ignored`-test verification (a stale test literal, a
+  latent P2.2-era BPS-assumption bug in a never-actually-run ignored test, and five
+  `goref_*` tests that replay real historical Kaspa chain data now correctly marked
+  `#[ignore]` rather than fixed, since that scenario can never validate again on a
+  from-scratch economics schedule). Full numbers and rationale in
+  [DECISIONS.md](DECISIONS.md)'s "P3.2" section and [NOTES.md](NOTES.md)'s P3.1/P3.2
+  entries.
 - **Phase 2 (P2.1-P2.9) is fully done**, including the closing smoke test: two
   independently-started devnet nodes (separate appdirs/ports, `--addpeer`-linked)
   converged to byte-identical DAG state — same block count, virtual DAA score, tip

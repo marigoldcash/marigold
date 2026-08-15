@@ -16,7 +16,7 @@ needed; this file is the authority on *what was chosen* and *when*.
 | Base unit name | `petal` | Fits the marigold/flower branding (a flower's petals are its smallest, most numerous parts — mirrors how sompi are Kaspa's smallest unit); short, pronounceable, not already a unit name in this codebase or in wallet/RPC display code elsewhere. | 2026-08-14 |
 | Supply cap | 210,000,000 MAGLD — hard cap, **no tail emission** | 10× Bitcoin's cap. At any given market cap the unit is 10× cheaper than a 21M cap would make it, keeping the smallest pool note (0.01, per the P1.6 recommended set) usable for sub-dollar private payments and letting prices read in whole marigolds — granularity matters more for an everyday-cash coin than maximum scarcity branding. Hard cap kept for fair-launch credibility; a Dogecoin-style tail could only ever be added by explicit future hard fork if circulation fees demonstrably fail to carry security (recorded openly here so it's never a quiet change). | 2026-08-14 |
 | Emission curve | Smooth geometric decay from genesis: reward halves every **3 years** via monthly steps (monthly factor 2^(−1/36)); **no pre-deflationary phase** | No cliff moments ever — fee share grows as subsidy fades. ~20.6% of supply mined in year 1 (Bitcoin-comparable front-loading; Kaspa's 1-yr halving shape would have mined ~50% in year 1 into a tiny launch hashrate — stealth-premine optics), ~90% by year 10, per-block reward quantizes below 1 petal around **year ~72**, so subsidy outlives the P5.8 finality-anchor sunset by decades. Deflationary from genesis is also the simplest P3.2 implementation. **Mechanically applied (not re-decided) at P2.6**: `deflationary_phase_daa_score` set to `0` for mainnet/testnet in `params.rs`, since leaving it at real Kaspa's legacy checkpoint value produced a genuine bug (10×-too-high flat subsidy — see NOTES.md's P2.6 writeup). The real subsidy table/curve numbers above remain P3.2's job. | 2026-08-14 |
-| Initial block reward | ≈ **1.5228 MAGLD/sec** (≈ 0.15228 MAGLD/block at 10 BPS); exact petal value fixed by the P3.2 generator so total emission ≤ cap | Derived, not independently chosen: cap ÷ Σ(monthly decay series) = 210,000,000 ÷ ~137.9M-seconds-equivalent. P3.2's generator computes the exact table and asserts the cap. | 2026-08-14 |
+| Initial block reward | **152,280,842.63 petals/sec ≈ 1.5228084263 MAGLD/sec** (15,228,085 petals/block at 10 BPS, `div_ceil`). Locked in by P3.2's generator: 1016-month table, total emission 20,999,999,999,644,200 petals — **355,800 petals (~0.0036 MAGLD) under the 210,000,000 MAGLD cap**, table tapers to an exact 0 at month 1015 (~84.6 years). Per-block reward reaches its final 1-petal floor at month 862 (~71.8 years), matching the original ~year-72 estimate. | Derived, not independently chosen: found by bisecting for the largest base subsidy whose discrete, rounded monthly table still sums to ≤ cap (not the closed-form continuous estimate, which would slightly overshoot after rounding). P3.2's generator (`consensus/src/processes/coinbase.rs::tests::generate_subsidy_table`, `#[ignore]`d, rerunnable) computes this exactly; `total_emission_stays_under_cap` enforces it permanently. | 2026-08-15 |
 | Security endgame posture | Three-phase: **anchors guard youth → emission guards middle age → circulation fees guard maturity** | Marigold is a circulation coin: every payment is an on-chain rotate op paying a fee, so a *successful* cash economy is a permanent fee base — unlike store-of-value coins whose activity (and fee revenue) dries up at maturity. The ~72-year smooth subsidy runway is the bridge to that fee-funded maturity. This is the bet, stated openly. | 2026-08-14 |
 | Launch allocation | **Fair launch from zero** — no premine, no dev fund, no airdrop; every MAGLD enters circulation via the P1.4 emission schedule from block 0 | Matches the plan's own defensible-zone guidance ("honesty + large premine is a hard sell") at the clean end of the spectrum; strengthens P1.9's regulatory posture and P9.6 legal review (no allocation to a founding entity to justify); mirrors Kaspa's own no-premine launch, which the project already inherits credibility from by forking. No vesting/governance question to resolve since there's no allocation to vest. | 2026-08-14 |
 | Pool denominations | Powers of ten, whole coins: **{0.01, 0.1, 1, 10, 100, 1000, 10000, 100000}** (8 tiers) | Extends the plan's recommended set upward by two tiers (10000, 100000). Since split/merge is always available at an exact 10× factor (per the architecture), adding large denominations costs nothing at the small end — no fragmentation of the anonymity sets for everyday-payment sizes — while saving large holders from managing piles of 1000-notes to represent one big balance which is worse for usability. Also a wallet holding e.g. 50× 1000-notes leaks an approximate balance by note count / UTXO-style clustering that one 100000-note or a few don't. Floor stays at 0.01 (the P5.6/P8.3 smallest-denomination discussion — spam/floor pricing — is unaffected, only the ceiling moved). | 2026-08-14 |
@@ -83,6 +83,52 @@ Alternatives considered and rejected:
 actually *paying fees*. The spec must define the fee-payment mechanism for pool ops.
 Resolved to a recommended default under P1.8 below — see that section for the
 mechanism.
+
+### P3.2 — Subsidy table implementation (clarifies P1.4)
+
+Implemented P1.4's formula by replacing Kaspa's `SUBSIDY_BY_MONTH_TABLE` (426 entries,
+1-year halving) with Marigold's own (1016 entries, 3-year/36-month halving),
+preserving the existing table-driven `CoinbaseManager` architecture rather than
+switching to a closed-form runtime calculation (the option flagged as open at P3.1) —
+simpler diff, keeps the exact-zero-tail behavior "for free." The generator bisects
+for the largest base subsidy whose *discrete, rounded* table sums to ≤ cap (not the
+continuous closed-form estimate, which overshoots slightly once you round each
+month) — see the table row above for the exact final numbers.
+
+**One clarification to P1.4's "no pre-deflationary phase" language**: that's true for
+mainnet, testnet, and devnet (`deflationary_phase_daa_score: 0`, unchanged from
+P2.6), but **not** for simnet, which keeps a real flat pre-deflationary phase
+(`TenBps::deflationary_phase_daa_score()`, a real-Kaspa-derived value, unchanged from
+before P2.6 too). This was checked, not assumed: setting simnet's
+`deflationary_phase_daa_score` to 0 "for consistency" was tried first and broke a
+real, passing test
+(`testing/integration/src/daemon_integration_tests.rs::daemon_utxos_propagation_test`,
+plus a sibling assertion), which mines `coinbase_maturity` blocks and asserts the
+resulting balance as `initial_blocks * SIMNET_PARAMS.pre_deflationary_phase_base_subsidy`
+— i.e. it deliberately relies on simnet paying a flat, predictable subsidy for its
+initial mining run rather than the decaying table. Simnet is a PoW-skipped internal
+benchmark/test harness (per its own existing params comment, built for "mempool
+benchmarks out of the box"), never a real user-facing network, so P1.4/P1.5's
+fair-launch commitment was never meant to bind it — reverted to keep that test
+correct rather than force uniformity where it isn't the actual decision.
+
+**Three more real bugs found via full-workspace + ignored-test verification, each
+its own commit**: (1) `body_validation_in_context.rs`'s `validate_body_in_context_test`
+had a hardcoded expected-subsidy literal (`4400000000`, Kaspa's real month-0 value)
+that needed updating to ours (`15228085`). (2) `verify_crescendo_emission_schedule`
+(an `#[ignore]`d, ~15-20-minute test at our table's scale) cross-checks
+`calc_block_subsidy` against `legacy_calc_block_subsidy`, which assumes a 1-BPS
+reference rate; this assumption silently broke back at P2.2 (which deliberately made
+`pre_crescendo_target_time_per_block` match the real 10 BPS rate instead of a fake
+historical 1 BPS), but went uncaught until now because the test is `#[ignore]`d and
+was never actually run this session before P3.2 — fixed the comparison to convert
+blocks→seconds and scale the legacy result by the real pre-crescendo BPS, rather
+than assuming 1:1. (3) Five `goref_*` integration tests
+(`testing/integration/src/consensus_integration_tests.rs`) replay real, literal
+historical Kaspa mainnet block data with real historical coinbase subsidies baked
+into the recorded fixtures — permanently incompatible with a from-scratch chain's
+own economics, not a bug to fix. Marked `#[ignore]` with an explanatory reason
+rather than deleted, so the fixtures/test code stay available for reference.
 
 ### P1.8 — Pool-op fee mechanism (revised: fee stamps)
 

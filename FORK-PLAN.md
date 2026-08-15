@@ -491,19 +491,36 @@ small, mechanical, and individually testable.*
   consumption sites (validation + template generation) and the one shared `CoinbaseManager`
   instance they both go through.
 
-- [ ] **P3.2 — Generate your subsidy table.**
-  Write a small generator (a `#[test]` or `examples/gen_emission.rs` in
-  `consensus/core`) that, from your P1.4 choices (cap, duration, decay), computes a monthly
-  table (same 426-slot shape or your own length — if length changes, update
-  `SUBSIDY_BY_MONTH_TABLE_SIZE` and all its uses), **asserts total emission
-  (pre-deflationary + Σ table × seconds-per-month) ≤ cap**, and prints the table as Rust
-  code. Paste the output into `coinbase.rs`, replacing Kaspa's table. Set
-  `deflationary_phase_daa_score` and `pre_deflationary_phase_base_subsidy` in
-  [params.rs](consensus/core/src/config/params.rs) accordingly (simplest: deflationary phase
-  from genesis — `deflationary_phase_daa_score: 0` — so the table alone defines emission).
-  ✅ *Verify:* the generator's cap assertion passes as a permanent test;
-  `cargo test -p kaspa-consensus coinbase` passes (update Kaspa-specific expected-value
-  tests to your schedule in the same commit).
+- [x] **P3.2 — Generate your subsidy table.** Executed 2026-08-15.
+  Kept the existing table-driven architecture (option (a) from P3.1) rather than switching to a
+  closed-form calculation. Wrote the generator as a permanent `#[ignore]`d test,
+  `processes::coinbase::tests::generate_subsidy_table` in
+  [coinbase.rs](consensus/src/processes/coinbase.rs) — bisects for the largest base subsidy
+  whose discrete, rounded monthly table still sums to ≤ the 210M cap. Result: **1016 months**
+  (vs Kaspa's 426 — a 3-year halving decays 3× slower), base ≈ **1.5228084263 MAGLD/sec**, total
+  emission 20,999,999,999,644,200 petals, ~0.0036 MAGLD under cap, table tapers to an exact 0.
+  `SUBSIDY_BY_MONTH_TABLE_SIZE` updated to 1016 (grepped the workspace — no other consumers of
+  the table/constant exist outside this file). `deflationary_phase_daa_score: 0` for
+  mainnet/testnet/devnet was already set at P2.6; **left simnet on its real pre-deflationary
+  value** after confirming (not assuming) it's load-bearing for
+  `daemon_integration_tests::daemon_utxos_propagation_test` — simnet is an internal PoW-skipped
+  benchmark harness, not a real network, so P1.4/P1.5's fair-launch commitment doesn't bind it.
+  Rewrote `subsidy_test` to spot-check the DAA-score → month → table-lookup → BPS-scaling wiring
+  against real table entries by index, rather than re-deriving expectations via Kaspa's original
+  `initial_subsidy / 2^n` halving-count shortcut (confirmed empirically that shortcut doesn't
+  hold exactly for our table). Added a permanent `total_emission_stays_under_cap` test (the
+  actual cap enforcement). Fixed three more real bugs found via full-workspace + ignored-test
+  verification: a hardcoded subsidy literal in `body_validation_in_context.rs`'s test; a latent
+  P2.2-era bug in `verify_crescendo_emission_schedule` (BPS-unaware legacy-calc cross-check,
+  never actually run until this step's diligence pass); and five `goref_*` integration tests
+  that replay real historical Kaspa mainnet block data — permanently incompatible with a
+  from-scratch economics schedule, so `#[ignore]`d (with reason) rather than fixed. Full
+  writeup, numbers, and bug root-causes in [NOTES.md](docs/x-fork/NOTES.md) and
+  [DECISIONS.md](docs/x-fork/DECISIONS.md).
+  ✅ *Verify:* `total_emission_stays_under_cap` passes as a permanent test;
+  `cargo test -p kaspa-consensus --lib coinbase` — 7 passed, 2 ignored (generator + the
+  ~15-20-minute `verify_crescendo_emission_schedule`), 0 failed. Full `cargo build --workspace`
+  / `cargo test --workspace`: 144 test-result blocks, 0 failures, matching the P2.8 baseline.
 
 - [ ] **P3.3 — Emission integration check.**
   On a fresh single-node devnet-of-your-network, mine ~1000 blocks; query circulating supply

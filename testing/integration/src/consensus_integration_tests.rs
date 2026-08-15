@@ -734,31 +734,48 @@ async fn mergeset_size_limit_test() {
     consensus.shutdown(wait_handles);
 }
 
+// P3.2: these five `goref_*` tests replay real, literal historical Kaspa mainnet block data
+// (`testdata/dags_for_json_tests/goref-*`) recorded from the actual chain — each block's own
+// coinbase payload declares its real historical subsidy value. `json_test()` builds its `Params`
+// from the fixture's own recorded genesis/overrides, but `SUBSIDY_BY_MONTH_TABLE` itself is a
+// global const, not part of `Params` — it can't be swapped per test. Now that the table holds
+// Marigold's own P1.4 schedule instead of Kaspa's, every historical block's real coinbase
+// subsidy mismatches our `calc_block_subsidy()`, so these fail with `WrongSubsidy` (confirmed
+// for goref_tx_small_concurrent_test; the other four share the same fixture-vs-table conflict).
+// This isn't a bug to fix — replaying real Kaspa chain history against a permanently-diverged
+// economics schedule can never validate again. Ignored rather than deleted, so the fixtures and
+// test code stay available for reference/upstream-diffing (same reasoning as P2.5's genesis
+// change and P2.6's fork-activation change breaking other real-history-tied checks).
 #[tokio::test]
+#[ignore = "P3.2: replays real historical Kaspa mainnet subsidies, incompatible with Marigold's own SUBSIDY_BY_MONTH_TABLE"]
 async fn goref_custom_pruning_depth_test() {
     init_allocator_with_default_settings();
     json_test("testdata/dags_for_json_tests/goref_custom_pruning_depth", false).await
 }
 
 #[tokio::test]
+#[ignore = "P3.2: replays real historical Kaspa mainnet subsidies, incompatible with Marigold's own SUBSIDY_BY_MONTH_TABLE"]
 async fn goref_notx_test() {
     init_allocator_with_default_settings();
     json_test("testdata/dags_for_json_tests/goref-notx-5000-blocks", false).await
 }
 
 #[tokio::test]
+#[ignore = "P3.2: replays real historical Kaspa mainnet subsidies, incompatible with Marigold's own SUBSIDY_BY_MONTH_TABLE"]
 async fn goref_notx_concurrent_test() {
     init_allocator_with_default_settings();
     json_test("testdata/dags_for_json_tests/goref-notx-5000-blocks", true).await
 }
 
 #[tokio::test]
+#[ignore = "P3.2: replays real historical Kaspa mainnet subsidies, incompatible with Marigold's own SUBSIDY_BY_MONTH_TABLE"]
 async fn goref_tx_small_test() {
     init_allocator_with_default_settings();
     json_test("testdata/dags_for_json_tests/goref-1060-tx-265-blocks", false).await
 }
 
 #[tokio::test]
+#[ignore = "P3.2: replays real historical Kaspa mainnet subsidies, incompatible with Marigold's own SUBSIDY_BY_MONTH_TABLE"]
 async fn goref_tx_small_concurrent_test() {
     init_allocator_with_default_settings();
     json_test("testdata/dags_for_json_tests/goref-1060-tx-265-blocks", true).await

@@ -766,6 +766,15 @@ pub const SIMNET_PARAMS: Params = Params {
     difficulty_window_size: DIFFICULTY_SAMPLED_WINDOW_SIZE as usize,
     min_difficulty_window_size: MIN_DIFFICULTY_WINDOW_SIZE,
 
+    // Unlike MAINNET/TESTNET/DEVNET_PARAMS, simnet deliberately keeps a real pre-deflationary
+    // flat-subsidy phase (checked at P3.2, not simply left over from before P2.6): simnet is an
+    // internal PoW-skipped benchmark/test harness, never a real user-facing network, so P1.4/
+    // P1.5's "no pre-deflationary phase, fair launch" commitment doesn't apply to it — and
+    // testing/integration/src/daemon_integration_tests.rs's daemon_utxos_propagation_test relies
+    // on exactly this: it mines `coinbase_maturity` blocks and asserts the resulting balance as
+    // `initial_blocks * SIMNET_PARAMS.pre_deflationary_phase_base_subsidy`, which only holds if
+    // simnet actually spends that many blocks in the flat pre-deflationary phase. Confirmed by
+    // breaking that test locally when this was set to 0 to "match" the other three networks.
     deflationary_phase_daa_score: TenBps::deflationary_phase_daa_score(),
     pre_deflationary_phase_base_subsidy: TenBps::pre_deflationary_phase_base_subsidy(),
     coinbase_payload_script_public_key_max_len: 150,

@@ -169,7 +169,10 @@ mod tests {
             let mut block = consensus.build_block_with_parents_and_transactions(7.into(), vec![6.into()], vec![]);
             block.transactions[0].payload[8..16].copy_from_slice(&(5_u64).to_le_bytes());
             block.header.hash_merkle_root = calc_hash_merkle_root(block.transactions.iter());
-            assert_match!(consensus.validate_and_insert_block(block.to_immutable()).virtual_state_task.await, Err(RuleError::WrongSubsidy(expected,_)) if expected == 4400000000);
+            // P3.2: month-0 value of our own SUBSIDY_BY_MONTH_TABLE (152,280,843 petals/sec),
+            // BPS-scaled (div_ceil by 10) — was Kaspa's own 44000000000/10 before the P1.4
+            // schedule replaced the table.
+            assert_match!(consensus.validate_and_insert_block(block.to_immutable()).virtual_state_task.await, Err(RuleError::WrongSubsidy(expected,_)) if expected == 15228085);
         }
 
         {
