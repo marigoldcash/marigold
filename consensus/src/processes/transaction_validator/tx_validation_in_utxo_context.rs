@@ -379,6 +379,7 @@ mod tests {
             MassCalculator::new(0, 0, 0),
             ForkActivation::always(),
             params.mass_per_sig_op,
+            params.finality_anchor,
         );
 
         let schnorr_key = secp256k1::Keypair::from_seckey_slice(secp256k1::SECP256K1, &[7u8; 32]).unwrap();

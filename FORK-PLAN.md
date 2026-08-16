@@ -1523,7 +1523,7 @@ store → validation → pipeline → mempool → sync → RPC. Every step lands
   simpa` green (`test_pruning_via_simpa` + `test_pool_ops_via_simpa` together, no
   resource contention); `cargo build --workspace --tests` clean throughout.
 
-- [ ] **P6.11 — Finality-anchor consensus rule.** ⚠️ **HARD.** Implement per P5.8: anchor
+- [x] **P6.11 — Finality-anchor consensus rule.** ⚠️ **HARD.** Implement per P5.8: anchor
   tx parsing and k-of-n signature verification against trustee pubkeys pinned in
   [params.rs](consensus/core/src/config/params.rs); the fork-choice override in the
   virtual processor (a chain conflicting with the latest valid anchor is invalid
@@ -1531,10 +1531,58 @@ store → validation → pipeline → mempool → sync → RPC. Every step lands
   refusal); equivocation-proof handling with permanent key disqualification; fail-open
   behavior when anchors are absent; and the `ForkActivation`-staged sunset
   (mandatory → advisory → keys consensus-expired).
-  ✅ *Verify:* consensus tests: a heavier attacker chain lacking the latest anchor loses
-  to the anchored chain; an equivocating quorum is ignored after its proof is processed;
-  anchors after the sunset score are rejected; anchor-free operation degrades to plain
-  PoW without halting.
+  **Executed (2026-08-16):** new `consensus-core::finality_anchor` module (P5.8's exact
+  `FinalityAnchor` struct, `EquivocationEvidence` as two signed attestations from one
+  key, `AnchorPayload` borsh enum, `FinalityAnchor`-domain signing hash, full
+  context-free k-of-n/equivocation verification — 7 unit tests pinning the exact
+  boundaries, including "exactly one interval apart is honest, not equivocation");
+  `SUBNETWORK_ID_FINALITY_ANCHOR` ("ANCR") as the spec's second independent user-lane
+  namespace; a grouped `FinalityAnchorParams` in params (trustees `None` on every
+  network until the P9.1 ceremony — mechanism ships inert; depth 600, launch interval
+  300, hard expiry 6,311,520,000, decay stages 1-3 as `ForkActivation::never()` hooks
+  whose difficulty-based triggers are **deliberately deferred** — T is explicitly
+  unfrozen until the P9.5-gated sensitivity model, so live sustained-difficulty
+  evaluation would be wiring against an unfinalized constant; the `ForkActivation`
+  scores are the exact hook that evaluation or the P9.x governance mechanism sets).
+  **The two structural design decisions, both documented at length in NOTES.md:**
+  (1) anchor/evidence *transaction validity* is fully context-free (parse + shape +
+  every BIP340 signature + the equivocation overlap rule + certified-score-vs-expiry,
+  all checked at body-in-isolation), while everything chain-contextual (depth, chain
+  membership, deny-list quorum filtering) decides an accepted anchor's *effect* at
+  virtual-commit time — a failing anchor is a no-op, never a block invalidator —
+  keeping block validity identical across nodes regardless of local anchor state and
+  eliminating an acceptance-divergence hazard a POV-scoped-deny-at-validation design
+  would have; (2) the ratchet + deny-list are **monotone node-local protection
+  state** (new `DbFinalityAnchorStore`, prefixes 97/98, written inside
+  `commit_virtual_state`'s existing batch): the ratchet never rolls back by spec, and
+  deny entries are keyed by their accepting chain block so POV scoping falls out of a
+  reachability check — reorged-out evidence is inert by keying, no rollback machinery.
+  Fork-choice: `sink_search_algorithm` refuses candidates whose selected chain lacks
+  the anchored block, structured exactly like the finality-point refusal (falls
+  through to the parents push, preserving the walk's termination argument); the guard
+  is gated on the fail-open staleness bound judged against the node's **own** virtual
+  DAA score (not the candidate's — a fast-mined attacker chain must not bring its own
+  exemption). Anchor txs are zero-input/zero-output (trustees "hold no mining reward"
+  — requiring a funding input would contradict that; only trustee-signed material
+  passes isolation, so no spam surface), mirroring pure pool Transfers' carve-out.
+  Fail-open alerting via an edge-detected state machine (error-severity log the
+  moment staleness engages) + `ConsensusApi::get_finality_anchor_status()` (latest
+  anchor, enforcing/stale/expired flags, active interval, deny-list) — RPC wire
+  exposure of the spec's `finality_anchor_stale` flag deferred to P6.12 alongside the
+  rest of the distribution surface.
+  ✅ *Verify:* 5 new pipeline tests in `finality_anchor_tests.rs`, all four plan
+  criteria plus the closed-lane case, each with an anti-vacuity control: heavier
+  attacker chain loses ONLY on the anchored node (an identical unkeyed node reorgs);
+  equivocation evidence permanently disqualifies (prior anchors untouched, dead-quorum
+  and mixed 2-countable anchors both refuse to ratchet); anchors certifying at/past
+  the hard expiry are invalid transactions AND enforcement retires unconditionally
+  once virtual's own score passes it (a heavier fork then wins despite the ratchet);
+  never-anchored and stale-anchor operation both degrade to plain PoW without halting
+  (and the ratchet survives fail-open — stale, not forgotten). One real bug found by
+  the first test run: the initial tests forgot that a block's own transactions are
+  accepted by its chain *descendants*, so an anchor takes effect one block after
+  inclusion — a genuine, documented property of the mechanism, not a test artifact.
+  Full workspace + integration suites green (kaspa-consensus 105, up from 100).
 
 - [ ] **P6.12 — Anchor distribution + trustee signer.** Gossip anchors over P2P and make
   IBD anchor-aware (a syncing node requests the latest anchor before committing to a

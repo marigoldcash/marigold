@@ -77,7 +77,8 @@ use kaspa_consensus_notify::{
     root::ConsensusNotificationRoot,
 };
 use kaspa_consensusmanager::SessionLock;
-use kaspa_core::{debug, info, time::unix_now, trace, warn};
+use crate::model::stores::finality_anchor::{DenyListEntry, StoredAnchor};
+use kaspa_core::{debug, error, info, time::unix_now, trace, warn};
 use kaspa_database::prelude::{StoreError, StoreResultExt, StoreResultUnitExt};
 use kaspa_hashes::{Hash, ZERO_HASH};
 use kaspa_muhash::MuHash;
@@ -181,12 +182,55 @@ pub struct VirtualStateProcessor {
     pub(crate) toccata_activation: ForkActivation,
     pub(crate) toccata_logger: ForkLogger,
 
+    // Finality anchors (POOL-SPEC.md P5.8, FORK-PLAN P6.11)
+    pub(super) finality_anchor_params: kaspa_consensus_core::config::params::FinalityAnchorParams,
+    pub(super) finality_anchor_store: Arc<RwLock<crate::model::stores::finality_anchor::DbFinalityAnchorStore>>,
+    /// Last observed enforcement state, for alert edge detection (see
+    /// [`AnchorEnforcementState`]) — the spec requires a *loud* alert the moment
+    /// fail-open engages, not a log line per virtual resolution.
+    pub(super) finality_anchor_state: std::sync::atomic::AtomicU8,
+
     // SMT stores
     pub(super) smt_stores: Arc<kaspa_smt_store::processor::SmtStores>,
     pub(super) smt_metadata_store: Arc<crate::model::stores::smt_metadata::DbSmtMetadataStore>,
 
     // Mining Rule
     _mining_rules: Arc<MiningRules>,
+}
+
+/// The finality-anchor enforcement state as of the latest virtual advance
+/// (POOL-SPEC.md P5.8's fail-open visibility requirement, FORK-PLAN P6.11).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum AnchorEnforcementState {
+    /// No trustee keys pinned, or no anchor ever accepted — nothing to enforce.
+    Inactive = 0,
+    /// A fresh anchor is being enforced: chains conflicting with it are refused.
+    Enforcing = 1,
+    /// The latest anchor fell outside the staleness bound — fail-open engaged,
+    /// plain PoW security until a fresh anchor arrives. Loudly alerted.
+    Stale = 2,
+    /// The hard trustee-expiry score is reached: the mechanism is permanently retired.
+    Expired = 3,
+}
+
+impl From<u8> for AnchorEnforcementState {
+    fn from(v: u8) -> Self {
+        match v {
+            1 => Self::Enforcing,
+            2 => Self::Stale,
+            3 => Self::Expired,
+            _ => Self::Inactive,
+        }
+    }
+}
+
+/// Monotone anchor-state updates computed from newly adopted chain blocks, written in
+/// the same batch as the virtual state itself.
+#[derive(Default, Debug)]
+pub(super) struct AnchorStateUpdates {
+    pub(super) new_latest: Option<StoredAnchor>,
+    pub(super) new_deny_entries: Vec<DenyListEntry>,
 }
 
 impl VirtualStateProcessor {
@@ -256,6 +300,9 @@ impl VirtualStateProcessor {
             counters,
             toccata_activation: params.toccata_activation,
             toccata_logger: ForkLogger::new("virtual state processing rules", true),
+            finality_anchor_params: params.finality_anchor,
+            finality_anchor_store: storage.finality_anchor_store.clone(),
+            finality_anchor_state: std::sync::atomic::AtomicU8::new(AnchorEnforcementState::Inactive as u8),
             smt_stores: storage.smt_stores.clone(),
             smt_metadata_store: storage.smt_metadata_store.clone(),
             _mining_rules: mining_rules,
@@ -327,6 +374,11 @@ impl VirtualStateProcessor {
         // (mirrors `VirtualState::utxo_diff`; stored separately, see `VirtualStores::pool_diff`).
         let mut accumulated_pool_diff = virtual_read.virtual_pool_diff().to_reversed();
 
+        // The finality-anchor guard (P6.11): judged against the node's own current
+        // virtual DAA score — see `finality_anchor_guard`'s doc for why not the
+        // candidate's own score.
+        let anchor_guard = self.finality_anchor_guard(prev_state.daa_score);
+
         let (new_sink, virtual_parent_candidates) = self.sink_search_algorithm(
             &virtual_read,
             &mut accumulated_diff,
@@ -335,6 +387,7 @@ impl VirtualStateProcessor {
             tips,
             finality_point,
             pruning_point,
+            anchor_guard,
         );
         let (virtual_parents, virtual_ghostdag_data) = self.pick_virtual_parents(new_sink, virtual_parent_candidates, pruning_point);
         assert_eq!(virtual_ghostdag_data.selected_parent, new_sink);
@@ -356,6 +409,10 @@ impl VirtualStateProcessor {
                 &chain_path,
             )
             .expect("all possible rule errors are unexpected here");
+
+        // Recompute the anchor enforcement state against the advanced virtual and
+        // alert on transitions (P5.8's fail-open visibility requirement)
+        self.update_finality_anchor_alert(new_virtual_state.daa_score);
 
         let compact_sink_ghostdag_data = if let Some(sink_ghostdag_data) = Lazy::get(&sink_ghostdag_data) {
             // If we had to retrieve the full data, we convert it to compact
@@ -415,6 +472,222 @@ impl VirtualStateProcessor {
             // At the beginning of IBD when virtual finality point might be below the pruning point
             // or disagreeing with the pruning point chain, we take the pruning point itself as the finality point
             pruning_point
+        }
+    }
+
+    /// The finality-anchor fork-choice guard (POOL-SPEC.md P5.8, FORK-PLAN P6.11): the
+    /// block every sink candidate must have on its selected chain, or `None` when the
+    /// anchor-conflict rule is not currently enforced. Enforcement requires ALL of:
+    /// trustee keys pinned in params, the hard trustee-expiry score not yet reached
+    /// (judged by the node's own virtual DAA score), an anchor ever accepted (the
+    /// ratchet), and that anchor within the fail-open staleness bound
+    /// (`depth + 3×interval`, stage-scaled) of the node's own virtual DAA score — the
+    /// node's own clock of chain progress, deliberately not the candidate's (a
+    /// fast-mined attacker chain must not be able to bring its own exemption).
+    ///
+    /// The moment any condition fails, the rule simply stops being enforced — the
+    /// chain falls back to ordinary PoW/finality-depth security, exactly as if the
+    /// mechanism didn't exist, with no operator action needed to keep blocks flowing.
+    pub(super) fn finality_anchor_guard(&self, virtual_daa_score: u64) -> Option<Hash> {
+        self.finality_anchor_params.trustees.as_ref()?;
+        if self.finality_anchor_params.expired(virtual_daa_score) {
+            return None;
+        }
+        let latest = self.finality_anchor_store.read().latest().unwrap()?;
+        if virtual_daa_score.saturating_sub(latest.anchored_daa_score) > self.finality_anchor_params.staleness_bound(virtual_daa_score)
+        {
+            return None;
+        }
+        Some(latest.anchored_block)
+    }
+
+    /// Scans the acceptance data of newly adopted virtual-chain blocks for
+    /// anchor-subnetwork transactions and computes the resulting (monotone) anchor
+    /// state updates: deny-list entries from accepted equivocation evidence, and the
+    /// latest-anchor ratchet advance. Pure reads — the returned updates join
+    /// `commit_virtual_state`'s write batch so anchor state and virtual state land
+    /// atomically.
+    ///
+    /// Design note (P6.11): transaction *acceptance* of anchor-subnetwork txs is
+    /// deliberately independent of anchor state — body-in-isolation validation already
+    /// guaranteed parse/shape/signature validity, and everything contextual (depth,
+    /// chain membership, expiry, deny-list quorum filtering) is decided HERE, where a
+    /// failing anchor simply has no effect rather than invalidating its containing
+    /// block. This keeps block/tx validity identical across nodes regardless of each
+    /// node's local anchor knowledge; the anchor rule itself is node-local protection
+    /// state, the same category as the finality-depth reorg refusal it extends.
+    fn collect_finality_anchor_updates(&self, chain_path: &ChainPath) -> Option<AnchorStateUpdates> {
+        use kaspa_consensus_core::finality_anchor::{
+            ANCHOR_QUORUM, AnchorPayload, bitmap_signers, verify_anchor, verify_equivocation_evidence,
+        };
+
+        let trustees = self.finality_anchor_params.trustees.as_ref()?;
+        if chain_path.added.is_empty() {
+            return None;
+        }
+
+        let anchor_read = self.finality_anchor_store.read();
+        let stored_latest = anchor_read.latest().unwrap();
+        let stored_deny = anchor_read.deny_list().unwrap();
+        drop(anchor_read);
+
+        let mut updates = AnchorStateUpdates::default();
+        let mut best_score = stored_latest.map(|a| a.anchored_daa_score);
+
+        // `chain_path.added` is ordered from the split point up to the new sink, so
+        // evidence takes effect for anchors accepted at the same chain block and
+        // onward ("from that block onward, deterministically"), never retroactively.
+        for &accepting_block in chain_path.added.iter() {
+            let accepting_daa_score = self.headers_store.get_daa_score(accepting_block).unwrap();
+            if self.finality_anchor_params.expired(accepting_daa_score) {
+                // Stage 4: keys are consensus-expired — no anchor (and no further
+                // disqualification bookkeeping, which is moot) from this point on.
+                continue;
+            }
+            // A trustee is disqualified in this POV iff some deny entry's accepting
+            // block is on this chain block's selected chain. Entries appended earlier
+            // in this very loop qualify by construction (their accepting blocks are
+            // this block or its added-path ancestors).
+            let denied = |trustee: u8, updates: &AnchorStateUpdates| {
+                stored_deny
+                    .iter()
+                    .any(|e| e.trustee_index == trustee && self.reachability_service.is_chain_ancestor_of(e.accepting_block, accepting_block))
+                    || updates.new_deny_entries.iter().any(|e| e.trustee_index == trustee)
+            };
+
+            let Some(acceptance_data) = self.acceptance_data_store.get(accepting_block).optional().unwrap() else { continue };
+            for mergeset_data in acceptance_data.iter() {
+                let Some(txs) = self.block_transactions_store.get(mergeset_data.block_hash).optional().unwrap() else { continue };
+                for entry in mergeset_data.accepted_transactions.iter() {
+                    let Some(tx) = txs.get(entry.index_within_block as usize) else { continue };
+                    if tx.subnetwork_id != kaspa_consensus_core::subnets::SUBNETWORK_ID_FINALITY_ANCHOR {
+                        continue;
+                    }
+                    // Body validation guarantees decodability + signature validity for
+                    // mined anchor txs; `continue` (rather than panic) keeps this scan
+                    // robust anyway — an undecodable payload here simply has no effect.
+                    let Some(payload) = AnchorPayload::decode_payload(&tx.payload) else { continue };
+                    match payload {
+                        AnchorPayload::Equivocation(evidence) => {
+                            let interval_at = |score| self.finality_anchor_params.cadence_interval(score);
+                            if verify_equivocation_evidence(&evidence, trustees, interval_at).is_err() {
+                                continue;
+                            }
+                            if denied(evidence.trustee_index, &updates) {
+                                continue; // already disqualified on this chain — idempotent
+                            }
+                            warn!(
+                                "[FINALITY ANCHOR] Equivocation proof accepted at chain block {}: trustee key {} is permanently disqualified",
+                                accepting_block, evidence.trustee_index
+                            );
+                            updates
+                                .new_deny_entries
+                                .push(DenyListEntry { trustee_index: evidence.trustee_index, accepting_block });
+                        }
+                        AnchorPayload::Anchor(anchor) => {
+                            if verify_anchor(&anchor, trustees).is_err() {
+                                continue;
+                            }
+                            // Contextual checks, each failure meaning "no effect":
+                            // certified score must precede the hard expiry; the
+                            // anchored block must be known, at its claimed DAA score,
+                            // on this chain block's own selected chain, and at least
+                            // `depth` behind it.
+                            if self.finality_anchor_params.expired(anchor.anchored_daa_score) {
+                                continue;
+                            }
+                            if accepting_daa_score.saturating_sub(anchor.anchored_daa_score) < self.finality_anchor_params.depth {
+                                continue;
+                            }
+                            let Some(anchored_header_score) =
+                                self.headers_store.get_daa_score(anchor.anchored_block).optional().unwrap()
+                            else {
+                                continue;
+                            };
+                            if anchored_header_score != anchor.anchored_daa_score {
+                                continue;
+                            }
+                            if !self.reachability_service.is_chain_ancestor_of(anchor.anchored_block, accepting_block) {
+                                continue;
+                            }
+                            // Quorum after deny-list filtering: disqualified keys'
+                            // signatures stop counting from the evidence block onward.
+                            let countable = bitmap_signers(anchor.signer_bitmap).filter(|&i| !denied(i, &updates)).count();
+                            if countable < ANCHOR_QUORUM {
+                                continue;
+                            }
+                            // The ratchet only ever advances.
+                            if best_score.is_none_or(|best| anchor.anchored_daa_score > best) {
+                                best_score = Some(anchor.anchored_daa_score);
+                                updates.new_latest = Some(StoredAnchor {
+                                    anchored_block: anchor.anchored_block,
+                                    anchored_daa_score: anchor.anchored_daa_score,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some(latest) = updates.new_latest {
+            info!(
+                "[FINALITY ANCHOR] Ratchet advanced: block {} at DAA score {} is now trustee-certified history",
+                latest.anchored_block, latest.anchored_daa_score
+            );
+        }
+        (updates.new_latest.is_some() || !updates.new_deny_entries.is_empty()).then_some(updates)
+    }
+
+    /// Recomputes the enforcement state after a virtual advance and alerts loudly on
+    /// transitions — most importantly the moment fail-open engages (the spec's
+    /// error-severity "the extra protection layer is currently absent" alert; the
+    /// matching RPC-queryable flag ships with P6.12's distribution work).
+    pub(super) fn update_finality_anchor_alert(&self, virtual_daa_score: u64) {
+        use std::sync::atomic::Ordering;
+        let new_state = self.compute_anchor_enforcement_state(virtual_daa_score);
+        let prev = self.finality_anchor_state.swap(new_state as u8, Ordering::Relaxed);
+        if prev == new_state as u8 {
+            return;
+        }
+        match new_state {
+            AnchorEnforcementState::Enforcing => {
+                info!("[FINALITY ANCHOR] Anchored-finality protection is active");
+            }
+            AnchorEnforcementState::Stale => {
+                error!(
+                    "[FINALITY ANCHOR] The latest finality anchor is STALE — anchored-finality protection has \
+                     fallen back to plain PoW security until a fresh anchor arrives (finality_anchor_stale: true)"
+                );
+            }
+            AnchorEnforcementState::Expired => {
+                info!(
+                    "[FINALITY ANCHOR] The trustee keys have reached their hard consensus-expiry score — \
+                     the chain now runs on plain PoW security permanently (anchor mechanism retired)"
+                );
+            }
+            AnchorEnforcementState::Inactive => {}
+        }
+    }
+
+    pub(super) fn compute_anchor_enforcement_state(&self, virtual_daa_score: u64) -> AnchorEnforcementState {
+        if self.finality_anchor_params.trustees.is_none() {
+            return AnchorEnforcementState::Inactive;
+        }
+        if self.finality_anchor_params.expired(virtual_daa_score) {
+            return AnchorEnforcementState::Expired;
+        }
+        match self.finality_anchor_store.read().latest().unwrap() {
+            None => AnchorEnforcementState::Inactive,
+            Some(latest) => {
+                if virtual_daa_score.saturating_sub(latest.anchored_daa_score)
+                    > self.finality_anchor_params.staleness_bound(virtual_daa_score)
+                {
+                    AnchorEnforcementState::Stale
+                } else {
+                    AnchorEnforcementState::Enforcing
+                }
+            }
         }
     }
 
@@ -610,7 +883,18 @@ impl VirtualStateProcessor {
             accumulated_diff,
             accumulated_pool_diff,
         )?;
-        self.commit_virtual_state(virtual_read, new_virtual_state.clone(), virtual_pool_diff, accumulated_diff, accumulated_pool_diff, chain_path);
+        // Finality-anchor state updates from the newly adopted chain blocks (P6.11) —
+        // computed via pure reads here, written in the commit batch below.
+        let anchor_updates = self.collect_finality_anchor_updates(chain_path);
+        self.commit_virtual_state(
+            virtual_read,
+            new_virtual_state.clone(),
+            virtual_pool_diff,
+            accumulated_diff,
+            accumulated_pool_diff,
+            chain_path,
+            anchor_updates,
+        );
         Ok(new_virtual_state)
     }
 
@@ -1017,10 +1301,12 @@ impl VirtualStateProcessor {
         accumulated_diff: &UtxoDiff,
         accumulated_pool_diff: &kaspa_consensus_core::notepool::PoolDiff,
         chain_path: &ChainPath,
+        anchor_updates: Option<AnchorStateUpdates>,
     ) {
         let mut batch = WriteBatch::default();
         let mut virtual_write = RwLockUpgradableReadGuard::upgrade(virtual_read);
         let mut selected_chain_write = self.selected_chain_store.write();
+        let mut anchor_write = anchor_updates.is_some().then(|| self.finality_anchor_store.write());
 
         // Apply the accumulated diff to the virtual UTXO set
         virtual_write.utxo_set.write_diff_batch(&mut batch, accumulated_diff).unwrap();
@@ -1038,12 +1324,24 @@ impl VirtualStateProcessor {
         // Update the virtual selected chain
         selected_chain_write.apply_changes(&mut batch, chain_path).unwrap();
 
+        // Apply finality-anchor state updates (P6.11) — the ratchet and deny-list are
+        // monotone, so joining this batch is atomicity, not rollbackability
+        if let (Some(updates), Some(anchor_write)) = (anchor_updates, anchor_write.as_mut()) {
+            if !updates.new_deny_entries.is_empty() {
+                anchor_write.append_deny_entries_batch(&mut batch, &updates.new_deny_entries).unwrap();
+            }
+            if let Some(latest) = updates.new_latest {
+                anchor_write.set_latest_batch(&mut batch, latest).unwrap();
+            }
+        }
+
         // Flush the batch changes
         self.db.write(batch).unwrap();
 
         // Calling the drops explicitly after the batch is written in order to avoid possible errors.
         drop(virtual_write);
         drop(selected_chain_write);
+        drop(anchor_write);
     }
 
     /// Caches the DAA and Median time windows of the sink block (if needed). Following, virtual's window calculations will
@@ -1092,6 +1390,7 @@ impl VirtualStateProcessor {
         tips: Vec<Hash>,
         finality_point: Hash,
         pruning_point: Hash,
+        anchor_guard: Option<Hash>,
     ) -> (Hash, VecDeque<Hash>) {
         // TODO (relaxed): additional tests
 
@@ -1109,7 +1408,27 @@ impl VirtualStateProcessor {
         // (and it can't be in the future by induction)
         loop {
             let candidate = heap.pop().expect("valid sink must exist").hash;
-            if self.reachability_service.is_chain_ancestor_of(finality_point, candidate) {
+            // The finality-anchor fork-choice override (POOL-SPEC.md P5.8, FORK-PLAN
+            // P6.11): while a fresh anchor is enforced, a candidate whose selected
+            // chain does not contain the anchored block is refused regardless of
+            // accumulated work — the second, faster-triggering enforcement of the same
+            // principle the finality-point refusal below encodes, backed by an
+            // explicit trustee signature instead of work-accumulation depth. Refusal
+            // falls through to the parents push below (exactly like a finality
+            // violation), so the walk still descends toward the heaviest
+            // anchor-compatible chain — termination is guaranteed because the ratchet
+            // only ever holds anchors accepted on a locally-committed chain, whose
+            // blocks (and tip descendants) this node retains.
+            let anchor_ok =
+                anchor_guard.is_none_or(|anchored| self.reachability_service.is_chain_ancestor_of(anchored, candidate));
+            if !anchor_ok {
+                warn!(
+                    "[FINALITY ANCHOR] Block {} conflicts with the latest finality anchor ({}) and is ignored \
+                     from Virtual chain selection regardless of its accumulated work.",
+                    candidate,
+                    anchor_guard.unwrap()
+                );
+            } else if self.reachability_service.is_chain_ancestor_of(finality_point, candidate) {
                 diff_point = self.calculate_utxo_state_relatively(stores, diff, pool_diff, diff_point, candidate);
                 if diff_point == candidate {
                     // This indicates that candidate has valid UTXO state and that `diff` represents its diff from virtual
@@ -1664,6 +1983,7 @@ impl VirtualStateProcessor {
             &Default::default(),
             &Default::default(),
             &Default::default(),
+            None,
         );
     }
 

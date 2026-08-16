@@ -4,8 +4,8 @@ Snapshot of everything decided and built so far, so any fresh coding session on 
 machine can continue from the repo alone. Read this together with [FORK-PLAN.md](../../FORK-PLAN.md).
 Update this file whenever off-repo state changes (domains, accounts, infra).
 
-Last updated: 2026-08-16 (P6.10 complete — consensus test battery + simpa pool ops;
-stopped at P6.11 ⚠️ HARD per standing instruction, awaiting a model switch)
+Last updated: 2026-08-16 (P6.11 complete — finality-anchor consensus rule; next step
+P6.12, anchor distribution + trustee signer)
 
 ## What this project is
 
@@ -80,9 +80,27 @@ substitute for it.
 
 ## Where execution stands
 
-- **Next step: P6.11 — Finality-anchor consensus rule.** ⚠️ **HARD**, per the plan's
-  own flag. Execution is stopped here per standing instruction — needs a model
-  switch before proceeding (mirrors the P5.9/P6.4/P6.8 pattern).
+- **Next step: P6.12 — Anchor distribution + trustee signer.** P2P gossip of
+  anchors/evidence, anchor-aware IBD, mempool/relay policy for the anchor lane, the
+  trustee signer daemon, and RPC exposure of `finality_anchor_stale` + the current
+  decay stage. P6.11 structured its verification (context-free `verify_anchor` vs
+  contextual-effect application) so gossiped anchors slot in without rework — see
+  NOTES.md's P6.11 "Deferred to P6.12" list for the exact contract.
+- **P6.11 is done (⚠️ HARD, done under a stronger model per standing discipline).**
+  The P5.8 finality-anchor consensus rule end to end: `consensus-core::finality_anchor`
+  (types/hashing/k-of-n + equivocation verification), the "ANCR" subnetwork,
+  `FinalityAnchorParams` in params (trustees `None` everywhere until the P9.1
+  ceremony — mechanism ships inert; decay stages 1-3 are `ForkActivation::never()`
+  hooks pending the P9.5 T-calibration, deliberately), `DbFinalityAnchorStore`
+  (monotone latest-anchor ratchet + reachability-keyed deny-list), the fork-choice
+  override in `sink_search_algorithm` (second trigger next to the finality-point
+  refusal, judged against the node's own virtual DAA score), fail-open with
+  edge-detected loud alerting, and `ConsensusApi::get_finality_anchor_status()`.
+  Two structural decisions worth re-reading before touching this code — context-free
+  transaction validity vs contextual anchor *effect* (an acceptance-divergence hazard
+  was designed out), and monotone-by-keying deny-list semantics — plus the
+  one-block anchor application lag (a block's own txs are accepted by its chain
+  descendants) are all documented in NOTES.md's P6.11 entry.
 - **P6.10 is done.** New split/merge/`BadPublicKey`/`MalformedNotePoolPayload`/deep-
   reorg/cross-op-conflict tests in `consensus/src/pipeline/virtual_processor/
   notepool_tests.rs` (reusing its existing harness rather than duplicating it into

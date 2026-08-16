@@ -55,6 +55,9 @@ impl TestBlockBuilder {
             parents,
             finality_point,
             pruning_point,
+            // No anchor guard: like the ORIGIN finality point above, this builds a
+            // hypothetical PoV block, not the actual virtual
+            None,
         );
         let (pov_virtual_parents, pov_virtual_ghostdag_data) =
             self.pick_virtual_parents(pov_sink, virtual_parent_candidates, pruning_point);

@@ -19,6 +19,15 @@ pub enum TxRuleError {
     #[error("note-pool op failed validation in context: {0}")]
     InvalidNotePoolOpInContext(PoolOpContextError),
 
+    #[error("finality-anchor transaction payload is not a validly encoded AnchorPayload")]
+    MalformedFinalityAnchorPayload,
+
+    #[error("finality-anchor payload failed verification: {0}")]
+    InvalidFinalityAnchor(crate::finality_anchor::FinalityAnchorError),
+
+    #[error("the finality-anchor lane is unavailable: no trustee keys are pinned on this network")]
+    FinalityAnchorsUnavailable,
+
     #[error("transaction has duplicate inputs")]
     TxDuplicateInputs,
 

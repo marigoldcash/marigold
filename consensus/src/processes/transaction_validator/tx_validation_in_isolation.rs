@@ -3,9 +3,11 @@ use super::{
     errors::{TxResult, TxRuleError},
 };
 use crate::constants::{MAX_SOMPI, TX_VERSION_TOCCATA};
+use kaspa_consensus_core::finality_anchor::{AnchorPayload, verify_anchor, verify_equivocation_evidence};
 use kaspa_consensus_core::notepool::{PoolOp, validate_stateless};
 use kaspa_consensus_core::subnets::{
-    CoinbaseSubnetwork, NativeSubnetwork, SUBNETWORK_NAMESPACE_LEN, SUBNETWORK_ZERO_TAIL_LEN, SUBNETWORK_ID_NOTE_POOL, Subnetwork,
+    CoinbaseSubnetwork, NativeSubnetwork, SUBNETWORK_NAMESPACE_LEN, SUBNETWORK_ZERO_TAIL_LEN, SUBNETWORK_ID_FINALITY_ANCHOR,
+    SUBNETWORK_ID_NOTE_POOL, Subnetwork,
 };
 use kaspa_consensus_core::tx::Transaction;
 use std::collections::HashSet;
@@ -27,7 +29,50 @@ impl TransactionValidator {
         check_transaction_subnetwork(tx)?;
         check_transaction_version(tx)?;
         check_tx_version_specific_fields(tx)?;
-        check_note_pool_payload(tx)
+        check_note_pool_payload(tx)?;
+        self.check_finality_anchor_payload(tx)
+    }
+
+    /// For anchor-lane transactions (POOL-SPEC.md P5.8, FORK-PLAN P6.11): the payload
+    /// must borsh-decode to exactly one `AnchorPayload` and pass full context-free
+    /// verification — quorum shape and every carried BIP340 signature for anchors, the
+    /// exact overlap rule plus both signatures for equivocation evidence, and the hard
+    /// trustee-expiry bound on the certified score. All of these are pure functions of
+    /// the payload bytes and the pinned trustee keys, which is what makes them
+    /// isolation checks: "false evidence ... is simply an invalid transaction", and so
+    /// is any anchor not genuinely signed by the trustees. What is NOT checked here is
+    /// anything chain-contextual (depth, chain membership, deny-list quorum
+    /// filtering): those decide an accepted anchor's *effect* in the virtual
+    /// processor, never a transaction's validity — see
+    /// `collect_finality_anchor_updates` for why.
+    fn check_finality_anchor_payload(&self, tx: &Transaction) -> TxResult<()> {
+        if tx.subnetwork_id != SUBNETWORK_ID_FINALITY_ANCHOR {
+            return Ok(());
+        }
+        // Without pinned trustee keys the anchor lane is meaningless — nothing could
+        // ever verify. Reject outright (the lane opens when P9.1 pins real keys).
+        let Some(trustees) = self.finality_anchor_params.trustees.as_ref() else {
+            return Err(TxRuleError::FinalityAnchorsUnavailable);
+        };
+        let payload = AnchorPayload::decode_payload(&tx.payload).ok_or(TxRuleError::MalformedFinalityAnchorPayload)?;
+        match payload {
+            AnchorPayload::Anchor(anchor) => {
+                verify_anchor(&anchor, trustees).map_err(TxRuleError::InvalidFinalityAnchor)?;
+                if self.finality_anchor_params.expired(anchor.anchored_daa_score) {
+                    return Err(TxRuleError::InvalidFinalityAnchor(
+                        kaspa_consensus_core::finality_anchor::FinalityAnchorError::PastHardExpiry(
+                            anchor.anchored_daa_score,
+                            self.finality_anchor_params.hard_expiry_daa_score,
+                        ),
+                    ));
+                }
+                Ok(())
+            }
+            AnchorPayload::Equivocation(evidence) => {
+                let interval_at = |score| self.finality_anchor_params.cadence_interval(score);
+                verify_equivocation_evidence(&evidence, trustees, interval_at).map_err(TxRuleError::InvalidFinalityAnchor)
+            }
+        }
     }
 
     fn check_transaction_inputs_in_isolation(&self, tx: &Transaction) -> TxResult<()> {
@@ -82,7 +127,15 @@ impl TransactionValidator {
         // transparent inputs (POOL-SPEC.md P5.2): a pure Transfer touches no transparent
         // value at all — its authorization is the note-level Schnorr signatures in its
         // payload, validated in the UTXO context stage (P6.4).
-        if !tx.is_coinbase() && tx.inputs.is_empty() && tx.subnetwork_id != SUBNETWORK_ID_NOTE_POOL {
+        // ... and so are finality-anchor transactions (POOL-SPEC.md P5.8, P6.11):
+        // their authorization is the trustee quorum signatures in the payload, and
+        // requiring a funding input would force the trustees to hold transparent
+        // value — the spec's trustees "hold no mining reward" and can only veto.
+        if !tx.is_coinbase()
+            && tx.inputs.is_empty()
+            && tx.subnetwork_id != SUBNETWORK_ID_NOTE_POOL
+            && tx.subnetwork_id != SUBNETWORK_ID_FINALITY_ANCHOR
+        {
             return Err(TxRuleError::NoTxInputs);
         }
 

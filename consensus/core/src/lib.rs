@@ -23,6 +23,7 @@ pub mod config;
 pub mod constants;
 pub mod daa_score_timestamp;
 pub mod errors;
+pub mod finality_anchor;
 pub mod hashing;
 pub mod header;
 pub mod mass;

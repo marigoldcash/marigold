@@ -1205,6 +1205,37 @@ impl ConsensusApi for Consensus {
         self.virtual_stores.read().pool_smt.current_root().expect("live pool root must be readable")
     }
 
+    fn get_finality_anchor_status(&self) -> kaspa_consensus_core::finality_anchor::FinalityAnchorStatus {
+        let params = &self.config.params.finality_anchor;
+        let virtual_state = self.lkg_virtual_state.load();
+        let virtual_daa_score = virtual_state.daa_score;
+        let sink = virtual_state.ghostdag_data.selected_parent;
+        let anchor_read = self.storage.finality_anchor_store.read();
+        let latest = anchor_read.latest().unwrap();
+        let deny_list = anchor_read.deny_list().unwrap();
+        drop(anchor_read);
+
+        let expired = params.expired(virtual_daa_score);
+        let stale = !expired
+            && latest.is_some_and(|a| virtual_daa_score.saturating_sub(a.anchored_daa_score) > params.staleness_bound(virtual_daa_score));
+        let enforcing = params.trustees.is_some() && !expired && !stale && latest.is_some();
+        let mut disqualified: Vec<u8> = deny_list
+            .iter()
+            .filter(|e| self.services.reachability_service.is_chain_ancestor_of(e.accepting_block, sink))
+            .map(|e| e.trustee_index)
+            .collect();
+        disqualified.sort_unstable();
+        disqualified.dedup();
+        kaspa_consensus_core::finality_anchor::FinalityAnchorStatus {
+            latest_anchor: latest.map(|a| (a.anchored_block, a.anchored_daa_score)),
+            enforcing,
+            stale,
+            expired,
+            current_interval: params.cadence_interval(virtual_daa_score),
+            disqualified,
+        }
+    }
+
     fn modify_coinbase_payload(&self, payload: Vec<u8>, miner_data: &MinerData) -> CoinbaseResult<Vec<u8>> {
         self.services.coinbase_manager.modify_coinbase_payload(payload, miner_data)
     }

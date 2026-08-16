@@ -58,6 +58,8 @@ blake3_hasher! {
     struct NotePoolSerialHash => b"NotePoolSerial",
     struct NotePoolSigningHash => b"NotePoolSig",
     struct NotePoolOutputsHash => b"NotePoolOutputs",
+
+    struct FinalityAnchorSigningHash => b"FinalityAnchor",
 }
 
 #[macro_export]

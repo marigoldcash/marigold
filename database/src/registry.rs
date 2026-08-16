@@ -94,6 +94,14 @@ pub enum DatabaseStorePrefixes {
     PruningNotePool = 95,
     NotePoolSyncFlag = 96,
 
+    // ---- Finality anchors (POOL-SPEC.md P5.8, FORK-PLAN P6.11) ----
+    /// The node's highest-scoring accepted anchor (the ratchet — monotone, never
+    /// rolled back, surviving restarts/resyncs/reorgs by design).
+    FinalityAnchorLatest = 97,
+    /// The trustee deny-list: permanently disqualified keys, each entry keyed to the
+    /// chain block whose accepted equivocation evidence produced it.
+    FinalityAnchorDenyList = 98,
+
     // ---- Separator ----
     /// Reserved as a separator
     Separator = SEPARATOR,

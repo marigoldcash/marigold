@@ -11,7 +11,7 @@ use kaspa_txscript::{
 
 use kaspa_consensus_core::{
     KType,
-    config::params::{ForkActivation, ForkedParam},
+    config::params::{FinalityAnchorParams, ForkActivation, ForkedParam},
     mass::MassCalculator,
 };
 
@@ -27,6 +27,11 @@ pub struct TransactionValidator {
     sig_cache: Cache<SigCacheKey, bool>,
     toccata_activation: ForkActivation,
     mass_per_sig_op: u64,
+    /// Finality-anchor params (P6.11) — anchor-subnetwork payloads are fully
+    /// verifiable in isolation (parse/shape/signatures/equivocation rule are all
+    /// context-free given the pinned trustee keys), so that verification lives here
+    /// with the other isolation checks.
+    finality_anchor_params: FinalityAnchorParams,
 
     pub(crate) mass_calculator: MassCalculator,
 }
@@ -45,6 +50,7 @@ impl TransactionValidator {
         mass_calculator: MassCalculator,
         toccata_activation: ForkActivation,
         mass_per_sig_op: u64,
+        finality_anchor_params: FinalityAnchorParams,
     ) -> Self {
         Self {
             max_tx_inputs,
@@ -58,6 +64,7 @@ impl TransactionValidator {
             mass_calculator,
             toccata_activation,
             mass_per_sig_op,
+            finality_anchor_params,
         }
     }
 
@@ -83,6 +90,7 @@ impl TransactionValidator {
             mass_calculator: MassCalculator::new(0, 0, 0),
             toccata_activation: ForkActivation::never(),
             mass_per_sig_op: 0,
+            finality_anchor_params: FinalityAnchorParams::LAUNCH_UNKEYED,
         }
     }
 }

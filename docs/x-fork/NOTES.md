@@ -2317,3 +2317,167 @@ miners, 400 blocks, `pool_op_probability = 0.5`) — the pool-root agreement ass
 never fired, and the independent-replay cross-check against a fresh consensus
 (simpa's own existing post-simulation validation) passed too; `cargo build
 --workspace --tests` clean throughout.
+
+### P6.11 — Finality-anchor consensus rule (2026-08-16) ⚠️ HARD
+
+Done under a stronger model per the plan's own HARD flag and the standing model-switch
+discipline. Everything implements POOL-SPEC.md P5.8 exactly; where the spec left an
+implementation choice open, the decision and its reasoning are recorded here.
+
+**What was built, layer by layer:**
+- `consensus/core/src/finality_anchor/mod.rs`: P5.8's `FinalityAnchor` struct field
+  for field; `EquivocationEvidence` as `{trustee_index, first, second}` where each
+  attestation is `(anchored_block, anchored_daa_score, signature)` — the signing hash
+  covers exactly those two fields, so a trustee's contribution to any anchor is fully
+  captured by that triple, making this the minimal self-contained form of the spec's
+  "two complete conflicting FinalityAnchor messages plus their two signatures";
+  `AnchorPayload` borsh enum (Anchor/Equivocation — evidence travels "as a transaction
+  in the same dedicated anchor subnetwork", per spec); a `FinalityAnchor`-domain
+  blake3 signing hash (`crypto/hashes` macro convention); and context-free
+  verification: bitmap shape (a bitmap cannot express a repeated signer — why the
+  spec chose it), one-signature-per-set-bit, ≥3 signers, every BIP340 signature
+  against its pinned key, and the exact equivocation rule (different blocks AND
+  scores strictly `< interval` apart, interval resolved at the max score's decay
+  stage). Seven unit tests pin the boundaries — including that two anchors exactly
+  one interval apart are honest sequential anchoring, NOT equivocation, and that a
+  forged signature can never disqualify anyone.
+- `SUBNETWORK_ID_FINALITY_ANCHOR` ("ANCR"): the spec's "second, independent
+  namespace, not the pool's".
+- `FinalityAnchorParams` grouped in params (one field in each network const block +
+  `OverrideParams`, the `BlockrateParams` pattern): trustees ship as `None` on every
+  network — the mechanism is inert until the P9.1 ceremony pins real keys, and tests
+  inject generated ones. Depth 600, launch interval 300, hard expiry 6,311,520,000
+  as spec'd.
+- `DbFinalityAnchorStore` (registry prefixes 97/98): the latest-anchor ratchet
+  (`CachedDbItem<StoredAnchor>`) and the deny-list (`CachedDbItem<Vec<DenyListEntry>>`).
+- Virtual processor: `collect_finality_anchor_updates` (acceptance-scan + contextual
+  checks + ratchet/deny computation, pure reads) feeding `commit_virtual_state`'s
+  existing `WriteBatch`; the fork-choice override in `sink_search_algorithm`; the
+  fail-open state machine + alert; `ConsensusApi::get_finality_anchor_status()`.
+- Isolation validation (`check_finality_anchor_payload`) + the zero-input carve-out.
+
+**Design decision 1 — context-free validity, contextual effect.** The spec's deny-list
+activation is POV-scoped ("takes effect ... in validation contexts whose POV chain
+includes the block containing the accepted evidence"). Read naively, that makes
+anchor-*transaction* validity depend on each node's deny-list store — and during
+design this surfaced a genuine determinism hazard: deny entries created at
+virtual-commit time exist only on nodes whose virtual actually passed through the
+evidence block, so a node validating the same context later (e.g. re-verifying a
+block whose chain includes evidence its own virtual never adopted) would judge an
+anchor tx differently than a node that had adopted it — divergent acceptance data
+from identical on-chain history. The fix is structural: **transaction validity is
+fully context-free** (parse, shape, all signatures, the equivocation overlap rule,
+and the certified-score-vs-hard-expiry bound — all pure functions of payload bytes
+plus params, checked at body-in-isolation, so "false evidence is simply an invalid
+transaction" holds exactly as spec'd), while **everything chain-contextual decides
+only an accepted anchor's *effect*** at virtual-commit time: depth vs the accepting
+chain block's DAA score, anchored-block chain membership + claimed-score
+cross-check, and deny-list quorum filtering. A contextually-failing anchor is a
+no-op transaction, never a block invalidator. The spec's POV-scoped semantics are
+preserved where they matter — which anchors *ratchet* and which keys *count* — and
+the deny-list's effect on later anchors within the same commit is ordered by
+acceptance order (evidence first ⇒ same-chain-block anchors already see it),
+matching "from that block onward" inclusively and deterministically.
+
+**Design decision 2 — monotone node-local state, no rollback machinery.** The ratchet
+is monotone *by spec* ("persists the highest-scoring valid anchor it has ever
+accepted ... across restarts, resyncs, and reorgs" — the rollback-resistance rule).
+The deny-list gets the same treatment by *keying* rather than by rollback: each entry
+records its accepting chain block, and whether it binds in a given context is a
+reachability question (`is_chain_ancestor_of(entry.accepting_block, pov)`) — an
+entry whose accepting block reorgs out is inert automatically, and re-acceptance on
+the new chain appends a new entry. Nothing is ever deleted (permanence: "no
+un-disqualify mechanism short of a hard fork" holds by construction), the list is
+bounded by 5 keys × a handful of evidence acceptances ever, and both items join
+`commit_virtual_state`'s batch so anchor state and virtual state land atomically.
+This is why neither item needs the diff-based POV machinery the UTXO set and note
+pool require — and why pruning is a non-issue (they're not per-block data).
+
+**Fork-choice wiring — exactly "a second trigger for the existing finality-depth reorg
+refusal", as the plan phrased it.** `sink_search_algorithm` now takes an
+`anchor_guard: Option<Hash>`; a candidate whose selected chain lacks the anchored
+block is refused with a loud warning and **falls through to the parents push exactly
+like a finality violation** — an earlier draft `continue`d past the push, which a
+review pass caught as a heap-exhaustion hazard (a merge block whose *selected* chain
+is the attacker's but which references honest parents would strand those parents).
+Falling through preserves the existing termination argument unchanged. Two
+deliberate choices here: the guard is evaluated against the node's **own** virtual
+DAA score, not the candidate's — an attacker with majority hashrate can inflate a
+fork's DAA score and would otherwise fast-mine its way past the staleness bound and
+bring its own exemption; and the test-block builder passes `None` (it builds
+hypothetical PoV blocks with an ORIGIN finality point — same reasoning). Safety of
+the guard against local knowledge: the ratchet only ever holds anchors accepted on a
+locally-committed chain whose blocks this node retains, and a fresh (non-stale)
+anchor is at most ~1,500 score units old — far inside finality/pruning depth — so
+the anchored chain's tips always exist locally and the walk always terminates.
+
+**Zero-input anchor transactions.** Trustees "produce no blocks, hold no mining
+reward, and can only veto" — requiring a funding input would force trustee wallets
+into existence. Anchor-lane txs get the same zero-input carve-out pure pool
+Transfers have: authorization is the payload's trustee signatures. No spam surface:
+only genuinely trustee-signed material passes isolation, an identical tx has one
+txid, and third parties can't mint variants. (Fee/relay policy for the lane — how
+miners are induced to include zero-fee anchor txs — lands with P6.12's signer
+daemon, where it's actually exercised; consensus imposes no minimum fee, which is
+all P6.11 needs.)
+
+**The sunset, staged honestly.** The hard expiry (stage 4) is enforced
+unconditionally in three places: an anchor *certifying* a score ≥ expiry is an
+invalid transaction (isolation, context-free); accepted-anchor processing skips
+expired accepting contexts; and enforcement itself switches off once the node's own
+virtual score passes expiry — "no anchor, however validly signed, has any consensus
+effect from this point forward", with the ratchet retained but inert. Stages 1–3
+ship as `ForkActivation::never()` hooks with their intervals (36k/864k/6,048k)
+pinned: their *triggers* are the sustained-difficulty condition whose threshold T is
+explicitly not final until the P9.5-gated sensitivity model exists (the spec's own
+"Calibration is a hard pre-launch gate"), so wiring live median-≥-T-for-M-months
+evaluation now would be building consensus rules against an unfrozen constant. The
+`ForkActivation` scores are precisely the hook that evaluation — or the FORK-PLAN
+P9.x governance mechanism that "upgrades the P5.8 sunset story" — sets when T
+freezes. This is the plan's own "`ForkActivation`-staged sunset" phrasing read
+literally, and the deferral is recorded here so nobody mistakes it for a forgotten
+piece.
+
+**A genuine property surfaced by the first failing test run:** a block's own
+transactions are accepted by its chain *descendants* (a block's acceptance data
+covers its mergeset, never its own body), so **an anchor takes effect exactly one
+chain block after inclusion**. The first test draft mined an anchor into the tip and
+asserted an immediate ratchet — `None`. Not a bug: certifying "already-mined
+history" is inherently fine with a one-block application lag, and the honest network
+mines continuously. Documented in the test module's header as load-bearing for every
+test there (`mine_and_confirm` = carrier block + confirming block). Also surfaced:
+`build_utxo_valid_block_with_parents` runs only *contextual* template validation —
+isolation checks fire at insert-time body validation, so rejection tests assert the
+insert errs rather than the build panicking (unlike the notepool rejection tests,
+whose invalid ops are contextual and do panic the build).
+
+**Deferred to P6.12, explicitly:** P2P gossip of anchors/evidence (the second
+distribution channel — P6.11 nodes learn anchors only from mined transactions),
+anchor-aware IBD (requesting latest anchors from every peer before committing to a
+chain; the `verify_anchor` / contextual-effect split was structured so gossiped
+anchors slot in as "valid signed statements about known blocks" without rework),
+mempool/relay policy for the anchor lane, the trustee signer daemon, and RPC
+exposure of `finality_anchor_stale` + the current decay stage (the consensus-side
+flag and `get_finality_anchor_status()` exist; the spec's wallet-visible RPC
+requirement rides P6.12's surface work).
+
+✅ *Verify:* 5 new tests in
+`consensus/src/pipeline/virtual_processor/finality_anchor_tests.rs`, all four plan
+criteria plus the closed-lane case, each with an anti-vacuity control:
+`heavier_attacker_chain_lacking_anchor_loses` (25-block attacker fork vs a 10-block
+anchored chain — sink holds; the identical DAG on an unkeyed control node reorgs,
+proving the anchor made the difference); `equivocating_quorum_ignored_after_proof`
+(evidence against keys 0/1/2 → `disqualified == [0,1,2]`, prior anchor untouched, a
+dead-quorum anchor and a mixed {2,3,4} anchor with only 2 countable signers both
+fail to ratchet — and with 3 of 5 keys dead the quorum is unrecoverable short of a
+hard fork, exactly as spec'd); `anchors_past_sunset_rejected_and_enforcement_retires`
+(expiry-15 params: an anchor certifying score 20 is an invalid *transaction*; a
+pre-expiry anchor enforces until virtual's own score passes 15, then `expired` +
+heavier fork wins despite the ratchet); `anchor_free_and_stale_operation_degrade_to_plain_pow`
+(never-anchored: plain PoW, `stale` correctly false — nothing was lost; anchored
+then outrun past `depth + 3×interval`: `stale` true, deep reorg allowed again,
+ratchet retained — stale, not forgotten); `anchor_lane_closed_without_pinned_keys`.
+All 5 passed on the first run after the acceptance-timing fix. `kaspa-consensus`
+105 passed (up from 100, plus 7 new consensus-core unit tests → 128 there); full
+`cargo test --workspace --exclude kaspa-testing-integration` and the integration
+suite green; `cargo build --workspace --tests` clean.

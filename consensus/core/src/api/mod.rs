@@ -554,6 +554,14 @@ pub trait ConsensusApi: Send + Sync {
         unimplemented!()
     }
 
+    /// The node's finality-anchor state (POOL-SPEC.md P5.8, FORK-PLAN P6.11): the
+    /// latest-anchor ratchet, whether the anchor-conflict rule is currently enforced,
+    /// the spec's `finality_anchor_stale` fail-open flag, and the trustee deny-list as
+    /// of the current virtual chain. RPC exposure ships with P6.12's distribution work.
+    fn get_finality_anchor_status(&self) -> crate::finality_anchor::FinalityAnchorStatus {
+        unimplemented!()
+    }
+
     fn get_missing_block_body_hashes(&self, high: Hash) -> ConsensusResult<Vec<Hash>> {
         unimplemented!()
     }

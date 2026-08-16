@@ -20,6 +20,7 @@ use crate::{
         smt_metadata::DbSmtMetadataStore,
         statuses::DbStatusesStore,
         tips::DbTipsStore,
+        finality_anchor::DbFinalityAnchorStore,
         notepool_diffs::DbNotePoolDiffsStore,
         utxo_diffs::DbUtxoDiffsStore,
         utxo_multisets::DbUtxoMultisetsStore,
@@ -70,6 +71,11 @@ pub struct ConsensusStorage {
     // Note-pool stores (FORK-PLAN P6.4): per-chain-block pool diffs, the pool analog of
     // `utxo_diffs_store`. The virtual pool state itself lives inside `virtual_stores`.
     pub notepool_diffs_store: Arc<DbNotePoolDiffsStore>,
+
+    // Finality-anchor node state (POOL-SPEC.md P5.8, FORK-PLAN P6.11): the
+    // latest-anchor ratchet + trustee deny-list. Monotone (never rolled back), written
+    // under the virtual write lock in `commit_virtual_state`'s batch.
+    pub finality_anchor_store: Arc<RwLock<DbFinalityAnchorStore>>,
 
     // Block window caches
     pub block_window_cache_for_difficulty: Arc<BlockWindowCacheStore>,
@@ -233,6 +239,9 @@ impl ConsensusStorage {
         let block_window_cache_for_difficulty = Arc::new(BlockWindowCacheStore::new(difficulty_window_builder.build()));
         let block_window_cache_for_past_median_time = Arc::new(BlockWindowCacheStore::new(median_window_builder.build()));
 
+        // Finality-anchor node state (P6.11)
+        let finality_anchor_store = Arc::new(RwLock::new(DbFinalityAnchorStore::new(db.clone())));
+
         // Virtual stores
         let lkg_virtual_state = LkgVirtualState::default();
         let virtual_stores =
@@ -277,6 +286,7 @@ impl ConsensusStorage {
             pruning_samples_store,
             utxo_diffs_store,
             notepool_diffs_store,
+            finality_anchor_store,
             utxo_multisets_store,
             block_window_cache_for_difficulty,
             block_window_cache_for_past_median_time,

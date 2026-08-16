@@ -145,6 +145,7 @@ impl ConsensusServices {
             mass_calculator.clone(),
             params.toccata_activation,
             params.mass_per_sig_op,
+            params.finality_anchor,
         );
 
         let pruning_point_manager = PruningPointManager::new(
