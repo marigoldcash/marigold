@@ -4,9 +4,8 @@ Snapshot of everything decided and built so far, so any fresh coding session on 
 machine can continue from the repo alone. Read this together with [FORK-PLAN.md](../../FORK-PLAN.md).
 Update this file whenever off-repo state changes (domains, accounts, infra).
 
-Last updated: 2026-08-16 (P7.1 complete — wallet-core note key DB, encrypted
-serial-keyed store + NotesChanged subscription plumbing; next: P7.2, mint & redeem
-commands)
+Last updated: 2026-08-16 (P7.2 complete — mint & redeem commands, live-verified on
+a real daemon+wallet; next: P7.3, receive flows)
 
 ## What this project is
 
@@ -95,8 +94,31 @@ substitute for it.
 
 ## Where execution stands
 
-- **Next step: P7.2 — Mint & redeem commands.** CLI `note mint <amount>` /
-  `note redeem <serials|amount>` against the P7.1 key DB.
+- **Next step: P7.3 — Receive flows.** Bearer import (scan/paste a key → verify →
+  immediately rotate to fresh cold) and sign-to-fresh-pk (generate keypair, emit
+  payment-request QR, watch for rotation). First step needing an actual QR
+  dependency (none in the workspace yet — checked in P7.2's research).
+- **P7.2 is done — live-verified against a real daemon, not just unit tests.**
+  `note mint <amount>` / `note redeem <serial>...|amount <amount>` /
+  `note balance` / `note list` (`cli/src/modules/note.rs`). Mint funds through the
+  ordinary `Generator`/`Signer` pipeline (`GeneratorSettings::with_subnetwork_id()`,
+  new, applied only to the final transaction; minted value withheld from change via
+  `PaymentDestination::PaymentOutputs(vec![])` + `Fees::SenderPays(amount_petals)`,
+  no output ever represents it). Redeem is hand-built (zero transparent inputs,
+  mirrors `trustee-signer::anchor_transaction`'s pattern) since it's self-funding by
+  design and doesn't fit `Generator`'s aggregate-toward-a-target model at all. New
+  live daemon+wallet test infra (`testing/integration/src/
+  notepool_wallet_integration_tests.rs`, `kaspa-wallet-core` now a
+  `testing/integration` dependency for the first time — reusable by P7.3-P7.5)
+  found and fixed a genuine `Generator` bug along the way, not notepool-specific:
+  Toccata-version (≥1) transactions need `ComputeBudget`-based input mass, not
+  legacy `SigopCount` — nothing before P7.2 had ever combined a non-native
+  subnetwork with real transparent inputs, so the mismatch had no way to surface
+  until mint needed both. Live-verified reconciliation: mint drops balance by
+  exactly `amount + real fee`, redeem raises it by exactly `redeemed value - real
+  fee`, net cost across both is exactly the two real fees, nothing more. Full
+  writeup (including the two test-harness maturity-timing bugs found along the
+  way) in NOTES.md's P7.2 entry.
 - **P7.1 is done.** `wallet/core::storage::notekeys` — `NoteKeyEntry{sn,sk,d,
   provenance}` (encrypted, zeroized on drop) split from `NoteKeyInfo{sn,pk,d,
   provenance,status}` (plaintext index — nothing but `sk` is actually sensitive,

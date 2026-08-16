@@ -9,6 +9,7 @@ use crate::result::Result;
 use crate::tx::{Fees, PaymentDestination};
 use crate::utxo::{UtxoContext, UtxoEntryReference, UtxoIterator};
 use kaspa_addresses::Address;
+use kaspa_consensus_core::subnets::{SUBNETWORK_ID_NATIVE, SubnetworkId};
 use workflow_core::channel::Multiplexer;
 
 pub struct GeneratorSettings {
@@ -36,6 +37,10 @@ pub struct GeneratorSettings {
     pub final_transaction_destination: PaymentDestination,
     // payload
     pub final_transaction_payload: Option<Vec<u8>>,
+    // subnetwork id of the final transaction only (intermediate compound
+    // transactions, if any, are always `SUBNETWORK_ID_NATIVE` — see
+    // `Generator`'s doc comment on `final_transaction_subnetwork_id`)
+    pub final_transaction_subnetwork_id: SubnetworkId,
     // transaction is a transfer between accounts
     pub destination_utxo_context: Option<UtxoContext>,
 }
@@ -88,6 +93,7 @@ impl GeneratorSettings {
             final_transaction_priority_fee: final_priority_fee,
             final_transaction_destination,
             final_transaction_payload,
+            final_transaction_subnetwork_id: SUBNETWORK_ID_NATIVE,
             destination_utxo_context: None,
         };
 
@@ -123,6 +129,7 @@ impl GeneratorSettings {
             final_transaction_priority_fee: final_priority_fee,
             final_transaction_destination,
             final_transaction_payload,
+            final_transaction_subnetwork_id: SUBNETWORK_ID_NATIVE,
             destination_utxo_context: None,
         };
 
@@ -157,6 +164,7 @@ impl GeneratorSettings {
             final_transaction_priority_fee: final_priority_fee,
             final_transaction_destination,
             final_transaction_payload,
+            final_transaction_subnetwork_id: SUBNETWORK_ID_NATIVE,
             destination_utxo_context: None,
         };
 
@@ -165,6 +173,17 @@ impl GeneratorSettings {
 
     pub fn utxo_context_transfer(mut self, destination_utxo_context: &UtxoContext) -> Self {
         self.destination_utxo_context = Some(destination_utxo_context.clone());
+        self
+    }
+
+    /// Override the final transaction's subnetwork id (default
+    /// `SUBNETWORK_ID_NATIVE`) — e.g. `SUBNETWORK_ID_NOTE_POOL` for a note-pool op
+    /// transaction (FORK-PLAN P7.2+) carrying its `payload` (set via
+    /// `final_transaction_payload` above). Intermediate compound transactions, if
+    /// the aggregation needs more than one, are unaffected — only the final
+    /// transaction (the one actually carrying `final_transaction_payload`) uses this.
+    pub fn with_subnetwork_id(mut self, subnetwork_id: SubnetworkId) -> Self {
+        self.final_transaction_subnetwork_id = subnetwork_id;
         self
     }
 }

@@ -5,6 +5,7 @@
 
 pub mod descriptor;
 pub mod kind;
+pub mod notepool;
 pub mod pskb;
 pub mod variants;
 use kaspa_hashes::Hash;
@@ -368,6 +369,26 @@ pub trait Account: AnySync + Send + Sync + 'static {
         }
 
         Ok((generator.summary(), ids))
+    }
+
+    /// Mint `amount_petals` worth of notes into the P7.1 note key database, funded
+    /// from this account's transparent balance (FORK-PLAN P7.2). See
+    /// `account::notepool` for the construction details.
+    async fn mint(
+        self: Arc<Self>,
+        wallet_secret: Secret,
+        payment_secret: Option<Secret>,
+        amount_petals: u64,
+        fee_rate: Option<f64>,
+        abortable: &Abortable,
+    ) -> Result<notepool::MintResult> {
+        notepool::mint(self.as_dyn_arc(), wallet_secret, payment_secret, amount_petals, fee_rate, abortable).await
+    }
+
+    /// Redeem notes back to transparent balance (FORK-PLAN P7.2). See
+    /// `account::notepool` for the construction details.
+    async fn redeem(self: Arc<Self>, wallet_secret: Secret, selection: notepool::RedeemSelection) -> Result<notepool::RedeemResult> {
+        notepool::redeem(self.as_dyn_arc(), wallet_secret, selection).await
     }
 
     async fn commit_reveal_manual(

@@ -1723,10 +1723,64 @@ wallet. WASM/mobile wallets are post-launch — CLI proves the protocol.*
   clean (one pre-existing enum-size lint fixed with a scoped `#[allow]` rather than
   reshaping the unrelated pre-existing `Discovery` variant).
 
-- [ ] **P7.2 — Mint & redeem commands.** CLI: `note mint <amount>` (splits into P1.6
+- [x] **P7.2 — Mint & redeem commands.** CLI: `note mint <amount>` (splits into P1.6
   denominations, pays from transparent balance) and `note redeem <serials|amount>`.
   ✅ *Verify:* on local testnet: mint from mined funds, redeem back, transparent balance
   reconciles minus fees.
+  **Executed (2026-08-16):** `decompose_amount()` (`wallet/core::account::notepool`) —
+  exact greedy largest-first split into the P1.6 ladder, `None` for any amount not an
+  exact multiple of the smallest denomination. **Mint** goes through the ordinary
+  `Generator`/`Signer` pipeline (funded from real transparent UTXOs, same as any
+  `send`) — the wallet's `Generator` was extended with a
+  `GeneratorSettings::with_subnetwork_id()` builder (default `SUBNETWORK_ID_NATIVE`,
+  threaded only to the *final* transaction — intermediate compound transactions stay
+  native) so the final transaction can carry `SUBNETWORK_ID_NOTE_POOL` and a `MintOp`
+  payload; the minted value is withheld from change via
+  `PaymentDestination::PaymentOutputs(vec![])` + `Fees::SenderPays(amount_petals)`
+  (zero explicit outputs, so the priority-fee mechanism silently reduces the
+  automatic change output — no output ever represents the minted value itself).
+  Fresh note keypairs (Cold) are generated before submission, persisted into the
+  P7.1 `NoteKeyStore` keyed by `serial_hash(final_tx_id, index)` the instant the tx
+  id is known (no need to wait for confirmation — the wallet is the notes' creator).
+  **Redeem** is hand-built instead of going through `Generator` — POOL-SPEC.md P5.2
+  designs it self-funding (zero transparent inputs, output paid entirely from
+  consumed notes), which doesn't fit `Generator`'s "aggregate real UTXOs toward a
+  target" model at all; mirrors `trustee-signer::anchor_transaction`'s zero-input
+  pattern instead (`consensus_core::mass::MassCalculator` for a correct mass/fee,
+  signed `SignedGroup`s per shared key via raw secp256k1 Schnorr on the note's own
+  `sk`, direct RPC submission, redeemed serials marked `Superseded` in the
+  `NoteKeyStore` on successful submit). New `cli/src/modules/note.rs`: `note mint`,
+  `note redeem <serial>...` / `note redeem amount <amount>`, `note balance`,
+  `note list`.
+  **Two real bugs found and fixed via a live daemon+wallet integration test**
+  (`testing/integration/src/notepool_wallet_integration_tests.rs` — new test
+  infrastructure, `kaspa-wallet-core` added as a `testing/integration` dependency
+  for the first time, connecting a real resident `Wallet` over wRPC to a live daemon
+  via the same non-interactive `WalletApi` bootstrap the CLI/wasm bindings use, not
+  a hand-rolled shortcut — reusable by P7.3-P7.5's own live-wallet needs): (1) a
+  genuine `Generator` bug, not notepool-specific — transparent inputs were always
+  built with legacy `SigopCount`-based mass regardless of the final transaction's
+  version, which Toccata-version (≥1) transactions reject (they require
+  `ComputeBudget` instead, `ComputeCommit::version_expects_compute_budget_field`);
+  fixed by remapping the final transaction's inputs to
+  `TransactionInput::new_with_compute_budget(...)` (same grams-per-sigop →
+  compute-budget conversion `sign::sign` already uses) whenever the final version is
+  non-native. This would have hit any future non-native-subnetwork wallet flow with
+  real transparent inputs, not just mint. (2) the wallet's own `tx::mass`
+  `MassCalculator` doesn't yet know about pool-op signature costing (flagged, not
+  fixed — Mint's real inputs are unaffected since Mint's `pool_signature_mass` is
+  always zero; Transfer/Redeem bypass this calculator entirely by being hand-built,
+  so the gap is latent, not live — left for whoever next needs the wallet estimator
+  itself to price a Transfer). Two test-harness timing bugs also found and fixed
+  (funding-maturity backlog masking the mint balance drop; redeem's payout needing
+  the *ordinary* 100-DAA-score user-transaction maturity window since it bypasses
+  `PendingTransaction`'s outgoing-transaction fast-maturity path — full detail in
+  NOTES.md). Live-verified reconciliation: mint 1.11 MAGLD (111,000,000 petals) drops
+  transparent balance by exactly `amount + real fee` (183,200 sompi); redeem raises
+  it by exactly `redeemed value - real fee` (900,900 sompi); net cost across both is
+  exactly the two real fees (1,084,100 sompi), nothing more. `cargo build
+  --workspace`, `cargo test -p kaspa-wallet-core` (51 tests), and clippy on every
+  touched crate all clean.
 
 - [ ] **P7.3 — Receive flows.** (a) bearer import: scan/paste a key QR → verify serial's
   on-chain pk matches → **immediately rotate to a fresh cold key** → report confirmed;

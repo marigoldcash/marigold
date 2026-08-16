@@ -66,8 +66,10 @@ use crate::tx::{
 };
 use crate::utxo::{NetworkParams, UtxoContext, UtxoEntryReference};
 use kaspa_consensus_client::UtxoEntry;
-use kaspa_consensus_core::constants::UNACCEPTED_DAA_SCORE;
-use kaspa_consensus_core::subnets::SUBNETWORK_ID_NATIVE;
+use kaspa_consensus_core::constants::{TX_VERSION, TX_VERSION_TOCCATA, UNACCEPTED_DAA_SCORE};
+use kaspa_consensus_core::mass::GRAMS_PER_COMPUTE_BUDGET_UNIT;
+use kaspa_consensus_core::mass::units::GRAMS_PER_SIGOP_COUNT_UNIT;
+use kaspa_consensus_core::subnets::{SUBNETWORK_ID_NATIVE, SubnetworkId};
 use kaspa_consensus_core::tx::{Transaction, TransactionInput, TransactionOutpoint, TransactionOutput};
 use kaspa_hashes::Hash;
 use kaspa_txscript::pay_to_address_script;
@@ -310,6 +312,8 @@ struct Inner {
     final_transaction_payload: Vec<u8>,
     // final transaction payload mass
     final_transaction_payload_mass: u64,
+    // subnetwork id of the final transaction only (see `GeneratorSettings::with_subnetwork_id`)
+    final_transaction_subnetwork_id: SubnetworkId,
     // execution context
     context: Mutex<Context>,
 }
@@ -364,6 +368,7 @@ impl Generator {
             final_transaction_priority_fee,
             final_transaction_destination,
             final_transaction_payload,
+            final_transaction_subnetwork_id,
             destination_utxo_context,
         } = settings;
 
@@ -481,6 +486,7 @@ impl Generator {
             final_transaction_outputs_compute_mass,
             final_transaction_payload,
             final_transaction_payload_mass,
+            final_transaction_subnetwork_id,
             destination_utxo_context,
         };
 
@@ -1090,12 +1096,48 @@ impl Generator {
                     });
                 }
 
+                // Every non-native subnetwork this fork has added (note-pool ops,
+                // finality anchors) requires Toccata; native transactions keep the
+                // original version untouched.
+                let version =
+                    if self.inner.final_transaction_subnetwork_id == SUBNETWORK_ID_NATIVE { TX_VERSION } else { TX_VERSION_TOCCATA };
+
+                // `aggregate_utxo` always builds inputs with the legacy `SigopCount`-based
+                // mass encoding, which is correct for every *intermediate* compound
+                // transaction (those always stay `SUBNETWORK_ID_NATIVE` regardless of
+                // `final_transaction_subnetwork_id` -- see `GeneratorSettings::with_subnetwork_id`'s
+                // doc comment) but wrong for a Toccata-version (>= 1) final transaction,
+                // which commits an input's compute budget instead
+                // (`ComputeCommit::version_expects_compute_budget_field`). Remap here,
+                // before the unsigned transaction is built (and, downstream, hashed and
+                // signed by `sign_with_multiple_v2`, which -- unlike
+                // `kaspa_consensus_core::sign::sign` -- does NOT itself fix this up) --
+                // same grams-per-sigop -> compute-budget conversion `kaspa_consensus_core::
+                // sign::sign` uses for its own version-aware signing.
+                let inputs = if version == TX_VERSION {
+                    inputs
+                } else {
+                    let compute_budget = ((self.inner.sig_op_count as u64) * GRAMS_PER_SIGOP_COUNT_UNIT)
+                        .div_ceil(GRAMS_PER_COMPUTE_BUDGET_UNIT) as u16;
+                    inputs
+                        .into_iter()
+                        .map(|input| {
+                            TransactionInput::new_with_compute_budget(
+                                input.previous_outpoint,
+                                input.signature_script,
+                                input.sequence,
+                                compute_budget,
+                            )
+                        })
+                        .collect()
+                };
+
                 let tx = Transaction::new(
-                    0,
+                    version,
                     inputs,
                     final_outputs,
                     0,
-                    SUBNETWORK_ID_NATIVE,
+                    self.inner.final_transaction_subnetwork_id,
                     0,
                     self.inner.final_transaction_payload.clone(),
                 );

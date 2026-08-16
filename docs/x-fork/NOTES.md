@@ -2714,3 +2714,132 @@ supplied on a second `apply_notes_changed` call, inserts the new row inheriting 
 old row's `sk`/provenance. Full wallet-core suite green (46 tests, up from 43),
 `cargo check --workspace --all-targets` and `cargo clippy -p kaspa-wallet-core`
 clean.
+
+### P7.2 — Mint & redeem commands (2026-08-16)
+
+**Two very different transaction shapes, two very different construction
+strategies.** Mint needs real transparent inputs (it's funded from the transparent
+balance) — the natural fit is the wallet's existing `Generator`/`Signer` pipeline,
+same as any `send`. Redeem needs *zero* transparent inputs at all — POOL-SPEC.md
+P5.2 designs it self-funding, the transparent output paid entirely from the
+consumed notes' value — which doesn't fit `Generator`'s model even slightly (it only
+knows how to aggregate real UTXOs *toward* a requested output value; it has no
+concept of value arriving from outside the UTXO set). Redeem is hand-built instead,
+mirroring `trustee-signer::anchor_transaction`'s zero-input pattern from P6.12
+almost exactly (`consensus_core::mass::MassCalculator` for a correct mass/fee, raw
+secp256k1 Schnorr signing with the note's own key, direct RPC submission) —
+Redeem's notes-authorize-value is architecturally the same shape as an
+anchor-lane transaction's signature-authorizes-inclusion, just with a real payout.
+
+**The Generator's one new trick, and why nothing bigger was needed.** Making Mint's
+minted value vanish from change without a real output for it turned out not to need
+touching `Generator`'s core aggregation logic at all: `PaymentDestination::Change`
+(sweep semantics) structurally forbids any priority fee, but
+`PaymentDestination::PaymentOutputs(vec![])` — a non-Change destination with an
+*empty* explicit-outputs list — sails through the same validation and gives
+`Fees::SenderPays(amount_petals)` a real target to attach to, silently reducing the
+automatic change output by exactly the minted amount (plus the real fee) with no
+output ever created to represent it. Found by reading the aggregation code closely
+enough to notice `final_transaction_amount` only needs to be `Some(0)`, not `None`,
+for the fee-inclusion machinery to activate. The only genuine `Generator` change
+needed was `GeneratorSettings::with_subnetwork_id()` (default
+`SUBNETWORK_ID_NATIVE`, applied only to the *final* transaction — any intermediate
+compound/consolidation transactions stay native, matching how
+`final_transaction_payload` already works) plus deriving `TX_VERSION_TOCCATA` for
+any non-native final transaction (every non-native subnetwork this fork has added —
+note-pool ops, finality anchors — requires it).
+
+**The real bug the Generator change exposed — genuinely not notepool-specific.**
+Found only by building and running a live daemon+wallet integration test (see
+below): the daemon rejected mint's signed transaction with `"RpcTransactionInput
+.sig_op_count is inconsistent with transaction version 1"`. Root cause:
+`Generator::aggregate_utxo()` always builds transparent inputs with legacy
+`ComputeCommit::SigopCount`-based mass, correct for `TX_VERSION` (0) but invalid for
+`TX_VERSION_TOCCATA` (≥1), which requires `ComputeCommit::ComputeBudget` instead
+(`ComputeCommit::version_expects_compute_budget_field`) — Toccata's "input
+compute-budget mass" change (`consensus/core/src/constants.rs`'s own doc comment on
+`TX_VERSION_TOCCATA`). Nothing before P7.2 had ever exercised this combination
+(Toccata version *and* real transparent inputs) anywhere in the codebase — every
+prior non-native-subnetwork transaction (pool ops, finality anchors) has zero
+inputs, so the mismatch had no way to surface until mint needed both at once. Fixed
+by remapping every input to `TransactionInput::new_with_compute_budget(...)` right
+before the final transaction is built (i.e. before signing — `compute_commit` is
+part of what the sighash commits, so this can't be patched up after the fact), using
+the same grams-per-sigop → compute-budget conversion `kaspa_consensus_core::sign::
+sign` already uses elsewhere (`GRAMS_PER_SIGOP_COUNT_UNIT=1000` /
+`GRAMS_PER_COMPUTE_BUDGET_UNIT=100` → 10 budget units per sigop, rounded up). This is
+a real, general `Generator` bug — it would have hit any future feature needing a
+non-native subnetwork with real transparent inputs, not just mint. Flagged, not yet
+fixed: the wallet's own `tx::mass::MassCalculator` (an independent reimplementation
+of the consensus-core one, not a wrapper around it) still doesn't know about
+pool-op signature costing at all — harmless for Mint specifically (`pool_signature_
+mass` is always zero for Mint) and for Redeem/Transfer (both bypass this calculator
+entirely, being hand-built with `consensus_core::mass::MassCalculator` directly),
+but a real gap for whoever eventually needs the wallet's own estimator to *price* a
+Transfer before building it.
+
+**Live daemon+wallet test infrastructure (new, reusable by P7.3-P7.5)**:
+`testing/integration/src/notepool_wallet_integration_tests.rs`, with
+`kaspa-wallet-core` added as a `testing/integration` dependency for the first
+time — every prior daemon test builds transactions from raw consensus-core types
+directly. Connects a real `kaspa_wallet_core::Wallet` (resident storage) to a live
+daemon over **wRPC**, not gRPC — `Wallet`'s `UtxoProcessor` only wires its
+connect-state and `UtxosChanged` listener registration through `RpcCtl`, which
+`GrpcClient` (every other daemon test's RPC client) doesn't drive the way
+`KaspaRpcClient` does; `common::daemon::ClientManager` already configures a
+wRPC-borsh listener alongside the daemon's gRPC one, so the wallet connects there
+while a plain `GrpcClient` still mines blocks, exactly like every other daemon
+test. Bootstraps the wallet/account via the same non-interactive `WalletApi`
+methods (`wallet_create`/`prv_key_data_create`/`accounts_create`/
+`accounts_activate`) the real CLI (`cli/src/wizards/account.rs`) and wasm bindings
+use — not a hand-rolled storage shortcut, so the test actually exercises the real
+bootstrap path.
+
+**Two test-harness timing bugs, both about UTXO maturity, found via the same live
+run** — neither is a P7.2 code bug:
+1. **Funding-maturity backlog masking the mint balance drop.** The first draft
+   mined `coinbase_maturity + 20` blocks straight to the wallet's own receive
+   address for funding, then captured `balance_before_mint` the moment `mature > 0`
+   — but with ~800 blocks mined in one burst, only a handful had matured by that
+   instant; the other ~800 sat in `pending`/`stasis`, still maturing on their own as
+   *any* later block got mined (mint-confirmation, redeem-confirmation, didn't
+   matter), continuously masking the real (much smaller) mint-caused drop behind
+   unrelated ongoing maturation. Fixed: fund with exactly **one** block to the
+   wallet's own address, mine the remaining maturity-worth to a throwaway address —
+   keeps the tracked balance attributable to mint/redeem alone.
+2. **Redeem's payout never promoted `pending → mature`.** `register_outgoing_
+   transaction`/`notify_outgoing_transaction` (`wallet/core/src/utxo/context.rs`) —
+   the mechanism that makes a wallet's *own* spend appear to mature near-instantly
+   — only fires from `PendingTransaction::try_submit()`. `redeem()` submits directly
+   over RPC, bypassing `Generator`/`PendingTransaction` entirely (see above for
+   why), so the wallet has no way to know the payout is its own doing; the deposit
+   gets ordinary-deposit treatment instead —
+   `UtxoEntryReferenceExtension::maturity`'s non-coinbase branch, gated on
+   `user_transaction_maturity_period_daa` (100 DAA-score units by default,
+   `wallet/core/src/utxo/settings.rs`) — and the test was only mining 10
+   confirmation blocks. Diagnosed by adding a one-off debug print of the full
+   `Balance` struct right before the wait loop: `pending: 110099100,
+   pending_utxo_count: 1` — the exact redeemed-value-minus-fee, sitting in
+   `pending`, never promoted. Fixed: mine `user_transaction_maturity_period_daa +
+   20` blocks instead of a flat 10.
+
+**Delegation note**: the bulk of this step's investigation (harness scaffolding,
+the compute-budget diagnosis and fix, the first of the two maturity bugs) was done
+by a background subagent working from a detailed brief; the second maturity bug and
+final verification were done directly after taking over mid-debug once the agent's
+progress reports stopped advancing between checks — recorded here since the
+finding itself (not who found it) is what matters for future readers of this note.
+
+✅ *Verify*: `wallet_notepool_mint_redeem_test` (live daemon, simnet) — mints 1.11
+MAGLD (111,000,000 petals, decomposing into D1+D0_1+D0_01 — deliberately not a
+single-denomination amount), confirms via the daemon's own independent
+`get_pool_stats()` that the pool holds exactly those three notes and confirms via
+the wallet's `NoteKeyStore` that each is `Cold`/`Active`; asserts the transparent
+balance drop equals exactly `minted value + real fee` and the real fee is small
+(<0.01 MAGLD) for a single-input mint. Redeems the exact three minted serials back;
+confirms via `get_pool_stats()` the pool is empty again and via `NoteKeyStore` that
+all three are `Superseded`; asserts the balance rise equals exactly `redeemed value
+- real fee`. Final reconciliation: net balance change across mint+redeem equals
+exactly the sum of the two real fees (1,084,100 sompi total on this run), nothing
+more, nothing less. Full workspace build, `cargo test -p kaspa-wallet-core` (51
+tests), and clippy on every touched crate all clean.

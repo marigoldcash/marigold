@@ -4043,6 +4043,8 @@ dependencies = [
  "kaspa-txscript-errors",
  "kaspa-utils",
  "kaspa-utxoindex",
+ "kaspa-wallet-core",
+ "kaspa-wallet-keys",
  "kaspa-wrpc-client",
  "kaspa-wrpc-server",
  "kaspad",
@@ -4059,6 +4061,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "workflow-core",
  "workflow-perf-monitor",
 ]
 

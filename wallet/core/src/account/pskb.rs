@@ -375,6 +375,7 @@ pub fn pskt_to_pending_transaction(
         final_transaction_priority_fee: fee_u.into(),
         final_transaction_destination,
         final_transaction_payload: None,
+        final_transaction_subnetwork_id: kaspa_consensus_core::subnets::SUBNETWORK_ID_NATIVE,
     };
 
     // Create the Generator

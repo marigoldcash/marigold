@@ -464,6 +464,7 @@ where
         final_transaction_priority_fee: final_priority_fee,
         final_transaction_destination,
         final_transaction_payload,
+        final_transaction_subnetwork_id: kaspa_consensus_core::subnets::SUBNETWORK_ID_NATIVE,
     };
 
     Generator::try_new(settings, None, None)
