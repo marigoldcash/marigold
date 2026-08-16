@@ -355,22 +355,3 @@ specifically, not just the mechanism shape.
   cryptographic guarantee) and the sunset itself (bounding how long that trust is ever
   extended, not eliminating the need for it during the young-chain phase where it's
   genuinely the best available option per the plan's own rationale).
-
-### T&A anchoring-gateway integration — subnetwork namespace (2026-08-16)
-
-**`"T360"` (`0x54 0x33 0x36 0x30`) is the pinned subnetwork namespace for the
-Time & Attendance integrator's document-hash anchoring** — the first (and, until
-another integrator is onboarded, only) consumer of the P9-era anchoring gateway's
-dedicated user-lane mechanism (`SubnetworkId::from_namespace`, per the P5.2 decision
-above). Chosen by the integrator, not Marigold — a business decision, not a protocol
-one, recorded here because it's now load-bearing for both sides: their Cloudflare
-Workers integration and any future archival-node verifier need to agree on the exact
-namespace bytes to filter transactions by, and this is the canonical place that
-agreement is pinned. **Any namespace this integrator uses in Cloudflare (Workers,
-KV, or otherwise) should use `T360`** — one namespace, not a per-surface pick, so an
-auditor or a future integration engineer never has to reconcile two different
-"T360-ish" identifiers.
-
-Full API contract (endpoints, payload encoding, auth/token-rotation semantics):
-[ANCHORING-GATEWAY.md](ANCHORING-GATEWAY.md). Business context (archival-node
-commitment, verifier tool): STATE.md's "Live infrastructure" section.
