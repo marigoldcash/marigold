@@ -1,10 +1,11 @@
 # Marigold anchoring gateway — API contract (DRAFT v0)
 
-Status: **draft for integrator review** (2026-08-16). The gateway itself ships with
-the P9-era launch tooling; this contract is published early so integrators on
-constrained runtimes (Cloudflare Workers etc.) can build against it now. Field names
-and semantics here are intended to be stable; anything marked OPEN is explicitly up
-for discussion.
+Status: **draft for integrator review** (2026-08-16; rev 2 same day — namespace
+pinned and token-rotation semantics resolved per integrator feedback). The gateway
+itself ships with the P9-era launch tooling; this contract is published early so
+integrators on constrained runtimes (Cloudflare Workers etc.) can build against it
+now. Field names and semantics here are intended to be stable; anything marked OPEN
+is explicitly up for discussion.
 
 ## What this is
 
@@ -25,6 +26,14 @@ the root's on-chain presence and timestamp.
 
 - `POST` endpoints: `Authorization: Bearer <token>` — per-integrator tokens issued
   out of band. 401 without.
+- **Zero-downtime rotation**: the gateway holds a *set* of active tokens per
+  integrator (not a single value). Rotation is: (1) a new token is added alongside
+  the old, (2) the integrator switches on their own schedule — both tokens are
+  valid for the whole overlap window, which has no built-in expiry, (3) the old
+  token is revoked once the integrator confirms the switch. No coordinated
+  cutover, ever; a token swap is never a maintenance event on the integrator's
+  side. All active tokens map to the same integrator identity for rate limiting
+  and `label` bookkeeping.
 - `GET` endpoints: public, no auth (they serve independent verification).
 - All endpoints: HTTPS only, standard ports (Workers-compatible; no custom ports).
 
@@ -103,9 +112,9 @@ must be able to check an anchor against any archival node with no gateway involv
 
 - The anchoring transaction lives in a **dedicated user-lane subnetwork**: a 20-byte
   subnetwork id of the form `[4-byte namespace, 16 zero bytes]`. The namespace for
-  this service: **OPEN — to be pinned in v1** (proposal: `0x54 0x41 0x50 0x46`,
-  ASCII "TAPF"). Filtering a block's transactions by this subnetwork id finds all
-  anchors.
+  this integration is **pinned: `0x54 0x33 0x36 0x30` (ASCII `"T360"`)** —
+  integrator's choice, 2026-08-16. Filtering a block's transactions by this
+  subnetwork id finds all of this integration's anchors.
 - The transaction payload is exactly **33 bytes**: `0x01` (payload version) followed
   by the 32-byte root, big-endian as submitted.
 - Independent verification of a document, end to end:
@@ -131,12 +140,18 @@ must be able to check an anchor against any archival node with no gateway involv
 - Not a general-purpose RPC proxy. Anything beyond anchor/lookup uses the node's
   own RPC surfaces.
 
+## Resolved (formerly OPEN)
+
+1. **Subnetwork namespace: `"T360"`** (`0x54 0x33 0x36 0x30`) — pinned above.
+2. **Token rotation: zero-downtime by design** — active-token *sets* with an
+   unbounded overlap window, specified under Authentication above. (Issuance
+   channel — how a new token is delivered out of band — remains an ops detail,
+   deliberately outside this contract.)
+
 ## OPEN items for v1
 
-1. Pin the subnetwork namespace (integrator may prefer their own — one namespace
-   per integrator is fine and aids filtering).
-2. Token issuance/rotation mechanics.
-3. Rate limits (proposal: 60 submissions/day per token — monthly batching needs 1).
+3. Rate limits (proposal: 60 submissions/day per integrator — monthly batching
+   needs 1).
 4. Whether `GET /v0/anchors/{root}` should also return a merkle-independent
    chain-inclusion proof blob (KIP-21 lane proofs exist on the node; probably
    overkill for v1).
