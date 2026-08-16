@@ -530,6 +530,35 @@ impl ConsensusSessionOwned {
     pub async fn async_is_pruning_smt_stable(&self) -> bool {
         self.clone().spawn_blocking(move |c| c.is_pruning_smt_stable()).await
     }
+    pub async fn async_get_pruning_point_pool_entries(
+        &self,
+        expected_pruning_point: Hash,
+        from_sn: Option<Hash>,
+        chunk_size: usize,
+        skip_first: bool,
+    ) -> ConsensusResult<Vec<(Hash, kaspa_consensus_core::notepool::NewNote)>> {
+        self.clone()
+            .spawn_blocking(move |c| c.get_pruning_point_pool_entries(expected_pruning_point, from_sn, chunk_size, skip_first))
+            .await
+    }
+    pub async fn async_append_imported_pruning_point_pool_entries(
+        &self,
+        chunk: Vec<(Hash, kaspa_consensus_core::notepool::NewNote)>,
+    ) {
+        self.clone().spawn_blocking(move |c| c.append_imported_pruning_point_pool_entries(&chunk)).await
+    }
+    pub async fn async_import_pruning_point_pool_state(&self, new_pruning_point: Hash, entry_count: u64) -> PruningImportResult<()> {
+        self.clone().spawn_blocking(move |c| c.import_pruning_point_pool_state(new_pruning_point, entry_count)).await
+    }
+    pub async fn async_clear_pruning_pool_state(&self) {
+        self.clone().spawn_blocking(move |c| c.clear_pruning_pool_state()).await
+    }
+    pub async fn async_set_pruning_pool_state_stable(&self) {
+        self.clone().spawn_blocking(move |c| c.set_pruning_pool_state_stable_flag(true)).await
+    }
+    pub async fn async_is_pruning_pool_state_stable(&self) -> bool {
+        self.clone().spawn_blocking(move |c| c.is_pruning_pool_state_stable()).await
+    }
     pub async fn async_get_pruning_point_smt_metadata(
         &self,
         expected_pp: Hash,

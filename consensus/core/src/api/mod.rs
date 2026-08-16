@@ -492,6 +492,36 @@ pub trait ConsensusApi: Send + Sync {
         unimplemented!()
     }
 
+    /// Serves a chunk of the note-pool state positioned at the pruning point, in
+    /// ascending serial order — the pool analog of [`Self::get_pruning_point_utxos`]
+    /// (FORK-PLAN P6.8).
+    fn get_pruning_point_pool_entries(
+        &self,
+        expected_pruning_point: Hash,
+        from_sn: Option<Hash>,
+        chunk_size: usize,
+        skip_first: bool,
+    ) -> ConsensusResult<Vec<(Hash, crate::notepool::NewNote)>> {
+        unimplemented!()
+    }
+
+    /// Stages one downloaded chunk of the pruning point's pool state — the pool analog
+    /// of [`Self::append_imported_pruning_point_utxos`], minus the multiset argument:
+    /// the pool's commitment is an SMT root, recomputed in one pass at import rather
+    /// than folded incrementally per chunk.
+    fn append_imported_pruning_point_pool_entries(&self, chunk: &[(Hash, crate::notepool::NewNote)]) {
+        unimplemented!()
+    }
+
+    /// Verifies the staged pool state against the pruning point header's
+    /// `pool_commitment` (rebuilding the SMT root from scratch) and, on success, makes
+    /// it live: the virtual pool state map and pool SMT are overwritten with it.
+    /// `entry_count` is the number of entries staged by the caller's
+    /// [`Self::append_imported_pruning_point_pool_entries`] calls.
+    fn import_pruning_point_pool_state(&self, new_pruning_point: Hash, entry_count: u64) -> PruningImportResult<()> {
+        unimplemented!()
+    }
+
     fn get_missing_block_body_hashes(&self, high: Hash) -> ConsensusResult<Vec<Hash>> {
         unimplemented!()
     }
@@ -539,6 +569,20 @@ pub trait ConsensusApi: Send + Sync {
     }
 
     fn is_pruning_smt_stable(&self) -> bool {
+        unimplemented!()
+    }
+
+    /// Lowers the pool-state stable flag and clears both the staged pruning-position pool
+    /// store and the virtual pool stores, ahead of a from-scratch download (FORK-PLAN P6.8).
+    fn clear_pruning_pool_state(&self) {
+        unimplemented!()
+    }
+
+    fn set_pruning_pool_state_stable_flag(&self, _val: bool) {
+        unimplemented!()
+    }
+
+    fn is_pruning_pool_state_stable(&self) -> bool {
         unimplemented!()
     }
 

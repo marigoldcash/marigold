@@ -52,6 +52,10 @@ pub enum KaspadMessagePayloadType {
     SmtMetadata,
     SmtLaneChunk,
     RequestNextPruningPointSmtChunk,
+    RequestPruningPointPoolState,
+    PruningPointPoolStateChunk,
+    RequestNextPruningPointPoolStateChunk,
+    DonePruningPointPoolStateChunks,
 }
 
 impl From<&KaspadMessagePayload> for KaspadMessagePayloadType {
@@ -112,6 +116,12 @@ impl From<&KaspadMessagePayload> for KaspadMessagePayloadType {
             KaspadMessagePayload::SmtMetadata(_) => KaspadMessagePayloadType::SmtMetadata,
             KaspadMessagePayload::SmtLaneChunk(_) => KaspadMessagePayloadType::SmtLaneChunk,
             KaspadMessagePayload::RequestNextPruningPointSmtChunk(_) => KaspadMessagePayloadType::RequestNextPruningPointSmtChunk,
+            KaspadMessagePayload::RequestPruningPointPoolState(_) => KaspadMessagePayloadType::RequestPruningPointPoolState,
+            KaspadMessagePayload::PruningPointPoolStateChunk(_) => KaspadMessagePayloadType::PruningPointPoolStateChunk,
+            KaspadMessagePayload::RequestNextPruningPointPoolStateChunk(_) => {
+                KaspadMessagePayloadType::RequestNextPruningPointPoolStateChunk
+            }
+            KaspadMessagePayload::DonePruningPointPoolStateChunks(_) => KaspadMessagePayloadType::DonePruningPointPoolStateChunks,
         }
     }
 }

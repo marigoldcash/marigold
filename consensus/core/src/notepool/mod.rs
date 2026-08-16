@@ -78,6 +78,28 @@ impl DenominationTag {
     }
 }
 
+/// Ordinal round-trip for wire formats that carry the tag as a plain integer (P2P
+/// pool-state sync chunks, FORK-PLAN P6.8; RPC later). The ordinals are the same
+/// declaration-order values borsh assigns — one canonical numbering (see [`PoolOp`]'s
+/// doc comment for the identical principle applied to op types).
+impl TryFrom<u8> for DenominationTag {
+    type Error = ();
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        Ok(match value {
+            0 => Self::D0_01,
+            1 => Self::D0_1,
+            2 => Self::D1,
+            3 => Self::D10,
+            4 => Self::D100,
+            5 => Self::D1000,
+            6 => Self::D10000,
+            7 => Self::D100000,
+            _ => return Err(()),
+        })
+    }
+}
+
 /// A note, as a self-contained unit (e.g. in a wallet's key database — POOL-SPEC.md
 /// P5.6). 65 bytes: `d` (1) + `pk` (32) + `sn` (32). Inside the pool state map itself,
 /// `sn` is the map key, so only `d`+`pk` (33 bytes) are the stored value per entry.

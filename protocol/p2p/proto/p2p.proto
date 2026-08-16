@@ -336,3 +336,28 @@ message SmtLaneChunkMessage {
 
 message RequestNextPruningPointSmtChunkMessage {
 }
+
+// Note-pool state sync (FORK-PLAN P6.8). Wire shape mirrors the pruning point UTXO-set
+// flow (chunked, Done-sentinel-terminated); the client verifies the rebuilt pool SMT
+// root against the pruning point header's own poolCommitment, so no metadata message
+// and no inline proofs are needed.
+
+message RequestPruningPointPoolStateMessage {
+  Hash pruningPointHash = 1;
+}
+
+message PoolStateEntry {
+  bytes sn = 1;             // 32 bytes: note serial
+  uint32 denomination = 2;  // DenominationTag ordinal (0..=7)
+  bytes pk = 3;             // 32 bytes: x-only note pubkey
+}
+
+message PruningPointPoolStateChunkMessage {
+  repeated PoolStateEntry entries = 1;
+}
+
+message RequestNextPruningPointPoolStateChunkMessage {
+}
+
+message DonePruningPointPoolStateChunksMessage {
+}

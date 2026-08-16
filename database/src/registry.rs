@@ -88,6 +88,11 @@ pub enum DatabaseStorePrefixes {
     NotePoolSmtRoot = 92,
     NotePoolDiffs = 93,
     VirtualNotePoolDiff = 94,
+    /// The pool state map positioned at the pruning point (FORK-PLAN P6.8) — the pool
+    /// analog of `PruningUtxoset`, advanced by the pruning processor and served to
+    /// IBD peers.
+    PruningNotePool = 95,
+    NotePoolSyncFlag = 96,
 
     // ---- Separator ----
     /// Reserved as a separator

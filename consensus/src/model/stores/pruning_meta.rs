@@ -9,14 +9,20 @@ use kaspa_database::registry::DatabaseStorePrefixes;
 use kaspa_hashes::Hash;
 use rocksdb::WriteBatch;
 
+use super::notepool::DbNotePoolStore;
 use super::utxo_set::DbUtxoSetStore;
 
 /// Used in order to group stores related to the pruning point utxoset under a single lock
 pub struct PruningMetaStores {
     pub utxo_set: DbUtxoSetStore,
+    /// The pool state map positioned at the pruning point (FORK-PLAN P6.8) — the pool
+    /// analog of `utxo_set`, advanced in lockstep with it (same loop, same batch, so
+    /// `utxoset_position` speaks for both) and served to IBD peers.
+    pub pool_state: DbNotePoolStore,
     utxoset_position_access: CachedDbItem<Hash>,
     utxoset_stable_flag_access: CachedDbItem<bool>,
     smt_stable_flag_access: CachedDbItem<bool>,
+    pool_state_stable_flag_access: CachedDbItem<bool>,
     body_missing_anticone_blocks: CachedDbItem<Vec<Hash>>,
 }
 
@@ -24,9 +30,13 @@ impl PruningMetaStores {
     pub fn new(db: Arc<DB>, utxoset_cache_policy: CachePolicy) -> Self {
         Self {
             utxo_set: DbUtxoSetStore::new(db.clone(), utxoset_cache_policy, DatabaseStorePrefixes::PruningUtxoset.into()),
+            // Accessed only during pruning advances and IBD serving — sequential scans
+            // and write-throughs, nothing worth caching.
+            pool_state: DbNotePoolStore::with_prefix(db.clone(), CachePolicy::Empty, DatabaseStorePrefixes::PruningNotePool.into()),
             utxoset_position_access: CachedDbItem::new(db.clone(), DatabaseStorePrefixes::PruningUtxosetPosition.into()),
             utxoset_stable_flag_access: CachedDbItem::new(db.clone(), DatabaseStorePrefixes::PruningUtxosetSyncFlag.into()),
             smt_stable_flag_access: CachedDbItem::new(db.clone(), DatabaseStorePrefixes::SmtSyncFlag.into()),
+            pool_state_stable_flag_access: CachedDbItem::new(db.clone(), DatabaseStorePrefixes::NotePoolSyncFlag.into()),
             body_missing_anticone_blocks: CachedDbItem::new(db.clone(), DatabaseStorePrefixes::BodyMissingAnticone.into()),
         }
     }
@@ -80,7 +90,20 @@ impl PruningMetaStores {
         self.smt_stable_flag_access.read().optional().unwrap().unwrap_or(true)
     }
 
+    pub fn set_pruning_pool_state_stable_flag(&mut self, batch: &mut WriteBatch, stable: bool) -> StoreResult<()> {
+        self.pool_state_stable_flag_access.write(BatchDbWriter::new(batch), &stable)
+    }
+
+    /// Default to true if missing — same rationale as the flags above, and additionally
+    /// pre-pool-activation nodes (where `sync_new_pool_state` is a no-op) never lower it.
+    pub fn pruning_pool_state_stable_flag(&self) -> bool {
+        self.pool_state_stable_flag_access.read().optional().unwrap().unwrap_or(true)
+    }
+
     pub fn is_in_transitional_ibd_state(&self) -> bool {
-        !self.is_anticone_fully_synced() || !self.pruning_utxoset_stable_flag() || !self.pruning_smt_stable_flag()
+        !self.is_anticone_fully_synced()
+            || !self.pruning_utxoset_stable_flag()
+            || !self.pruning_smt_stable_flag()
+            || !self.pruning_pool_state_stable_flag()
     }
 }

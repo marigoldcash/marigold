@@ -15,8 +15,8 @@ use kaspa_p2p_lib::{
     convert::{header::HeaderFormat, header::Versioned, model::trusted::TrustedDataEntry},
     make_message,
     pb::{
-        RequestNextHeadersMessage, RequestNextPruningPointAndItsAnticoneBlocksMessage, RequestNextPruningPointSmtChunkMessage,
-        RequestNextPruningPointUtxoSetChunkMessage, kaspad_message::Payload,
+        RequestNextHeadersMessage, RequestNextPruningPointAndItsAnticoneBlocksMessage, RequestNextPruningPointPoolStateChunkMessage,
+        RequestNextPruningPointSmtChunkMessage, RequestNextPruningPointUtxoSetChunkMessage, kaspad_message::Payload,
     },
 };
 use std::sync::Arc;
@@ -203,6 +203,81 @@ impl<'a, 'b> PruningPointUtxosetChunkStream<'a, 'b> {
                     .enqueue(make_message!(
                         Payload::RequestNextPruningPointUtxoSetChunk,
                         RequestNextPruningPointUtxoSetChunkMessage {}
+                    ))
+                    .await?;
+            }
+            Ok(Some(chunk))
+        } else {
+            res
+        }
+    }
+}
+
+/// A chunk of note-pool entries
+pub type PoolStateChunk = Vec<(Hash, kaspa_consensus_core::notepool::NewNote)>;
+
+/// Stream of pruning-point note-pool state chunks (FORK-PLAN P6.8) — a structural clone
+/// of [`PruningPointUtxosetChunkStream`]: Done-sentinel terminated, flow-controlled every
+/// [`IBD_BATCH_SIZE`] chunks. Verification is entirely the importer's job (rebuilt SMT
+/// root vs the pruning point header's `pool_commitment`), so the stream itself only
+/// shapes bytes.
+pub struct PruningPointPoolStateChunkStream<'a, 'b> {
+    router: &'a Router,
+    incoming_route: &'b mut IncomingRoute,
+    i: usize, // Chunk index
+    entry_count: usize,
+}
+
+impl<'a, 'b> PruningPointPoolStateChunkStream<'a, 'b> {
+    pub fn new(router: &'a Router, incoming_route: &'b mut IncomingRoute) -> Self {
+        Self { router, incoming_route, i: 0, entry_count: 0 }
+    }
+
+    pub fn entry_count(&self) -> usize {
+        self.entry_count
+    }
+
+    pub async fn next(&mut self) -> Result<Option<PoolStateChunk>, ProtocolError> {
+        let res: Result<Option<PoolStateChunk>, ProtocolError> = match timeout(DEFAULT_TIMEOUT, self.incoming_route.recv()).await {
+            Ok(op) => {
+                if let Some(msg) = op {
+                    match msg.payload {
+                        Some(Payload::PruningPointPoolStateChunk(payload)) => Ok(Some(payload.try_into()?)),
+                        Some(Payload::DonePruningPointPoolStateChunks(_)) => {
+                            info!("Finished receiving the note-pool state. Total notes: {}", self.entry_count);
+                            Ok(None)
+                        }
+                        Some(Payload::UnexpectedPruningPoint(_)) => {
+                            // See PruningPointUtxosetChunkStream: err and disconnect rather than
+                            // risk a syncer repeating this failure as an exploit
+                            Err(ProtocolError::ConsensusError(ConsensusError::UnexpectedPruningPoint))
+                        }
+                        _ => Err(ProtocolError::UnexpectedMessage(
+                            stringify!(
+                                Payload::PruningPointPoolStateChunk
+                                    | Payload::DonePruningPointPoolStateChunks
+                                    | Payload::UnexpectedPruningPoint
+                            ),
+                            msg.payload.as_ref().map(|v| v.into()),
+                        )),
+                    }
+                } else {
+                    Err(ProtocolError::ConnectionClosed)
+                }
+            }
+            Err(_) => Err(ProtocolError::Timeout(DEFAULT_TIMEOUT)),
+        };
+
+        // Request the next batch only if the stream is still live
+        if let Ok(Some(chunk)) = res {
+            self.i += 1;
+            self.entry_count += chunk.len();
+            if self.i.is_multiple_of(IBD_BATCH_SIZE) {
+                info!("Received {} note-pool state chunks so far, totaling in {} notes", self.i, self.entry_count);
+                self.router
+                    .enqueue(make_message!(
+                        Payload::RequestNextPruningPointPoolStateChunk,
+                        RequestNextPruningPointPoolStateChunkMessage {}
                     ))
                     .await?;
             }

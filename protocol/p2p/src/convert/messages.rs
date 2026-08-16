@@ -11,6 +11,7 @@ use crate::pb as protowire;
 use kaspa_consensus_core::{
     block::Block,
     header::Header,
+    notepool::{DenominationTag, NewNote},
     pruning::{PruningPointProof, PruningPointsList},
     tx::{TransactionId, TransactionOutpoint, UtxoEntry},
 };
@@ -175,6 +176,39 @@ impl TryFrom<protowire::RequestPruningPointSmtStateMessage> for Hash {
 
     fn try_from(msg: protowire::RequestPruningPointSmtStateMessage) -> Result<Self, Self::Error> {
         msg.pruning_point_hash.try_into_ex()
+    }
+}
+
+impl TryFrom<protowire::RequestPruningPointPoolStateMessage> for Hash {
+    type Error = ConversionError;
+
+    fn try_from(msg: protowire::RequestPruningPointPoolStateMessage) -> Result<Self, Self::Error> {
+        msg.pruning_point_hash.try_into_ex()
+    }
+}
+
+impl TryFrom<protowire::PoolStateEntry> for (Hash, NewNote) {
+    type Error = ConversionError;
+
+    fn try_from(entry: protowire::PoolStateEntry) -> Result<Self, Self::Error> {
+        let sn = Hash::from_bytes(entry.sn.as_slice().try_into()?);
+        let d = DenominationTag::try_from(u8::try_from(entry.denomination)?).map_err(|_| ConversionError::General)?;
+        let pk: [u8; 32] = entry.pk.as_slice().try_into()?;
+        Ok((sn, NewNote { d, pk }))
+    }
+}
+
+impl From<&(Hash, NewNote)> for protowire::PoolStateEntry {
+    fn from((sn, note): &(Hash, NewNote)) -> Self {
+        Self { sn: sn.as_bytes().to_vec(), denomination: note.d as u32, pk: note.pk.to_vec() }
+    }
+}
+
+impl TryFrom<protowire::PruningPointPoolStateChunkMessage> for Vec<(Hash, NewNote)> {
+    type Error = ConversionError;
+
+    fn try_from(msg: protowire::PruningPointPoolStateChunkMessage) -> Result<Self, Self::Error> {
+        msg.entries.into_iter().map(|e| e.try_into()).collect()
     }
 }
 

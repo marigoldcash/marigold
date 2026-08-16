@@ -104,6 +104,12 @@ pub enum PruningImportError {
 
     #[error("SMT store error: {0}")]
     SmtStoreError(String),
+
+    #[error("note-pool commitment mismatch: header commits {expected}, imported state computes {computed}")]
+    PoolRootMismatch { expected: Hash, computed: Hash },
+
+    #[error("note-pool state store error: {0}")]
+    PoolStoreError(String),
 }
 
 #[derive(Error, Debug, Clone)]

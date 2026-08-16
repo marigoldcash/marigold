@@ -1253,6 +1253,271 @@ async fn daemon_ibd_smt_state_sync_test() {
     kaspad2.shutdown();
 }
 
+// IBD test focused on `sync_new_pool_state` (FORK-PLAN P6.8): a fresh node syncing from a
+// pruning point whose note pool is non-empty must download the pool state, verify it
+// against the pruning point header's `pool_commitment`, and end up with a genuinely
+// usable pool — proven by (a) IBD completing at all (a root mismatch aborts it), (b) the
+// synced pruning point committing to a non-empty pool, (c) the syncee's OWN mempool
+// accepting a rotate that consumes notes which exist only in the imported state, and
+// (d) the syncee following post-IBD blocks (whose pool commitments extend the imported
+// state — with a wrong import every subsequent chain block would fail commitment
+// verification and virtual would never advance).
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn daemon_ibd_pool_state_sync_test() {
+    use kaspa_consensus_core::notepool::{
+        DenominationTag, FreshnessAnchor, MintOp, NewNote, PoolOp, SignedGroup, TransferOp, hashing as pool_hashing,
+    };
+    use kaspa_consensus_core::subnets::SUBNETWORK_ID_NOTE_POOL;
+
+    init_allocator_with_default_settings();
+    kaspa_core::log::try_init_logger("INFO,kaspa_testing_integration=trace");
+
+    let override_params_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/params/seqcommit_sync_test_params.json");
+    let params = load_override_params(&override_params_path);
+
+    let args = Args {
+        simnet: true,
+        unsafe_rpc: true,
+        enable_unsynced_mining: true,
+        disable_upnp: true,
+        utxoindex: true,
+        override_params_file: Some(override_params_path.to_string_lossy().to_string()),
+        ..Default::default()
+    };
+
+    let total_fd_limit = 10;
+    let mut kaspad1 = Daemon::new_random_with_args(args.clone(), total_fd_limit);
+    let rpc_client1 = kaspad1.start().await;
+
+    let (miner_sk, miner_pk) = secp256k1::generate_keypair(&mut thread_rng());
+    let miner_address =
+        Address::new(kaspad1.network.into(), kaspa_addresses::Version::PubKey, &miner_pk.x_only_public_key().0.serialize());
+    let miner_schnorr_key = secp256k1::Keypair::from_secret_key(secp256k1::SECP256K1, &miner_sk);
+    let miner_note_pk: [u8; 32] = miner_pk.x_only_public_key().0.serialize();
+
+    // A second key to rotate the notes to pre-IBD, and a third for the post-IBD rotate.
+    let holder_key = secp256k1::Keypair::new(secp256k1::SECP256K1, &mut thread_rng());
+    let holder_pk: [u8; 32] = holder_key.public_key().x_only_public_key().0.serialize();
+    let final_key = secp256k1::Keypair::new(secp256k1::SECP256K1, &mut thread_rng());
+    let final_pk: [u8; 32] = final_key.public_key().x_only_public_key().0.serialize();
+
+    // Signs a one-group rotate of `serials` producing `produced` (POOL-SPEC.md P5.2's
+    // signing hash; anchor 0 stays within the 36k freshness window at this test's scale).
+    let build_rotate = |signer: &secp256k1::Keypair, serials: Vec<Hash>, produced: Vec<NewNote>| -> Transaction {
+        let outputs_hash = pool_hashing::transparent_outputs_hash(&[]);
+        let msg_hash = pool_hashing::signing_hash(1, &serials, &produced, outputs_hash, 0);
+        let msg = secp256k1::Message::from_digest(msg_hash.into());
+        let signature = *signer.sign_schnorr(msg).as_ref();
+        let op = PoolOp::Transfer(TransferOp {
+            consumed: vec![SignedGroup { serials, signature }],
+            produced,
+            freshness: FreshnessAnchor { anchor_daa_score: 0 },
+        });
+        Transaction::new(TX_VERSION_TOCCATA, vec![], vec![], 0, SUBNETWORK_ID_NOTE_POOL, 0, op.encode_payload())
+    };
+
+    // Phase 1: mine enough blocks for a mature coinbase output.
+    let coinbase_maturity = params.coinbase_maturity();
+    let initial_blocks = (coinbase_maturity as usize) + 20;
+    for _ in 0..initial_blocks {
+        let template = rpc_client1.get_block_template(miner_address.clone(), vec![]).await.unwrap();
+        rpc_client1.submit_block(template.block, false).await.unwrap();
+    }
+
+    // Phase 2: mint three notes (1 + 0.01 + 0.01 MAGLD, all to the miner key) from a real
+    // coinbase input (P6.6's value binding), through the real mempool (P6.7's entry path).
+    let utxos = fetch_spendable_utxos(&rpc_client1, miner_address.clone(), coinbase_maturity).await;
+    let (outpoint, entry) = utxos.first().expect("mature utxo").clone();
+
+    let mint_notes = vec![
+        NewNote { d: DenominationTag::D1, pk: miner_note_pk },
+        NewNote { d: DenominationTag::D0_01, pk: miner_note_pk },
+        NewNote { d: DenominationTag::D0_01, pk: miner_note_pk },
+    ];
+    let notes_value: u64 = mint_notes.iter().map(|n| n.d.petals()).sum();
+    // Generous relay-fee estimate: 1-in-1-out standard shape plus the mint payload bytes.
+    let mint_fee = 2 * fee::calc_for_plain_standard_tx_with_extra_serialized_bytes(1, 1, 200);
+    assert!(entry.amount > notes_value + mint_fee, "coinbase utxo too small to fund the mint");
+    let change = entry.amount - notes_value - mint_fee;
+    let unsigned_mint = Transaction::new(
+        TX_VERSION_TOCCATA,
+        vec![TransactionInput::new(outpoint, vec![], 0, 1)],
+        vec![TransactionOutput { value: change, script_public_key: pay_to_address_script(&miner_address), covenant: None }],
+        0,
+        SUBNETWORK_ID_NOTE_POOL,
+        0,
+        PoolOp::Mint(MintOp { new_notes: mint_notes }).encode_payload(),
+    );
+    let mint = sign(MutableTransaction::with_entries(unsigned_mint, vec![entry]), miner_schnorr_key).tx;
+    let mint_id = mint.id();
+    let mint_serials: Vec<Hash> = (0..3).map(|i| pool_hashing::serial_hash(&mint_id, i)).collect();
+    rpc_client1.submit_transaction((&mint).into(), false).await.unwrap();
+
+    // Mine until the mint clears the mempool (i.e. was included and accepted).
+    let mint_check = rpc_client1.clone();
+    let mint_check_id = mint_id;
+    for _ in 0..10 {
+        let template = rpc_client1.get_block_template(miner_address.clone(), vec![]).await.unwrap();
+        rpc_client1.submit_block(template.block, false).await.unwrap();
+    }
+    wait_for(
+        50,
+        40,
+        move || {
+            let client = mint_check.clone();
+            Box::pin(async move { client.get_mempool_entry(mint_check_id.into(), false, false).await.is_err() })
+        },
+        "mint did not clear the syncer mempool",
+    )
+    .await;
+
+    // Rotate all three notes to the holder key: consumed 1.02, produced 1.01, fee 0.01.
+    // Serial-consuming ops can only enter the mempool once their producing op is on chain
+    // (P6.7's documented no-unconfirmed-chaining scope), hence the burial above.
+    let rotate1_produced =
+        vec![NewNote { d: DenominationTag::D1, pk: holder_pk }, NewNote { d: DenominationTag::D0_01, pk: holder_pk }];
+    let rotate1 = build_rotate(&miner_schnorr_key, mint_serials.clone(), rotate1_produced);
+    let rotate1_id = rotate1.id();
+    let holder_serials: Vec<Hash> = (0..2).map(|i| pool_hashing::serial_hash(&rotate1_id, i)).collect();
+    rpc_client1.submit_transaction((&rotate1).into(), false).await.unwrap();
+
+    let rotate1_check = rpc_client1.clone();
+    for _ in 0..10 {
+        let template = rpc_client1.get_block_template(miner_address.clone(), vec![]).await.unwrap();
+        rpc_client1.submit_block(template.block, false).await.unwrap();
+    }
+    wait_for(
+        50,
+        40,
+        move || {
+            let client = rotate1_check.clone();
+            Box::pin(async move { client.get_mempool_entry(rotate1_id.into(), false, false).await.is_err() })
+        },
+        "rotate did not clear the syncer mempool",
+    )
+    .await;
+
+    // Phase 3: mine past the pruning depth so the pruning point advances beyond the pool
+    // ops; the pool state at the pruning point is then exactly the two holder-key notes.
+    let finality_depth = params.finality_depth();
+    let pruning_depth = params.pruning_depth();
+    let blocks_after_txs = pruning_depth as usize + 60;
+    for _ in 0..blocks_after_txs {
+        let template = rpc_client1.get_block_template(miner_address.clone(), vec![]).await.unwrap();
+        rpc_client1.submit_block(template.block, false).await.unwrap();
+    }
+
+    let mut dag_info = rpc_client1.get_block_dag_info().await.unwrap();
+    let mut pruning_point_blue_score = rpc_client1.get_block(dag_info.pruning_point_hash, false).await.unwrap().header.blue_score;
+    let mut extra_blocks = 0usize;
+    let extra_blocks_limit = finality_depth as usize + 100;
+    while (dag_info.pruning_point_hash == SIMNET_GENESIS.hash || pruning_point_blue_score <= finality_depth)
+        && extra_blocks < extra_blocks_limit
+    {
+        let template = rpc_client1.get_block_template(miner_address.clone(), vec![]).await.unwrap();
+        rpc_client1.submit_block(template.block, false).await.unwrap();
+        extra_blocks += 1;
+        dag_info = rpc_client1.get_block_dag_info().await.unwrap();
+        pruning_point_blue_score = rpc_client1.get_block(dag_info.pruning_point_hash, false).await.unwrap().header.blue_score;
+    }
+    assert_ne!(dag_info.pruning_point_hash, SIMNET_GENESIS.hash, "syncer pruning point did not advance off genesis");
+
+    let target_daa_score = rpc_client1.get_server_info().await.unwrap().virtual_daa_score;
+    let target_pruning_point = dag_info.pruning_point_hash;
+
+    // The pruning point must commit to a non-empty pool, or this test would pass vacuously.
+    let genesis_pool_commitment = rpc_client1.get_block(SIMNET_GENESIS.hash, false).await.unwrap().header.pool_commitment;
+    let pp_pool_commitment = rpc_client1.get_block(target_pruning_point, false).await.unwrap().header.pool_commitment;
+    assert_ne!(
+        pp_pool_commitment, genesis_pool_commitment,
+        "pruning point pool commitment is the empty root — the pool ops did not make it below the pruning point"
+    );
+
+    // Phase 4: bring up the syncee and connect it to the syncer.
+    let mut kaspad2 = Daemon::new_random_with_args(args, total_fd_limit);
+    let rpc_client2 = kaspad2.start().await;
+
+    rpc_client2.add_peer(format!("127.0.0.1:{}", kaspad1.p2p_port).try_into().unwrap(), true).await.unwrap();
+    let check_client = rpc_client2.clone();
+    wait_for(
+        50,
+        40,
+        move || {
+            let client = check_client.clone();
+            Box::pin(async move { client.get_connected_peer_info().await.unwrap().peer_info.len() == 1 })
+        },
+        "the nodes did not connect to each other",
+    )
+    .await;
+
+    // Phase 5: wait for IBD (including `sync_new_pool_state`) to complete. A tampered or
+    // wrong pool download would fail the import's root check and stall this wait.
+    let sync_check = rpc_client2.clone();
+    wait_for(
+        100,
+        600,
+        move || {
+            let client = sync_check.clone();
+            Box::pin(async move {
+                let server_info = client.get_server_info().await.unwrap();
+                if server_info.virtual_daa_score < target_daa_score {
+                    return false;
+                }
+                client.get_block_dag_info().await.unwrap().pruning_point_hash == target_pruning_point
+            })
+        },
+        "syncee did not complete pool-state-era IBD within timeout (suspected sync_new_pool_state stall)",
+    )
+    .await;
+
+    // The syncee serves the same pruning point header, committing to the same non-empty pool.
+    let syncee_pp_commitment = rpc_client2.get_block(target_pruning_point, false).await.unwrap().header.pool_commitment;
+    assert_eq!(syncee_pp_commitment, pp_pool_commitment);
+
+    // Phase 6a: the sharpest import proof — the syncee's own mempool validates a rotate
+    // consuming notes that exist ONLY in the pool state it just imported.
+    let rotate2 = build_rotate(&holder_key, holder_serials.clone(), vec![NewNote { d: DenominationTag::D1, pk: final_pk }]);
+    let rotate2_id = rotate2.id();
+    rpc_client2.submit_transaction((&rotate2).into(), false).await.unwrap();
+    rpc_client2.get_mempool_entry(rotate2_id.into(), false, false).await.expect(
+        "syncee mempool rejected a rotate of imported notes — the imported pool state is not serving mempool validation",
+    );
+
+    // Phase 6b: mine post-IBD blocks on the syncer and assert the syncee follows — every
+    // new chain block's pool commitment now builds on the imported state. (The rotate may
+    // also reach the syncer via tx relay and land on-chain; not required for this assert.)
+    let post_ibd_blocks = finality_depth as usize + 30;
+    for _ in 0..post_ibd_blocks {
+        let template = rpc_client1.get_block_template(miner_address.clone(), vec![]).await.unwrap();
+        rpc_client1.submit_block(template.block, false).await.unwrap();
+    }
+
+    let post_ibd_target_score = rpc_client1.get_server_info().await.unwrap().virtual_daa_score;
+    let post_ibd_target_pp = rpc_client1.get_block_dag_info().await.unwrap().pruning_point_hash;
+    let post_ibd_check = rpc_client2.clone();
+    wait_for(
+        100,
+        600,
+        move || {
+            let client = post_ibd_check.clone();
+            Box::pin(async move {
+                let server_info = client.get_server_info().await.unwrap();
+                if server_info.virtual_daa_score < post_ibd_target_score {
+                    return false;
+                }
+                client.get_block_dag_info().await.unwrap().pruning_point_hash == post_ibd_target_pp
+            })
+        },
+        "syncee did not accept post-IBD blocks on top of the imported pool state",
+    )
+    .await;
+
+    rpc_client1.disconnect().await.unwrap();
+    rpc_client2.disconnect().await.unwrap();
+    kaspad1.shutdown();
+    kaspad2.shutdown();
+}
+
 // The following test runtime parameters are required for a graceful shutdown of the gRPC server
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn daemon_cleaning_test() {

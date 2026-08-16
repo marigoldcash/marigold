@@ -10,6 +10,7 @@ use crate::{
         stores::{
             ghostdag::{CompactGhostdagData, GhostdagStoreReader},
             headers::HeaderStoreReader,
+            notepool_diffs::NotePoolDiffsStoreReader,
             past_pruning_points::PastPruningPointsStoreReader,
             pruning::PruningStoreReader,
             pruning_samples::PruningSamplesStoreReader,
@@ -265,8 +266,12 @@ impl PruningProcessor {
             let mut pruning_meta_write = RwLockUpgradableReadGuard::upgrade(pruning_meta_read);
 
             let utxo_diff = self.utxo_diffs_store.get(chain_block).expect("chain blocks have utxo state");
+            // The pruning-position pool state advances in the same batch as the utxoset
+            // (FORK-PLAN P6.8) so `utxoset_position` remains a single truth for both.
+            let pool_diff = self.notepool_diffs_store.get(chain_block).expect("chain blocks have pool state");
             let mut batch = WriteBatch::default();
             pruning_meta_write.utxo_set.write_diff_batch(&mut batch, utxo_diff.as_ref()).unwrap();
+            pruning_meta_write.pool_state.write_diff_batch(&mut batch, pool_diff.as_ref()).unwrap();
             pruning_meta_write.set_utxoset_position(&mut batch, chain_block).unwrap();
             self.db.write(batch).unwrap();
             drop(pruning_meta_write);
@@ -275,6 +280,7 @@ impl PruningProcessor {
         if self.config.enable_sanity_checks {
             info!("Performing a sanity check that the new UTXO set has the expected UTXO commitment");
             self.assert_utxo_commitment(new_pruning_point);
+            self.assert_pool_commitment(new_pruning_point);
         }
         true
     }
@@ -289,6 +295,31 @@ impl PruningProcessor {
         }
         assert_eq!(multiset.finalize(), commitment, "Updated pruning point utxo set does not match the header utxo commitment");
         info!("Pruning point UTXO commitment was verified correctly (sanity test)");
+    }
+
+    /// The pool analog of [`Self::assert_utxo_commitment`] (FORK-PLAN P6.8): the advanced
+    /// pruning-position pool state must hash to the pruning point header's `pool_commitment`.
+    fn assert_pool_commitment(&self, pruning_point: Hash) {
+        use kaspa_consensus_core::notepool::leaf_hash;
+        use kaspa_hashes::NotePoolSmt;
+        use kaspa_smt::SmtHasher;
+        use kaspa_smt::store::{BTreeSmtStore, LeafUpdate, SortedLeafUpdates};
+        use kaspa_smt::tree::compute_root_update;
+
+        info!("Verifying the new pruning point note-pool commitment (sanity test)");
+        let commitment = self.headers_store.get_header(pruning_point).unwrap().pool_commitment;
+        let pruning_meta_read = self.pruning_meta_stores.read();
+        let leaf_updates = SortedLeafUpdates::from_unsorted(
+            pruning_meta_read
+                .pool_state
+                .iterator()
+                .map(|r| r.unwrap())
+                .map(|(sn, note)| LeafUpdate { key: sn, leaf_hash: leaf_hash(note.d, &note.pk) }),
+        );
+        let empty_store = BTreeSmtStore::new();
+        let (root, _) = compute_root_update::<NotePoolSmt, _>(&empty_store, NotePoolSmt::empty_root(), leaf_updates).unwrap();
+        assert_eq!(root, commitment, "Updated pruning point note-pool state does not match the header pool commitment");
+        info!("Pruning point note-pool commitment was verified correctly (sanity test)");
     }
 
     fn prune(&self, new_pruning_point: Hash, retention_period_root: Hash) {
@@ -485,6 +516,7 @@ impl PruningProcessor {
                 // Prune data related to block bodies and UTXO state
                 self.utxo_multisets_store.delete_batch(&mut batch, current).unwrap();
                 self.utxo_diffs_store.delete_batch(&mut batch, current).unwrap();
+                self.notepool_diffs_store.delete_batch(&mut batch, current).unwrap();
                 self.acceptance_data_store.delete_batch(&mut batch, current).unwrap();
                 self.block_transactions_store.delete_batch(&mut batch, current).unwrap();
                 self.smt_metadata_store.delete_batch(&mut batch, current).unwrap();

@@ -1703,10 +1703,10 @@ impl VirtualStateProcessor {
         // Validate transactions of the pruning point itself.
         // Mirrors the same contextual info used by validate_block_template_transaction and verify_expected_utxo_state.
         let new_pruning_point_transactions = self.block_transactions_store.get(new_pruning_point).unwrap();
-        // Pool state is NOT imported at the pruning point yet (FORK-PLAN P6.8's job) — the
-        // pool view here is the empty local one, so a pruning point whose own txs contain
-        // pool ops would fail validation until P6.8 lands. Acceptable pre-P6.8: no pool
-        // ops exist on any network this code syncs from before then.
+        // `virtual_read.pool_state` holds the pruning point's imported pool state at this
+        // point: the IBD flow runs `sync_new_pool_state` (P6.8) before `sync_new_utxo_set`
+        // in every branch, so a pruning point whose own txs contain pool ops validates
+        // against exactly the state its header committed to.
         let validated_transactions = self.validate_transactions_in_parallel(
             &new_pruning_point_transactions,
             &virtual_read.utxo_set,

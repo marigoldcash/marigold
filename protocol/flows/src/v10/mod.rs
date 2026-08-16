@@ -13,7 +13,9 @@ use crate::v7::{
     txrelay::flow::{RelayTransactionsFlow, RequestTransactionsFlow},
 };
 use crate::v8::request_block_bodies::HandleBlockBodyRequests;
+pub(crate) mod request_pruning_point_pool_state;
 pub(crate) mod request_pruning_point_smt_state;
+use request_pruning_point_pool_state::RequestPruningPointPoolStateFlow;
 use request_pruning_point_smt_state::RequestPruningPointSmtStateFlow;
 
 use crate::{flow_context::FlowContext, flow_trait::Flow, ibd::IbdFlow};
@@ -47,6 +49,8 @@ pub fn register(ctx: FlowContext, router: Arc<Router>, protocol_version: u32) ->
                 KaspadMessagePayloadType::DonePruningPointUtxoSetChunks,
                 KaspadMessagePayloadType::SmtMetadata,
                 KaspadMessagePayloadType::SmtLaneChunk,
+                KaspadMessagePayloadType::PruningPointPoolStateChunk,
+                KaspadMessagePayloadType::DonePruningPointPoolStateChunks,
             ]),
             relay_receiver,
             body_only_ibd_permitted,
@@ -100,6 +104,14 @@ pub fn register(ctx: FlowContext, router: Arc<Router>, protocol_version: u32) ->
             router.subscribe(vec![
                 KaspadMessagePayloadType::RequestPruningPointSmtState,
                 KaspadMessagePayloadType::RequestNextPruningPointSmtChunk,
+            ]),
+        )),
+        Box::new(RequestPruningPointPoolStateFlow::new(
+            ctx.clone(),
+            router.clone(),
+            router.subscribe(vec![
+                KaspadMessagePayloadType::RequestPruningPointPoolState,
+                KaspadMessagePayloadType::RequestNextPruningPointPoolStateChunk,
             ]),
         )),
         Box::new(HandleIbdBlockRequests::new(

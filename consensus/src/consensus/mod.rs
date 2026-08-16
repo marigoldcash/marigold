@@ -115,6 +115,7 @@ use std::{
 use tokio::sync::oneshot;
 
 use crate::model::stores::selected_chain::SelectedChainStoreReader;
+use crate::model::stores::virtual_state::VirtualStores;
 
 pub struct Consensus {
     // DB
@@ -1083,6 +1084,103 @@ impl ConsensusApi for Consensus {
         Ok(utxos)
     }
 
+    fn get_pruning_point_pool_entries(
+        &self,
+        expected_pruning_point: Hash,
+        from_sn: Option<Hash>,
+        chunk_size: usize,
+        skip_first: bool,
+    ) -> ConsensusResult<Vec<(Hash, kaspa_consensus_core::notepool::NewNote)>> {
+        // Mirrors `get_pruning_point_utxos` exactly, including the re-check of the
+        // pruning point after the read — see the comments there.
+        if self.pruning_point_store.read().pruning_point().unwrap() != expected_pruning_point {
+            return Err(ConsensusError::UnexpectedPruningPoint);
+        }
+        let pruning_meta_read = self.pruning_meta_stores.read();
+        let entries = pruning_meta_read.pool_state.seek_iterator(from_sn, chunk_size, skip_first).map(|item| item.unwrap()).collect();
+        drop(pruning_meta_read);
+
+        if self.pruning_point_store.read().pruning_point().unwrap() != expected_pruning_point {
+            return Err(ConsensusError::UnexpectedPruningPoint);
+        }
+
+        Ok(entries)
+    }
+
+    fn append_imported_pruning_point_pool_entries(&self, chunk: &[(Hash, kaspa_consensus_core::notepool::NewNote)]) {
+        let mut pruning_meta_write = self.pruning_meta_stores.write();
+        pruning_meta_write.pool_state.write_many(chunk).unwrap();
+    }
+
+    fn import_pruning_point_pool_state(&self, new_pruning_point: Hash, entry_count: u64) -> PruningImportResult<()> {
+        use kaspa_consensus_core::errors::pruning::PruningImportError;
+        use kaspa_consensus_core::notepool::{PoolDiff, leaf_hash};
+
+        info!("Importing the note-pool state of the pruning point {} ({} notes)", new_pruning_point, entry_count);
+        let expected_root = self.headers_store.get_header(new_pruning_point).unwrap().pool_commitment;
+
+        let pruning_meta_read = self.pruning_meta_stores.read();
+        let mut virtual_write = self.virtual_stores.write();
+
+        // The staged flat map becomes virtual's pool state, and the SMT is rebuilt from
+        // it in the same single sorted pass (RocksDB iteration order == ascending sn,
+        // which is exactly what `rebuild_from_sorted_leaves` requires). Destructure to
+        // split the borrows across the two stores.
+        let VirtualStores { pool_state, pool_smt, pool_diff, .. } = &mut *virtual_write;
+        pool_state.clear().map_err(|e| PruningImportError::PoolStoreError(e.to_string()))?;
+        pool_smt.clear().map_err(|e| PruningImportError::PoolStoreError(e.to_string()))?;
+        // Virtual is about to be recomputed from the new pruning point's POV
+        // (`import_pruning_point_utxo_set` runs right after this in the IBD flow), so any
+        // stored virtual-vs-sink pool diff from the previous state is stale.
+        pool_diff
+            .write(kaspa_database::prelude::DirectDbWriter::new(&self.db), &PoolDiff::default())
+            .map_err(|e| PruningImportError::PoolStoreError(e.to_string()))?;
+
+        const COPY_CHUNK: usize = 1024;
+        let mut copy_buf: Vec<(Hash, kaspa_consensus_core::notepool::NewNote)> = Vec::with_capacity(COPY_CHUNK);
+        let mut copy_err: Option<PruningImportError> = None;
+        {
+            let pool_state_ref = &mut *pool_state;
+            let copy_buf = &mut copy_buf;
+            let copy_err = &mut copy_err;
+            let leaves = pruning_meta_read.pool_state.iterator().map(|res| {
+                let (sn, note) = res.expect("staged pool state must be readable");
+                copy_buf.push((sn, note));
+                if copy_buf.len() >= COPY_CHUNK
+                    && copy_err.is_none()
+                    && let Err(e) = pool_state_ref.write_many(copy_buf)
+                {
+                    *copy_err = Some(PruningImportError::PoolStoreError(e.to_string()));
+                }
+                if copy_buf.len() >= COPY_CHUNK {
+                    copy_buf.clear();
+                }
+                (sn, leaf_hash(note.d, &note.pk))
+            });
+
+            let computed_root = pool_smt
+                .rebuild_from_sorted_leaves(entry_count, leaves)
+                .map_err(|e| PruningImportError::PoolStoreError(e.to_string()))?;
+
+            if computed_root != expected_root {
+                // Leave nothing half-imported behind: the stable flag is still down, but
+                // clearing eagerly means no code path can ever observe the forged tree.
+                pool_state_ref.clear().map_err(|e| PruningImportError::PoolStoreError(e.to_string()))?;
+                pool_smt.clear().map_err(|e| PruningImportError::PoolStoreError(e.to_string()))?;
+                return Err(PruningImportError::PoolRootMismatch { expected: expected_root, computed: computed_root });
+            }
+        }
+        if let Some(e) = copy_err {
+            return Err(e);
+        }
+        if !copy_buf.is_empty() {
+            pool_state.write_many(&copy_buf).map_err(|e| PruningImportError::PoolStoreError(e.to_string()))?;
+        }
+
+        info!("Imported note-pool state for pruning point {}: {} notes, root {}", new_pruning_point, entry_count, expected_root);
+        Ok(())
+    }
+
     fn modify_coinbase_payload(&self, payload: Vec<u8>, miner_data: &MinerData) -> CoinbaseResult<Vec<u8>> {
         self.services.coinbase_manager.modify_coinbase_payload(payload, miner_data)
     }
@@ -1669,6 +1767,28 @@ impl ConsensusApi for Consensus {
 
     fn is_pruning_smt_stable(&self) -> bool {
         self.pruning_meta_stores.read().pruning_smt_stable_flag()
+    }
+
+    fn clear_pruning_pool_state(&self) {
+        let mut pruning_meta_write = self.pruning_meta_stores.write();
+        let mut batch = rocksdb::WriteBatch::default();
+        pruning_meta_write.set_pruning_pool_state_stable_flag(&mut batch, false).unwrap();
+        self.db.write(batch).unwrap();
+        pruning_meta_write.pool_state.clear().unwrap();
+        drop(pruning_meta_write);
+        // The virtual pool stores are rebuilt from scratch by `import_pruning_point_pool_state`
+        // (which clears them itself); nothing further to clear here.
+    }
+
+    fn set_pruning_pool_state_stable_flag(&self, val: bool) {
+        let mut pruning_meta_write = self.pruning_meta_stores.write();
+        let mut batch = rocksdb::WriteBatch::default();
+        pruning_meta_write.set_pruning_pool_state_stable_flag(&mut batch, val).unwrap();
+        self.db.write(batch).unwrap();
+    }
+
+    fn is_pruning_pool_state_stable(&self) -> bool {
+        self.pruning_meta_stores.read().pruning_pool_state_stable_flag()
     }
 
     /// The usual flow consists of the pruning point naturally updating during pruning, and hence maintains consistency by default

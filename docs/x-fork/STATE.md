@@ -4,7 +4,7 @@ Snapshot of everything decided and built so far, so any fresh coding session on 
 machine can continue from the repo alone. Read this together with [FORK-PLAN.md](../../FORK-PLAN.md).
 Update this file whenever off-repo state changes (domains, accounts, infra).
 
-Last updated: 2026-08-16 (P6.7 complete — pool ops live in the mempool; next step P6.8)
+Last updated: 2026-08-16 (P6.8 complete — pool state syncs over IBD; next step P6.9)
 
 ## What this project is
 
@@ -79,12 +79,51 @@ substitute for it.
 
 ## Where execution stands
 
-- **Next step: P6.8 — Pool state sync (IBD).** bite-size (not HARD). New
-  nodes syncing from a pruning point need to download the pool state and verify it
-  against the committed root — mirror `request_pruning_point_utxo_set.rs`'s
-  chunked, hash-verified download (`crypto/smt`'s streaming module exists for
-  exactly this); add the messages to the current protocol version's flow
-  registration.
+- **Next step: P6.9 — RPC + notifications.** bite-size (not HARD). Add RPC
+  methods (get note(s) by serial, pool stats per denomination) and a
+  `NotesChanged`-style subscription through the notify system, scoped to watched
+  serials/pks — what P7's wallet poll-free receive/sweep flows depend on. Wire
+  through rpc/core, grpc proto, and wrpc. (`DenominationTag: TryFrom<u8>` already
+  exists from P6.8 for integer-carrying wire formats.)
+- **P6.8 is done (done under a stronger model — the prior session scoped it and
+  correctly judged it HARD-caliber despite the plan not flagging it).** New nodes
+  syncing from a pruning point download the pool state, verify it against the
+  header-committed root, and end with a genuinely usable pool.
+  **The real design problem, absent from the plan text**: the server must serve the
+  pool state *at the pruning point*, but only virtual's pool state existed (P6.4).
+  Solved exactly the way UTXO solves it (confirmed by reading, not analogy): a new
+  pruning-position pool store in `PruningMetaStores` (prefix 95), advanced by the
+  pruning processor from the per-chain-block `notepool_diffs` store **in the same
+  WriteBatch** as the pruning utxoset, so the existing `utxoset_position` recovery
+  marker and crash semantics cover both. New pool stable flag (prefix 96) folded
+  into `is_in_transitional_ibd_state`.
+  **Deliberate deviation from both plan hints, documented in NOTES.md**: wire shape
+  mirrors the UTXO flow (4 messages, Done-sentinel, no metadata, no inline proofs
+  — the pool root is the header's `pool_commitment` verbatim, already PoW-validated
+  locally, unlike seq-commit's folded lanes_root; inline proofs would force every
+  node to maintain a second pruning-positioned SMT forever). Verification uses
+  `crypto/smt`'s generic `StreamingSmtBuilder` directly (new
+  `DbNotePoolSmtStore::rebuild_from_sorted_leaves` + a small pool `MergeSink`) —
+  NOT `consensus/smt-store`'s `streaming_import`, which is hard-coded to
+  seq-commit's versioned multi-lane apparatus. O(n) single pass; RocksDB's native
+  key order is exactly the sorted input the builder needs.
+  Import populates virtual's pool map + SMT in the same pass, resets the stored
+  virtual pool diff, and runs BEFORE the utxoset sync in all three IBD branches
+  (the utxo import validates the pruning point's own pool ops against virtual's
+  pool state) — closing P6.4's "pool state empty at pruning import" caveat, which
+  was a genuine silent-wrongness gap (empty pool + non-empty commitment, nothing
+  comparing them).
+  **Two real bugs found by reading actual code**: pruned blocks' `notepool_diffs`
+  were never deleted (permanent disk leak since P6.4 — fixed); and the above import
+  gap. Pool commitment added to the pruning processor's sanity checks
+  (`assert_pool_commitment`).
+  ✅ *Verify*: new `daemon_ibd_pool_state_sync_test` (two real daemons): mint →
+  rotate → bury past pruning depth → fresh node IBDs → pruning point commits a
+  non-empty pool, **the syncee's own mempool accepts a rotate consuming notes that
+  exist only in the imported state**, and the syncee follows post-IBD blocks.
+  Passed first run, full-log confirmed. Tamper rejection pinned by store unit
+  tests (`streaming_rebuild_detects_tampered_leaf`, rebuild-vs-incremental
+  agreement). Full workspace + integration suites green; workspace build clean.
 - **P6.7 is done.** Pool ops (Mint/Transfer/Redeem) are live in the real mempool —
   before this step, a `PoolOp` transaction could only ever enter the system by
   being handed straight to a test block builder; no real user could submit one to

@@ -215,8 +215,10 @@ impl VirtualStores {
         Self {
             state: DbVirtualStateStore::new(db.clone(), lkg_virtual_state),
             utxo_set: DbUtxoSetStore::new(db.clone(), utxoset_cache_policy, DatabaseStorePrefixes::VirtualUtxoset.into()),
-            // Modest fixed cache counts: pool entries are 65 bytes each, and P6.4-era
-            // traffic is test/devnet scale. Revisit sizing alongside P6.8 (pool IBD).
+            // Modest fixed cache counts: pool entries are 65 bytes each. P6.8's IBD
+            // import writes through these same caches, whose count caps bound memory
+            // during a bulk rebuild — kept as-is; revisit only if mainnet-scale pool
+            // sizes make the hit rate matter (P8.3 calibration territory).
             pool_state: DbNotePoolStore::new(db.clone(), CachePolicy::Count(100_000)),
             pool_smt: DbNotePoolSmtStore::new(db.clone(), CachePolicy::Count(100_000)),
             pool_diff: CachedDbItem::new(db, DatabaseStorePrefixes::VirtualNotePoolDiff.into()),

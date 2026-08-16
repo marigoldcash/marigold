@@ -67,7 +67,13 @@ impl Flow for IbdFlow {
 }
 
 pub enum IbdType {
-    Sync { highest_known_syncer_chain_hash: Hash, is_utxo_stable: bool, is_smt_stable: bool, is_pp_anticone_synced: bool },
+    Sync {
+        highest_known_syncer_chain_hash: Hash,
+        is_utxo_stable: bool,
+        is_smt_stable: bool,
+        is_pool_stable: bool,
+        is_pp_anticone_synced: bool,
+    },
     DownloadHeadersProof,
     PruningCatchUp { highest_known_syncer_chain_hash: Hash },
 }
@@ -122,7 +128,7 @@ impl IbdFlow {
             )
             .await?;
         match ibd_type {
-            IbdType::Sync { highest_known_syncer_chain_hash, is_utxo_stable, is_smt_stable, is_pp_anticone_synced } => {
+            IbdType::Sync { highest_known_syncer_chain_hash, is_utxo_stable, is_smt_stable, is_pool_stable, is_pp_anticone_synced } => {
                 let pruning_point = session.async_pruning_point().await;
 
                 info!("syncing ahead from current pruning point");
@@ -152,6 +158,17 @@ impl IbdFlow {
                     // TODO(post-toccata): In pre-Toccata nodes there are some edge cases where the SMT stable flag is wrongly set to false at this point.
                     // Therefore, the below line can be removed post-Toccata.
                     session.async_set_pruning_smt_stable().await;
+                }
+
+                // Note-pool state syncs before the utxoset for the same reason SMT does:
+                // `sync_new_utxo_set`'s import validates the pruning point's own txs (pool
+                // ops included) against virtual's pool state (FORK-PLAN P6.8).
+                if !is_pool_stable {
+                    info!(
+                        "note-pool state corresponding to the current pruning point {} is incomplete, attempting to download it from {}",
+                        pruning_point, self.router
+                    );
+                    self.sync_new_pool_state(&session, pruning_point).await?;
                 }
 
                 if !is_utxo_stable
@@ -191,6 +208,7 @@ impl IbdFlow {
                         // Note that the new pruning point's anticone need not be downloaded separately as in other IBD types
                         // as it was just downloaded as part of the headers proof.
                         self.sync_new_smt_state(&session, negotiation_output.syncer_pruning_point).await?;
+                        self.sync_new_pool_state(&session, negotiation_output.syncer_pruning_point).await?;
                         self.sync_new_utxo_set(&session, negotiation_output.syncer_pruning_point).await?;
                     }
                     Err(e) => {
@@ -207,6 +225,7 @@ impl IbdFlow {
                         info!("header stage of pruning catchup from peer {} completed", self.router);
                         self.sync_missing_trusted_bodies(&session).await?;
                         self.sync_new_smt_state(&session, negotiation_output.syncer_pruning_point).await?;
+                        self.sync_new_pool_state(&session, negotiation_output.syncer_pruning_point).await?;
                         self.sync_new_utxo_set(&session, negotiation_output.syncer_pruning_point).await?;
                         // Note that pruning of old data will only occur once virtual has caught up sufficiently far
                     }
@@ -290,14 +309,28 @@ impl IbdFlow {
                 } else {
                     true
                 };
+                // Same pre-activation reasoning for the note-pool state flag (FORK-PLAN P6.8).
+                let is_pool_stable = if self.ctx.config.pool_activation.is_active(pp_header.daa_score) {
+                    consensus.async_is_pruning_pool_state_stable().await
+                } else {
+                    true
+                };
 
-                return match (syncer_skew, is_utxo_stable && is_smt_stable && is_pp_anticone_synced) {
-                    (SyncerSkew::Aligned, _) => {
-                        Ok(IbdType::Sync { highest_known_syncer_chain_hash, is_utxo_stable, is_smt_stable, is_pp_anticone_synced })
-                    }
-                    (SyncerSkew::Lagging, true) => {
-                        Ok(IbdType::Sync { highest_known_syncer_chain_hash, is_utxo_stable, is_smt_stable, is_pp_anticone_synced })
-                    }
+                return match (syncer_skew, is_utxo_stable && is_smt_stable && is_pool_stable && is_pp_anticone_synced) {
+                    (SyncerSkew::Aligned, _) => Ok(IbdType::Sync {
+                        highest_known_syncer_chain_hash,
+                        is_utxo_stable,
+                        is_smt_stable,
+                        is_pool_stable,
+                        is_pp_anticone_synced,
+                    }),
+                    (SyncerSkew::Lagging, true) => Ok(IbdType::Sync {
+                        highest_known_syncer_chain_hash,
+                        is_utxo_stable,
+                        is_smt_stable,
+                        is_pool_stable,
+                        is_pp_anticone_synced,
+                    }),
                     (SyncerSkew::Lagging, false) => Err(ProtocolError::Other(
                         "Local node is in a transitional state requiring external data to stabilize, but the syncer lags behind and is unable to provide said data",
                     )),
@@ -305,7 +338,13 @@ impl IbdFlow {
                         if consensus.async_get_block_status(syncer_pruning_point).await.is_some_and(|b| b.has_block_body()) {
                             // While a leading syncer skew often indicates the need for catchup, in this case
                             // the node is just missing a segment in the future of its current pruning point, that is available to the syncer
-                            Ok(IbdType::Sync { highest_known_syncer_chain_hash, is_utxo_stable, is_smt_stable, is_pp_anticone_synced })
+                            Ok(IbdType::Sync {
+                                highest_known_syncer_chain_hash,
+                                is_utxo_stable,
+                                is_smt_stable,
+                                is_pool_stable,
+                                is_pp_anticone_synced,
+                            })
                         } else {
                             Ok(IbdType::PruningCatchUp { highest_known_syncer_chain_hash })
                         }
@@ -768,6 +807,50 @@ impl IbdFlow {
         consensus.async_set_pruning_smt_stable().await;
 
         info!("SMT state synced: {} lanes", stream.lane_count());
+        Ok(())
+    }
+
+    /// Downloads and imports the note-pool state at `pruning_point` (FORK-PLAN P6.8) —
+    /// the pool analog of [`Self::sync_new_utxo_set`]. Must run BEFORE the utxoset sync:
+    /// `import_pruning_point_utxo_set` validates the pruning point's own transactions
+    /// (pool ops included) against virtual's pool state, which this function populates.
+    async fn sync_new_pool_state(&mut self, consensus: &ConsensusProxy, pruning_point: Hash) -> Result<(), ProtocolError> {
+        use super::streams::PruningPointPoolStateChunkStream;
+        use kaspa_p2p_lib::pb::RequestPruningPointPoolStateMessage;
+
+        let pp_header = consensus.async_get_header(pruning_point).await.unwrap();
+        if !self.ctx.config.pool_activation.is_active(pp_header.daa_score) {
+            // Pre-activation the pool is empty by definition; mark stable so IBD-type
+            // negotiation (which treats an unstable pool state as transitional) is a no-op,
+            // mirroring `sync_new_smt_state`'s pre-Toccata behavior.
+            consensus.async_set_pruning_pool_state_stable().await;
+            return Ok(());
+        }
+
+        consensus.async_clear_pruning_pool_state().await;
+
+        info!("downloading the pruning point note-pool state from {}", self.router);
+
+        self.router
+            .enqueue(make_message!(
+                Payload::RequestPruningPointPoolState,
+                RequestPruningPointPoolStateMessage { pruning_point_hash: Some(pruning_point.into()) }
+            ))
+            .await?;
+
+        let mut chunk_stream = PruningPointPoolStateChunkStream::new(&self.router, &mut self.incoming_route);
+        while let Some(chunk) = chunk_stream.next().await? {
+            consensus.async_append_imported_pruning_point_pool_entries(chunk).await;
+        }
+        let entry_count = chunk_stream.entry_count() as u64;
+
+        // Rebuilds the pool SMT from the staged entries and verifies the root against the
+        // pruning point header's `pool_commitment` — a tampered or truncated download
+        // fails here and the stable flag stays down.
+        consensus.async_import_pruning_point_pool_state(pruning_point, entry_count).await?;
+        consensus.async_set_pruning_pool_state_stable().await;
+
+        info!("note-pool state synced: {} notes", entry_count);
         Ok(())
     }
 

@@ -31,7 +31,15 @@ pub struct DbNotePoolStore {
 
 impl DbNotePoolStore {
     pub fn new(db: Arc<DB>, cache_policy: CachePolicy) -> Self {
-        Self { access: CachedDbAccess::new(Arc::clone(&db), cache_policy, DatabaseStorePrefixes::NotePoolState.into()), db }
+        Self::with_prefix(db, cache_policy, DatabaseStorePrefixes::NotePoolState.into())
+    }
+
+    /// A pool state store under an explicit prefix — used for the pruning-point-positioned
+    /// copy (`DatabaseStorePrefixes::PruningNotePool`, FORK-PLAN P6.8), mirroring how
+    /// `DbUtxoSetStore::new` takes its prefix so the virtual and pruning UTXO sets share
+    /// one implementation.
+    pub fn with_prefix(db: Arc<DB>, cache_policy: CachePolicy, prefix: Vec<u8>) -> Self {
+        Self { access: CachedDbAccess::new(Arc::clone(&db), cache_policy, prefix), db }
     }
 
     pub fn clear(&mut self) -> StoreResult<()> {
@@ -40,6 +48,26 @@ impl DbNotePoolStore {
 
     pub fn iterator(&self) -> impl Iterator<Item = Result<(Hash, NewNote), Box<dyn std::error::Error>>> + '_ {
         self.access.iterator().map(|res| res.map(|(key, note)| (Hash::from_slice(key.as_ref()), note)).map_err(|e| e.into()))
+    }
+
+    /// Chunked, resumable iteration in ascending serial order — the pool analog of
+    /// `DbUtxoSetStore::seek_iterator`, used to serve pruning-point pool state to IBD
+    /// peers (FORK-PLAN P6.8).
+    pub fn seek_iterator(
+        &self,
+        from_sn: Option<Hash>,
+        limit: usize,
+        skip_first: bool,
+    ) -> impl Iterator<Item = Result<(Hash, NewNote), Box<dyn std::error::Error>>> + '_ {
+        self.access
+            .seek_iterator(None, from_sn, limit, skip_first)
+            .map(|res| res.map(|(key, note)| (Hash::from_slice(key.as_ref()), note)).map_err(|e| e.into()))
+    }
+
+    /// Appends `entries` directly (no diff semantics) — used while staging a downloaded
+    /// pruning-point pool state chunk by chunk (mirrors `DbUtxoSetStore::write_many`).
+    pub fn write_many(&mut self, entries: &[(Hash, NewNote)]) -> StoreResult<()> {
+        self.access.write_many(DirectDbWriter::new(&self.db), &mut entries.iter().copied())
     }
 
     /// Batch variant of [`NotePoolStore::write_diff`] — stages into the caller's

@@ -174,6 +174,127 @@ impl DbNotePoolSmtStore {
     pub fn unapply_diff(&mut self, diff: &PoolDiff) -> StoreResult<Hash> {
         self.apply_diff(&diff.clone().to_reversed())
     }
+
+    /// Deletes all branch nodes and resets the root to the canonical empty-tree state —
+    /// used before a from-scratch pruning-point import (FORK-PLAN P6.8).
+    pub fn clear(&mut self) -> StoreResult<()> {
+        use kaspa_database::prelude::DirectDbWriter;
+        self.access.delete_all(DirectDbWriter::new(&self.db))?;
+        self.root.write(DirectDbWriter::new(&self.db), &NotePoolSmt::empty_root())?;
+        Ok(())
+    }
+
+    /// Rebuilds the whole tree in a single streaming pass over `leaves` (`(sn, leaf_hash)`
+    /// pairs in strictly ascending `sn` order — RocksDB's native key order, so a store
+    /// iterator can be fed directly), writing each branch node exactly once and returning
+    /// the final root. Used by pruning-point pool-state import (FORK-PLAN P6.8), where the
+    /// state arrives as a full sorted snapshot rather than incremental diffs — an O(n)
+    /// single pass via `crypto/smt`'s [`StreamingSmtBuilder`] instead of `expected_count`
+    /// incremental [`compute_root_update`] applications.
+    ///
+    /// The store must be empty ([`Self::clear`]) — this appends nodes assuming no stale
+    /// branch structure survives underneath.
+    pub fn rebuild_from_sorted_leaves(
+        &mut self,
+        expected_count: u64,
+        leaves: impl Iterator<Item = (Hash, Hash)>,
+    ) -> Result<Hash, kaspa_smt::streaming::StreamError<StoreError>> {
+        use kaspa_smt::streaming::StreamError;
+        let sink = NotePoolMergeSink { access: &self.access, db: &self.db, batch: WriteBatch::default(), pending: 0 };
+        let mut builder = kaspa_smt::streaming::StreamingSmtBuilder::<NotePoolSmt, _>::new(expected_count, sink);
+        for (sn, leaf_hash) in leaves {
+            // `blue_score` is a seq-commit versioning concept the pool tree doesn't have — 0 throughout.
+            builder.feed(sn, leaf_hash, 0)?;
+        }
+        let (root, mut sink) = builder.finish()?;
+        sink.flush().map_err(StreamError::Sink)?;
+        self.root.write(kaspa_database::prelude::DirectDbWriter::new(&self.db), &root).map_err(StreamError::Sink)?;
+        Ok(root)
+    }
+}
+
+/// [`kaspa_smt::streaming::MergeSink`] writing straight into [`DbNotePoolSmtStore`]'s own
+/// branch-node schema. Structurally the generic `InlineMergeSink` from `crypto/smt`'s own
+/// tests, with DB-batched persistence instead of a `Vec` — deliberately NOT
+/// `consensus/smt-store`'s `DbSink`, which is coupled to seq-commit's block-versioned
+/// multi-lane apparatus (`lane_version`/`score_index`) the pool's single-current-state
+/// store intentionally avoids (see this file's top-level doc comment).
+struct NotePoolMergeSink<'a> {
+    access: &'a CachedDbAccess<NotePoolBranchKey, NodeBytes>,
+    db: &'a DB,
+    batch: WriteBatch,
+    pending: usize,
+}
+
+/// Nodes buffered per RocksDB write batch during a streaming rebuild.
+const REBUILD_FLUSH_INTERVAL: usize = 8192;
+
+impl NotePoolMergeSink<'_> {
+    fn put(&mut self, key: BranchKey, node: Node) -> Result<(), StoreError> {
+        self.access.write(BatchDbWriter::new(&mut self.batch), key.into(), NodeBytes::from(node))?;
+        self.pending += 1;
+        if self.pending >= REBUILD_FLUSH_INTERVAL {
+            self.flush()?;
+        }
+        Ok(())
+    }
+
+    fn flush(&mut self) -> Result<(), StoreError> {
+        if self.pending > 0 {
+            self.db.write(std::mem::take(&mut self.batch))?;
+            self.pending = 0;
+        }
+        Ok(())
+    }
+}
+
+impl kaspa_smt::streaming::MergeSink for NotePoolMergeSink<'_> {
+    type Error = StoreError;
+
+    fn merge(
+        &mut self,
+        left: Hash,
+        right: Hash,
+        parent_key: BranchKey,
+        left_info: kaspa_smt::streaming::ChildInfo,
+        right_info: kaspa_smt::streaming::ChildInfo,
+        _parent_blue_score: u64,
+    ) -> Result<Hash, Self::Error> {
+        use kaspa_smt::streaming::ChildInfo;
+        if let ChildInfo::Collapsed { branch_key, leaf, .. } = left_info {
+            self.put(branch_key, Node::Collapsed(leaf))?;
+        }
+        if let ChildInfo::Collapsed { branch_key, leaf, .. } = right_info {
+            self.put(branch_key, Node::Collapsed(leaf))?;
+        }
+        let parent_hash = kaspa_smt::hash_node::<NotePoolSmt>(left, right);
+        self.put(parent_key, Node::Internal(parent_hash))?;
+        Ok(parent_hash)
+    }
+
+    fn merge_chain_with_empty(
+        &mut self,
+        hash: Hash,
+        from_depth: usize,
+        to_depth: usize,
+        representative_key: &Hash,
+        _blue_score: u64,
+    ) -> Result<Hash, Self::Error> {
+        let mut current_hash = hash;
+        for d in (to_depth..from_depth).rev() {
+            let height = kaspa_smt::DEPTH - 1 - d;
+            let goes_right = kaspa_smt::bit_at(representative_key, d);
+            let empty_h = <NotePoolSmt as SmtHasher>::EMPTY_HASHES[height];
+            let (left_h, right_h) = if goes_right { (empty_h, current_hash) } else { (current_hash, empty_h) };
+            current_hash = kaspa_smt::hash_node::<NotePoolSmt>(left_h, right_h);
+            self.put(BranchKey::new(d as u8, representative_key), Node::Internal(current_hash))?;
+        }
+        Ok(current_hash)
+    }
+
+    fn write_collapsed(&mut self, branch_key: BranchKey, leaf: kaspa_smt::store::CollapsedLeaf, _blue_score: u64) -> Result<(), Self::Error> {
+        self.put(branch_key, Node::Collapsed(leaf))
+    }
 }
 
 impl SmtStore for DbNotePoolSmtStore {
@@ -268,6 +389,69 @@ mod tests {
 
         let reopened = DbNotePoolSmtStore::new(db, CachePolicy::Count(16));
         assert_eq!(reopened.current_root().unwrap(), root);
+    }
+
+    /// The streaming rebuild (P6.8's IBD import path) and the incremental apply path
+    /// (P6.2's live-processing path) are two independent constructions of the same tree —
+    /// they must agree exactly on both the root and the persisted branch structure (the
+    /// rebuilt store must remain incrementally updatable afterwards).
+    #[test]
+    fn streaming_rebuild_agrees_with_incremental_apply() {
+        let n = 100u8;
+        // Incremental reference.
+        let (_l1, db1) = create_temp_db!(ConnBuilder::default().with_files_limit(10));
+        let mut incremental = DbNotePoolSmtStore::new(db1, CachePolicy::Count(16));
+        let incremental_root =
+            incremental.apply_note_diff((1..=n).map(|b| (hash(b), leaf(b))), std::iter::empty()).unwrap();
+
+        // Streaming rebuild over the same leaves, sorted ascending by serial.
+        let (_l2, db2) = create_temp_db!(ConnBuilder::default().with_files_limit(10));
+        let mut rebuilt = DbNotePoolSmtStore::new(db2, CachePolicy::Count(16));
+        let mut leaves: Vec<(Hash, Hash)> = (1..=n).map(|b| (hash(b), leaf(b))).collect();
+        leaves.sort_by_key(|(sn, _)| *sn);
+        let rebuilt_root = rebuilt.rebuild_from_sorted_leaves(n as u64, leaves.into_iter()).unwrap();
+
+        assert_eq!(rebuilt_root, incremental_root, "streaming rebuild must produce the incremental path's exact root");
+        assert_eq!(rebuilt.current_root().unwrap(), rebuilt_root);
+
+        // The rebuilt branch structure must support further incremental updates identically.
+        let extra = vec![(hash(200), leaf(200))];
+        let incr_extended = incremental.apply_note_diff(extra.clone(), std::iter::empty()).unwrap();
+        let rebuilt_extended = rebuilt.apply_note_diff(extra, std::iter::empty()).unwrap();
+        assert_eq!(rebuilt_extended, incr_extended, "rebuilt store must remain incrementally updatable with identical results");
+    }
+
+    /// A tampered entry (wrong leaf value for a serial) yields a different root — the
+    /// exact mechanism by which a tampered IBD chunk is rejected at import (P6.8's
+    /// final `computed_root == header.pool_commitment` check).
+    #[test]
+    fn streaming_rebuild_detects_tampered_leaf() {
+        let honest: Vec<(Hash, Hash)> = (1..=10).map(|b| (hash(b), leaf(b))).collect();
+        let mut tampered = honest.clone();
+        tampered[4].1 = leaf(99); // same serial, forged note contents
+
+        let (_l1, db1) = create_temp_db!(ConnBuilder::default().with_files_limit(10));
+        let honest_root =
+            DbNotePoolSmtStore::new(db1, CachePolicy::Count(16)).rebuild_from_sorted_leaves(10, honest.into_iter()).unwrap();
+        let (_l2, db2) = create_temp_db!(ConnBuilder::default().with_files_limit(10));
+        let tampered_root =
+            DbNotePoolSmtStore::new(db2, CachePolicy::Count(16)).rebuild_from_sorted_leaves(10, tampered.into_iter()).unwrap();
+
+        assert_ne!(honest_root, tampered_root, "a tampered leaf must change the root, or import verification would be blind to it");
+    }
+
+    #[test]
+    fn clear_resets_to_empty_root() {
+        let (_lifetime, db) = create_temp_db!(ConnBuilder::default().with_files_limit(10));
+        let mut store = DbNotePoolSmtStore::new(db, CachePolicy::Count(16));
+        store.apply_note_diff(vec![(hash(1), leaf(1)), (hash(2), leaf(2))], std::iter::empty()).unwrap();
+        store.clear().unwrap();
+        assert_eq!(store.current_root().unwrap(), NotePoolSmt::empty_root());
+        // And a rebuild after clear starts from a genuinely blank slate.
+        let root = store.rebuild_from_sorted_leaves(1, vec![(hash(3), leaf(3))].into_iter()).unwrap();
+        let (_l2, db2) = create_temp_db!(ConnBuilder::default().with_files_limit(10));
+        let mut fresh = DbNotePoolSmtStore::new(db2, CachePolicy::Count(16));
+        assert_eq!(root, fresh.apply_note_diff(vec![(hash(3), leaf(3))], std::iter::empty()).unwrap());
     }
 }
 

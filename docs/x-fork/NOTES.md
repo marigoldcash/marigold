@@ -1925,3 +1925,101 @@ confirming block, not just that the first-seen path works).
 ✅ *Verify*: all 3 new tests pass. Full `cargo test -p kaspa-mining` — 59 passed, 0 failed.
 `cargo test --workspace --exclude kaspa-testing-integration` — 0 failed across every
 crate. Integration suite: 42/42 passed. `cargo build --workspace` clean.
+
+### P6.8 — Pool state sync (IBD) (2026-08-16)
+
+**The real design problem the plan text never mentions**: WHERE does the served pool
+state come from? The plan says "mirror `request_pruning_point_utxo_set.rs`" — but the
+UTXO flow works only because every node maintains a SECOND utxoset positioned at the
+pruning point (`PruningMetaStores.utxo_set`), advanced by the pruning processor via
+per-chain-block `utxo_diffs` whenever the pruning point moves. The pool had no analog:
+the only pool state any node kept was virtual's (P6.4). Serving virtual's state is
+wrong (nothing commits to it), and reconstructing the pruning-point state on demand
+means walking ~pruning-depth diffs per request — non-viable. The fix is the exact
+structural mirror, and P6.4 had already unknowingly built the hard part: the
+per-chain-block `notepool_diffs` store is precisely the diff source the pruning
+processor needs. `PruningMetaStores` gained a `pool_state` (`DbNotePoolStore` under a
+new prefix 95, via a new `with_prefix` constructor — same one-implementation-two-
+prefixes pattern `DbUtxoSetStore` already uses) advanced **in the same loop iteration
+and same WriteBatch** as the pruning utxoset, so the existing `utxoset_position`
+recovery marker remains a single truth for both stores and crash-recovery semantics
+are inherited wholesale rather than re-derived. A new pool stable flag (prefix 96)
+joins the utxoset/SMT flags in `is_in_transitional_ibd_state`.
+
+**Wire + verification: a deliberate, documented deviation from BOTH plan hints, each
+half taken from the precedent that actually fits.** The prior session's research
+suggested mirroring the seq-commit SMT flow (metadata message + inline per-entry
+proofs). Reading the actual code said otherwise, twice:
+- *Wire shape → UTXO flow, not SMT flow.* Seq-commit needs a metadata message because
+  its `lanes_root` is one component folded inside `accepted_id_merkle_root` — the
+  receiver literally cannot know what root to expect without wire-carried companions.
+  The pool root has no such indirection: it IS the pruning point header's
+  `pool_commitment`, verbatim, in a header the receiver already validated under PoW
+  before asking. So: no metadata message at all, Done-sentinel termination, four
+  messages mirroring the UTXO flow's exactly. And no inline proofs: serving them
+  would require every node to maintain a second, pruning-positioned SMT (branch-node
+  storage + permanent write amplification on every pruning advance) purely for a
+  mid-stream-abort bandwidth nicety that the UTXO flow — with far larger payloads —
+  doesn't have either. Tampered data is still always rejected; just at the final
+  root check rather than mid-stream, exactly like the UTXO flow's MuHash check.
+- *Verification → `crypto/smt`'s streaming builder, not `consensus/smt-store`'s
+  importer.* The plan's "crypto/smt's streaming module exists for exactly this" is
+  right, but the existing `streaming_import` wrapper is hard-coded to seq-commit's
+  hasher and its block-versioned multi-lane `SmtStores` apparatus (confirmed by
+  reading it — `StreamingSmtBuilder::<SeqCommitActiveNode, _>` on line 96, `DbSink`
+  writing lane/score versioning the pool store deliberately doesn't have). New
+  `DbNotePoolSmtStore::rebuild_from_sorted_leaves` drives the *generic*
+  `StreamingSmtBuilder<NotePoolSmt, _>` directly with a ~70-line `MergeSink` writing
+  into the pool store's own branch schema (structurally the generic `InlineMergeSink`
+  from crypto/smt's own tests, DB-batched): O(n) single pass over the staged entries
+  in RocksDB's native ascending-key order — which is exactly the strictly-sorted
+  input the builder requires, so the staged flat map feeds it directly, no sort step.
+
+**Import semantics and ordering**: download stages chunks into the pruning-position
+pool store (mirroring `append_imported_pruning_point_utxos`); import then rebuilds the
+SMT and copies the flat map into virtual's pool stores in one shared sorted pass
+(split borrows via `VirtualStores` destructuring), resets the stored virtual pool
+diff (virtual is about to be recomputed from the new pruning point's POV), and
+compares the computed root against `pool_commitment` — `PoolRootMismatch` clears the
+half-written stores and aborts IBD with the stable flag still down. Ordering is
+enforced in all three IBD branches (Sync, DownloadHeadersProof, PruningCatchUp):
+pool state syncs BEFORE the utxoset, because `import_pruning_point_utxo_set`
+validates the pruning point's own transactions — pool ops included since P6.6/P6.7 —
+against virtual's pool state. This closes P6.4's recorded "pool state empty at
+pruning import" caveat, which reading the code confirmed was a genuine
+silent-wrongness gap, not a benign TODO: an IBD'd node's `DbNotePoolStore` stayed
+empty with its SMT at the empty root while the adopted header committed to a
+non-empty pool, and nothing compared the two — post-IBD pool-op validation would
+have run against a phantom empty pool.
+
+**Second real bug, found by reading the prune path**: `prune()` deletes pruned
+blocks' `utxo_diffs` (line 487) but `notepool_diffs` was never added to the deletion
+batch — a permanent per-block disk leak on every pruning node since P6.4. One-line
+fix alongside. Also added `assert_pool_commitment` to the pruning processor's
+`enable_sanity_checks` path, mirroring `assert_utxo_commitment` — and the new
+integration test's logs show it firing and passing on both the syncer's natural
+pruning advances AND the syncee's post-IBD advances on top of the imported store.
+
+**Also in passing**: `DenominationTag` gained the canonical `TryFrom<u8>` (wire
+formats carry the tag as an integer; RPC in P6.9 will want it too), and `notepool.rs`
+gained `seek_iterator`/`write_many` mirroring `DbUtxoSetStore`'s serving/staging API.
+
+✅ *Verify*: new `daemon_ibd_pool_state_sync_test` (two real simnet daemons, small
+override params): mint three notes through the real P6.6-funded/P6.7-mempool path,
+rotate them to a second key, bury everything past the pruning depth, bring up a fresh
+node, and assert (a) IBD completes (a root mismatch would abort it), (b) the synced
+pruning point commits to a NON-empty pool (anti-vacuity guard against the test
+silently passing on an empty pool), (c) **the syncee's own mempool accepts a rotate
+consuming notes that exist only in the imported state** — the sharpest import proof
+available, it fails with `SerialNotFound` on any import gap — and (d) the syncee
+follows post-IBD blocks, each re-verifying pool commitments on top of the imported
+store. Passed on the first run; full-log capture confirms the whole pipeline
+("downloading the pruning point note-pool state" → "Total notes: 2" → "Imported
+note-pool state ... root f43d…" → syncee sanity checks passing on later advances).
+Tamper rejection is pinned at the exact mechanism level by new store unit tests:
+`streaming_rebuild_detects_tampered_leaf` (forged note contents → different root),
+`streaming_rebuild_agrees_with_incremental_apply` (the IBD rebuild and the live
+incremental path produce identical roots AND identically-updatable branch structure),
+and `clear_resets_to_empty_root`. Full `cargo test --workspace --exclude
+kaspa-testing-integration` and the integration suite both green; `cargo build
+--workspace` clean.
