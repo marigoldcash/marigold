@@ -72,6 +72,20 @@ substitute for it.
   Open items: `_dmarc` record on marigold.cash; create `security@` and `dmarc@` routes.
 - Open item: social handles (`marigoldcash` + `marigoldcoin` on X, Telegram, Discord,
   Reddit, YouTube, Docker Hub, npm). marigoldcash.io deliberately not registered (revisit P9).
+- **Planned integration (agreed 2026-08-16, post-launch)**: a Time & Attendance SaaS
+  provider (personal contact of the founder) will anchor monthly Merkle roots of
+  customer PDF signatures on chain — one tiny transaction per month in his own
+  user-lane subnetwork, each customer receiving an inclusion proof with their PDF
+  (the OpenTimestamps pattern; design discussion in session history 2026-08-16). In
+  exchange **he has committed to running a full archival node** (closing the
+  pruning caveat on "independently verifiable") and already has a verification
+  tool. Marigold-side work, all P9-era: a documented Caddy-on-443 reverse-proxy
+  recipe for constrained runtimes (his app is Cloudflare Workers — gRPC is
+  impossible from Workers and `connect()` is blocked toward Cloudflare IPs, which
+  our own DNS uses), and a small standalone HTTP anchoring-gateway tool (Worker
+  POSTs a 32-byte root; the gateway, holding the funded fee key off Cloudflare,
+  builds/signs/submits) — sidecar binary like `trustee-signer`, never a fourth RPC
+  surface on the node.
 - **Future (P9.2)**: DNS seeders will be ≥2 independent VPS instances running Kaspa's
   `dnsseeder` software, reached via an NS delegation record per seeder subdomain
   (e.g. `seed1.marigold.cash`) created in this Cloudflare account — Cloudflare stays
