@@ -108,6 +108,17 @@ pub trait NoteKeyStore: Send + Sync {
         wallet_secret: Option<&Secret>,
         notification: &kaspa_rpc_core::message::NotesChangedNotification,
     ) -> Result<crate::storage::notekeys::NotesChangedApplyResult>;
+
+    // ~~~ payment-request keys (FORK-PLAN P7.3, sign-to-fresh-pk receive flow) ~~~
+
+    /// Persist a freshly generated payment-request key. Returns the plaintext info
+    /// (pk derived from the key). Must be called BEFORE the request's QR is shown
+    /// anywhere — see `PaymentRequestKey`'s doc comment on crash safety.
+    async fn store_payment_request(&self, wallet_secret: &Secret, key: PaymentRequestKey) -> Result<PaymentRequestInfo>;
+    /// All outstanding (not yet claimed/removed) payment requests, plaintext half only.
+    async fn payment_requests(&self) -> Result<Vec<PaymentRequestInfo>>;
+    async fn load_payment_request_key(&self, wallet_secret: &Secret, pk: &[u8; 32]) -> Result<Option<PaymentRequestKey>>;
+    async fn remove_payment_request(&self, wallet_secret: &Secret, pk: &[u8; 32]) -> Result<()>;
 }
 
 #[async_trait]

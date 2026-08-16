@@ -17,7 +17,7 @@ use crate::common::utils::wait_for;
 use kaspa_addresses::Version;
 use kaspa_alloc::init_allocator_with_default_settings;
 use kaspa_consensus::params::SIMNET_PARAMS;
-use kaspa_consensus_core::notepool::DenominationTag;
+use kaspa_consensus_core::notepool::{DENOMINATION_PETALS, DenominationTag};
 use kaspa_hashes::Hash;
 use kaspa_rpc_core::api::rpc::RpcApi;
 use kaspa_wallet_core::account::notepool::RedeemSelection;
@@ -34,23 +34,12 @@ use workflow_core::abortable::Abortable;
 /// exercising more than one denomination in a single mint.
 const MINT_AMOUNT_PETALS: u64 = 111_000_000;
 
-/// `cargo test --release --package kaspa-testing-integration --lib -- notepool_wallet_integration_tests::wallet_notepool_mint_redeem_test --ignored --nocapture`
-#[ignore]
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn wallet_notepool_mint_redeem_test() {
-    init_allocator_with_default_settings();
-    kaspa_core::log::try_init_logger("INFO,kaspa_testing_integration=trace,kaspa_wallet_core=debug");
-
-    let args =
-        Args { simnet: true, unsafe_rpc: true, enable_unsynced_mining: true, disable_upnp: true, utxoindex: true, ..Default::default() };
-    let total_fd_limit = 10;
-    let mut kaspad = Daemon::new_random_with_args(args, total_fd_limit);
-    // `miner_client` plays the role every other daemon test's `rpc_client1` plays: submit
-    // blocks/transactions "from the network side". It is intentionally NOT what the
-    // `Wallet` connects with (see module doc comment).
-    let miner_client = kaspad.start().await;
-
-    // --- Connect a real `Wallet` to the daemon over wRPC ---
+/// Connect a fresh resident `Wallet` to the daemon over wRPC and bootstrap a BIP32
+/// account through the same non-interactive `WalletApi` calls the real CLI/wasm
+/// bindings use (see `wallet_notepool_mint_redeem_test`'s comments for why wRPC and
+/// why this path). Shared by every notepool wallet test; P7.3+ tests need several
+/// wallets against one daemon.
+async fn connect_and_bootstrap_wallet(kaspad: &Daemon, wallet_secret: &Secret) -> (Arc<Wallet>, Arc<dyn kaspa_wallet_core::account::Account>) {
     let wrpc_client = Arc::new(kaspad.new_wrpc_client());
     let rpc_ctl = wrpc_client.ctl().clone();
     let rpc_api: Arc<DynRpcApi> = wrpc_client.clone();
@@ -63,9 +52,6 @@ async fn wallet_notepool_mint_redeem_test() {
     wrpc_client.connect(None).await.expect("wallet wRPC client failed to connect to the daemon");
     wallet.start().await.expect("wallet task failed to start");
 
-    // --- Non-interactive wallet + account bootstrap, via the same `WalletApi` calls the
-    // real CLI (`cli/src/wizards/account.rs`) and wasm bindings use. ---
-    let wallet_secret = Secret::from("test-wallet-password");
     wallet
         .clone()
         .wallet_create(
@@ -103,6 +89,29 @@ async fn wallet_notepool_mint_redeem_test() {
     // registers the account's address window for `UtxosChanged` notifications.
     wallet.clone().accounts_activate(Some(vec![account_id])).await.expect("accounts_activate failed");
     let account = wallet.active_accounts().get(&account_id).expect("account should be active after accounts_activate");
+
+    (wallet, account)
+}
+
+/// `cargo test --release --package kaspa-testing-integration --lib -- notepool_wallet_integration_tests::wallet_notepool_mint_redeem_test --ignored --nocapture`
+#[ignore]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn wallet_notepool_mint_redeem_test() {
+    init_allocator_with_default_settings();
+    kaspa_core::log::try_init_logger("INFO,kaspa_testing_integration=trace,kaspa_wallet_core=debug");
+
+    let args =
+        Args { simnet: true, unsafe_rpc: true, enable_unsynced_mining: true, disable_upnp: true, utxoindex: true, ..Default::default() };
+    let total_fd_limit = 10;
+    let mut kaspad = Daemon::new_random_with_args(args, total_fd_limit);
+    // `miner_client` plays the role every other daemon test's `rpc_client1` plays: submit
+    // blocks/transactions "from the network side". It is intentionally NOT what the
+    // `Wallet` connects with (see module doc comment).
+    let miner_client = kaspad.start().await;
+
+    // --- Connect a real `Wallet` to the daemon over wRPC and bootstrap an account ---
+    let wallet_secret = Secret::from("test-wallet-password");
+    let (wallet, account) = connect_and_bootstrap_wallet(&kaspad, &wallet_secret).await;
 
     let receive_address = account.receive_address().expect("account should have a receive address");
     println!("wallet account receive address: {receive_address}");
@@ -300,7 +309,203 @@ async fn wallet_notepool_mint_redeem_test() {
         redeem_result.fee_sompi
     );
 
-    wrpc_client.disconnect().await.ok();
+    if let Some(client) = wallet.try_wrpc_client() {
+        client.disconnect().await.ok();
+    }
+    miner_client.disconnect().await.unwrap();
+    kaspad.shutdown();
+}
+
+/// FORK-PLAN P7.3's verify criterion: "both flows succeed on local testnet between two
+/// wallet instances; imported key is never left unrotated after confirmation." Two
+/// real `Wallet` instances (A = payer, B = receiver) against one live daemon:
+///
+/// (a) bearer import — A hands one note's `(sn, sk, d)` to B via the text/QR payload;
+///     B verifies the serial's on-chain pk against the handed-over key, stores it Hot,
+///     and immediately rotates it to fresh Cold keys (slack mode here: B holds nothing
+///     else, so the fee comes out of the rotated value itself — the bootstrap case).
+///
+/// (b) sign-to-fresh-pk — B creates a pinned-amount payment request (persisted before
+///     display), A pays it with exact denominations plus a fee-stamp note, and B
+///     claims the landed serials via its `NotesChanged` pk-subscription (which fires
+///     on *confirmation*, so arrival is settlement).
+///
+/// `cargo test --release --package kaspa-testing-integration --lib -- notepool_wallet_integration_tests::wallet_notepool_receive_flows_test --ignored --nocapture`
+#[ignore]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn wallet_notepool_receive_flows_test() {
+    use kaspa_wallet_core::account::notepool::{BearerNote, PaymentRequest, await_payment_request, create_payment_request};
+    use kaspa_wallet_core::storage::NoteProvenance;
+
+    init_allocator_with_default_settings();
+    kaspa_core::log::try_init_logger("INFO,kaspa_testing_integration=trace");
+
+    let args =
+        Args { simnet: true, unsafe_rpc: true, enable_unsynced_mining: true, disable_upnp: true, utxoindex: true, ..Default::default() };
+    let total_fd_limit = 10;
+    let mut kaspad = Daemon::new_random_with_args(args, total_fd_limit);
+    let miner_client = kaspad.start().await;
+
+    let secret_a = Secret::from("payer-wallet-password");
+    let secret_b = Secret::from("receiver-wallet-password");
+    let (wallet_a, account_a) = connect_and_bootstrap_wallet(&kaspad, &secret_a).await;
+    let (wallet_b, account_b) = connect_and_bootstrap_wallet(&kaspad, &secret_b).await;
+
+    let receive_a = account_a.receive_address().expect("payer receive address");
+    let throwaway = Address::new(kaspad.network.into(), Version::PubKey, &[7u8; 32]);
+
+    // Fund A: one tracked coinbase, then maturity blocks to the throwaway address
+    // (same reasoning as the mint/redeem test's funding comment).
+    let coinbase_maturity = SIMNET_PARAMS.coinbase_maturity();
+    let template = miner_client.get_block_template(receive_a.clone(), vec![]).await.unwrap();
+    miner_client.submit_block(template.block, false).await.unwrap();
+    for _ in 0..coinbase_maturity + 20 {
+        let template = miner_client.get_block_template(throwaway.clone(), vec![]).await.unwrap();
+        miner_client.submit_block(template.block, false).await.unwrap();
+    }
+    let poll_account = account_a.clone();
+    wait_for(
+        200,
+        150,
+        move || {
+            let account = poll_account.clone();
+            Box::pin(async move { account.balance().map(|b| b.mature).unwrap_or(0) > 0 })
+        },
+        "payer wallet did not observe a mature transparent balance after mining",
+    )
+    .await;
+
+    // A mints 0.28 MAGLD -> 2x0.1 + 8x0.01: a 0.1 to hand over as a bearer note,
+    // exact denominations for a 0.05 payment, and small notes to stamp fees with.
+    let mint = account_a.clone().mint(secret_a.clone(), None, 28_000_000, None, &Abortable::default()).await.expect("mint failed");
+    assert_eq!(mint.notes.len(), 10);
+    for _ in 0..10 {
+        let template = miner_client.get_block_template(throwaway.clone(), vec![]).await.unwrap();
+        miner_client.submit_block(template.block, false).await.unwrap();
+    }
+
+    // ---------- (a) bearer import ----------
+    let handover = mint.notes.iter().find(|n| n.d == DenominationTag::D0_1).expect("mint produced a 0.1 note").clone();
+    let bearer_text = BearerNote { sn: handover.sn, sk: handover.sk, d: handover.d }.to_text();
+
+    // A's side of a bearer handover: the key has left the wallet; tombstone the row
+    // (P7.4's bearer-export command formalizes this "handed over" bookkeeping).
+    let store_a = wallet_a.store().as_note_key_store().expect("payer note key store");
+    store_a.mark_status(&handover.sn, NoteStatus::Superseded).await.unwrap();
+
+    let bearer = BearerNote::from_text(&bearer_text).expect("bearer text round-trip");
+    let import_result = account_b.clone().bearer_import(secret_b.clone(), bearer).await.expect("bearer import failed");
+    assert_eq!(import_result.imported_sn, handover.sn);
+
+    // B held nothing else, so the rotation ran in slack mode: produced value =
+    // rotated value - fee, all under fresh Cold keys, none reusing the imported key.
+    let rotation = &import_result.rotation;
+    let produced_value: u64 = rotation.own_notes.iter().map(|n| DENOMINATION_PETALS[n.d as usize]).sum();
+    assert_eq!(produced_value + rotation.fee_petals, 10_000_000, "rotation must conserve value minus the fee");
+    assert!(rotation.fee_petals >= 1_000_000 && rotation.fee_petals % 1_000_000 == 0, "fee must be a whole number of 0.01 quanta");
+    for note in &rotation.own_notes {
+        assert_ne!(note.sk, handover.sk, "no rotated note may reuse the imported (Hot) key");
+        assert_eq!(note.provenance, NoteProvenance::Cold);
+    }
+
+    for _ in 0..10 {
+        let template = miner_client.get_block_template(throwaway.clone(), vec![]).await.unwrap();
+        miner_client.submit_block(template.block, false).await.unwrap();
+    }
+
+    // On-chain: the handed-over serial is gone, the rotated serials exist.
+    let old = miner_client.get_notes_by_serial(vec![handover.sn]).await.unwrap();
+    assert!(!old.iter().any(|entry| entry.sn == handover.sn), "the imported serial must be rotated away on-chain");
+    let new_serials: Vec<Hash> = rotation.own_notes.iter().map(|n| n.sn).collect();
+    let found = miner_client.get_notes_by_serial(new_serials.clone()).await.unwrap();
+    assert_eq!(found.len(), new_serials.len(), "every rotated serial must exist in the pool");
+
+    // B's books: imported row Hot + Superseded (never left unrotated), new rows Cold + Active.
+    let store_b = wallet_b.store().as_note_key_store().expect("receiver note key store");
+    let imported_info = store_b.load_info(&handover.sn).await.unwrap().expect("imported row present");
+    assert_eq!(imported_info.provenance, NoteProvenance::Hot);
+    assert_eq!(imported_info.status, NoteStatus::Superseded);
+    for sn in &new_serials {
+        let info = store_b.load_info(sn).await.unwrap().expect("rotated row present");
+        assert_eq!(info.provenance, NoteProvenance::Cold);
+        assert_eq!(info.status, NoteStatus::Active);
+    }
+    println!(
+        "bearer flow: imported {} -> rotated into {} note(s), fee {} petals, tx {}",
+        handover.sn,
+        rotation.own_notes.len(),
+        rotation.fee_petals,
+        rotation.transaction_id
+    );
+
+    // ---------- (b) sign-to-fresh-pk ----------
+    const PAYMENT_PETALS: u64 = 5_000_000; // 0.05 MAGLD -> 5x0.01 from A's minted notes
+
+    let request = create_payment_request(&wallet_b, &secret_b, Some(PAYMENT_PETALS)).await.expect("create_payment_request failed");
+    let request_text = request.to_text();
+    assert_eq!(wallet_b.store().as_note_key_store().unwrap().payment_requests().await.unwrap().len(), 1);
+
+    // B watches for the payment (subscribes by pk BEFORE A pays — the notification
+    // fires on confirmation, which happens strictly after the mining below).
+    let awaiter = {
+        let wallet_b = wallet_b.clone();
+        let secret_b = secret_b.clone();
+        let pk = request.pk;
+        tokio::spawn(async move { await_payment_request(&wallet_b, &secret_b, pk, std::time::Duration::from_secs(90)).await })
+    };
+    // Let the awaiter register its subscription before the payment can confirm.
+    workflow_core::task::sleep(std::time::Duration::from_millis(1_000)).await;
+
+    let parsed = PaymentRequest::from_text(&request_text).expect("request text round-trip");
+    assert_eq!(parsed.amount_petals, Some(PAYMENT_PETALS));
+    let pay = account_a.clone().pay_payment_request(secret_a.clone(), parsed, None).await.expect("pay_payment_request failed");
+    assert_eq!(pay.external_serials.len(), 5, "0.05 MAGLD pays as 5x0.01 notes");
+    assert!(pay.fee_petals >= 1_000_000 && pay.fee_petals % 1_000_000 == 0);
+
+    for _ in 0..10 {
+        let template = miner_client.get_block_template(throwaway.clone(), vec![]).await.unwrap();
+        miner_client.submit_block(template.block, false).await.unwrap();
+    }
+
+    let claimed = awaiter.await.expect("awaiter task panicked").expect("await_payment_request failed");
+    assert_eq!(claimed.total_petals, PAYMENT_PETALS, "claimed value must equal the requested amount exactly");
+    assert_eq!(claimed.notes.len(), 5);
+    let claimed_serials: Vec<Hash> = claimed.notes.iter().map(|n| n.sn).collect();
+    assert_eq!(claimed_serials.iter().collect::<std::collections::HashSet<_>>().len(), 5);
+    for note in &claimed.notes {
+        let info = store_b.load_info(&note.sn).await.unwrap().expect("claimed row present");
+        assert_eq!(info.provenance, NoteProvenance::Cold, "a request key never left the wallet — its notes are Cold");
+        assert_eq!(info.status, NoteStatus::Active);
+        assert_eq!(info.pk, request.pk, "claimed notes land on the request pk (transient landing pad)");
+    }
+    // The request retired on claim.
+    assert!(wallet_b.store().as_note_key_store().unwrap().payment_requests().await.unwrap().is_empty());
+
+    // On-chain agreement: the claimed serials exist and are owned by the request pk;
+    // the payer's consumed serials (payment notes + fee stamp) are gone.
+    let found = miner_client.get_notes_by_serial(claimed_serials.clone()).await.unwrap();
+    assert_eq!(found.len(), 5);
+    assert!(found.iter().all(|entry| entry.pk == request.pk));
+    let consumed = miner_client.get_notes_by_serial(pay.consumed_serials.clone()).await.unwrap();
+    assert!(consumed.is_empty(), "the payer's consumed serials must be gone from the pool");
+    for sn in &pay.consumed_serials {
+        let info = store_a.load_info(sn).await.unwrap().expect("payer row present");
+        assert_eq!(info.status, NoteStatus::Superseded);
+    }
+    println!(
+        "payment flow: request {} petals -> paid as {} note(s) (fee {} petals, tx {}), claimed {} petals",
+        PAYMENT_PETALS,
+        pay.external_serials.len(),
+        pay.fee_petals,
+        pay.transaction_id,
+        claimed.total_petals
+    );
+
+    for wallet in [&wallet_a, &wallet_b] {
+        if let Some(client) = wallet.try_wrpc_client() {
+            client.disconnect().await.ok();
+        }
+    }
     miner_client.disconnect().await.unwrap();
     kaspad.shutdown();
 }

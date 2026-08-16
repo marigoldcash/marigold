@@ -4,8 +4,9 @@ Snapshot of everything decided and built so far, so any fresh coding session on 
 machine can continue from the repo alone. Read this together with [FORK-PLAN.md](../../FORK-PLAN.md).
 Update this file whenever off-repo state changes (domains, accounts, infra).
 
-Last updated: 2026-08-16 (P7.2 complete — mint & redeem commands, live-verified on
-a real daemon+wallet; next: P7.3, receive flows)
+Last updated: 2026-08-16 (P7.3 complete — receive flows (bearer import +
+sign-to-fresh-pk), live-verified between two wallet instances; next: P7.4, spend
+flows)
 
 ## What this project is
 
@@ -94,10 +95,29 @@ substitute for it.
 
 ## Where execution stands
 
-- **Next step: P7.3 — Receive flows.** Bearer import (scan/paste a key → verify →
-  immediately rotate to fresh cold) and sign-to-fresh-pk (generate keypair, emit
-  payment-request QR, watch for rotation). First step needing an actual QR
-  dependency (none in the workspace yet — checked in P7.2's research).
+- **Next step: P7.4 — Spend flows.** Note selection + split planning to hit exact
+  sums (the transfer builder, exact-selection, and rotation primitives all exist
+  from P7.3 — P7.4 adds the split planner and bearer *export* with solo-key
+  enforcement).
+- **P7.3 is done — both receive flows live-verified between two wallet
+  instances.** The wallet's first `TransferOp` construction
+  (`account::notepool::submit_transfer` + `rotate_notes`/`pay_payment_request`),
+  with a recorded fee design: pure pool transfers pay fees in 0.01-MAGLD quanta
+  (value math forces this — every value is a multiple of the smallest
+  denomination), sourced via P5.2 fee stamps from spare notes (excess back as
+  change) or slack-withheld from the rotation itself when the wallet holds
+  nothing else (bootstrap case). Deliberately NOT transparent-funded — that would
+  link transparent identity to note rotations. `PaymentRequest` QR/text in both
+  spec forms (40B pinned-amount / 32B payer-fills-in), `BearerNote` = the paper
+  backup's `(sn, sk, d)` triple; `qrcode` crate (CLI-only) renders terminal QRs.
+  Payment-request keys are a new persisted store (encrypted, written before the
+  QR is displayed — crash safety). CLI: `note request/pay/import`. **Real
+  pre-existing bug found by the live test**: the wRPC client never registered a
+  handler for `NotesChangedNotification` — P6.9 wired the server, and every wRPC
+  client silently dropped the notification; one-line fix in
+  `rpc/wrpc/client/src/client.rs`. Known deliberate gap: offline-landed payments
+  need a query-by-pk RPC to discover — lands with P7.6's restore (which needs it
+  anyway). Full writeup in NOTES.md's P7.3 entry.
 - **P7.2 is done — live-verified against a real daemon, not just unit tests.**
   `note mint <amount>` / `note redeem <serial>...|amount <amount>` /
   `note balance` / `note list` (`cli/src/modules/note.rs`). Mint funds through the

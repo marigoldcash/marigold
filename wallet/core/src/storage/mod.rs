@@ -29,7 +29,9 @@ pub use interface::{
 pub use keydata::{AssocPrvKeyDataIds, PrvKeyData, PrvKeyDataId, PrvKeyDataInfo, PrvKeyDataMap, PrvKeyDataPayload};
 pub use local::interface::make_filename;
 pub use metadata::AccountMetadata;
-pub use notekeys::{NoteKeyEntry, NoteKeyInfo, NoteKeyMap, NoteProvenance, NoteStatus};
+pub use notekeys::{
+    NoteKeyEntry, NoteKeyInfo, NoteKeyMap, NoteProvenance, NoteStatus, PaymentRequestInfo, PaymentRequestKey, PaymentRequestMap,
+};
 pub use storable::Storable;
 pub use transaction::{TransactionData, TransactionId, TransactionKind, TransactionRecord};
 

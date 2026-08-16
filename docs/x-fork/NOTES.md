@@ -2843,3 +2843,81 @@ all three are `Superseded`; asserts the balance rise equals exactly `redeemed va
 exactly the sum of the two real fees (1,084,100 sompi total on this run), nothing
 more, nothing less. Full workspace build, `cargo test -p kaspa-wallet-core` (51
 tests), and clippy on every touched crate all clean.
+
+### P7.3 — Receive flows (2026-08-16)
+
+**The fee-quantization decision (new, recorded here as the authority).** A pure pool
+`Transfer` has no transparent side, so its fee is `Σconsumed − Σproduced` in note
+values — and since every denomination is a multiple of the smallest, that difference
+is *necessarily* a multiple of 0.01 MAGLD (1,000,000 petals). Pool-op fees are
+quantized whether anyone likes it or not; the design just embraces it:
+`FEE_QUANTUM_PETALS = DENOMINATION_PETALS[0]`, fee = `k` quanta with `k` sized by a
+bounded fixpoint against the consensus mass calculator and the node's feerate
+estimate (each iteration only raises `k`; converges immediately in practice since
+one quantum ≈ 1M sompi dwarfs small-transfer fees — mempool floor confirmed to
+apply to pool ops, only the anchor lane is exempt, `check_transaction_standard`).
+Fee *sourcing* is P5.2's fee-stamp mechanism made concrete: consume spare notes
+(smallest-first) alongside, return their excess over the fee as change to fresh own
+Cold keys — a 0.01 spare consumed at `k=1` is a pure stamp, a 0.1 spare produces
+9×0.01 change. The one case with no spare to stamp with — a fresh wallet's
+first-ever bearer receive — runs in **slack mode**: the fee is withheld from the
+rotation's own produced decomposition (rotate 0.1 → produce 9×0.01, fee 0.01).
+Deliberately NOT implemented: funding pool-op fees from the transparent balance
+(mint-style inputs on a transfer). It would work consensus-wise and avoid burning a
+quantum, but it links the wallet's transparent identity to a note rotation — the
+exact linkage the pool exists to avoid; the spec's fee-stamp design is
+pool-self-contained on purpose.
+
+**Payload formats.** `PaymentRequest{pk, amount_petals: Option}` — both spec forms
+(P5.6): 40 bytes with a pinned amount, 32 bytes without (payer enters it — the
+printed/static-QR variant), distinguished by length alone. `BearerNote{sn, sk, d}` —
+65 bytes, deliberately the same triple the paper backup stores per note rather than
+a third invented shape. Text encodings `marigoldreq:<hex>` / `marigoldnote:<hex>`
+(wallet-level conventions, not consensus); the CLI renders them as terminal QR codes
+via the `qrcode` crate (`default-features = false`, unicode half-block rendering —
+first QR dependency in the workspace, CLI-only, wallet-core stays clean).
+
+**Payment-request keys are a new persisted store** (P7.1's exact pattern: encrypted
+`pk → {sk, amount}` map + plaintext info half, appended `Payload` field): the key is
+persisted *before* the QR is ever displayed, because a crash between issuing a
+request and the payment landing must not lose the only key that can ever claim the
+payer's notes ("unpaid-invoice semantics" — the wallet was watching that pk since
+generating it). Claiming goes through `await_payment_request`: an explicit
+`NotesChanged`-by-pk subscription (notifications fire on *confirmation* — virtual's
+pool state — so arrival IS settlement, P5.5's rule satisfied by construction), which
+stores the landed serials as Cold rows (the request key never left the wallet; only
+its pk did) and retires the request. Known gap, deliberate: a payment that lands
+while the wallet is offline can't yet be discovered (no query-by-pk RPC exists);
+P7.6's restore flow needs exactly that RPC anyway (the spec's sanctioned
+pk-enumeration), so it lands there rather than as a P7.3 side-quest.
+
+**The real bug: wRPC clients never received NotesChanged at all.** P6.9 wired the
+server side fully (`EventType::NotesChanged → RpcApiOps::NotesChangedNotification`,
+op 69) but the wRPC *client*'s notification-handler registration array
+(`rpc/wrpc/client/src/client.rs`) never got the new op — so the server sent
+notifications and the client-side interface, having no handler registered for op
+69, silently dropped them. Found the honest way: the two-wallet live test's
+receiver sat at "0 petals arrived" until timeout. One-line fix (add the op to the
+array). Lesson recorded: P6.9's verify exercised the subscription mechanism but not
+an end-to-end wRPC consumer — a notification pipeline isn't verified until
+something actually *consumes* a notification over every transport it claims to
+support.
+
+**Bearer import is one call, not a checklist**: `bearer_import` verifies the
+serial's current on-chain pk against the handed-over key and the claimed
+denomination (`get_notes_by_serial`) *before* touching the wallet, stores via
+P7.1's `import_bearer_key` (Hot, structurally — no caller-supplied provenance
+exists), and rotates in the same call. "Imported key is never left unrotated" is
+therefore not a UX discipline, it's the only code path.
+
+✅ *Verify*: `wallet_notepool_receive_flows_test` — two real `Wallet` instances
+(payer A, receiver B) against one live daemon, both flows end-to-end (see
+FORK-PLAN's entry for the full assertion list: slack-mode rotation with exact
+value conservation, Hot+Superseded/Cold+Active bookkeeping on both sides, on-chain
+old-serial-gone/new-serials-live checks, exact-amount claim via subscription,
+request retirement, payer tombstones). 4 new unit tests (both request forms
+round-trip, bearer round-trip + bad-tag rejection, exact-selection greedy
+including must-not-overshoot cases, fee-quanta sizing). P7.2's mint/redeem live
+test re-passes after its bootstrap was factored into the shared
+`connect_and_bootstrap_wallet` helper. Wallet-core suite 55 green; full workspace
+check + clippy clean.

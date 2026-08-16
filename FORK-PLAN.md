@@ -1782,12 +1782,52 @@ wallet. WASM/mobile wallets are post-launch — CLI proves the protocol.*
   --workspace`, `cargo test -p kaspa-wallet-core` (51 tests), and clippy on every
   touched crate all clean.
 
-- [ ] **P7.3 — Receive flows.** (a) bearer import: scan/paste a key QR → verify serial's
+- [x] **P7.3 — Receive flows.** (a) bearer import: scan/paste a key QR → verify serial's
   on-chain pk matches → **immediately rotate to a fresh cold key** → report confirmed;
   (b) sign-to-fresh-pk: generate fresh keypair(s), emit payment-request QR, watch for the
   rotation, confirm. Enforce the P5.6 hot-key rule on every import path (incl. restore).
   ✅ *Verify:* both flows succeed on local testnet between two wallet instances; imported
   key is never left unrotated after confirmation.
+  **Executed (2026-08-16):** the wallet's first `TransferOp` construction
+  (`account::notepool`: `submit_transfer`/`rotate_notes`/`pay_payment_request`,
+  mirroring redeem's hand-built zero-transparent-part pattern — one `SignedGroup`
+  per distinct key over the P5.2 signing hash) plus a **fee-quantization design
+  decision** recorded in NOTES.md: a pure pool transfer's fee is *necessarily* a
+  multiple of the smallest denomination (all values are), so fees are sized in
+  0.01-MAGLD quanta, sourced per P5.2's fee-stamp mechanism from spare notes
+  (excess back as change to fresh Cold keys) or — bootstrap case, wallet holds
+  nothing else — withheld from the rotation's own produced decomposition ("slack
+  mode"). QR/text payloads: `PaymentRequest` in both spec forms (40-byte pinned
+  amount / 32-byte payer-fills-in — the "amount or not" variants, distinguished by
+  length exactly as P5.6 lays out) and `BearerNote` `(sn, sk, d)` — deliberately
+  the paper-backup entry triple, not a third invented shape; terminal QR rendering
+  in the CLI via the `qrcode` crate (first QR dependency in the workspace).
+  Payment-request keys are persisted (encrypted, P7.1's storage pattern) *before*
+  the QR is ever displayed — a crash between issuing a request and payment landing
+  must not lose the only claiming key. `bearer_import` verifies the serial's live
+  on-chain pk/denomination via `get_notes_by_serial` before storing (Hot,
+  structurally) and rotating in the same call; `await_payment_request` subscribes
+  to `NotesChanged` by pk — notifications fire on *confirmation* (virtual pool
+  state), so arrival is settlement by construction. CLI: `note request [amount]`
+  (QR + text, then watches), `note pay <text> [amount]`, `note import <text>`.
+  **One real pre-existing bug found by the live two-wallet test**: the wRPC
+  *client* never registered a notification handler for `NotesChangedNotification`
+  (op 69) — the server-side mapping existed since P6.9, but incoming NotesChanged
+  messages were silently dropped client-side; P6.9's own verification exercised
+  the subscription over gRPC-adjacent paths, so the gap survived until something
+  actually consumed the notification over wRPC. One-line fix in
+  `rpc/wrpc/client/src/client.rs`'s notification-ops array. Verified live
+  (`wallet_notepool_receive_flows_test`, two real `Wallet` instances against one
+  daemon): bearer flow — A hands a 0.1 note to B (a fresh wallet holding nothing),
+  B verifies/imports/rotates in slack mode into 9×0.01 fresh Cold notes (fee
+  exactly one quantum), on-chain shows old serial gone + new serials live, B's
+  books show Hot+Superseded import and Cold+Active rotations, no rotated note
+  reuses the imported key; payment flow — B requests 0.05 pinned, A pays 5×0.01
+  exact + one 0.01 fee stamp, B's subscription claims exactly 5,000,000 petals,
+  request retires, payer's consumed serials verified gone from the pool. Plus 4
+  new unit tests (payload round-trips both request forms, exact-selection greedy,
+  fee-quanta sizing); mint/redeem live test re-passes after the bootstrap-helper
+  refactor; wallet-core suite 55 green; workspace check + clippy clean.
 
 - [ ] **P7.4 — Spend flows.** Given an amount: note selection + split planning to hit the
   exact sum, then (a) rotate to a supplied payment-request pk, or (b) bearer export —

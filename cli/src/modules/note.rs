@@ -1,12 +1,23 @@
 use crate::imports::*;
 use kaspa_consensus_core::Hash;
 use kaspa_consensus_core::notepool::DENOMINATION_PETALS;
-use kaspa_wallet_core::account::notepool::RedeemSelection;
+use kaspa_wallet_core::account::notepool::{
+    BearerNote, PaymentRequest, RedeemSelection, await_payment_request, create_payment_request,
+};
 use kaspa_wallet_core::storage::NoteStatus;
+use std::time::Duration;
 use workflow_core::abortable::Abortable;
 
+/// Render a payload as a terminal QR code (dense unicode half-blocks). Falls back to
+/// nothing (text-only) if the payload somehow exceeds QR capacity — the text form
+/// printed alongside is always sufficient.
+fn qr_string(text: &str) -> Option<String> {
+    let code = qrcode::QrCode::new(text.as_bytes()).ok()?;
+    Some(code.render::<qrcode::render::unicode::Dense1x2>().build())
+}
+
 #[derive(Default, Handler)]
-#[help("Mint, redeem, and list notes (FORK-PLAN P7.2)")]
+#[help("Mint, redeem, send, receive, and list notes")]
 pub struct Note;
 
 impl Note {
@@ -21,6 +32,9 @@ impl Note {
         match action.as_str() {
             "mint" => self.mint(&ctx, argv).await,
             "redeem" => self.redeem(&ctx, argv).await,
+            "request" => self.request(&ctx, argv).await,
+            "pay" => self.pay(&ctx, argv).await,
+            "import" => self.import(&ctx, argv).await,
             "balance" => self.balance(&ctx).await,
             "list" => self.list(&ctx).await,
             v => {
@@ -28,6 +42,94 @@ impl Note {
                 self.display_help(ctx, argv).await
             }
         }
+    }
+
+    /// `note request [amount]` — create a payment request (fresh pk, persisted
+    /// before display), show its QR + text, then watch for the payment.
+    async fn request(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
+        let account = ctx.wallet().account()?;
+        // Amount is optional per POOL-SPEC.md P5.6's two QR forms: pinned (40-byte)
+        // or left for the payer to fill in (32-byte, the printed/static form).
+        let amount_petals = if argv.is_empty() { None } else { Some(try_parse_required_nonzero_kaspa_as_sompi_u64(argv.first())?) };
+        let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(Some(&account)).await?;
+
+        let request = create_payment_request(&ctx.wallet(), &wallet_secret, amount_petals).await?;
+        let text = request.to_text();
+        if let Some(qr) = qr_string(&text) {
+            tprintln!(ctx, "{}", qr);
+        }
+        tprintln!(ctx, "{text}");
+        match amount_petals {
+            Some(amount) => tprintln!(ctx, "requesting {} MAGLD", sompi_to_kaspa_string(amount)),
+            None => tprintln!(ctx, "no pinned amount - the payer chooses"),
+        }
+
+        let timeout = Duration::from_secs(120);
+        tprintln!(ctx, "watching for payment (up to {}s; the request stays claimable after a timeout)...", timeout.as_secs());
+        match await_payment_request(&ctx.wallet(), &wallet_secret, request.pk, timeout).await {
+            Ok(claimed) => {
+                tprintln!(ctx, "payment received: {} MAGLD in {} note(s):", sompi_to_kaspa_string(claimed.total_petals), claimed.notes.len());
+                for note in &claimed.notes {
+                    tprintln!(ctx, "  {} - {}", note.sn, sompi_to_kaspa_string(DENOMINATION_PETALS[note.d as usize]));
+                }
+                tprintln!(ctx, "");
+            }
+            Err(err) => {
+                tprintln!(ctx, "{err}");
+                tprintln!(ctx, "(re-run 'note request' later or watch 'note list' - the request key remains stored)\r\n");
+            }
+        }
+        Ok(())
+    }
+
+    /// `note pay <request-text> [amount]` — pay a payment request from held notes.
+    async fn pay(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
+        if argv.is_empty() {
+            tprintln!(ctx, "usage: 'note pay <request-text> [amount]'\r\n");
+            return Ok(());
+        }
+        let account = ctx.wallet().account()?;
+        let request = PaymentRequest::from_text(&argv[0])?;
+        let amount_override =
+            if argv.len() > 1 { Some(try_parse_required_nonzero_kaspa_as_sompi_u64(argv.get(1))?) } else { None };
+        let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(Some(&account)).await?;
+
+        let result = account.pay_payment_request(wallet_secret, request, amount_override).await?;
+        tprintln!(
+            ctx,
+            "paid {} note(s) (fee {} MAGLD); tx: {}",
+            result.external_serials.len(),
+            sompi_to_kaspa_string(result.fee_petals),
+            result.transaction_id
+        );
+        tprintln!(ctx, "");
+        Ok(())
+    }
+
+    /// `note import <bearer-text>` — bearer-note import: verify on-chain, store
+    /// (Hot), immediately rotate to fresh Cold keys, report.
+    async fn import(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
+        if argv.is_empty() {
+            tprintln!(ctx, "usage: 'note import <bearer-text>'\r\n");
+            return Ok(());
+        }
+        let account = ctx.wallet().account()?;
+        let bearer = BearerNote::from_text(&argv[0])?;
+        let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(Some(&account)).await?;
+
+        let result = account.bearer_import(wallet_secret, bearer).await?;
+        tprintln!(ctx, "imported note {} and immediately rotated it to fresh cold key(s):", result.imported_sn);
+        for note in &result.rotation.own_notes {
+            tprintln!(ctx, "  {} - {}", note.sn, sompi_to_kaspa_string(DENOMINATION_PETALS[note.d as usize]));
+        }
+        tprintln!(
+            ctx,
+            "rotation tx: {} (fee {} MAGLD); the note is yours once this confirms",
+            result.rotation.transaction_id,
+            sompi_to_kaspa_string(result.rotation.fee_petals)
+        );
+        tprintln!(ctx, "");
+        Ok(())
     }
 
     async fn mint(&self, ctx: &Arc<KaspaCli>, mut argv: Vec<String>) -> Result<()> {
@@ -146,6 +248,9 @@ impl Note {
                 ("mint <amount>", "Mint notes worth <amount> MAGLD from the transparent balance"),
                 ("redeem <serial> [<serial> ...]", "Redeem specific notes by serial"),
                 ("redeem amount <amount>", "Redeem enough owned notes to cover at least <amount> MAGLD"),
+                ("request [<amount>]", "Create a payment request (QR + text), then watch for the payment"),
+                ("pay <request-text> [<amount>]", "Pay a payment request from held notes"),
+                ("import <bearer-text>", "Import a bearer note and immediately rotate it to fresh keys"),
                 ("balance", "Show note balance by denomination"),
                 ("list", "List every held note (serial, denomination, provenance, status)"),
             ],

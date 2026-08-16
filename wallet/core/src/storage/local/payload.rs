@@ -3,7 +3,7 @@
 //!
 
 use crate::imports::*;
-use crate::storage::{AddressBookEntry, NoteKeyEntry, PrvKeyData, PrvKeyDataId};
+use crate::storage::{AddressBookEntry, NoteKeyEntry, PaymentRequestKey, PrvKeyData, PrvKeyDataId};
 use kaspa_bip32::Mnemonic;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
@@ -15,6 +15,8 @@ pub struct Payload {
     pub encrypt_transactions: Option<EncryptionKind>,
     /// Note key database rows (FORK-PLAN P7.1, POOL-SPEC.md P5.6).
     pub note_key_data: Vec<NoteKeyEntry>,
+    /// Outstanding payment-request keys (FORK-PLAN P7.3, POOL-SPEC.md P5.5b).
+    pub payment_request_keys: Vec<PaymentRequestKey>,
 }
 
 impl Payload {
@@ -22,7 +24,14 @@ impl Payload {
     const STORAGE_VERSION: u32 = 0;
 
     pub fn new(prv_key_data: Vec<PrvKeyData>, accounts: Vec<AccountStorage>, address_book: Vec<AddressBookEntry>) -> Self {
-        Self { prv_key_data, accounts, address_book, encrypt_transactions: None, note_key_data: Vec::new() }
+        Self {
+            prv_key_data,
+            accounts,
+            address_book,
+            encrypt_transactions: None,
+            note_key_data: Vec::new(),
+            payment_request_keys: Vec::new(),
+        }
     }
 }
 
@@ -32,6 +41,7 @@ impl Zeroize for Payload {
     fn zeroize(&mut self) {
         self.prv_key_data.zeroize();
         self.note_key_data.iter_mut().for_each(|entry| entry.zeroize());
+        self.payment_request_keys.iter_mut().for_each(|key| key.zeroize());
     }
 }
 
@@ -65,6 +75,7 @@ impl BorshSerialize for Payload {
         BorshSerialize::serialize(&self.address_book, writer)?;
         BorshSerialize::serialize(&self.encrypt_transactions, writer)?;
         BorshSerialize::serialize(&self.note_key_data, writer)?;
+        BorshSerialize::serialize(&self.payment_request_keys, writer)?;
 
         Ok(())
     }
@@ -79,8 +90,9 @@ impl BorshDeserialize for Payload {
         let address_book = BorshDeserialize::deserialize_reader(reader)?;
         let encrypt_transactions = BorshDeserialize::deserialize_reader(reader)?;
         let note_key_data = BorshDeserialize::deserialize_reader(reader)?;
+        let payment_request_keys = BorshDeserialize::deserialize_reader(reader)?;
 
-        Ok(Self { prv_key_data, accounts, address_book, encrypt_transactions, note_key_data })
+        Ok(Self { prv_key_data, accounts, address_book, encrypt_transactions, note_key_data, payment_request_keys })
     }
 }
 

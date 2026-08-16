@@ -124,6 +124,59 @@ impl crate::storage::IdT for NoteKeyInfo {
 
 pub type NoteKeyMap = HashMap<Hash, NoteKeyEntry>;
 
+/// A payment-request key (FORK-PLAN P7.3, POOL-SPEC.md P5.5b "sign-to-fresh-pk"):
+/// a locally generated keypair whose `pk` has been handed out in a payment-request
+/// QR but which owns no serial *yet* — the spec's "unpaid-invoice semantics" ("the
+/// wallet was watching that `pk` since generating it"). Persisted the moment the
+/// request is created, before the QR is ever shown: a crash between issuing a
+/// request and the payment landing must not lose the only key that can ever spend
+/// the payer's notes. Sensitive (holds a raw `sk`) — stored encrypted, mirroring
+/// [`NoteKeyEntry`]'s handling, and zeroized on drop.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
+pub struct PaymentRequestKey {
+    pub sk: [u8; 32],
+    /// The requested amount, if the request pinned one (POOL-SPEC.md P5.6's QR
+    /// formats: the 40-byte form carries an amount; the 32-byte static/printed form
+    /// omits it and the payer enters the amount manually).
+    pub amount_petals: Option<u64>,
+}
+
+impl PaymentRequestKey {
+    pub fn new(sk: [u8; 32], amount_petals: Option<u64>) -> Self {
+        Self { sk, amount_petals }
+    }
+
+    /// The x-only BIP340 pk this request advertises — derived, never stored (same
+    /// rule as [`NoteKeyEntry::derive_pk`]).
+    pub fn derive_pk(&self) -> Result<[u8; 32]> {
+        let secret_key = SecretKey::from_slice(&self.sk).map_err(|e| Error::Custom(format!("invalid request secret key: {e}")))?;
+        Ok(Keypair::from_secret_key(SECP256K1, &secret_key).x_only_public_key().0.serialize())
+    }
+}
+
+impl Zeroize for PaymentRequestKey {
+    fn zeroize(&mut self) {
+        self.sk.zeroize();
+    }
+}
+
+impl Drop for PaymentRequestKey {
+    fn drop(&mut self) {
+        self.sk.zeroize();
+    }
+}
+
+/// Plaintext-safe half of a payment request (mirrors [`NoteKeyInfo`]'s split from
+/// [`NoteKeyEntry`]): the `pk` is public by construction — it's literally the
+/// content of the QR being shown around — and the amount is invoice metadata.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
+pub struct PaymentRequestInfo {
+    pub pk: [u8; 32],
+    pub amount_petals: Option<u64>,
+}
+
+pub type PaymentRequestMap = HashMap<[u8; 32], PaymentRequestKey>;
+
 /// Result of [`crate::storage::NoteKeyStore::apply_notes_changed`] — which serials it
 /// actually updated, split by kind so a caller can tell "fully reconciled" from
 /// "partially applied, retry `deferred` once a wallet secret is available."

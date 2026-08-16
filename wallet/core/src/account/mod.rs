@@ -391,6 +391,32 @@ pub trait Account: AnySync + Send + Sync + 'static {
         notepool::redeem(self.as_dyn_arc(), wallet_secret, selection).await
     }
 
+    /// Rotate owned notes to fresh Cold keys (FORK-PLAN P7.3; the P5.6 receive
+    /// flow's step 3 and the future P7.4 isolation primitive).
+    async fn rotate_notes(self: Arc<Self>, wallet_secret: Secret, serials: Vec<Hash>) -> Result<notepool::TransferResult> {
+        notepool::rotate_notes(self.as_dyn_arc(), wallet_secret, serials).await
+    }
+
+    /// Import a bearer note and immediately rotate it (FORK-PLAN P7.3 flow (a)).
+    async fn bearer_import(
+        self: Arc<Self>,
+        wallet_secret: Secret,
+        bearer: notepool::BearerNote,
+    ) -> Result<notepool::BearerImportResult> {
+        notepool::bearer_import(self.as_dyn_arc(), wallet_secret, bearer).await
+    }
+
+    /// Pay a payment request with exact denominations (FORK-PLAN P7.3 flow (b),
+    /// payer half).
+    async fn pay_payment_request(
+        self: Arc<Self>,
+        wallet_secret: Secret,
+        request: notepool::PaymentRequest,
+        amount_override: Option<u64>,
+    ) -> Result<notepool::TransferResult> {
+        notepool::pay_payment_request(self.as_dyn_arc(), wallet_secret, request, amount_override).await
+    }
+
     async fn commit_reveal_manual(
         self: Arc<Self>,
         start_destination: PaymentDestination,

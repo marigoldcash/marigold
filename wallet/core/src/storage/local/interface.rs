@@ -646,6 +646,40 @@ impl NoteKeyStore for LocalStoreInner {
 
         Ok(result)
     }
+
+    async fn store_payment_request(&self, wallet_secret: &Secret, key: PaymentRequestKey) -> Result<PaymentRequestInfo> {
+        let pk = key.derive_pk()?;
+        let info = PaymentRequestInfo { pk, amount_petals: key.amount_petals };
+        let mut cache = self.cache.write().unwrap();
+        let encryption_kind = cache.encryption_kind;
+        let mut map: Decrypted<PaymentRequestMap> = cache.payment_request_data.decrypt(wallet_secret)?;
+        map.insert(pk, key);
+        cache.payment_request_data.replace(map.encrypt(wallet_secret, encryption_kind)?);
+        cache.payment_request_info.retain(|existing| existing.pk != pk);
+        cache.payment_request_info.push(info.clone());
+        self.set_modified(true);
+        Ok(info)
+    }
+
+    async fn payment_requests(&self) -> Result<Vec<PaymentRequestInfo>> {
+        Ok(self.cache.read().unwrap().payment_request_info.clone())
+    }
+
+    async fn load_payment_request_key(&self, wallet_secret: &Secret, pk: &[u8; 32]) -> Result<Option<PaymentRequestKey>> {
+        let map: Decrypted<PaymentRequestMap> = self.cache.read().unwrap().payment_request_data.decrypt(wallet_secret)?;
+        Ok(map.get(pk).cloned())
+    }
+
+    async fn remove_payment_request(&self, wallet_secret: &Secret, pk: &[u8; 32]) -> Result<()> {
+        let mut cache = self.cache.write().unwrap();
+        let encryption_kind = cache.encryption_kind;
+        let mut map: Decrypted<PaymentRequestMap> = cache.payment_request_data.decrypt(wallet_secret)?;
+        map.remove(pk);
+        cache.payment_request_data.replace(map.encrypt(wallet_secret, encryption_kind)?);
+        cache.payment_request_info.retain(|existing| existing.pk != *pk);
+        self.set_modified(true);
+        Ok(())
+    }
 }
 
 #[async_trait]

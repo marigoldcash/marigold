@@ -23,6 +23,12 @@ pub struct Cache {
     /// Plaintext index alongside `note_key_data`, mirroring `prv_key_data_info` — safe
     /// because none of `NoteKeyInfo`'s fields are sensitive (see its doc comment).
     pub note_key_info: Collection<Hash, NoteKeyInfo>,
+    /// Outstanding payment-request keys (FORK-PLAN P7.3) — encrypted `pk -> key` map.
+    pub payment_request_data: Encrypted,
+    /// Plaintext index alongside `payment_request_data` (the pk is the QR's own
+    /// public content; the amount is invoice metadata). Plain Vec, not a
+    /// `Collection` — requests are few and short-lived, linear scans are fine.
+    pub payment_request_info: Vec<PaymentRequestInfo>,
 }
 
 fn note_key_map_and_info(note_key_data: Vec<NoteKeyEntry>) -> Result<(NoteKeyMap, Collection<Hash, NoteKeyInfo>)> {
@@ -30,6 +36,17 @@ fn note_key_map_and_info(note_key_data: Vec<NoteKeyEntry>) -> Result<(NoteKeyMap
         note_key_data.iter().map(NoteKeyInfo::try_from).collect::<Result<Vec<_>>>()?.try_into()?;
     let note_key_map: NoteKeyMap = note_key_data.into_iter().map(|entry| (entry.sn, entry)).collect();
     Ok((note_key_map, note_key_info))
+}
+
+fn payment_request_map_and_info(keys: Vec<PaymentRequestKey>) -> Result<(PaymentRequestMap, Vec<PaymentRequestInfo>)> {
+    let mut map = PaymentRequestMap::new();
+    let mut info = Vec::with_capacity(keys.len());
+    for key in keys {
+        let pk = key.derive_pk()?;
+        info.push(PaymentRequestInfo { pk, amount_petals: key.amount_petals });
+        map.insert(pk, key);
+    }
+    Ok((map, info))
 }
 
 impl Cache {
@@ -51,6 +68,8 @@ impl Cache {
 
         let (note_key_map, note_key_info) = note_key_map_and_info(payload.0.note_key_data.clone())?;
         let note_key_data = Decrypted::new(note_key_map).encrypt(secret, encryption_kind)?;
+        let (payment_request_map, payment_request_info) = payment_request_map_and_info(payload.0.payment_request_keys.clone())?;
+        let payment_request_data = Decrypted::new(payment_request_map).encrypt(secret, encryption_kind)?;
 
         Ok(Cache {
             wallet_title,
@@ -63,6 +82,8 @@ impl Cache {
             address_book,
             note_key_data,
             note_key_info,
+            payment_request_data,
+            payment_request_info,
         })
     }
 
@@ -84,6 +105,8 @@ impl Cache {
 
         let (note_key_map, note_key_info) = note_key_map_and_info(payload.note_key_data)?;
         let note_key_data = Decrypted::new(note_key_map).encrypt(secret, encryption_kind)?;
+        let (payment_request_map, payment_request_info) = payment_request_map_and_info(payload.payment_request_keys)?;
+        let payment_request_data = Decrypted::new(payment_request_map).encrypt(secret, encryption_kind)?;
 
         Ok(Cache {
             wallet_title,
@@ -96,6 +119,8 @@ impl Cache {
             address_book,
             note_key_data,
             note_key_info,
+            payment_request_data,
+            payment_request_info,
         })
     }
 
@@ -111,8 +136,11 @@ impl Cache {
         let address_book = self.address_book.clone();
         let note_key_data: Decrypted<NoteKeyMap> = self.note_key_data.decrypt(secret)?;
         let note_key_data = note_key_data.values().cloned().collect::<Vec<_>>();
+        let payment_request_keys: Decrypted<PaymentRequestMap> = self.payment_request_data.decrypt(secret)?;
+        let payment_request_keys = payment_request_keys.values().cloned().collect::<Vec<_>>();
         let mut payload = Payload::new(prv_key_data, accounts, address_book);
         payload.note_key_data = note_key_data;
+        payload.payment_request_keys = payment_request_keys;
         let payload = Decrypted::new(payload).encrypt(secret, self.encryption_kind)?;
 
         Ok(WalletStorage {

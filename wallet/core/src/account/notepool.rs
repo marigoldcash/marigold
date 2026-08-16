@@ -20,21 +20,36 @@
 
 use crate::account::Account;
 use crate::imports::*;
-use crate::storage::{NoteKeyEntry, NoteProvenance, NoteStatus};
+use crate::storage::{NoteKeyEntry, NoteKeyInfo, NoteProvenance, NoteStatus, PaymentRequestKey};
 use crate::tx::{Fees, Generator, GeneratorSettings, PaymentDestination, PaymentOutputs, Signer};
+use crate::wallet::Wallet;
 use kaspa_consensus_core::config::params::Params;
 use kaspa_consensus_core::constants::TX_VERSION_TOCCATA;
 use kaspa_consensus_core::mass::MassCalculator;
 use kaspa_consensus_core::notepool::{
-    DENOMINATION_PETALS, DenominationTag, FreshnessAnchor, MintOp, NewNote, PoolOp, RedeemOp, SignedGroup,
+    DENOMINATION_PETALS, DenominationTag, FreshnessAnchor, MintOp, NewNote, PoolOp, RedeemOp, SignedGroup, TransferOp,
     hashing::{serial_hash, signing_hash, transparent_outputs_hash},
 };
 use kaspa_consensus_core::subnets::SUBNETWORK_ID_NOTE_POOL;
 use kaspa_consensus_core::tx::{PopulatedTransaction, Transaction, TransactionOutput};
 use kaspa_hashes::Hash;
+use kaspa_notify::scope::{NotesChangedScope, Scope};
+use kaspa_rpc_core::notify::connection::{ChannelConnection, ChannelType};
 use kaspa_txscript::pay_to_address_script;
 use secp256k1::{Keypair, Message, SECP256K1, SecretKey};
+use std::time::Duration;
 use workflow_core::abortable::Abortable;
+use workflow_core::channel::Channel;
+
+/// The fee granularity of a pure pool `Transfer` (FORK-PLAN P7.3 design decision,
+/// recorded in NOTES.md): since every consumed and produced value is a multiple of the
+/// smallest denomination, `fee = Σconsumed − Σproduced` is *necessarily* a multiple of
+/// 0.01 MAGLD — pool-op fees are quantized whether we like it or not. The wallet
+/// sources them per POOL-SPEC.md P5.2's fee-stamp mechanism (an extra consumed note
+/// with its excess over the fee returned as change to fresh own keys), or — when the
+/// wallet holds no spare note at all, e.g. a first-ever bearer receive — by
+/// withholding one quantum from the rotation's own produced decomposition.
+pub const FEE_QUANTUM_PETALS: u64 = DENOMINATION_PETALS[0];
 
 /// Decompose `petals` into the fixed P1.6 denomination ladder, largest-first. Always
 /// exact for a multiple of the smallest denomination — each rung is exactly 10x the
@@ -303,6 +318,623 @@ pub async fn redeem(account: Arc<dyn Account>, wallet_secret: Secret, selection:
     Ok(RedeemResult { transaction_id, redeemed_value_petals, fee_sompi, serials })
 }
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// Receive flows (FORK-PLAN P7.3): QR/text payloads, the pure-pool transfer builder,
+// bearer import, and the sign-to-fresh-pk payment-request flow.
+
+/// The payment-request QR/text payload (POOL-SPEC.md P5.6 "QR payload formats"):
+/// plaintext, no encryption — a public invitation to pay. 40 bytes with a pinned
+/// amount (`pk || amount_petals u64 LE`), 32 bytes without one (the static/printed
+/// form — the payer supplies the amount manually). The two forms are distinguished
+/// by length alone, exactly as the spec lays them out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PaymentRequest {
+    pub pk: [u8; 32],
+    pub amount_petals: Option<u64>,
+}
+
+/// Text-encoding prefix for payment requests. A wallet-level convention (what a QR
+/// or a pasted string carries), not a consensus format.
+pub const PAYMENT_REQUEST_PREFIX: &str = "marigoldreq:";
+/// Text-encoding prefix for bearer-note handovers.
+pub const BEARER_NOTE_PREFIX: &str = "marigoldnote:";
+
+impl PaymentRequest {
+    pub fn encode(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(40);
+        bytes.extend_from_slice(&self.pk);
+        if let Some(amount) = self.amount_petals {
+            bytes.extend_from_slice(&amount.to_le_bytes());
+        }
+        bytes
+    }
+
+    pub fn decode(bytes: &[u8]) -> Result<Self> {
+        match bytes.len() {
+            32 => Ok(Self { pk: bytes.try_into().unwrap(), amount_petals: None }),
+            40 => {
+                let pk: [u8; 32] = bytes[..32].try_into().unwrap();
+                let amount = u64::from_le_bytes(bytes[32..].try_into().unwrap());
+                Ok(Self { pk, amount_petals: Some(amount) })
+            }
+            len => Err(Error::Custom(format!("payment request must be 32 or 40 bytes, got {len}"))),
+        }
+    }
+
+    pub fn to_text(&self) -> String {
+        format!("{PAYMENT_REQUEST_PREFIX}{}", self.encode().to_hex())
+    }
+
+    pub fn from_text(text: &str) -> Result<Self> {
+        let hex = text
+            .trim()
+            .strip_prefix(PAYMENT_REQUEST_PREFIX)
+            .ok_or_else(|| Error::Custom(format!("payment request text must start with '{PAYMENT_REQUEST_PREFIX}'")))?;
+        let bytes = Vec::<u8>::from_hex(hex).map_err(|e| Error::Custom(format!("invalid payment request hex: {e}")))?;
+        Self::decode(&bytes)
+    }
+}
+
+/// The bearer-note handover payload: everything the receiver needs to take custody
+/// of one note — `(sn, sk, d)`, 65 bytes, deliberately the same triple the paper
+/// backup stores per note (POOL-SPEC.md P5.6's backup format) rather than a third
+/// invented shape. Plaintext by design: a bearer handover QR is shown briefly,
+/// point-to-point, and its entire value is *supposed* to transfer to whoever scans
+/// it — the mitigations are physical (show it only to the payee) and protocol-level
+/// (the receiver's immediate rotation, below), not encryption.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BearerNote {
+    pub sn: Hash,
+    pub sk: [u8; 32],
+    pub d: DenominationTag,
+}
+
+impl BearerNote {
+    pub fn encode(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(65);
+        bytes.extend_from_slice(&self.sn.as_bytes());
+        bytes.extend_from_slice(&self.sk);
+        bytes.push(self.d as u8);
+        bytes
+    }
+
+    pub fn decode(bytes: &[u8]) -> Result<Self> {
+        if bytes.len() != 65 {
+            return Err(Error::Custom(format!("bearer note must be 65 bytes, got {}", bytes.len())));
+        }
+        let sn = Hash::from_slice(&bytes[..32]);
+        let sk: [u8; 32] = bytes[32..64].try_into().unwrap();
+        let d = DenominationTag::try_from(bytes[64]).map_err(|_| Error::Custom(format!("unknown denomination tag {}", bytes[64])))?;
+        Ok(Self { sn, sk, d })
+    }
+
+    pub fn to_text(&self) -> String {
+        format!("{BEARER_NOTE_PREFIX}{}", self.encode().to_hex())
+    }
+
+    pub fn from_text(text: &str) -> Result<Self> {
+        let hex = text
+            .trim()
+            .strip_prefix(BEARER_NOTE_PREFIX)
+            .ok_or_else(|| Error::Custom(format!("bearer note text must start with '{BEARER_NOTE_PREFIX}'")))?;
+        let bytes = Vec::<u8>::from_hex(hex).map_err(|e| Error::Custom(format!("invalid bearer note hex: {e}")))?;
+        Self::decode(&bytes)
+    }
+}
+
+/// Like [`decompose_amount`] but maps zero to an empty list (a fee source consumed
+/// exactly as a stamp produces no change) instead of `None`.
+fn decompose_amount_allow_zero(petals: u64) -> Option<Vec<DenominationTag>> {
+    if petals == 0 { Some(Vec::new()) } else { decompose_amount(petals) }
+}
+
+/// A freshly generated note key destined to become an own `NoteKeyEntry` row once
+/// the transfer's transaction id (and therefore each serial) is known.
+struct FreshNote {
+    d: DenominationTag,
+    sk: [u8; 32],
+    pk: [u8; 32],
+}
+
+fn generate_fresh_notes(denominations: &[DenominationTag]) -> Vec<FreshNote> {
+    denominations
+        .iter()
+        .map(|d| {
+            let sk = SecretKey::new(&mut secp256k1::rand::thread_rng());
+            let pk = Keypair::from_secret_key(SECP256K1, &sk).x_only_public_key().0.serialize();
+            FreshNote { d: *d, sk: sk.secret_bytes(), pk }
+        })
+        .collect()
+}
+
+/// Exact-sum note selection over the fixed ladder, greedy largest-first — optimal for
+/// a canonical powers-of-ten system: taking as many of the largest usable
+/// denomination as possible never forecloses an exact representation that skipping
+/// them would have allowed. Returns `None` when the held multiset simply cannot
+/// represent the amount exactly (P7.4's split planning is the remedy, not P7.3's).
+fn select_exact(available: &[Arc<NoteKeyInfo>], amount_petals: u64) -> Option<Vec<Hash>> {
+    let mut by_denom: Vec<Vec<Hash>> = vec![Vec::new(); DENOMINATION_PETALS.len()];
+    for info in available {
+        by_denom[info.d as usize].push(info.sn);
+    }
+    let mut remaining = amount_petals;
+    let mut selected = Vec::new();
+    for (index, value) in DENOMINATION_PETALS.iter().enumerate().rev() {
+        let want = (remaining / value) as usize;
+        let take = want.min(by_denom[index].len());
+        for sn in by_denom[index].drain(..take) {
+            selected.push(sn);
+        }
+        remaining -= take as u64 * value;
+    }
+    (remaining == 0).then_some(selected)
+}
+
+/// Estimate the consensus mass of a transfer with the given shape. A `SignedGroup`'s
+/// wire size is independent of its signature content, so placeholder signatures give
+/// byte-identical payload sizes to the final ones (same trick `redeem` uses).
+fn estimate_transfer_mass(
+    mass_calculator: &MassCalculator,
+    group_serials: &[Vec<Hash>],
+    produced: &[NewNote],
+    freshness: FreshnessAnchor,
+) -> Result<u64> {
+    let consumed: Vec<SignedGroup> =
+        group_serials.iter().map(|serials| SignedGroup { serials: serials.clone(), signature: [0u8; 64] }).collect();
+    let payload = PoolOp::Transfer(TransferOp { consumed, produced: produced.to_vec(), freshness }).encode_payload();
+    let tx = Transaction::new(TX_VERSION_TOCCATA, vec![], vec![], 0, SUBNETWORK_ID_NOTE_POOL, 0, payload);
+    let populated = PopulatedTransaction::new(&tx, vec![]);
+    Ok(mass_calculator
+        .calc_contextual_masses(&populated)
+        .ok_or_else(|| Error::Custom("transfer: mass calculation failed".to_string()))?
+        .storage_mass)
+}
+
+pub struct TransferResult {
+    pub transaction_id: Hash,
+    /// Every serial this transfer consumed (payment/rotation notes + fee sources).
+    pub consumed_serials: Vec<Hash>,
+    /// Own new rows (rotation/change notes), already persisted in the note key store.
+    pub own_notes: Vec<NoteKeyEntry>,
+    /// Serials of notes produced to an external pk (payment notes) — not own rows.
+    pub external_serials: Vec<Hash>,
+    pub fee_petals: u64,
+}
+
+/// The shared pure-pool transfer engine behind [`rotate_notes`] and
+/// [`pay_payment_request`]: given the notes to consume, the external payment notes
+/// (possibly none) and the own-note denominations to produce, it signs one
+/// `SignedGroup` per distinct key, assembles/submits the zero-transparent-part
+/// transaction, persists the own rows (`serial_hash(txid, index)` with external
+/// payment notes occupying the leading indices) and tombstones everything consumed.
+async fn submit_transfer(
+    account: &Arc<dyn Account>,
+    wallet_secret: &Secret,
+    consumed_entries: &[NoteKeyEntry],
+    external: &[NewNote],
+    own_fresh: &[FreshNote],
+    own_provenance: NoteProvenance,
+    freshness: FreshnessAnchor,
+    fee_petals: u64,
+) -> Result<TransferResult> {
+    let mut produced: Vec<NewNote> = external.to_vec();
+    produced.extend(own_fresh.iter().map(|f| NewNote { d: f.d, pk: f.pk }));
+
+    let outputs_hash = transparent_outputs_hash(&[]);
+    let mut groups_by_sk: HashMap<[u8; 32], Vec<Hash>> = HashMap::new();
+    for entry in consumed_entries {
+        groups_by_sk.entry(entry.sk).or_default().push(entry.sn);
+    }
+
+    const TRANSFER_OP_TYPE: u8 = 1;
+    let mut signed_groups = Vec::with_capacity(groups_by_sk.len());
+    for (sk_bytes, group_serials) in groups_by_sk {
+        let hash = signing_hash(TRANSFER_OP_TYPE, &group_serials, &produced, outputs_hash, freshness.anchor_daa_score);
+        let keypair =
+            Keypair::from_seckey_slice(SECP256K1, &sk_bytes).map_err(|e| Error::Custom(format!("invalid note secret key: {e}")))?;
+        let signature: [u8; 64] = *keypair.sign_schnorr(Message::from_digest(hash.into())).as_ref();
+        signed_groups.push(SignedGroup { serials: group_serials, signature });
+    }
+
+    let payload = PoolOp::Transfer(TransferOp { consumed: signed_groups, produced: produced.clone(), freshness }).encode_payload();
+    let tx = Transaction::new(TX_VERSION_TOCCATA, vec![], vec![], 0, SUBNETWORK_ID_NOTE_POOL, 0, payload);
+
+    let network_id = account.utxo_context().processor().network_id()?;
+    let mass_calculator = MassCalculator::new_with_consensus_params(&Params::from(network_id));
+    let populated = PopulatedTransaction::new(&tx, vec![]);
+    let storage_mass = mass_calculator
+        .calc_contextual_masses(&populated)
+        .ok_or_else(|| Error::Custom("transfer: mass calculation failed".to_string()))?
+        .storage_mass;
+    tx.set_storage_mass(storage_mass);
+
+    let rpc_tx: kaspa_rpc_core::RpcTransaction = (&tx).into();
+    let transaction_id = account.wallet().rpc_api().submit_transaction(rpc_tx, false).await?;
+
+    let note_key_store = account.wallet().store().as_note_key_store()?;
+    let external_serials: Vec<Hash> = (0..external.len()).map(|i| serial_hash(&transaction_id, i as u32)).collect();
+    let mut own_notes = Vec::with_capacity(own_fresh.len());
+    for (offset, fresh) in own_fresh.iter().enumerate() {
+        let sn = serial_hash(&transaction_id, (external.len() + offset) as u32);
+        let entry = NoteKeyEntry::new(sn, fresh.sk, fresh.d, own_provenance);
+        note_key_store.store(wallet_secret, entry.clone()).await?;
+        own_notes.push(entry);
+    }
+    let consumed_serials: Vec<Hash> = consumed_entries.iter().map(|e| e.sn).collect();
+    for sn in &consumed_serials {
+        note_key_store.mark_status(sn, NoteStatus::Superseded).await?;
+    }
+
+    Ok(TransferResult { transaction_id, consumed_serials, own_notes, external_serials, fee_petals })
+}
+
+/// Shared fee/feerate plumbing: the estimated feerate (sompi per gram) to size a
+/// transfer's fee quanta against, mirroring `redeem`'s sourcing.
+async fn transfer_feerate(account: &Arc<dyn Account>) -> f64 {
+    match account.wallet().rpc_api().get_fee_estimate().await {
+        Ok(estimate) => estimate.normal_buckets.first().map(|b| b.feerate).unwrap_or(1.0),
+        Err(_) => 1.0,
+    }
+}
+
+fn required_fee_quanta(mass: u64, feerate: f64) -> u64 {
+    let required = (mass as f64 * feerate).ceil() as u64;
+    required.div_ceil(FEE_QUANTUM_PETALS).max(1)
+}
+
+/// Rotate the given (owned, Active) serials to fresh keys (FORK-PLAN P7.3 — the
+/// receive flow's step 3, also the future P7.4 isolation primitive). The rotated
+/// value is re-produced under fresh Cold keys, preserving denominations. The fee is
+/// sourced from the wallet's smallest spare notes (consumed alongside, their excess
+/// returned as change) — or, when the wallet holds nothing else, withheld from the
+/// rotated value itself ("slack mode": the produced decomposition simply comes out
+/// one fee-quantum short, the bootstrap case for a first-ever bearer receive).
+pub async fn rotate_notes(account: Arc<dyn Account>, wallet_secret: Secret, serials: Vec<Hash>) -> Result<TransferResult> {
+    if serials.is_empty() {
+        return Err(Error::Custom("no serials given to rotate".to_string()));
+    }
+    let note_key_store = account.wallet().store().as_note_key_store()?;
+
+    let mut rotate_entries = Vec::with_capacity(serials.len());
+    for sn in &serials {
+        let entry =
+            note_key_store.load_key(&wallet_secret, sn).await?.ok_or_else(|| Error::Custom(format!("serial {sn} has no stored key")))?;
+        rotate_entries.push(entry);
+    }
+    let rotate_value: u64 = rotate_entries.iter().map(|e| DENOMINATION_PETALS[e.d as usize]).sum();
+
+    // Spare (fee-source) candidates: every Active note not being rotated, smallest first.
+    let mut spares: Vec<Arc<NoteKeyInfo>> = note_key_store
+        .iter()
+        .await?
+        .try_filter(|info| futures::future::ready(info.status == NoteStatus::Active && !serials.contains(&info.sn)))
+        .try_collect()
+        .await?;
+    spares.sort_by_key(|info| DENOMINATION_PETALS[info.d as usize]);
+
+    let network_id = account.utxo_context().processor().network_id()?;
+    let mass_calculator = MassCalculator::new_with_consensus_params(&Params::from(network_id));
+    let server_info = account.wallet().rpc_api().get_server_info().await?;
+    let freshness = FreshnessAnchor { anchor_daa_score: server_info.virtual_daa_score };
+    let feerate = transfer_feerate(&account).await;
+
+    let mut fee_quanta: u64 = 1;
+    // Bounded fixpoint: the fee affects the change/produced shape, which affects
+    // mass, which affects the fee. Each iteration only ever raises `fee_quanta`, and
+    // one quantum covers several thousand grams at any sane feerate, so this
+    // converges immediately in practice; the bound is a defensive backstop.
+    for _ in 0..8 {
+        let fee_petals = fee_quanta * FEE_QUANTUM_PETALS;
+
+        // Stamp mode: pull spares (smallest first) until they cover the fee.
+        let mut source_infos: Vec<Arc<NoteKeyInfo>> = Vec::new();
+        let mut source_total: u64 = 0;
+        for spare in &spares {
+            if source_total >= fee_petals {
+                break;
+            }
+            source_total += DENOMINATION_PETALS[spare.d as usize];
+            source_infos.push(spare.clone());
+        }
+
+        let (produced_denoms, consumed_serial_count) = if source_total >= fee_petals {
+            let mut denoms = decompose_amount(rotate_value).expect("rotate value is a sum of denominations");
+            denoms.extend(decompose_amount_allow_zero(source_total - fee_petals).expect("change is denomination-quantized"));
+            (denoms, serials.len() + source_infos.len())
+        } else {
+            // Slack mode: no (sufficient) spares — the fee comes out of the rotated
+            // value itself.
+            if rotate_value <= fee_petals {
+                return Err(Error::Custom(format!(
+                    "rotating these note(s) ({rotate_value} petals) would burn them entirely as fee ({fee_petals} petals) — \
+                     the wallet holds no spare note to fund the fee with"
+                )));
+            }
+            (decompose_amount(rotate_value - fee_petals).expect("slack remainder is denomination-quantized"), serials.len())
+        };
+
+        // Estimate mass for this candidate shape (worst-case grouping: every consumed
+        // entry under its own key — placeholder serials are fine, only counts matter).
+        let placeholder_groups: Vec<Vec<Hash>> = (0..consumed_serial_count).map(|i| vec![Hash::from_u64_word(i as u64)]).collect();
+        let placeholder_produced: Vec<NewNote> = produced_denoms.iter().map(|d| NewNote { d: *d, pk: [0u8; 32] }).collect();
+        let mass = estimate_transfer_mass(&mass_calculator, &placeholder_groups, &placeholder_produced, freshness)?;
+        let required = required_fee_quanta(mass, feerate);
+        if required > fee_quanta {
+            fee_quanta = required;
+            continue;
+        }
+
+        // Shape settled — build for real.
+        let mut consumed_entries = rotate_entries.clone();
+        for info in &source_infos {
+            let entry = note_key_store
+                .load_key(&wallet_secret, &info.sn)
+                .await?
+                .ok_or_else(|| Error::Custom(format!("fee-source serial {} has no stored key", info.sn)))?;
+            consumed_entries.push(entry);
+        }
+        let own_fresh = generate_fresh_notes(&produced_denoms);
+        return submit_transfer(
+            &account,
+            &wallet_secret,
+            &consumed_entries,
+            &[],
+            &own_fresh,
+            NoteProvenance::Cold,
+            freshness,
+            fee_quanta * FEE_QUANTUM_PETALS,
+        )
+        .await;
+    }
+    Err(Error::Custom("transfer fee sizing did not converge".to_string()))
+}
+
+pub struct BearerImportResult {
+    pub imported_sn: Hash,
+    pub rotation: TransferResult,
+}
+
+/// Bearer-note import (FORK-PLAN P7.3 flow (a), POOL-SPEC.md P5.5a/P5.6): verify the
+/// serial's current on-chain `pk` matches the handed-over key, store it — Hot,
+/// structurally (P7.1's `import_bearer_key` accepts no other provenance) — and
+/// **immediately** rotate it to a fresh Cold key. The note is not considered
+/// received until that rotation confirms; the caller reports confirmation by
+/// watching the rotation's own serials.
+pub async fn bearer_import(account: Arc<dyn Account>, wallet_secret: Secret, bearer: BearerNote) -> Result<BearerImportResult> {
+    let secret_key = SecretKey::from_slice(&bearer.sk).map_err(|e| Error::Custom(format!("invalid bearer secret key: {e}")))?;
+    let derived_pk = Keypair::from_secret_key(SECP256K1, &secret_key).x_only_public_key().0.serialize();
+
+    // Verify against live pool state before touching the wallet: the serial must
+    // exist, still be owned by exactly this key, and carry the claimed denomination.
+    let on_chain = account.wallet().rpc_api().get_notes_by_serial(vec![bearer.sn]).await?;
+    let entry = on_chain
+        .iter()
+        .find(|entry| entry.sn == bearer.sn)
+        .ok_or_else(|| Error::Custom(format!("note {} does not exist in the pool (already spent, or never existed)", bearer.sn)))?;
+    if entry.pk != derived_pk {
+        return Err(Error::Custom(format!(
+            "note {} is not currently owned by the handed-over key — it was already rotated away (spent) by someone else",
+            bearer.sn
+        )));
+    }
+    if entry.denomination != bearer.d as u8 {
+        return Err(Error::Custom(format!(
+            "note {} denomination mismatch: payload claims tag {}, chain says {}",
+            bearer.sn, bearer.d as u8, entry.denomination
+        )));
+    }
+
+    let note_key_store = account.wallet().store().as_note_key_store()?;
+    note_key_store.import_bearer_key(&wallet_secret, bearer.sn, bearer.sk, bearer.d).await?;
+
+    // The hot-key rule (POOL-SPEC.md P5.6): rotate immediately, not lazily.
+    let rotation = rotate_notes(account, wallet_secret, vec![bearer.sn]).await?;
+    Ok(BearerImportResult { imported_sn: bearer.sn, rotation })
+}
+
+/// Create (and persist, before anything is displayed) a payment request
+/// (FORK-PLAN P7.3 flow (b), POOL-SPEC.md P5.5b "sign-to-fresh-pk").
+pub async fn create_payment_request(wallet: &Arc<Wallet>, wallet_secret: &Secret, amount_petals: Option<u64>) -> Result<PaymentRequest> {
+    if let Some(amount) = amount_petals {
+        decompose_amount(amount).ok_or_else(|| {
+            Error::Custom(format!("{amount} petals is not representable in the denomination ladder (must be a nonzero multiple of 0.01 MAGLD)"))
+        })?;
+    }
+    let sk = SecretKey::new(&mut secp256k1::rand::thread_rng());
+    let key = PaymentRequestKey::new(sk.secret_bytes(), amount_petals);
+    let info = wallet.store().as_note_key_store()?.store_payment_request(wallet_secret, key).await?;
+    Ok(PaymentRequest { pk: info.pk, amount_petals })
+}
+
+/// Pay a payment request (the payer's half of sign-to-fresh-pk): select own notes
+/// summing *exactly* to the amount (P7.4 adds split planning for when the held
+/// multiset can't represent it), produce them under the request's `pk`, fund the fee
+/// with spare notes (change back to own fresh Cold keys).
+pub async fn pay_payment_request(
+    account: Arc<dyn Account>,
+    wallet_secret: Secret,
+    request: PaymentRequest,
+    amount_override: Option<u64>,
+) -> Result<TransferResult> {
+    let amount = request
+        .amount_petals
+        .or(amount_override)
+        .ok_or_else(|| Error::Custom("this payment request pins no amount — one must be supplied".to_string()))?;
+    decompose_amount(amount)
+        .ok_or_else(|| Error::Custom(format!("{amount} petals is not representable (must be a nonzero multiple of 0.01 MAGLD)")))?;
+
+    let note_key_store = account.wallet().store().as_note_key_store()?;
+    let active: Vec<Arc<NoteKeyInfo>> = note_key_store
+        .iter()
+        .await?
+        .try_filter(|info| futures::future::ready(info.status == NoteStatus::Active))
+        .try_collect()
+        .await?;
+
+    let payment_serials = select_exact(&active, amount).ok_or_else(|| {
+        Error::Custom(
+            "held notes cannot represent this amount exactly (split planning arrives with FORK-PLAN P7.4 — \
+             for now, mint or receive denominations that sum to it)"
+                .to_string(),
+        )
+    })?;
+
+    let mut spares: Vec<Arc<NoteKeyInfo>> =
+        active.iter().filter(|info| !payment_serials.contains(&info.sn)).cloned().collect();
+    spares.sort_by_key(|info| DENOMINATION_PETALS[info.d as usize]);
+
+    let mut payment_entries = Vec::with_capacity(payment_serials.len());
+    for sn in &payment_serials {
+        let entry =
+            note_key_store.load_key(&wallet_secret, sn).await?.ok_or_else(|| Error::Custom(format!("serial {sn} has no stored key")))?;
+        payment_entries.push(entry);
+    }
+    let payment_denoms = decompose_amount(amount).expect("validated above");
+    let external: Vec<NewNote> = payment_denoms.iter().map(|d| NewNote { d: *d, pk: request.pk }).collect();
+
+    let network_id = account.utxo_context().processor().network_id()?;
+    let mass_calculator = MassCalculator::new_with_consensus_params(&Params::from(network_id));
+    let server_info = account.wallet().rpc_api().get_server_info().await?;
+    let freshness = FreshnessAnchor { anchor_daa_score: server_info.virtual_daa_score };
+    let feerate = transfer_feerate(&account).await;
+
+    let mut fee_quanta: u64 = 1;
+    for _ in 0..8 {
+        let fee_petals = fee_quanta * FEE_QUANTUM_PETALS;
+        let mut source_infos: Vec<Arc<NoteKeyInfo>> = Vec::new();
+        let mut source_total: u64 = 0;
+        for spare in &spares {
+            if source_total >= fee_petals {
+                break;
+            }
+            source_total += DENOMINATION_PETALS[spare.d as usize];
+            source_infos.push(spare.clone());
+        }
+        if source_total < fee_petals {
+            return Err(Error::Custom(format!(
+                "no spare note(s) available to fund the {fee_petals}-petal transfer fee — every payment consumes at least one \
+                 0.01-MAGLD fee quantum beyond the amount paid"
+            )));
+        }
+        let change_denoms = decompose_amount_allow_zero(source_total - fee_petals).expect("change is denomination-quantized");
+
+        let consumed_count = payment_entries.len() + source_infos.len();
+        let placeholder_groups: Vec<Vec<Hash>> = (0..consumed_count).map(|i| vec![Hash::from_u64_word(i as u64)]).collect();
+        let mut placeholder_produced = external.clone();
+        placeholder_produced.extend(change_denoms.iter().map(|d| NewNote { d: *d, pk: [0u8; 32] }));
+        let mass = estimate_transfer_mass(&mass_calculator, &placeholder_groups, &placeholder_produced, freshness)?;
+        let required = required_fee_quanta(mass, feerate);
+        if required > fee_quanta {
+            fee_quanta = required;
+            continue;
+        }
+
+        let mut consumed_entries = payment_entries.clone();
+        for info in &source_infos {
+            let entry = note_key_store
+                .load_key(&wallet_secret, &info.sn)
+                .await?
+                .ok_or_else(|| Error::Custom(format!("fee-source serial {} has no stored key", info.sn)))?;
+            consumed_entries.push(entry);
+        }
+        let own_fresh = generate_fresh_notes(&change_denoms);
+        return submit_transfer(
+            &account,
+            &wallet_secret,
+            &consumed_entries,
+            &external,
+            &own_fresh,
+            NoteProvenance::Cold,
+            freshness,
+            fee_quanta * FEE_QUANTUM_PETALS,
+        )
+        .await;
+    }
+    Err(Error::Custom("transfer fee sizing did not converge".to_string()))
+}
+
+pub struct ClaimedPayment {
+    pub notes: Vec<NoteKeyEntry>,
+    pub total_petals: u64,
+}
+
+/// Await a payment against an outstanding request (the receiver's half of
+/// sign-to-fresh-pk): subscribe to `NotesChanged` for the request's `pk`
+/// (POOL-SPEC.md P5.6's "the wallet was watching that `pk` since generating it" —
+/// notifications fire on *confirmation*, when virtual's pool state changes, so
+/// arrival here IS settlement, not mempool presence), claim the landed serials into
+/// the note key store as Cold rows, and retire the request. Cold, not Hot: the
+/// request key was generated locally and only its *pk* ever left the wallet.
+pub async fn await_payment_request(
+    wallet: &Arc<Wallet>,
+    wallet_secret: &Secret,
+    pk: [u8; 32],
+    timeout: Duration,
+) -> Result<ClaimedPayment> {
+    let note_key_store = wallet.store().as_note_key_store()?;
+    let request_key = note_key_store
+        .load_payment_request_key(wallet_secret, &pk)
+        .await?
+        .ok_or_else(|| Error::Custom("no outstanding payment request for this pk".to_string()))?;
+    let target = request_key.amount_petals;
+
+    let rpc = wallet.rpc_api();
+    let notification_channel = Channel::<kaspa_rpc_core::Notification>::unbounded();
+    let listener_id = rpc.register_new_listener(ChannelConnection::new(
+        "notepool-await-payment",
+        notification_channel.sender.clone(),
+        ChannelType::Closable,
+    ));
+    rpc.start_notify(listener_id, Scope::NotesChanged(NotesChangedScope::new(vec![], vec![pk]))).await?;
+
+    let mut landed: Vec<(Hash, DenominationTag)> = Vec::new();
+    let mut total: u64 = 0;
+    let mut timeout_fut = Box::pin(workflow_core::task::sleep(timeout).fuse());
+    let outcome = loop {
+        futures::select! {
+            notification = notification_channel.receiver.recv().fuse() => {
+                match notification {
+                    Ok(kaspa_rpc_core::Notification::NotesChanged(notification)) => {
+                        for entry in notification.added.iter().filter(|entry| entry.pk == pk) {
+                            let d = DenominationTag::try_from(entry.denomination)
+                                .map_err(|_| Error::Custom(format!("unknown denomination tag {}", entry.denomination)))?;
+                            if !landed.iter().any(|(sn, _)| *sn == entry.sn) {
+                                landed.push((entry.sn, d));
+                                total += DENOMINATION_PETALS[d as usize];
+                            }
+                        }
+                        match target {
+                            Some(amount) if total >= amount => break Ok(()),
+                            None if !landed.is_empty() => break Ok(()),
+                            _ => {}
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(_) => break Err(Error::Custom("notification channel closed while awaiting payment".to_string())),
+                }
+            }
+            _ = timeout_fut => {
+                break Err(Error::Custom(format!(
+                    "timed out awaiting payment ({} petals of {} arrived) — the request remains active",
+                    total,
+                    target.map(|t| t.to_string()).unwrap_or_else(|| "unpinned".to_string())
+                )));
+            }
+        }
+    };
+    let _ = rpc.unregister_listener(listener_id).await;
+    outcome?;
+
+    let mut notes = Vec::with_capacity(landed.len());
+    for (sn, d) in landed {
+        let entry = NoteKeyEntry::new(sn, request_key.sk, d, NoteProvenance::Cold);
+        note_key_store.store(wallet_secret, entry.clone()).await?;
+        notes.push(entry);
+    }
+    note_key_store.remove_payment_request(wallet_secret, &pk).await?;
+    Ok(ClaimedPayment { notes, total_petals: total })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -338,5 +970,59 @@ mod tests {
     #[test]
     fn decompose_amount_rejects_zero() {
         assert!(decompose_amount(0).is_none());
+    }
+
+    #[test]
+    fn payment_request_round_trips_both_forms() {
+        // The 40-byte pinned-amount form and the 32-byte amount-omitted form
+        // (POOL-SPEC.md P5.6's two QR variants), distinguished by length alone.
+        let with_amount = PaymentRequest { pk: [0xabu8; 32], amount_petals: Some(111_000_000) };
+        assert_eq!(with_amount.encode().len(), 40);
+        assert_eq!(PaymentRequest::from_text(&with_amount.to_text()).unwrap(), with_amount);
+
+        let without_amount = PaymentRequest { pk: [0xcdu8; 32], amount_petals: None };
+        assert_eq!(without_amount.encode().len(), 32);
+        assert_eq!(PaymentRequest::from_text(&without_amount.to_text()).unwrap(), without_amount);
+
+        assert!(PaymentRequest::decode(&[0u8; 33]).is_err());
+        assert!(PaymentRequest::from_text("marigoldnote:00").is_err());
+    }
+
+    #[test]
+    fn bearer_note_round_trips() {
+        let bearer = BearerNote { sn: Hash::from_bytes([0x11u8; 32]), sk: [0x22u8; 32], d: DenominationTag::D0_1 };
+        assert_eq!(bearer.encode().len(), 65);
+        assert_eq!(BearerNote::from_text(&bearer.to_text()).unwrap(), bearer);
+        assert!(BearerNote::decode(&[0u8; 64]).is_err());
+        // Unknown denomination tag byte is rejected, not coerced.
+        let mut bytes = bearer.encode();
+        bytes[64] = 200;
+        assert!(BearerNote::decode(&bytes).is_err());
+    }
+
+    fn info(byte: u8, d: DenominationTag) -> Arc<NoteKeyInfo> {
+        Arc::new(NoteKeyInfo::new(Hash::from_bytes([byte; 32]), [byte; 32], d, NoteProvenance::Cold))
+    }
+
+    #[test]
+    fn select_exact_greedy_over_the_ladder() {
+        let available =
+            vec![info(1, DenominationTag::D0_1), info(2, DenominationTag::D0_01), info(3, DenominationTag::D0_01), info(4, DenominationTag::D1)];
+        // 0.12 = 0.1 + 2x0.01
+        let selected = select_exact(&available, 12_000_000).unwrap();
+        assert_eq!(selected.len(), 3);
+        // 0.05 needs 5x0.01 but only 2 held — and greedy must NOT grab the 0.1 or 1.
+        assert!(select_exact(&available, 5_000_000).is_none());
+        // The full holdings sum exactly.
+        assert!(select_exact(&available, 112_000_000).is_some());
+        assert!(select_exact(&available, 113_000_000).is_none());
+    }
+
+    #[test]
+    fn fee_quanta_sizing() {
+        // One quantum covers any fee up to 1,000,000 sompi; never zero quanta.
+        assert_eq!(required_fee_quanta(0, 1.0), 1);
+        assert_eq!(required_fee_quanta(9_009, 100.0), 1);
+        assert_eq!(required_fee_quanta(10_001, 100.0), 2);
     }
 }
