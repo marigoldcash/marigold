@@ -1284,6 +1284,7 @@ impl VirtualStateProcessor {
         &self,
         mutable_tx: &mut MutableTransaction,
         virtual_utxo_view: &impl UtxoView,
+        virtual_pool_view: &impl kaspa_consensus_core::notepool::PoolStateView,
         virtual_daa_score: u64,
         virtual_past_median_time: u64,
         args: &TransactionValidationArgs,
@@ -1295,7 +1296,14 @@ impl VirtualStateProcessor {
             virtual_daa_score,
             virtual_past_median_time,
         )?;
-        self.validate_mempool_transaction_in_utxo_context(mutable_tx, virtual_utxo_view, virtual_daa_score, args, selected_parent)?;
+        self.validate_mempool_transaction_in_utxo_context(
+            mutable_tx,
+            virtual_utxo_view,
+            virtual_pool_view,
+            virtual_daa_score,
+            args,
+            selected_parent,
+        )?;
         Ok(())
     }
 
@@ -1303,6 +1311,7 @@ impl VirtualStateProcessor {
         let virtual_read = self.virtual_stores.read();
         let virtual_state = virtual_read.state.get().unwrap();
         let virtual_utxo_view = &virtual_read.utxo_set;
+        let virtual_pool_view = &virtual_read.pool_state;
         let virtual_daa_score = virtual_state.daa_score;
         let virtual_past_median_time = virtual_state.past_median_time;
 
@@ -1312,6 +1321,7 @@ impl VirtualStateProcessor {
             self.validate_mempool_transaction_impl(
                 mutable_tx,
                 virtual_utxo_view,
+                virtual_pool_view,
                 virtual_daa_score,
                 virtual_past_median_time,
                 args,
@@ -1328,6 +1338,7 @@ impl VirtualStateProcessor {
         let virtual_read = self.virtual_stores.read();
         let virtual_state = virtual_read.state.get().unwrap();
         let virtual_utxo_view = &virtual_read.utxo_set;
+        let virtual_pool_view = &virtual_read.pool_state;
         let virtual_daa_score = virtual_state.daa_score;
         let virtual_past_median_time = virtual_state.past_median_time;
         let virtual_sp = virtual_state.ghostdag_data.selected_parent;
@@ -1338,6 +1349,7 @@ impl VirtualStateProcessor {
                     self.validate_mempool_transaction_impl(
                         mtx,
                         &virtual_utxo_view,
+                        virtual_pool_view,
                         virtual_daa_score,
                         virtual_past_median_time,
                         args.get(&mtx.id()),

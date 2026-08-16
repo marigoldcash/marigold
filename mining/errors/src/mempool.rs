@@ -1,4 +1,5 @@
 use kaspa_consensus_core::{
+    Hash,
     errors::tx::TxRuleError,
     tx::{TransactionId, TransactionOutpoint},
 };
@@ -29,6 +30,11 @@ pub enum RuleError {
 
     #[error("output {0} already spent by transaction {1} in the mempool")]
     RejectDoubleSpendInMempool(TransactionOutpoint, TransactionId),
+
+    /// Note-pool serials never allow replace-by-fee (FORK-PLAN P6.7: "first-seen holds,
+    /// second rejected", unlike the outpoint side's configurable RBF policy).
+    #[error("serial {0} already consumed by transaction {1} in the mempool")]
+    RejectSerialConflictInMempool(Hash, TransactionId),
 
     #[error("replace by fee found no double spending transaction in the mempool")]
     RejectRbfNoDoubleSpend,

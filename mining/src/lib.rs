@@ -15,6 +15,8 @@ pub mod mempool;
 pub mod model;
 pub mod monitor;
 #[cfg(test)]
+mod notepool_mempool_tests;
+#[cfg(test)]
 mod toccata_transient_mass_activation_tests;
 
 // Exposed for benchmarks

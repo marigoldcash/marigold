@@ -505,19 +505,31 @@ impl VirtualStateProcessor {
         &self,
         mutable_tx: &mut MutableTransaction,
         utxo_view: &impl UtxoView,
+        pool_view: &impl PoolStateView,
         pov_daa_score: u64,
         args: &TransactionValidationArgs,
         selected_parent: Hash,
     ) -> TxResult<()> {
-        // Note-pool transactions are consensus-valid when they arrive in blocks (P6.4),
-        // but mempool entry needs the same-serial conflict policy, eviction, and orphan
-        // handling FORK-PLAN P6.7 owns — without those, two conflicting rotates could
-        // both enter the mempool and self-invalidate a locally-built block template.
-        // Reject at the door until P6.7.
-        if mutable_tx.tx.subnetwork_id == SUBNETWORK_ID_NOTE_POOL {
-            return Err(TxRuleError::NotePoolTxNotYetSupportedInMempool);
-        }
         self.populate_mempool_transaction_in_utxo_context(mutable_tx, utxo_view)?;
+
+        // Note-pool ops validate against the mempool's own committed-virtual pool view
+        // (FORK-PLAN P6.7). Unlike UTXO inputs, there's no positional "entries" array to
+        // pre-populate from other still-unconfirmed mempool transactions, so a pool op
+        // consuming a serial another unconfirmed mempool tx would produce is rejected here
+        // rather than orphaned — a deliberate, documented MVP scope limitation (see
+        // NOTES.md's P6.7 entry), not an oversight.
+        let validated_pool_op = if mutable_tx.tx.subnetwork_id == SUBNETWORK_ID_NOTE_POOL {
+            let op = PoolOp::decode_payload(&mutable_tx.tx.payload).ok_or(TxRuleError::MalformedNotePoolPayload)?;
+            match validate_stateful(&op, mutable_tx.tx.id(), &mutable_tx.tx.outputs, pool_view, pov_daa_score, false) {
+                Ok(validated) => Some(validated),
+                Err(e) => {
+                    info!("Rejecting note-pool transaction {} due to context error: {}", mutable_tx.tx.id(), e);
+                    return Err(TxRuleError::InvalidNotePoolOpInContext(e));
+                }
+            }
+        } else {
+            None
+        };
 
         // Calc the contextual storage mass
         let contextual_mass = self
@@ -547,8 +559,7 @@ impl VirtualStateProcessor {
             None
         };
 
-        // No pool_value: note-pool transactions are rejected at the top of this function
-        // (FORK-PLAN P6.7 owns mempool entry), so `mutable_tx` here is never a pool op.
+        let pool_value = validated_pool_op.as_ref().map(|v| (v.consumed_petals, v.produced_petals));
         let calculated_fee = self.transaction_validator.validate_populated_transaction_and_get_fee(
             &mutable_tx.as_verifiable(),
             pov_daa_score,
@@ -556,7 +567,7 @@ impl VirtualStateProcessor {
             TxValidationFlags::SkipMassCheck, // we can skip the mass check since we just set it
             mass_and_feerate_threshold,
             seq_commit_accessor.as_ref().map(|v| v as _),
-            None,
+            pool_value,
         )?;
         mutable_tx.calculated_fee = Some(calculated_fee);
         Ok(())

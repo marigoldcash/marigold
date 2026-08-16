@@ -1278,11 +1278,73 @@ store → validation → pipeline → mempool → sync → RPC. Every step lands
   (90 passed) and `cargo test --workspace --exclude kaspa-testing-integration` (0 failed
   across every crate) both green; `cargo build --workspace` clean.
 
-- [ ] **P6.7 — Mempool integration.** In [mining/src/mempool](mining/): accept pool-op
+- [x] **P6.7 — Mempool integration.** In [mining/src/mempool](mining/): accept pool-op
   transactions, standardness checks, same-serial conflict policy (first-seen holds, second
   rejected), eviction on confirmation, and inclusion in block templates.
   ✅ *Verify:* mempool tests: conflicting rotate arriving second is rejected; template
   built under load includes pool ops and validates.
+  **Executed.** A research pass (before any code changes) found the mempool crate was
+  already input/output-count-agnostic almost everywhere — standardness checks, mass/fee
+  ordering, block-template selection all correctly handle a zero-input/zero-output pure
+  Transfer as a vacuous case, no changes needed there. The real work was three genuinely
+  new pieces, plus lifting the reject-at-the-door guard P6.6 had left in place:
+  1. **Consensus-side mempool validation** (`consensus/src/pipeline/virtual_processor/
+     utxo_validation.rs`'s `validate_mempool_transaction_in_utxo_context`): removed the
+     P6.7-owned `NotePoolTxNotYetSupportedInMempool` guard (and the now-dead error variant
+     itself), added a `pool_view` parameter, and mirrored the block-validation path's
+     decode → `validate_stateful` → real `pool_value` sequence. Threaded `virtual_read.
+     pool_state` through `processor.rs`'s three mempool-validation call sites the same way
+     `virtual_read.utxo_set` already was.
+  2. **Serial-keyed conflict tracking** (`mining/src/mempool/model/pool_note_set.rs`, new):
+     `MempoolPoolNoteSet` — a `serial_owner_id: HashMap<Hash, TransactionId>` index, the
+     exact structural analog of `MempoolUtxoSet`'s `outpoint_owner_id`, but deliberately
+     simpler: no replace-by-fee variant (the plan specifies "first-seen holds, second
+     rejected" unconditionally for serials, unlike the outpoint side's configurable RBF
+     policy — confirmed this is genuinely just "run the `Forbidden`-branch logic
+     unconditionally", not a new mechanism), and no tracking of produced notes (see the MVP
+     scope note below). Wired into `TransactionsPool` alongside the existing `utxo_set`
+     calls; new `RuleError::RejectSerialConflictInMempool` in `mining/errors/src/mempool.rs`.
+  3. **Eviction on confirmation** (`handle_new_block_transactions.rs`): new
+     `remove_serial_conflicts`, the serial-keyed sibling of the existing
+     `remove_double_spends` — a confirmed pool op's consumed serials evict any
+     mempool-resident transaction still trying to consume the same one.
+  4. **`ConsensusMock` pool-op support** (`mining/src/testutils/consensus_mock.rs`): gained
+     a `notes: RwLock<PoolCollection>` field and a pool-op branch in
+     `validate_mempool_transaction` that reuses the real `validate_stateful` consensus-core
+     logic (not a second hand-rolled reimplementation) — `PoolCollection` already implements
+     `PoolStateView` directly, so it's a drop-in base view.
+  **A real, plan-text-silent design decision, found only by reading the actual UTXO-
+  chaining mechanism, not the plan's literal ask**: `populate_mempool_entries` lets a
+  transaction spending an unconfirmed mempool transaction's output validate successfully by
+  pre-populating its UTXO entries positionally, before consensus ever sees it — there is no
+  positional equivalent for pool state (`PoolStateView::get_note` is queried by serial
+  hash, not by an array index the mempool crate could pre-fill). This means a pool op
+  consuming a serial another still-unconfirmed mempool transaction is about to produce is
+  hard-rejected today (`SerialNotFound`), not orphaned — an unconfirmed pool op's produced
+  notes cannot be chained into a second unconfirmed pool op the way UTXO outputs already
+  can. Deliberately scoped OUT of this step (documented here as a real, known MVP
+  limitation rather than silently true): closing it fully would need a `PoolDiff`-based
+  mempool overlay composed via the same `PoolViewComposition::compose` primitive the block
+  pipeline already uses, plus a serial-keyed sibling to `OrphanPool` — real, additional
+  scope with no plan-text mandate to build it now. Given the pool's target cadence, "wait
+  one confirmation between chained pool ops" is a sub-second UX cost, not a severe one.
+  Added a new dedicated test file (`mining/src/notepool_mempool_tests.rs`, following the
+  existing `toccata_transient_mass_activation_tests.rs` file-level pattern, not nested
+  inside `manager_tests.rs`'s `mod tests`): `conflicting_rotate_arriving_second_is_rejected`
+  and `block_template_under_load_includes_pool_ops` are this step's two literal verify
+  criteria; a third, `conflicting_rotate_is_accepted_once_the_first_is_evicted_by_
+  confirmation`, closes the loop on the eviction mechanism itself (a fresh rotate of the
+  same serials succeeds once the stale mempool occupant is evicted by a confirming block).
+  All three needed each rotate to carry a genuine fee (a second, smaller "fee stamp" note
+  consumed alongside the note actually being moved, its value becoming the fee — the design
+  STATE.md's "wallet holds nothing but note keys" fee-stamp mechanism describes) since a
+  bare `consumed == produced` rotate has zero fee and is correctly rejected by the existing,
+  unmodified mempool standardness checks, same as any other zero-fee non-coinbase
+  transaction — not a P6.7-specific gap, just what a genuinely fee-generating pool-op
+  transaction needs to look like.
+  ✅ *Verify*: all 3 new tests pass; full `cargo test -p kaspa-mining` (59 passed, 0
+  failed) and `cargo test --workspace --exclude kaspa-testing-integration` (0 failed across
+  every crate) both green; `cargo build --workspace` clean.
 
 - [ ] **P6.8 — Pool state sync (IBD).** New nodes syncing from a pruning point download
   the pool state and verify it against the committed root — mirror

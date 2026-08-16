@@ -8,6 +8,8 @@ use crate::mempool::{
 };
 use kaspa_consensus_core::{
     api::ConsensusApi,
+    notepool::PoolOp,
+    subnets::SUBNETWORK_ID_NOTE_POOL,
     tx::{Transaction, TransactionId},
 };
 use kaspa_core::time::Stopwatch;
@@ -34,6 +36,7 @@ impl Mempool {
                 self.remove_transaction(&transaction_id, false, TxRemovalReason::Accepted, "")?;
             }
             self.remove_double_spends(transaction)?;
+            self.remove_serial_conflicts(transaction)?;
             self.orphan_pool.remove_orphan(&transaction_id, false, TxRemovalReason::Accepted, "")?;
             if self.accepted_transactions.add(transaction_id, block_daa_score) {
                 tx_accepted_counts += 1;
@@ -70,6 +73,29 @@ impl Mempool {
         let mut transactions_to_remove = HashSet::new();
         for input in transaction.inputs.iter() {
             if let Some(redeemer_id) = self.transaction_pool.get_outpoint_owner_id(&input.previous_outpoint) {
+                transactions_to_remove.insert(*redeemer_id);
+            }
+        }
+        transactions_to_remove.iter().try_for_each(|x| {
+            self.remove_transaction(x, true, TxRemovalReason::DoubleSpend, format!(" favouring {}", transaction.id()).as_str())
+        })
+    }
+
+    /// The note-pool serial-keyed analog of `remove_double_spends` (FORK-PLAN P6.7): a
+    /// confirmed pool op's consumed serials can no longer be validly consumed by any
+    /// mempool-resident transaction, so evict any that were racing to consume the same one.
+    fn remove_serial_conflicts(&mut self, transaction: &Transaction) -> RuleResult<()> {
+        if transaction.subnetwork_id != SUBNETWORK_ID_NOTE_POOL {
+            return Ok(());
+        }
+        let consumed_serials = match PoolOp::decode_payload(&transaction.payload) {
+            Some(PoolOp::Transfer(op)) => op.consumed,
+            Some(PoolOp::Redeem(op)) => op.consumed,
+            Some(PoolOp::Mint(_)) | None => return Ok(()),
+        };
+        let mut transactions_to_remove = HashSet::new();
+        for serial in consumed_serials.iter().flat_map(|g| g.serials.iter()) {
+            if let Some(redeemer_id) = self.transaction_pool.get_serial_owner_id(serial) {
                 transactions_to_remove.insert(*redeemer_id);
             }
         }

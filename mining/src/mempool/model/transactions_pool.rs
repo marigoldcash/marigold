@@ -7,6 +7,7 @@ use crate::{
         model::{
             map::MempoolTransactionCollection,
             pool::{Pool, TransactionsEdges},
+            pool_note_set::MempoolPoolNoteSet,
             tx::{DoubleSpend, MempoolTransaction},
             utxo_set::MempoolUtxoSet,
         },
@@ -15,6 +16,7 @@ use crate::{
     model::{TransactionIdSet, topological_index::TopologicalIndex},
 };
 use kaspa_consensus_core::{
+    Hash,
     block::TemplateTransactionSelector,
     tx::{MutableTransaction, TransactionId, TransactionOutpoint},
 };
@@ -78,6 +80,9 @@ pub(crate) struct TransactionsPool {
 
     /// Store of UTXOs
     utxo_set: MempoolUtxoSet,
+
+    /// Store of note-pool serial conflict locks (FORK-PLAN P6.7)
+    pool_note_set: MempoolPoolNoteSet,
 }
 
 impl TransactionsPool {
@@ -92,6 +97,7 @@ impl TransactionsPool {
             last_expire_scan_daa_score: 0,
             last_expire_scan_time: unix_now(),
             utxo_set: MempoolUtxoSet::new(),
+            pool_note_set: MempoolPoolNoteSet::new(),
             estimated_size: 0,
         }
     }
@@ -133,6 +139,7 @@ impl TransactionsPool {
         }
 
         self.utxo_set.add_transaction(&transaction.mtx);
+        self.pool_note_set.add_transaction(&transaction.mtx);
         self.estimated_size += transaction_size;
         self.all_transactions.insert(id, transaction);
         trace!("Added transaction {}", id);
@@ -178,6 +185,7 @@ impl TransactionsPool {
 
         // Remove the transaction from the mempool UTXO set
         self.utxo_set.remove_transaction(&removed_tx.mtx, &parent_ids);
+        self.pool_note_set.remove_transaction(&removed_tx.mtx);
         self.estimated_size -= removed_tx.mtx.mempool_estimated_bytes();
 
         if self.all_transactions.is_empty() {
@@ -307,6 +315,16 @@ impl TransactionsPool {
     /// Returns the first double spend of every transaction in the mempool double spending on `transaction`
     pub(crate) fn get_double_spend_transaction_ids(&self, transaction: &MutableTransaction) -> Vec<DoubleSpend> {
         self.utxo_set.get_double_spend_transaction_ids(transaction)
+    }
+
+    pub(crate) fn get_serial_owner_id(&self, serial: &Hash) -> Option<&TransactionId> {
+        self.pool_note_set.get_serial_owner_id(serial)
+    }
+
+    /// Make sure no other transaction in the mempool is already consuming a serial this
+    /// transaction also consumes (FORK-PLAN P6.7 — no RBF variant, first-seen always holds).
+    pub(crate) fn check_serial_conflicts(&self, transaction: &MutableTransaction) -> RuleResult<()> {
+        self.pool_note_set.check_serial_conflicts(transaction)
     }
 
     pub(crate) fn get_double_spend_owner<'a>(&'a self, double_spend: &DoubleSpend) -> RuleResult<&'a MempoolTransaction> {

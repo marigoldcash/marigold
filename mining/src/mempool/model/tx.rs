@@ -1,5 +1,6 @@
 use crate::mempool::tx::{Priority, RbfPolicy};
 use kaspa_consensus_core::{
+    Hash,
     mass::MassCofactors,
     tx::{MutableTransaction, Transaction, TransactionId, TransactionOutpoint},
 };
@@ -61,6 +62,24 @@ impl From<DoubleSpend> for RuleError {
 impl From<&DoubleSpend> for RuleError {
     fn from(value: &DoubleSpend) -> Self {
         RuleError::RejectDoubleSpendInMempool(value.outpoint, value.owner_id)
+    }
+}
+
+/// The note-pool serial-keyed analog of [`DoubleSpend`] (FORK-PLAN P6.7).
+pub(crate) struct SerialConflict {
+    pub serial: Hash,
+    pub owner_id: TransactionId,
+}
+
+impl SerialConflict {
+    pub fn new(serial: Hash, owner_id: TransactionId) -> Self {
+        Self { serial, owner_id }
+    }
+}
+
+impl From<SerialConflict> for RuleError {
+    fn from(value: SerialConflict) -> Self {
+        RuleError::RejectSerialConflictInMempool(value.serial, value.owner_id)
     }
 }
 

@@ -15,6 +15,8 @@ use kaspa_consensus_core::{
     header::{CompressedParents, Header},
     mass::{ContextualMasses, NonContextualMasses, transaction_estimated_serialized_size},
     merkle::calc_hash_merkle_root,
+    notepool::{PoolCollection, PoolOp, hashing::serial_hash, validate_stateful},
+    subnets::SUBNETWORK_ID_NOTE_POOL,
     tx::{MutableTransaction, Transaction, TransactionId, TransactionOutpoint, UtxoEntry},
     utxo::utxo_collection::UtxoCollection,
 };
@@ -28,6 +30,11 @@ pub(crate) struct ConsensusMock {
     transactions: RwLock<HashMap<TransactionId, Arc<Transaction>>>,
     statuses: RwLock<HashMap<TransactionId, TxResult<()>>>,
     utxos: RwLock<UtxoCollection>,
+    /// Live note-pool state (FORK-PLAN P6.7's test surface) — mirrors `utxos` for the
+    /// pool side. `PoolCollection` implements `PoolStateView` directly, so it's a drop-in
+    /// base view for `validate_stateful`, the same real consensus-core logic the actual
+    /// virtual pipeline uses, rather than a hand-rolled reimplementation of pool op rules.
+    notes: RwLock<PoolCollection>,
 }
 
 impl ConsensusMock {
@@ -36,6 +43,7 @@ impl ConsensusMock {
             transactions: RwLock::new(HashMap::default()),
             statuses: RwLock::new(HashMap::default()),
             utxos: RwLock::new(HashMap::default()),
+            notes: RwLock::new(HashMap::default()),
         }
     }
 
@@ -65,6 +73,23 @@ impl ConsensusMock {
                 ),
             );
         });
+        // Apply the note-pool side, if any: retire consumed notes, add produced ones.
+        if transaction.tx.subnetwork_id == SUBNETWORK_ID_NOTE_POOL
+            && let Some(op) = PoolOp::decode_payload(&transaction.tx.payload)
+        {
+            let mut notes = self.notes.write();
+            let (consumed, produced) = match &op {
+                PoolOp::Mint(op) => (Vec::new(), op.new_notes.as_slice()),
+                PoolOp::Transfer(op) => (op.consumed.iter().flat_map(|g| g.serials.iter().copied()).collect(), op.produced.as_slice()),
+                PoolOp::Redeem(op) => (op.consumed.iter().flat_map(|g| g.serials.iter().copied()).collect(), [].as_slice()),
+            };
+            for sn in consumed {
+                notes.remove(&sn);
+            }
+            for (i, note) in produced.iter().enumerate() {
+                notes.insert(serial_hash(&transaction.id(), i as u32), *note);
+            }
+        }
         // Register the transaction
         transactions.insert(transaction.id(), transaction.tx);
     }
@@ -137,13 +162,33 @@ impl ConsensusApi for ConsensusMock {
         if has_missing_outpoints {
             return Err(TxRuleError::MissingTxOutpoints);
         }
+
+        // Note-pool ops validate against the mock's live note-pool state (FORK-PLAN P6.7),
+        // reusing the real consensus-core `validate_stateful` rather than a second
+        // hand-rolled reimplementation of pool op rules.
+        let (consumed_petals, produced_petals) = if mutable_tx.tx.subnetwork_id == SUBNETWORK_ID_NOTE_POOL {
+            let op = PoolOp::decode_payload(&mutable_tx.tx.payload).ok_or(TxRuleError::MalformedNotePoolPayload)?;
+            let validated = validate_stateful(
+                &op,
+                mutable_tx.tx.id(),
+                &mutable_tx.tx.outputs,
+                &*self.notes.read(),
+                self.get_virtual_daa_score(),
+                false,
+            )
+            .map_err(TxRuleError::InvalidNotePoolOpInContext)?;
+            (validated.consumed_petals, validated.produced_petals)
+        } else {
+            (0, 0)
+        };
+
         // At this point we know all UTXO entries are populated, so we can safely calculate the fee
         let total_in: u64 = mutable_tx.entries.iter().map(|x| x.as_ref().unwrap().amount).sum();
         let total_out: u64 = mutable_tx.tx.outputs.iter().map(|x| x.value).sum();
         mutable_tx.tx.set_storage_mass(self.calculate_transaction_contextual_masses(mutable_tx).unwrap().storage_mass);
 
         if mutable_tx.calculated_fee.is_none() {
-            let calculated_fee = total_in - total_out;
+            let calculated_fee = total_in + consumed_petals - total_out - produced_petals;
             mutable_tx.calculated_fee = Some(calculated_fee);
         }
         Ok(())

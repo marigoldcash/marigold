@@ -19,9 +19,6 @@ pub enum TxRuleError {
     #[error("note-pool op failed validation in context: {0}")]
     InvalidNotePoolOpInContext(PoolOpContextError),
 
-    #[error("note-pool transactions are not accepted into the mempool yet (FORK-PLAN P6.7)")]
-    NotePoolTxNotYetSupportedInMempool,
-
     #[error("transaction has duplicate inputs")]
     TxDuplicateInputs,
 

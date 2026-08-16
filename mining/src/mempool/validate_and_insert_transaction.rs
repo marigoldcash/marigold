@@ -32,6 +32,10 @@ impl Mempool {
         self.validate_transaction_limits_in_isolation(&transaction, virtual_daa_score)?;
         self.validate_transaction_std_in_isolation(&transaction, virtual_daa_score)?;
         let feerate_threshold = self.get_replace_by_fee_constraint(&transaction, rbf_policy, virtual_daa_score)?;
+        // Note-pool serial conflicts are checked unconditionally (no RBF variant — FORK-PLAN
+        // P6.7's "first-seen holds, second rejected"), independent of whatever `rbf_policy`
+        // governs this transaction's own outpoint-side double spends.
+        self.transaction_pool.check_serial_conflicts(&transaction)?;
         self.populate_mempool_entries(&mut transaction)?;
         Ok(TransactionPreValidation { transaction, feerate_threshold })
     }
@@ -75,6 +79,10 @@ impl Mempool {
         // Perform mempool in-context validations prior to possible RBF replacements
         self.validate_transaction_limits_in_context(&transaction, virtual_daa_score)?;
         self.validate_transaction_std_in_context(&transaction, priority, virtual_daa_score)?;
+
+        // Re-check note-pool serial conflicts under the write lock (race protection,
+        // mirroring the outpoint side's re-check pattern below) — no RBF variant exists here.
+        self.transaction_pool.check_serial_conflicts(&transaction)?;
 
         // Check double spends and try to remove them if the RBF policy requires it
         let removed_transaction = self.execute_replace_by_fee(&transaction, rbf_policy, virtual_daa_score)?;
