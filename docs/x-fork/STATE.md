@@ -546,8 +546,11 @@ substitute for it.
   for everything from here on**, worth re-reading before any step touching wallets,
   fees, or transaction format (P5.2 onward).
 - wasm-pack / wasm32 target only needed for WASM SDK steps, not for `kaspad`.
-- Phases 0–4 are bite-size sessions by design; use stronger models for Phase 5 spec
-  work, ⚠️ HARD steps (P6.4, P6.11), and review gates.
+- Phases 0–4 were bite-size sessions by design; Phase 5 needs spec work and the
+  ⚠️ HARD steps (P6.4, P6.8 by judgment, P6.11, P6.12). The next ⚠️ HARD step is 
+  P8.3; P8.7/P8.8 are 🧑‍⚖️ gates needing the user. Standing rule: if a step turns out 
+  materially bigger than its label (the P6.8 precedent), stop and flag for a model 
+  switch instead of pushing through.
 
 ## Suggested session opener on a new machine
 
