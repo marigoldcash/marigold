@@ -14,10 +14,7 @@ pub mod args;
 pub mod maps;
 pub use args::*;
 
-use crate::account::ScanNotifier;
 use crate::api::traits::WalletApi;
-use crate::compat::gen1::decrypt_mnemonic;
-use crate::error::Error::Custom;
 use crate::factory::try_load_account;
 use crate::imports::*;
 use crate::settings::{SettingsStore, WalletSettings};
@@ -36,54 +33,6 @@ use kaspa_wrpc_client::{KaspaRpcClient, Resolver, WrpcEncoding};
 use workflow_core::task::spawn;
 
 pub type WalletGuard<'l> = AsyncMutexGuard<'l, ()>;
-
-#[derive(Debug)]
-pub struct EncryptedMnemonic<T: AsRef<[u8]>> {
-    pub cipher: T, // raw
-    pub salt: T,   // raw
-}
-
-#[derive(Debug)]
-pub struct SingleWalletFileV0<'a, T: AsRef<[u8]>> {
-    pub num_threads: u32,
-    pub encrypted_mnemonic: EncryptedMnemonic<T>,
-    pub xpublic_key: &'a str,
-    pub ecdsa: bool,
-}
-
-#[derive(Debug)]
-pub struct SingleWalletFileV1<'a, T: AsRef<[u8]>> {
-    pub encrypted_mnemonic: EncryptedMnemonic<T>,
-    pub xpublic_key: &'a str,
-    pub ecdsa: bool,
-}
-
-impl<T: AsRef<[u8]>> SingleWalletFileV1<'_, T> {
-    const NUM_THREADS: u32 = 8;
-}
-
-#[derive(Debug)]
-pub struct MultisigWalletFileV0<'a, T: AsRef<[u8]>> {
-    pub num_threads: u32,
-    pub encrypted_mnemonics: Vec<EncryptedMnemonic<T>>,
-    pub xpublic_keys: Vec<&'a str>, // includes pub keys from encrypted
-    pub required_signatures: u16,
-    pub cosigner_index: u8,
-    pub ecdsa: bool,
-}
-
-#[derive(Debug)]
-pub struct MultisigWalletFileV1<'a, T: AsRef<[u8]>> {
-    pub encrypted_mnemonics: Vec<EncryptedMnemonic<T>>,
-    pub xpublic_keys: Vec<&'a str>, // includes pub keys from encrypted
-    pub required_signatures: u16,
-    pub cosigner_index: u8,
-    pub ecdsa: bool,
-}
-
-impl<T: AsRef<[u8]>> MultisigWalletFileV1<'_, T> {
-    const NUM_THREADS: u32 = 8;
-}
 
 #[derive(Clone)]
 pub enum WalletBusMessage {
@@ -1355,194 +1304,11 @@ impl Wallet {
     //     Ok(Box::pin(stream))
     // }
 
-    pub async fn import_kaspawallet_golang_single_v1<T: AsRef<[u8]>>(
-        self: &Arc<Wallet>,
-        import_secret: &Secret,
-        wallet_secret: &Secret,
-        file: SingleWalletFileV1<'_, T>,
-    ) -> Result<Arc<dyn Account>> {
-        if file.ecdsa {
-            return Err(Error::Custom("ecdsa currently not suppoerted".to_owned()));
-            // todo import_with_mnemonic should accept both
-        }
-        let mnemonic = decrypt_mnemonic(SingleWalletFileV1::<T>::NUM_THREADS, file.encrypted_mnemonic, import_secret.as_ref())?;
-        let mnemonic = Mnemonic::new(mnemonic.trim(), Language::English)?;
-        let prv_key_data = storage::PrvKeyData::try_new_from_mnemonic(mnemonic.clone(), None, self.store().encryption_kind()?)?;
-        let prefix = file.xpublic_key.split_at(kaspa_bip32::Prefix::LENGTH).0;
-        let prefix = kaspa_bip32::Prefix::try_from(prefix)?;
-
-        if prv_key_data.create_xpub(None, BIP32_ACCOUNT_KIND.into(), 0).await?.to_string(Some(prefix)) != file.xpublic_key {
-            return Err(Custom("imported xpub does not equal derived one".to_owned()));
-        }
-        self.import_with_mnemonic(wallet_secret, None, mnemonic, BIP32_ACCOUNT_KIND.into()).await
-    }
-
-    pub async fn import_kaspawallet_golang_single_v0<T: AsRef<[u8]>>(
-        self: &Arc<Wallet>,
-        import_secret: &Secret,
-        wallet_secret: &Secret,
-        file: SingleWalletFileV0<'_, T>,
-    ) -> Result<Arc<dyn Account>> {
-        if file.ecdsa {
-            return Err(Error::Custom("ecdsa currently not suppoerted".to_owned()));
-            // todo import_with_mnemonic should accept both
-        }
-        let mnemonic = decrypt_mnemonic(file.num_threads, file.encrypted_mnemonic, import_secret.as_ref())?;
-        let mnemonic = Mnemonic::new(mnemonic.trim(), Language::English)?;
-        let prv_key_data = storage::PrvKeyData::try_new_from_mnemonic(mnemonic.clone(), None, self.store().encryption_kind()?)?;
-        let prefix = file.xpublic_key.split_at(kaspa_bip32::Prefix::LENGTH).0;
-        let prefix = kaspa_bip32::Prefix::try_from(prefix)?;
-        if prv_key_data.create_xpub(None, BIP32_ACCOUNT_KIND.into(), 0).await.unwrap().to_string(Some(prefix)) != file.xpublic_key {
-            return Err(Custom("imported xpub does not equal derived one".to_owned()));
-        }
-        self.import_with_mnemonic(wallet_secret, None, mnemonic, BIP32_ACCOUNT_KIND.into()).await
-    }
-
-    pub async fn import_kaspawallet_golang_multisig_v0<T: AsRef<[u8]>>(
-        self: &Arc<Wallet>,
-        import_secret: &Secret,
-        wallet_secret: &Secret,
-        file: MultisigWalletFileV0<'_, T>,
-    ) -> Result<Arc<dyn Account>> {
-        if file.ecdsa {
-            return Err(Error::Custom("ecdsa currently not suppoerted".to_owned()));
-            // todo import_with_mnemonic should accept both
-        }
-        let Some(first_pub_key) = file.xpublic_keys.first() else {
-            return Err(Error::Custom("no public keys".to_owned()));
-        };
-        let prefix = first_pub_key.split_at(kaspa_bip32::Prefix::LENGTH).0;
-        let prefix = kaspa_bip32::Prefix::try_from(prefix)?;
-
-        let mnemonics_and_secrets: Vec<(Mnemonic, Option<Secret>)> = file
-            .encrypted_mnemonics
-            .into_iter()
-            .map(|mnemonic| {
-                decrypt_mnemonic(file.num_threads, mnemonic, import_secret.as_ref())
-                    .and_then(|decrypted| Mnemonic::new(decrypted.trim(), Language::English).map_err(Error::from))
-            })
-            .map(|r| r.map(|m| (m, <Option<Secret>>::None)))
-            .collect::<Result<Vec<(Mnemonic, Option<Secret>)>>>()?;
-
-        let mut all_pub_keys = file.xpublic_keys;
-        all_pub_keys.sort_unstable();
-
-        let mut pubkeys_from_mnemonics = Vec::with_capacity(mnemonics_and_secrets.len());
-        for (mnemonic, _) in mnemonics_and_secrets.iter() {
-            let priv_key = storage::PrvKeyData::try_new_from_mnemonic(mnemonic.clone(), None, self.store().encryption_kind()?)?;
-            let xpub_key = priv_key.create_xpub(None, BIP32_ACCOUNT_KIND.into(), 0).await.unwrap().to_string(Some(prefix));
-            pubkeys_from_mnemonics.push(xpub_key);
-        }
-        pubkeys_from_mnemonics.sort_unstable();
-        all_pub_keys.retain(|v| pubkeys_from_mnemonics.binary_search_by_key(v, |xpub| xpub.as_str()).is_err());
-        let additional_pub_keys = all_pub_keys.into_iter().map(String::from).collect();
-        self.import_multisig_with_mnemonic(wallet_secret, mnemonics_and_secrets, file.required_signatures, additional_pub_keys).await
-    }
-
-    pub async fn import_kaspawallet_golang_multisig_v1<T: AsRef<[u8]>>(
-        self: &Arc<Wallet>,
-        import_secret: &Secret,
-        wallet_secret: &Secret,
-        file: MultisigWalletFileV1<'_, T>,
-    ) -> Result<Arc<dyn Account>> {
-        if file.ecdsa {
-            return Err(Error::Custom("ecdsa currently not suppoerted".to_owned()));
-            // todo import_with_mnemonic should accept both
-        }
-        let Some(first_pub_key) = file.xpublic_keys.first() else {
-            return Err(Error::Custom("no public keys".to_owned()));
-        };
-        let prefix = first_pub_key.split_at(kaspa_bip32::Prefix::LENGTH).0;
-        let prefix = kaspa_bip32::Prefix::try_from(prefix)?;
-
-        let mnemonics_and_secrets: Vec<(Mnemonic, Option<Secret>)> = file
-            .encrypted_mnemonics
-            .into_iter()
-            .map(|mnemonic| {
-                decrypt_mnemonic(MultisigWalletFileV1::<T>::NUM_THREADS, mnemonic, import_secret.as_ref())
-                    .and_then(|decrypted| Mnemonic::new(decrypted.trim(), Language::English).map_err(Error::from))
-            })
-            .map(|r| r.map(|m| (m, <Option<Secret>>::None)))
-            .collect::<Result<Vec<(Mnemonic, Option<Secret>)>>>()?;
-
-        let mut all_pub_keys = file.xpublic_keys;
-        all_pub_keys.sort_unstable_by(|left, right| {
-            left.split_at(kaspa_bip32::Prefix::LENGTH).1.cmp(right.split_at(kaspa_bip32::Prefix::LENGTH).1)
-        });
-
-        let mut pubkeys_from_mnemonics = Vec::with_capacity(mnemonics_and_secrets.len());
-        for (mnemonic, _) in mnemonics_and_secrets.iter() {
-            let priv_key = storage::PrvKeyData::try_new_from_mnemonic(mnemonic.clone(), None, self.store().encryption_kind()?)?;
-            let xpub_key = priv_key.create_xpub(None, MULTISIG_ACCOUNT_KIND.into(), 0).await.unwrap().to_string(Some(prefix));
-            pubkeys_from_mnemonics.push(xpub_key);
-        }
-        pubkeys_from_mnemonics.sort_unstable_by(|left, right| {
-            left.split_at(kaspa_bip32::Prefix::LENGTH).1.cmp(right.split_at(kaspa_bip32::Prefix::LENGTH).1)
-        });
-        all_pub_keys.retain(|v| {
-            let found = pubkeys_from_mnemonics.binary_search_by_key(v, |xpub| xpub.as_str());
-            found.is_err()
-        });
-        let additional_pub_keys = all_pub_keys.into_iter().map(String::from).collect();
-        let acc = self
-            .import_multisig_with_mnemonic(wallet_secret, mnemonics_and_secrets, file.required_signatures, additional_pub_keys)
-            .await?;
-        Ok(acc)
-    }
-
-    pub async fn import_legacy_keydata(
-        self: &Arc<Wallet>,
-        import_secret: &Secret,
-        wallet_secret: &Secret,
-        payment_secret: Option<&Secret>,
-        notifier: Option<ScanNotifier>,
-    ) -> Result<Arc<dyn Account>> {
-        use crate::compat::gen0::load_v0_keydata;
-
-        let notifier = notifier.as_ref();
-        let keydata = load_v0_keydata(import_secret).await?;
-
-        let mnemonic = Mnemonic::new(keydata.mnemonic.trim(), Language::English)?;
-        let prv_key_data = PrvKeyData::try_new_from_mnemonic(mnemonic, payment_secret, self.store().encryption_kind()?)?;
-        let prv_key_data_store = self.inner.store.as_prv_key_data_store()?;
-        if prv_key_data_store.load_key_data(wallet_secret, &prv_key_data.id).await?.is_some() {
-            return Err(Error::PrivateKeyAlreadyExists(prv_key_data.id));
-        }
-
-        let account: Arc<dyn Account> = Arc::new(legacy::Legacy::try_new(self, None, prv_key_data.id).await?);
-
-        // activate account (add it to wallet active account list)
-        self.active_accounts().insert(account.clone().as_dyn_arc());
-        self.legacy_accounts().insert(account.clone().as_dyn_arc());
-
-        // store private key and account
-        self.inner.store.batch().await?;
-        prv_key_data_store.store(wallet_secret, prv_key_data).await?;
-        self.inner.store.clone().as_account_store()?.store_single(&account.to_storage()?, None).await?;
-        self.inner.store.flush(wallet_secret).await?;
-
-        let legacy_account = account.clone().as_legacy_account()?;
-        legacy_account.create_private_context(wallet_secret, payment_secret, None).await?;
-
-        if self.is_connected() {
-            if let Some(notifier) = notifier {
-                notifier(0, 0, 0, None);
-            }
-            account.clone().scan(Some(100), Some(5000)).await?;
-        }
-
-        legacy_account.clear_private_context().await?;
-
-        Ok(account)
-    }
-
-    pub async fn import_gen1_keydata(self: &Arc<Wallet>, _secret: Secret) -> Result<()> {
-        // use crate::derivation::gen1::import::load_v1_keydata;
-
-        // let _keydata = load_v1_keydata(&secret).await?;
-        todo!();
-        // Ok(())
-    }
+    // The legacy-Kaspa import surfaces (`import_kaspawallet_golang_*`,
+    // `import_legacy_keydata`/KDX, `import_gen1_keydata`) were removed in FORK-PLAN
+    // P7.0: on a fair-launch chain they could never find funds — their only possible
+    // real-world effect was inviting users to expose real Kaspa keys inside Marigold
+    // software (key-reuse hazard). See docs/x-fork/DECISIONS.md.
 
     pub async fn import_with_mnemonic(
         self: &Arc<Wallet>,
@@ -1762,23 +1528,6 @@ impl Wallet {
         NetworkTaggedXpub::from((xpub_key.clone(), self.network_id().unwrap())).to_string()
     }
 }
-
-// fn decrypt_mnemonic<T: AsRef<[u8]>>(
-//     num_threads: u32,
-//     EncryptedMnemonic { cipher, salt }: EncryptedMnemonic<T>,
-//     pass: &[u8],
-// ) -> Result<String> {
-//     let params = argon2::ParamsBuilder::new().t_cost(1).m_cost(64 * 1024).p_cost(num_threads).output_len(32).build().unwrap();
-//     let mut key = [0u8; 32];
-//     argon2::Argon2::new(argon2::Algorithm::Argon2id, Default::default(), params)
-//         .hash_password_into(pass, salt.as_ref(), &mut key[..])
-//         .unwrap();
-//     let mut aead = chacha20poly1305::XChaCha20Poly1305::new(Key::from_slice(&key));
-//     let (nonce, ciphertext) = cipher.as_ref().split_at(24);
-
-//     let decrypted = aead.decrypt(nonce.into(), ciphertext).unwrap();
-//     Ok(unsafe { String::from_utf8_unchecked(decrypted) })
-// }
 
 #[cfg(not(target_arch = "wasm32"))]
 #[cfg(test)]

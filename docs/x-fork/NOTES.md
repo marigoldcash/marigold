@@ -2607,3 +2607,49 @@ anchors submitted continuously, both nodes reaching `enforcing && !stale`, the
 anchor advancing across cadence intervals). Full `cargo test --workspace --exclude
 kaspa-testing-integration` and the full integration suite green; `cargo build
 --workspace --tests` clean.
+
+### P7.0 — Inherited-wallet surface audit (2026-08-16) 🧑‍⚖️ DECISION
+
+Decision (options presented, user-ratified): **keep the inherited seed-phrase wallet
+stack as the transparent-tier wallet tool**, and execute the mandatory
+legacy-Kaspa-import removal immediately rather than at the P8.7 deadline. Full
+rationale in DECISIONS.md's new row; the short version: the transparent tier is
+permanent (mining payouts, mint funding, redeem outputs, the T&A integration's fee
+key), the inherited stack is its only wallet, it already works (P2.8 fixed and
+rebranded it), and both alternatives (strip / feature-gate) buy churn or build-matrix
+complexity without reducing what actually has to be maintained.
+
+**What was removed** — every way to feed real Kaspa key material into Marigold:
+`compat/gen0.rs` (KDX keydata import) and `compat/gen1.rs` (Go-`kaspawallet` file
+import) deleted, with `compat/mod.rs` kept as a documented tombstone so the removal
+is discoverable in place; the four `import_kaspawallet_golang_*` API functions,
+`import_legacy_keydata`, the `import_gen1_keydata` todo-stub, and the golang wallet
+wire-file types (`EncryptedMnemonic`, `SingleWalletFileV0/V1`,
+`MultisigWalletFileV0/V1` — used by nothing else) removed from `wallet/mod.rs`,
+along with a long-dead commented `decrypt_mnemonic`; the CLI's
+`account import legacy-data` arm removed, `account import mnemonic legacy` turned
+into an explanatory refusal (typing a 12-word KDX mnemonic is the same key-reuse
+hazard as the file imports — the plan's letter listed the file paths, its rationale
+clearly covers this one too), and every KDX/kaspanet mention scrubbed from help and
+hint text. **Two small discoveries along the way**: `cli/src/modules/import.rs` was
+already dead code — commented out of the module tree, which is why its call to a
+never-defined `import_gen0_keydata` compiled fine for years — deleted outright; and
+`api/traits.rs`'s `legacy_accounts` flag documentation actively advertised the
+KDX/kaspanet provenance, now rewritten to storage-compat-only with an explicit
+"should not be used by new code."
+
+**What was kept, deliberately**: the legacy account *storage* variant
+(`account/variants/legacy.rs`) and the gen0 derivation code — pre-existing wallet
+files containing legacy accounts still open (compatibility), there is simply no way
+left to create or import one. The verify grep's surviving matches are exactly:
+tombstone/refusal comments, the storage variant, one coincidental `…umkdx…`
+substring inside a bech32 test address, and our own `KaspaWalletKeys` error-variant
+name. `cargo test --workspace` green after removal.
+
+**Also this session (not a plan step)**: the T&A anchoring integration was agreed —
+the partner runs a full archival node and has a verifier tool (recorded in
+STATE.md), and a draft API contract for the P9-era anchoring gateway was published
+at [ANCHORING-GATEWAY.md](ANCHORING-GATEWAY.md) so the partner's Workers-side
+integration can start against a stable shape now (submit/lookup/health endpoints,
+the 33-byte on-chain payload encoding an independent verifier relies on, and the
+open items — namespace pinning, tokens, rate limits — flagged explicitly).

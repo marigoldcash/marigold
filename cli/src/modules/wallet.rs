@@ -106,14 +106,7 @@ impl Wallet {
             &[
                 ("list", "List available local wallet files"),
                 ("create [<name>]", "Create a new bip32 wallet"),
-                (
-                    "import [<name>]",
-                    "Create a wallet from an existing mnemonic (bip32 only). \r\n\r\n\
-                To import legacy wallets (KDX or kaspanet) please create \
-                a new bip32 wallet and use the 'account import' command. \
-                Legacy wallets can only be imported as accounts. \
-                \r\n",
-                ),
+                ("import [<name>]", "Create a wallet from an existing mnemonic (bip32 only)"),
                 ("open [<name>]", "Open an existing wallet (shorthand: 'open [<name>]')"),
                 ("close", "Close an opened wallet (shorthand: 'close')"),
                 ("hint", "Change the wallet phishing hint"),

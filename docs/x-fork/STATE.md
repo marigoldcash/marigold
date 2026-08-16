@@ -4,8 +4,8 @@ Snapshot of everything decided and built so far, so any fresh coding session on 
 machine can continue from the repo alone. Read this together with [FORK-PLAN.md](../../FORK-PLAN.md).
 Update this file whenever off-repo state changes (domains, accounts, infra).
 
-Last updated: 2026-08-16 (P6.12 complete — **Phase 6 is done**; next: P7.0, the
-inherited-wallet surface audit DECISION gate opening Phase 7)
+Last updated: 2026-08-16 (P7.0 complete — wallet decision recorded, legacy-Kaspa
+import surfaces removed; next: P7.1, the note key DB)
 
 ## What this project is
 
@@ -94,12 +94,15 @@ substitute for it.
 
 ## Where execution stands
 
-- **Next step: P7.0 — Inherited-wallet surface audit.** 🧑‍⚖️ **DECISION** gate
-  opening Phase 7 (wallet integration): decide the fate of the inherited seed-phrase
-  wallet stack, and in any case remove/hard-disable the legacy-Kaspa import surfaces
-  (`compat/gen0.rs`, `compat/gen1.rs`, `import_kaspawallet_golang_*`, the CLI's
-  `import legacy` commands) — a key-reuse/phishing hazard on a fair-launch chain.
-  Decision to be recorded in DECISIONS.md.
+- **Next step: P7.1 — Note key DB.** Phase 7 wallet work proper begins: a
+  serial-keyed store of note keys in `wallet/core`.
+- **P7.0 is done.** Decision (user-ratified, recorded in DECISIONS.md): the
+  inherited seed-phrase wallet stack **stays as the transparent-tier wallet tool**;
+  every legacy-Kaspa import surface was removed in the same step (compat/gen0+gen1
+  deleted, golang import API + wire types removed, CLI legacy arms
+  removed/refused, help text scrubbed; storage variant + derivation kept so old
+  wallet files still open). Also: the T&A anchoring-gateway API contract draft was
+  published at docs/x-fork/ANCHORING-GATEWAY.md for the partner's integration.
 - **P6.12 is done — and with it, all of Phase 6 (the full note-pool consensus layer
   plus the finality-anchor security layer).** Anchor gossip over P2P (on-connect
   request from every peer + hub-wide relay of improvements), the pending-anchor slot

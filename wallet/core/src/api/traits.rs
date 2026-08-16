@@ -168,10 +168,11 @@ pub trait WalletApi: Send + Sync + AnySync {
     /// If `account_descriptors` is true, this call will return `Some(Vec<AccountDescriptor>)`
     /// for all accounts in the wallet.
     ///
-    /// If `legacy_accounts` is true, the wallet will enable legacy account compatibility mode
-    /// allowing the wallet to operate on legacy accounts. Legacy accounts were created by
-    /// applications such as KDX and kaspanet.io web wallet using a deprecated derivation path
-    /// and are considered deprecated. Legacy accounts should not be used in 3rd-party applications.
+    /// If `legacy_accounts` is true, the wallet will enable legacy account compatibility mode,
+    /// allowing it to OPEN pre-existing wallet storage containing legacy accounts (a deprecated
+    /// derivation path inherited from upstream). Note that every way to *import* legacy-Kaspa
+    /// key material was removed in FORK-PLAN P7.0 (key-reuse hazard on a fair-launch chain);
+    /// this flag exists only for storage compatibility and should not be used by new code.
     ///
     /// See [`wallet_open`](Self::wallet_open) for a convenience wrapper around this call.
     async fn wallet_open_call(self: Arc<Self>, request: WalletOpenRequest) -> Result<WalletOpenResponse>;

@@ -16,7 +16,6 @@ pub mod guide;
 pub mod halt;
 pub mod help;
 pub mod history;
-// pub mod import;
 pub mod list;
 pub mod message;
 pub mod miner;

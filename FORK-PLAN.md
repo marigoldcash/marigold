@@ -1644,7 +1644,7 @@ store → validation → pipeline → mempool → sync → RPC. Every step lands
 *Goal: a person can hold, receive, spend, back up, and restore notes through the CLI
 wallet. WASM/mobile wallets are post-launch — CLI proves the protocol.*
 
-- [ ] **P7.0 — Inherited-wallet surface audit.** 🧑‍⚖️ **DECISION** (added 2026-08-15,
+- [x] **P7.0 — Inherited-wallet surface audit.** 🧑‍⚖️ **DECISION** (added 2026-08-15,
   prompted by the P2.8 investigation of `compat/gen0.rs`). Decide the fate of the
   entire inherited seed-phrase wallet stack (`kaspa-wallet-core`'s BIP32/mnemonic
   accounts, `kaspa-cli`'s wallet commands) now that the note wallet replaces the
@@ -1664,6 +1664,26 @@ wallet. WASM/mobile wallets are post-launch — CLI proves the protocol.*
   the P8.5 wallet threat pass must re-verify it happened.**
   ✅ *Verify:* decision recorded in DECISIONS.md; `grep -ri "kdx\|kaspawallet\|legacy_v0"
   wallet/ cli/` shows no reachable user-facing import path; `cargo test --workspace`
+  green after removal.
+  **Executed (2026-08-16):** decision: **keep the inherited stack as
+  the transparent-tier wallet tool** — the transparent tier is permanent
+  infrastructure (mining payouts, mint funding, redeem outputs, integrator fee
+  keys) and this is its only wallet; stripping would be churn for negative value,
+  feature-gating a build matrix without less maintenance. Import surfaces removed
+  in the same step rather than riding the P8.7 deadline: `compat/gen0.rs` +
+  `gen1.rs` deleted (compat module left as a documented tombstone), the four
+  `import_kaspawallet_golang_*` functions + `import_legacy_keydata` +
+  `import_gen1_keydata` + their wire-file types (`EncryptedMnemonic`,
+  `SingleWalletFileV0/V1`, `MultisigWalletFileV0/V1`) removed from
+  `wallet/core/src/wallet/mod.rs`, the CLI's `account import legacy-data` arm
+  removed and `account import mnemonic legacy` replaced with an explanatory
+  refusal, help/hint text scrubbed, `api/traits.rs`'s `legacy_accounts` doc
+  rewritten to storage-compat-only, and the already-dead (unregistered)
+  `cli/src/modules/import.rs` deleted outright. Kept deliberately: the legacy
+  account storage variant + gen0 derivation code, so pre-existing wallet files
+  still open — compatibility without any import path. Verify grep's remaining hits
+  are tombstone comments, the storage variant, a coincidental bech32-substring in
+  a test vector, and our own crate name — no reachable path. Full workspace suite
   green after removal.
 
 - [ ] **P7.1 — Note key DB.** In `wallet/core`: a serial-keyed store of
