@@ -247,6 +247,14 @@ impl RpcApi for RpcCoreMock {
         Err(RpcError::NotImplemented)
     }
 
+    async fn get_finality_anchor_status_call(
+        &self,
+        _connection: Option<&DynRpcConnection>,
+        _request: GetFinalityAnchorStatusRequest,
+    ) -> RpcResult<GetFinalityAnchorStatusResponse> {
+        Err(RpcError::NotImplemented)
+    }
+
     async fn get_subnetwork_call(
         &self,
         _connection: Option<&DynRpcConnection>,

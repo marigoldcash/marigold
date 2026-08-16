@@ -631,6 +631,21 @@ from!(item: RpcResult<&kaspa_rpc_core::GetPoolStatsResponse>, protowire::GetPool
     Self { counts: item.counts.to_vec(), error: None }
 });
 
+from!(&kaspa_rpc_core::GetFinalityAnchorStatusRequest, protowire::GetFinalityAnchorStatusRequestMessage);
+from!(item: RpcResult<&kaspa_rpc_core::GetFinalityAnchorStatusResponse>, protowire::GetFinalityAnchorStatusResponseMessage, {
+    Self {
+        has_anchor: item.has_anchor,
+        latest_anchored_block: item.latest_anchored_block.as_bytes().to_vec(),
+        latest_anchored_daa_score: item.latest_anchored_daa_score,
+        enforcing: item.enforcing,
+        stale: item.stale,
+        expired: item.expired,
+        current_interval: item.current_interval,
+        disqualified_trustees: item.disqualified_trustees.iter().map(|&x| x as u32).collect(),
+        error: None,
+    }
+});
+
 // ----------------------------------------------------------------------------
 // protowire to rpc_core
 // ----------------------------------------------------------------------------
@@ -1207,6 +1222,23 @@ try_from!(item: &protowire::GetNotesBySerialResponseMessage, RpcResult<kaspa_rpc
 });
 
 try_from!(&protowire::GetPoolStatsRequestMessage, kaspa_rpc_core::GetPoolStatsRequest);
+try_from!(&protowire::GetFinalityAnchorStatusRequestMessage, kaspa_rpc_core::GetFinalityAnchorStatusRequest);
+try_from!(item: &protowire::GetFinalityAnchorStatusResponseMessage, RpcResult<kaspa_rpc_core::GetFinalityAnchorStatusResponse>, {
+    Self {
+        has_anchor: item.has_anchor,
+        latest_anchored_block: hash_from_bytes(&item.latest_anchored_block)?,
+        latest_anchored_daa_score: item.latest_anchored_daa_score,
+        enforcing: item.enforcing,
+        stale: item.stale,
+        expired: item.expired,
+        current_interval: item.current_interval,
+        disqualified_trustees: item
+            .disqualified_trustees
+            .iter()
+            .map(|&x| u8::try_from(x).map_err(|_| RpcError::General("trustee index out of range".to_string())))
+            .collect::<RpcResult<Vec<_>>>()?,
+    }
+});
 try_from!(item: &protowire::GetPoolStatsResponseMessage, RpcResult<kaspa_rpc_core::GetPoolStatsResponse>, {
     Self {
         counts: item

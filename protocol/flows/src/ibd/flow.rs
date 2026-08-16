@@ -238,6 +238,15 @@ impl IbdFlow {
             }
         }
 
+        // Anchor-aware IBD (POOL-SPEC.md P5.8, FORK-PLAN P6.12): all three IBD types
+        // converge here with the syncer's headers fully synced, before any body
+        // download or virtual advance — the single point where "any candidate chain
+        // not building at-or-beyond the latest known anchor is rejected outright
+        // regardless of accumulated work" is checked. The anchors themselves were
+        // learned from every connected peer via `FinalityAnchorFlow`'s on-connect
+        // exchange (and from this node's own persisted ratchet).
+        self.verify_syncer_chain_against_finality_anchor(&session, negotiation_output.syncer_virtual_selected_parent).await?;
+
         // Sync missing bodies in the past of syncer sink (virtual selected parent)
         self.sync_missing_block_bodies(&session, negotiation_output.syncer_virtual_selected_parent).await?;
 
@@ -1043,6 +1052,66 @@ staging selected tip ({}) is too small or negative. Aborting IBD...",
         }
         Ok(())
     }
+    /// Anchor-aware IBD enforcement (POOL-SPEC.md P5.8, FORK-PLAN P6.12): with the
+    /// syncer's headers fully synced, the chain it offers must contain the newest
+    /// anchor this node holds — from its persisted ratchet or from a gossiped anchor
+    /// still pending (an anchored block this node couldn't verify locally *yet* is
+    /// exactly what a fresh node syncing for the first time is missing). Refusal
+    /// disconnects the syncer, so "a higher-work anchor-free attacker chain loses
+    /// during sync". Fail-open still applies: an anchor stale relative to the offered
+    /// chain's own tip score (`depth + 3×interval` behind, stage-scaled) is not
+    /// enforced — a chain whose trustees stopped anchoring long ago must remain
+    /// syncable on plain PoW, never halted.
+    async fn verify_syncer_chain_against_finality_anchor(
+        &mut self,
+        consensus: &ConsensusProxy,
+        syncer_virtual_selected_parent: Hash,
+    ) -> Result<(), ProtocolError> {
+        let anchor_params = &self.ctx.config.params.finality_anchor;
+        if anchor_params.trustees.is_none() {
+            return Ok(());
+        }
+        let Some(anchor) = consensus.async_get_latest_full_finality_anchor().await else { return Ok(()) };
+        if anchor_params.expired(anchor.anchored_daa_score) {
+            return Ok(());
+        }
+        let syncer_sink_daa_score = match consensus.async_get_header(syncer_virtual_selected_parent).await {
+            Ok(header) => header.daa_score,
+            // Without the syncer sink's own header we cannot judge staleness; leave
+            // enforcement to the post-IBD virtual-resolution guard (P6.11)
+            Err(_) => return Ok(()),
+        };
+        if anchor_params.expired(syncer_sink_daa_score) {
+            return Ok(());
+        }
+        if syncer_sink_daa_score.saturating_sub(anchor.anchored_daa_score) > anchor_params.staleness_bound(syncer_sink_daa_score) {
+            warn!(
+                "[FINALITY ANCHOR] The latest known anchor (DAA score {}) is stale relative to the syncer chain \
+                 offered by {} (sink DAA score {}) — proceeding on plain PoW security (fail-open)",
+                anchor.anchored_daa_score, self.router, syncer_sink_daa_score
+            );
+            return Ok(());
+        }
+        // Fresh anchor: the offered chain must build at-or-beyond the anchored block.
+        // An unknown anchored block after a full header sync from this peer means the
+        // offered chain omits it — same refusal as a known-but-reorged-out block.
+        let contains_anchor = match consensus.async_get_header(anchor.anchored_block).await {
+            Ok(header) => {
+                header.daa_score == anchor.anchored_daa_score
+                    && consensus.async_is_chain_ancestor_of(anchor.anchored_block, syncer_virtual_selected_parent).await.unwrap_or(false)
+            }
+            Err(_) => false,
+        };
+        if !contains_anchor {
+            return Err(ProtocolError::OtherOwned(format!(
+                "the chain offered by peer {} (sink {}) conflicts with the latest finality anchor \
+                 (block {} at DAA score {}) and is refused regardless of its accumulated work",
+                self.router, syncer_virtual_selected_parent, anchor.anchored_block, anchor.anchored_daa_score
+            )));
+        }
+        Ok(())
+    }
+
     async fn sync_missing_block_bodies(&mut self, consensus: &ConsensusProxy, high: Hash) -> Result<(), ProtocolError> {
         // TODO (relaxed): query consensus in batches
         let sleep_task = sleep(Duration::from_secs(2));

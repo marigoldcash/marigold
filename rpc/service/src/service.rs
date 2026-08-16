@@ -545,6 +545,29 @@ NOTE: This error usually indicates an RPC conversion error between the node and 
         Ok(GetPoolStatsResponse::new(stats.counts))
     }
 
+    async fn get_finality_anchor_status_call(
+        &self,
+        _connection: Option<&DynRpcConnection>,
+        _request: GetFinalityAnchorStatusRequest,
+    ) -> RpcResult<GetFinalityAnchorStatusResponse> {
+        let session = self.consensus_manager.consensus().unguarded_session();
+        let status = session.async_get_finality_anchor_status().await;
+        let (has_anchor, latest_anchored_block, latest_anchored_daa_score) = match status.latest_anchor {
+            Some((block, score)) => (true, block, score),
+            None => (false, Default::default(), 0),
+        };
+        Ok(GetFinalityAnchorStatusResponse {
+            has_anchor,
+            latest_anchored_block,
+            latest_anchored_daa_score,
+            enforcing: status.enforcing,
+            stale: status.stale,
+            expired: status.expired,
+            current_interval: status.current_interval,
+            disqualified_trustees: status.disqualified,
+        })
+    }
+
     async fn get_blocks_call(
         &self,
         _connection: Option<&DynRpcConnection>,

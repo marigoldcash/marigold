@@ -21,7 +21,8 @@
 //! is the trivial case here, unlike the pool state's P5.4/P6.8 machinery).
 
 use kaspa_consensus_core::Hash;
-use kaspa_database::prelude::{BatchDbWriter, CachedDbItem, DB, StoreResult, StoreResultExt};
+use kaspa_consensus_core::finality_anchor::FinalityAnchor;
+use kaspa_database::prelude::{BatchDbWriter, CachedDbItem, DB, DirectDbWriter, StoreResult, StoreResultExt};
 use kaspa_database::registry::DatabaseStorePrefixes;
 use rocksdb::WriteBatch;
 use serde::{Deserialize, Serialize};
@@ -45,20 +46,47 @@ pub struct DenyListEntry {
     pub accepting_block: Hash,
 }
 
-/// DB store for both items. Held by consensus storage as a sibling of the virtual
-/// stores; writes join `commit_virtual_state`'s batch so anchor state and virtual
-/// state land atomically.
+/// A complete anchor persisted as its borsh wire bytes wrapped in a serde shell —
+/// signatures included, so the node can re-serve its best anchor to peers (P6.12's
+/// gossip). Borsh-in-serde rather than a parallel serde mirror of `FinalityAnchor`:
+/// one wire format, no drift.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StoredFullAnchor {
+    payload: Vec<u8>,
+}
+
+impl StoredFullAnchor {
+    pub fn new(anchor: &FinalityAnchor) -> Self {
+        Self { payload: anchor.to_wire_bytes() }
+    }
+
+    pub fn decode(&self) -> FinalityAnchor {
+        FinalityAnchor::from_wire_bytes(&self.payload).expect("stored anchors were serialized by StoredFullAnchor::new")
+    }
+}
+
+/// DB store for the node's anchor state. Held by consensus storage as a sibling of
+/// the virtual stores; the ratchet/deny-list writes join `commit_virtual_state`'s
+/// batch so anchor state and virtual state land atomically; the gossip-facing items
+/// (`latest_full`, `pending`) are also written directly by the P2P apply path (P6.12)
+/// — monotone data, so a lost write is at worst a re-delivered gossip update.
 #[derive(Clone)]
 pub struct DbFinalityAnchorStore {
+    db: Arc<DB>,
     latest: CachedDbItem<StoredAnchor>,
     deny_list: CachedDbItem<Vec<DenyListEntry>>,
+    latest_full: CachedDbItem<StoredFullAnchor>,
+    pending: CachedDbItem<StoredFullAnchor>,
 }
 
 impl DbFinalityAnchorStore {
     pub fn new(db: Arc<DB>) -> Self {
         Self {
             latest: CachedDbItem::new(db.clone(), DatabaseStorePrefixes::FinalityAnchorLatest.into()),
-            deny_list: CachedDbItem::new(db, DatabaseStorePrefixes::FinalityAnchorDenyList.into()),
+            deny_list: CachedDbItem::new(db.clone(), DatabaseStorePrefixes::FinalityAnchorDenyList.into()),
+            latest_full: CachedDbItem::new(db.clone(), DatabaseStorePrefixes::FinalityAnchorLatestFull.into()),
+            pending: CachedDbItem::new(db.clone(), DatabaseStorePrefixes::FinalityAnchorPending.into()),
+            db,
         }
     }
 
@@ -90,5 +118,40 @@ impl DbFinalityAnchorStore {
             }
         }
         self.deny_list.write(BatchDbWriter::new(batch), &entries)
+    }
+
+    /// The complete latest anchor (signatures included), for re-serving to peers.
+    /// Present iff [`Self::latest`] is (they are written together).
+    pub fn latest_full(&self) -> StoreResult<Option<FinalityAnchor>> {
+        Ok(self.latest_full.read().optional()?.map(|stored| stored.decode()))
+    }
+
+    pub fn set_latest_full_batch(&mut self, batch: &mut WriteBatch, anchor: &FinalityAnchor) -> StoreResult<()> {
+        self.latest_full.write(BatchDbWriter::new(batch), &StoredFullAnchor::new(anchor))
+    }
+
+    /// A gossiped anchor held for a block this node does not know yet. Not enforced;
+    /// promoted to the ratchet once the block becomes locally verifiable, and used by
+    /// anchor-aware IBD to refuse chains that omit its block (P6.12).
+    pub fn pending(&self) -> StoreResult<Option<FinalityAnchor>> {
+        Ok(self.pending.read().optional()?.map(|stored| stored.decode()))
+    }
+
+    pub fn set_pending(&mut self, anchor: &FinalityAnchor) -> StoreResult<()> {
+        self.pending.write(DirectDbWriter::new(&self.db), &StoredFullAnchor::new(anchor))
+    }
+
+    pub fn clear_pending_batch(&mut self, batch: &mut WriteBatch) -> StoreResult<()> {
+        self.pending.remove(BatchDbWriter::new(batch)).map(|_| ())
+    }
+
+    /// Direct (non-batch) ratchet write for the P2P gossip apply path (P6.12) — the
+    /// caller must uphold the same monotonicity contract as the batch variants.
+    pub fn set_latest_direct(&mut self, anchor: &FinalityAnchor) -> StoreResult<()> {
+        self.latest.write(
+            DirectDbWriter::new(&self.db),
+            &StoredAnchor { anchored_block: anchor.anchored_block, anchored_daa_score: anchor.anchored_daa_score },
+        )?;
+        self.latest_full.write(DirectDbWriter::new(&self.db), &StoredFullAnchor::new(anchor))
     }
 }

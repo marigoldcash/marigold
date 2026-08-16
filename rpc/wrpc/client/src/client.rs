@@ -667,6 +667,7 @@ impl RpcApi for KaspaRpcClient {
             GetSeqCommitLaneProof,
             GetNotesBySerial,
             GetPoolStats,
+            GetFinalityAnchorStatus,
         ]
     );
 

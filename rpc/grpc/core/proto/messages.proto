@@ -72,6 +72,7 @@ message KaspadRequest {
     NotifyNotesChangedRequestMessage notifyNotesChangedRequest = 1120;
     GetNotesBySerialRequestMessage getNotesBySerialRequest = 1123;
     GetPoolStatsRequestMessage getPoolStatsRequest = 1125;
+    GetFinalityAnchorStatusRequestMessage getFinalityAnchorStatusRequest = 1127;
   }
 }
 
@@ -145,6 +146,7 @@ message KaspadResponse {
     NotesChangedNotificationMessage notesChangedNotification = 1122;
     GetNotesBySerialResponseMessage getNotesBySerialResponse = 1124;
     GetPoolStatsResponseMessage getPoolStatsResponse = 1126;
+    GetFinalityAnchorStatusResponseMessage getFinalityAnchorStatusResponse = 1128;
   }
 }
 

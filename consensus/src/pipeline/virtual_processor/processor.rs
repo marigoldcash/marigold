@@ -229,8 +229,11 @@ impl From<u8> for AnchorEnforcementState {
 /// the same batch as the virtual state itself.
 #[derive(Default, Debug)]
 pub(super) struct AnchorStateUpdates {
-    pub(super) new_latest: Option<StoredAnchor>,
+    /// The full new latest anchor (signatures kept for P6.12's gossip re-serving).
+    pub(super) new_latest: Option<kaspa_consensus_core::finality_anchor::FinalityAnchor>,
     pub(super) new_deny_entries: Vec<DenyListEntry>,
+    /// Clear the pending gossiped anchor (promoted or superseded).
+    pub(super) clear_pending: bool,
 }
 
 impl VirtualStateProcessor {
@@ -374,10 +377,18 @@ impl VirtualStateProcessor {
         // (mirrors `VirtualState::utxo_diff`; stored separately, see `VirtualStores::pool_diff`).
         let mut accumulated_pool_diff = virtual_read.virtual_pool_diff().to_reversed();
 
-        // The finality-anchor guard (P6.11): judged against the node's own current
-        // virtual DAA score — see `finality_anchor_guard`'s doc for why not the
-        // candidate's own score.
-        let anchor_guard = self.finality_anchor_guard(prev_state.daa_score);
+        // The finality-anchor guard (P6.11/P6.12): judged against the node's own
+        // current SINK's header DAA score — deliberately neither the candidate's own
+        // score (a fast-mined attacker chain must not bring its own staleness
+        // exemption) NOR virtual's mergeset-inclusive DAA score. The latter was a
+        // real bug caught by the P6.12 adversarial daemon test: virtual MERGES a
+        // conflicting heavier branch even while refusing to select it, so its DAA
+        // score is partially attacker-controlled — a large enough anchor-free branch
+        // inflated the clock past the staleness bound, tripped fail-open, and only
+        // then captured the chain. The sink's own header score is the selected
+        // chain's clock, which a refused branch cannot touch.
+        let sink_daa_score = self.headers_store.get_daa_score(prev_sink).unwrap();
+        let anchor_guard = self.finality_anchor_guard(sink_daa_score);
 
         let (new_sink, virtual_parent_candidates) = self.sink_search_algorithm(
             &virtual_read,
@@ -410,9 +421,10 @@ impl VirtualStateProcessor {
             )
             .expect("all possible rule errors are unexpected here");
 
-        // Recompute the anchor enforcement state against the advanced virtual and
-        // alert on transitions (P5.8's fail-open visibility requirement)
-        self.update_finality_anchor_alert(new_virtual_state.daa_score);
+        // Recompute the anchor enforcement state against the advanced sink and alert
+        // on transitions (P5.8's fail-open visibility requirement). Sink header
+        // score, not virtual's — same reasoning as the guard above.
+        self.update_finality_anchor_alert(self.headers_store.get_daa_score(new_sink).unwrap());
 
         let compact_sink_ghostdag_data = if let Some(sink_ghostdag_data) = Lazy::get(&sink_ghostdag_data) {
             // If we had to retrieve the full data, we convert it to compact
@@ -478,12 +490,11 @@ impl VirtualStateProcessor {
     /// The finality-anchor fork-choice guard (POOL-SPEC.md P5.8, FORK-PLAN P6.11): the
     /// block every sink candidate must have on its selected chain, or `None` when the
     /// anchor-conflict rule is not currently enforced. Enforcement requires ALL of:
-    /// trustee keys pinned in params, the hard trustee-expiry score not yet reached
-    /// (judged by the node's own virtual DAA score), an anchor ever accepted (the
-    /// ratchet), and that anchor within the fail-open staleness bound
-    /// (`depth + 3×interval`, stage-scaled) of the node's own virtual DAA score — the
-    /// node's own clock of chain progress, deliberately not the candidate's (a
-    /// fast-mined attacker chain must not be able to bring its own exemption).
+    /// trustee keys pinned in params, the hard trustee-expiry score not yet reached,
+    /// an anchor ever accepted (the ratchet), and that anchor within the fail-open
+    /// staleness bound (`depth + 3×interval`, stage-scaled) of `pov_daa_score` — the
+    /// node's own SINK header DAA score (see `resolve_virtual` for why it is neither
+    /// the candidate's score nor virtual's mergeset-inflated score).
     ///
     /// The moment any condition fails, the rule simply stops being enforced — the
     /// chain falls back to ordinary PoW/finality-depth security, exactly as if the
@@ -619,10 +630,7 @@ impl VirtualStateProcessor {
                             // The ratchet only ever advances.
                             if best_score.is_none_or(|best| anchor.anchored_daa_score > best) {
                                 best_score = Some(anchor.anchored_daa_score);
-                                updates.new_latest = Some(StoredAnchor {
-                                    anchored_block: anchor.anchored_block,
-                                    anchored_daa_score: anchor.anchored_daa_score,
-                                });
+                                updates.new_latest = Some(anchor);
                             }
                         }
                     }
@@ -630,13 +638,50 @@ impl VirtualStateProcessor {
             }
         }
 
-        if let Some(latest) = updates.new_latest {
+        // Pending-anchor promotion (P6.12): a gossiped anchor held for a then-unknown
+        // block becomes the ratchet the moment its block is locally verifiable — known
+        // at the claimed DAA score and on the selected chain of some body tip (the
+        // exact precondition that keeps `sink_search_algorithm`'s termination argument
+        // intact; see `apply_external_finality_anchor`). Superseded pendings are
+        // simply cleared.
+        if let Some(pending) = self.finality_anchor_store.read().pending().unwrap() {
+            if best_score.is_some_and(|best| best >= pending.anchored_daa_score) {
+                updates.clear_pending = true;
+            } else if self
+                .headers_store
+                .get_daa_score(pending.anchored_block)
+                .optional()
+                .unwrap()
+                .is_some_and(|score| score == pending.anchored_daa_score)
+                && self.is_chain_ancestor_of_any_body_tip(pending.anchored_block)
+            {
+                best_score = Some(pending.anchored_daa_score);
+                updates.new_latest = Some(pending);
+                updates.clear_pending = true;
+            }
+        }
+        let _ = best_score;
+
+        if let Some(latest) = updates.new_latest.as_ref() {
             info!(
                 "[FINALITY ANCHOR] Ratchet advanced: block {} at DAA score {} is now trustee-certified history",
                 latest.anchored_block, latest.anchored_daa_score
             );
         }
-        (updates.new_latest.is_some() || !updates.new_deny_entries.is_empty()).then_some(updates)
+        (updates.new_latest.is_some() || !updates.new_deny_entries.is_empty() || updates.clear_pending).then_some(updates)
+    }
+
+    /// Whether `block` is on the selected chain of at least one current body tip —
+    /// the local-verifiability precondition for enforcing an anchor (guarantees the
+    /// sink search can always reach an anchor-compatible candidate).
+    pub(crate) fn is_chain_ancestor_of_any_body_tip(&self, block: Hash) -> bool {
+        self.body_tips_store
+            .read()
+            .get()
+            .unwrap()
+            .read()
+            .iter()
+            .any(|&tip| self.reachability_service.is_chain_ancestor_of(block, tip))
     }
 
     /// Recomputes the enforcement state after a virtual advance and alerts loudly on
@@ -1324,14 +1369,24 @@ impl VirtualStateProcessor {
         // Update the virtual selected chain
         selected_chain_write.apply_changes(&mut batch, chain_path).unwrap();
 
-        // Apply finality-anchor state updates (P6.11) — the ratchet and deny-list are
-        // monotone, so joining this batch is atomicity, not rollbackability
+        // Apply finality-anchor state updates (P6.11/P6.12) — the ratchet and
+        // deny-list are monotone, so joining this batch is atomicity, not
+        // rollbackability
         if let (Some(updates), Some(anchor_write)) = (anchor_updates, anchor_write.as_mut()) {
             if !updates.new_deny_entries.is_empty() {
                 anchor_write.append_deny_entries_batch(&mut batch, &updates.new_deny_entries).unwrap();
             }
-            if let Some(latest) = updates.new_latest {
-                anchor_write.set_latest_batch(&mut batch, latest).unwrap();
+            if let Some(latest) = updates.new_latest.as_ref() {
+                anchor_write
+                    .set_latest_batch(
+                        &mut batch,
+                        StoredAnchor { anchored_block: latest.anchored_block, anchored_daa_score: latest.anchored_daa_score },
+                    )
+                    .unwrap();
+                anchor_write.set_latest_full_batch(&mut batch, latest).unwrap();
+            }
+            if updates.clear_pending {
+                anchor_write.clear_pending_batch(&mut batch).unwrap();
             }
         }
 

@@ -151,6 +151,8 @@ pub enum RpcApiOps {
     GetNotesBySerial = 154,
     /// Get note-pool stats: live note count per denomination (FORK-PLAN P6.9)
     GetPoolStats = 155,
+    /// The node's finality-anchor status (POOL-SPEC.md P5.8's `finality_anchor_stale` visibility flag and friends)
+    GetFinalityAnchorStatus = 156,
 }
 
 impl RpcApiOps {

@@ -93,6 +93,7 @@ pub enum KaspadPayloadOps {
     GetSeqCommitLaneProof,
     GetNotesBySerial,
     GetPoolStats,
+    GetFinalityAnchorStatus,
 
     // Subscription commands for starting/stopping notifications
     NotifyBlockAdded,

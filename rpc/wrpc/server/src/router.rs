@@ -74,6 +74,7 @@ impl Router {
                 GetSeqCommitLaneProof,
                 GetNotesBySerial,
                 GetPoolStats,
+                GetFinalityAnchorStatus,
                 ResolveFinalityConflict,
                 Shutdown,
                 SubmitBlock,

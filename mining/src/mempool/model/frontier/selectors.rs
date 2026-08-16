@@ -207,6 +207,49 @@ impl TemplateTransactionSelector for SequenceSelector {
     }
 }
 
+/// Wraps an inner selector, force-including a small set of transactions ahead of its
+/// first batch (FORK-PLAN P6.12: finality-anchor lane transactions). Zero-fee anchor
+/// txs have weight `(0/mass)^3 = 0` and would never be sampled by the feerate-weighted
+/// selectors, yet the chain's protection layer wants every produced template to carry
+/// the freshest anchor — so they bypass weighting entirely. The forced set is bounded
+/// by the trustee cadence (at most an anchor or two plus rare equivocation evidence),
+/// so the unaccounted mass is negligible. Duplicates coming back out of the inner
+/// selector (e.g. `TakeAllSelector` returning the whole frontier) are filtered so a
+/// template never carries the same transaction twice.
+pub struct ForcedInclusionSelector {
+    forced: Vec<Transaction>,
+    forced_ids: std::collections::HashSet<TransactionId>,
+    inner: Box<dyn TemplateTransactionSelector>,
+}
+
+impl ForcedInclusionSelector {
+    pub fn new(forced: Vec<Transaction>, inner: Box<dyn TemplateTransactionSelector>) -> Self {
+        let forced_ids = forced.iter().map(|tx| tx.id()).collect();
+        Self { forced, forced_ids, inner }
+    }
+}
+
+impl TemplateTransactionSelector for ForcedInclusionSelector {
+    fn select_transactions(&mut self) -> Vec<Transaction> {
+        let mut batch: Vec<Transaction> = std::mem::take(&mut self.forced);
+        batch.extend(self.inner.select_transactions().into_iter().filter(|tx| !self.forced_ids.contains(&tx.id())));
+        batch
+    }
+
+    fn reject_selection(&mut self, tx_id: TransactionId) {
+        // A rejected forced tx (e.g. an anchor invalidated contextually between
+        // mempool admission and template build) is simply dropped — the inner
+        // selector never saw it and would panic on an unknown id
+        if !self.forced_ids.remove(&tx_id) {
+            self.inner.reject_selection(tx_id)
+        }
+    }
+
+    fn is_successful(&self) -> bool {
+        self.inner.is_successful()
+    }
+}
+
 /// A selector that selects all the transactions it holds and is always considered successful.
 /// If all mempool transactions have combined mass which is <= block mass limit, this selector
 /// should be called and provided with all the transactions.

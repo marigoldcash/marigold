@@ -101,6 +101,12 @@ pub enum DatabaseStorePrefixes {
     /// The trustee deny-list: permanently disqualified keys, each entry keyed to the
     /// chain block whose accepted equivocation evidence produced it.
     FinalityAnchorDenyList = 98,
+    /// The complete latest anchor (signatures included), kept alongside the ratchet so
+    /// the node can re-serve it to peers over P2P gossip (FORK-PLAN P6.12).
+    FinalityAnchorLatestFull = 99,
+    /// A gossiped anchor whose anchored block this node does not know yet — held
+    /// pending, promoted to the ratchet once the block is locally verifiable.
+    FinalityAnchorPending = 100,
 
     // ---- Separator ----
     /// Reserved as a separator

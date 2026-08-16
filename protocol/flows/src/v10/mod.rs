@@ -13,8 +13,10 @@ use crate::v7::{
     txrelay::flow::{RelayTransactionsFlow, RequestTransactionsFlow},
 };
 use crate::v8::request_block_bodies::HandleBlockBodyRequests;
+pub(crate) mod finality_anchor;
 pub(crate) mod request_pruning_point_pool_state;
 pub(crate) mod request_pruning_point_smt_state;
+use finality_anchor::FinalityAnchorFlow;
 use request_pruning_point_pool_state::RequestPruningPointPoolStateFlow;
 use request_pruning_point_smt_state::RequestPruningPointSmtStateFlow;
 
@@ -28,6 +30,13 @@ pub fn register(ctx: FlowContext, router: Arc<Router>, protocol_version: u32) ->
     let body_only_ibd_permitted = true;
     let header_format = HeaderFormat::from(protocol_version);
     let mut flows: Vec<Box<dyn Flow>> = vec![
+        // Finality-anchor gossip (P6.12): requests the peer's best anchor on connect,
+        // serves ours on request, relays improvements
+        Box::new(FinalityAnchorFlow::new(
+            ctx.clone(),
+            router.clone(),
+            router.subscribe(vec![KaspadMessagePayloadType::RequestFinalityAnchor, KaspadMessagePayloadType::FinalityAnchor]),
+        )),
         Box::new(IbdFlow::new(
             ctx.clone(),
             router.clone(),

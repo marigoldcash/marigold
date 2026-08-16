@@ -568,6 +568,18 @@ impl ConsensusSessionOwned {
     pub async fn async_get_pool_stats(&self) -> kaspa_consensus_core::notepool::PoolStats {
         self.clone().spawn_blocking(move |c| c.get_pool_stats()).await
     }
+    pub async fn async_get_finality_anchor_status(&self) -> kaspa_consensus_core::finality_anchor::FinalityAnchorStatus {
+        self.clone().spawn_blocking(move |c| c.get_finality_anchor_status()).await
+    }
+    pub async fn async_apply_external_finality_anchor(
+        &self,
+        anchor: kaspa_consensus_core::finality_anchor::FinalityAnchor,
+    ) -> kaspa_consensus_core::finality_anchor::ExternalAnchorOutcome {
+        self.clone().spawn_blocking(move |c| c.apply_external_finality_anchor(anchor)).await
+    }
+    pub async fn async_get_latest_full_finality_anchor(&self) -> Option<kaspa_consensus_core::finality_anchor::FinalityAnchor> {
+        self.clone().spawn_blocking(move |c| c.get_latest_full_finality_anchor()).await
+    }
     pub async fn async_get_pruning_point_smt_metadata(
         &self,
         expected_pp: Hash,

@@ -112,6 +112,19 @@ pub enum AnchorPayload {
     Equivocation(EquivocationEvidence),
 }
 
+impl FinalityAnchor {
+    /// The anchor's canonical borsh bytes — used for DB persistence and P2P transport
+    /// (P6.12). One wire format everywhere; `AnchorPayload` wraps the same encoding
+    /// with a lane discriminant for the transaction channel.
+    pub fn to_wire_bytes(&self) -> Vec<u8> {
+        borsh::to_vec(self).expect("borsh serialization of FinalityAnchor cannot fail")
+    }
+
+    pub fn from_wire_bytes(bytes: &[u8]) -> Option<Self> {
+        Self::try_from_slice(bytes).ok()
+    }
+}
+
 impl AnchorPayload {
     /// Decodes an anchor-subnetwork transaction payload. `None` on any malformed
     /// encoding, trailing bytes included — same "malformed encodings are
@@ -163,6 +176,24 @@ pub enum FinalityAnchorError {
 
     #[error("anchored DAA score {0} is at or beyond the hard trustee-expiry score {1}")]
     PastHardExpiry(u64, u64),
+}
+
+/// The outcome of offering an externally-received (gossiped) anchor to consensus
+/// (FORK-PLAN P6.12). Drives the P2P flow's rebroadcast decision: `Ratcheted` and
+/// `Pending` anchors improved local state and are worth relaying; `Ignored` ones are
+/// stale, invalid, or quorum-dead and propagate no further.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExternalAnchorOutcome {
+    /// Verified, block locally known, ratchet advanced — enforced from the next
+    /// virtual resolution.
+    Ratcheted,
+    /// Verified and newer than anything held, but the anchored block is not locally
+    /// verifiable yet — held pending (promoted once the block syncs; meanwhile it
+    /// still guards IBD chain selection).
+    Pending,
+    /// No improvement or no consensus effect (stale score, invalid signatures,
+    /// disqualified quorum, expired keys, or the mechanism is unkeyed).
+    Ignored,
 }
 
 /// A snapshot of the node's finality-anchor state (POOL-SPEC.md P5.8's visibility

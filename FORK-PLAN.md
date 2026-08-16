@@ -1584,14 +1584,58 @@ store → validation → pipeline → mempool → sync → RPC. Every step lands
   inclusion — a genuine, documented property of the mechanism, not a test artifact.
   Full workspace + integration suites green (kaspa-consensus 105, up from 100).
 
-- [ ] **P6.12 — Anchor distribution + trustee signer.** Gossip anchors over P2P and make
+- [x] **P6.12 — Anchor distribution + trustee signer.** Gossip anchors over P2P and make
   IBD anchor-aware (a syncing node requests the latest anchor before committing to a
   chain, so an anchor-free attacker chain cannot capture fresh nodes); build the trustee
   signer daemon: a small tool that watches its own node, signs the depth-D block on the
   P5.8 cadence, aggregates k-of-n partial signatures, and submits the anchor tx.
-  ✅ *Verify:* integration test: a fresh node offered only an attacker chain refuses it
-  once it learns the latest anchor; a 3-of-5 signer setup on the local testnet produces
-  anchors continuously and all nodes report finality within one cadence interval.
+  **Executed (2026-08-16):** P2P gossip via two new messages (`RequestFinalityAnchor`/
+  `FinalityAnchor`, proto tags 68/69) and a per-peer `FinalityAnchorFlow` that requests
+  the peer's best anchor on connect (the `ReceiveAddressesFlow` pattern — this is what
+  makes IBD ask *every* connected peer), serves ours on request, and re-relays
+  improvements hub-wide; consensus grew `apply_external_finality_anchor` (gossiped
+  anchors ratchet when the anchored block is locally verifiable — known at its claimed
+  score AND on some body tip's selected chain, the precondition preserving the sink
+  search's termination argument — else held in a persisted *pending* slot, promoted
+  automatically once the block syncs) and `get_latest_full_finality_anchor` (the store
+  now keeps the full signed anchor for re-serving, plus the pending slot; prefixes
+  99/100). Anchor-aware IBD: a single check where all three IBD types converge
+  post-header-sync — a syncer chain not containing the newest held anchor (ratcheted
+  OR pending) is refused with a disconnect, with fail-open preserved (an anchor stale
+  relative to the offered chain's own tip score is not enforced, so a chain whose
+  trustees stopped anchoring long ago stays syncable). Mempool/relay policy: anchor-
+  lane txs exempt from the relay-fee floor (trustees hold no funds by design; isolation
+  validation already limits the lane to genuinely trustee-signed material) and
+  force-included in block templates via a new `ForcedInclusionSelector` wrapper
+  (zero-fee ⇒ sampling weight `(0/mass)³ = 0` ⇒ the weighted selectors would never
+  pick them). New `GetFinalityAnchorStatus` RPC (grpc + wrpc + cli), exposing the
+  spec's wallet-visible `finality_anchor_stale` flag, enforcing/expired state, active
+  cadence interval, and deny-list. New `kaspa-trustee-signer` crate (lib + bin): one
+  instance per trustee key, polls its node, signs the depth-D selected-chain block at
+  most once per cadence interval **with the last-signed state persisted before
+  sharing** (a restart mid-interval must never re-sign a different block — the exact
+  honest-equivocation hazard P5.8 flags), exchanges partial attestations over minimal
+  length-prefixed-borsh TCP, assembles canonical k-of-n anchors, submits via RPC with
+  already-in-mempool treated as success.
+  **A real security bug found and fixed by the first adversarial run of the refusal
+  test:** P6.11's fail-open staleness clock was *virtual's* DAA score — but virtual
+  MERGES a conflicting heavier branch even while refusing to select it, so that clock
+  is partially attacker-controlled: a large anchor-free branch inflated the defender's
+  clock past the staleness bound, tripped fail-open, and only then captured the chain.
+  Fixed by judging staleness (guard, status, alert) by the SINK's own header DAA
+  score — the selected chain's clock, untouchable by a refused branch. Full writeup
+  in NOTES.md.
+  ✅ *Verify:* `daemon_anchor_refuses_heavier_anchorless_chain_test` — honest node A
+  (anchor submitted through real RPC → mempool exemption → forced template inclusion →
+  mined), attacker node B with a verified-heavier chain, fresh node C syncs A, learns
+  the anchor, then meets B and keeps refusing its chain (log-confirmed: "conflicts
+  with the latest finality anchor ... ignored from Virtual chain selection regardless
+  of its accumulated work"), with the anchored block still on C's selected chain.
+  `daemon_trustee_signers_produce_anchors_test` — three in-process signers (one key
+  each, real localhost TCP partial exchange) against a continuously-mined node:
+  3-of-5 anchors assembled and submitted continuously, BOTH connected nodes reach
+  `enforcing && !stale` ("reporting finality within one cadence interval"), and the
+  anchor keeps advancing across intervals. Full workspace + integration suites green.
 
 ---
 

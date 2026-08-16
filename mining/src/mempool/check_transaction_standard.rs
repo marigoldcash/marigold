@@ -124,6 +124,18 @@ impl Mempool {
             }
         }
 
+        // Finality-anchor lane transactions (POOL-SPEC.md P5.8, FORK-PLAN P6.12) are
+        // exempt from the relay-fee floor: the trustees hold no funds by design
+        // ("produce no blocks, hold no mining reward, can only veto"), so anchors are
+        // zero-input, zero-fee. This is not a spam surface — consensus isolation
+        // validation already rejected anything not genuinely trustee-signed before
+        // this check runs, the honest production rate is one anchor per cadence
+        // interval (plus rare equivocation evidence), and identical anchors dedup by
+        // transaction id.
+        if transaction.tx.subnetwork_id == kaspa_consensus_core::subnets::SUBNETWORK_ID_FINALITY_ANCHOR {
+            return Ok(());
+        }
+
         // Minimum relay fee applies to normalized non-contextual mass so block-space usage has a
         // minimum cost, whether dominated by compute or by transient byte footprint.
         // Storage mass does not require an additional relay-fee floor here since storage growth is

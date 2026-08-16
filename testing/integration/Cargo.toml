@@ -31,6 +31,7 @@ kaspa-muhash.workspace = true
 kaspa-notify.workspace = true
 kaspa-pow.workspace = true
 kaspa-rpc-core.workspace = true
+kaspa-trustee-signer.workspace = true
 kaspa-rpc-service.workspace = true
 kaspa-seq-commit.workspace = true
 kaspa-smt.workspace = true

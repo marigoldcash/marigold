@@ -260,6 +260,16 @@ pub trait RpcApi: Sync + Send + AnySync {
     async fn get_pool_stats(&self) -> RpcResult<[u64; 8]> {
         Ok(self.get_pool_stats_call(None, GetPoolStatsRequest {}).await?.counts)
     }
+    /// The node's finality-anchor status (POOL-SPEC.md P5.8, FORK-PLAN P6.12) —
+    /// including the wallet-visible `finality_anchor_stale` fail-open flag.
+    async fn get_finality_anchor_status(&self) -> RpcResult<GetFinalityAnchorStatusResponse> {
+        self.get_finality_anchor_status_call(None, GetFinalityAnchorStatusRequest {}).await
+    }
+    async fn get_finality_anchor_status_call(
+        &self,
+        connection: Option<&DynRpcConnection>,
+        request: GetFinalityAnchorStatusRequest,
+    ) -> RpcResult<GetFinalityAnchorStatusResponse>;
     async fn get_pool_stats_call(
         &self,
         connection: Option<&DynRpcConnection>,

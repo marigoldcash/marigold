@@ -87,6 +87,7 @@ impl Factory {
                 GetSeqCommitLaneProof,
                 GetNotesBySerial,
                 GetPoolStats,
+                GetFinalityAnchorStatus,
                 NotifyBlockAdded,
                 NotifyNewBlockTemplate,
                 NotifyFinalityConflict,

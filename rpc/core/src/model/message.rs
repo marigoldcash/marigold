@@ -3954,6 +3954,83 @@ impl Deserializer for GetPoolStatsResponse {
     }
 }
 
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetFinalityAnchorStatusRequest {}
+
+impl Serializer for GetFinalityAnchorStatusRequest {
+    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        store!(u16, &1, writer)?;
+        Ok(())
+    }
+}
+
+impl Deserializer for GetFinalityAnchorStatusRequest {
+    fn deserialize<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
+        let _version = load!(u16, reader)?;
+        Ok(Self {})
+    }
+}
+
+/// The node's finality-anchor state (POOL-SPEC.md P5.8, FORK-PLAN P6.12): the
+/// latest-anchor ratchet, whether the anchor-conflict rule is being enforced, the
+/// spec's `finality_anchor_stale` fail-open flag (wallet-visible by requirement — "a
+/// user accepting a large payment during an extended anchor outage ... should be able
+/// to know it"), the hard-expiry state, the active cadence interval, and the trustee
+/// deny-list as of the current virtual chain. `latest_anchored_block`/`_daa_score`
+/// are meaningful only when `has_anchor` is true.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetFinalityAnchorStatusResponse {
+    pub has_anchor: bool,
+    pub latest_anchored_block: RpcHash,
+    pub latest_anchored_daa_score: u64,
+    pub enforcing: bool,
+    pub stale: bool,
+    pub expired: bool,
+    pub current_interval: u64,
+    pub disqualified_trustees: Vec<u8>,
+}
+
+impl Serializer for GetFinalityAnchorStatusResponse {
+    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        store!(u16, &1, writer)?;
+        store!(bool, &self.has_anchor, writer)?;
+        store!(RpcHash, &self.latest_anchored_block, writer)?;
+        store!(u64, &self.latest_anchored_daa_score, writer)?;
+        store!(bool, &self.enforcing, writer)?;
+        store!(bool, &self.stale, writer)?;
+        store!(bool, &self.expired, writer)?;
+        store!(u64, &self.current_interval, writer)?;
+        store!(Vec<u8>, &self.disqualified_trustees, writer)?;
+        Ok(())
+    }
+}
+
+impl Deserializer for GetFinalityAnchorStatusResponse {
+    fn deserialize<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
+        let _version = load!(u16, reader)?;
+        let has_anchor = load!(bool, reader)?;
+        let latest_anchored_block = load!(RpcHash, reader)?;
+        let latest_anchored_daa_score = load!(u64, reader)?;
+        let enforcing = load!(bool, reader)?;
+        let stale = load!(bool, reader)?;
+        let expired = load!(bool, reader)?;
+        let current_interval = load!(u64, reader)?;
+        let disqualified_trustees = load!(Vec<u8>, reader)?;
+        Ok(Self {
+            has_anchor,
+            latest_anchored_block,
+            latest_anchored_daa_score,
+            enforcing,
+            stale,
+            expired,
+            current_interval,
+            disqualified_trustees,
+        })
+    }
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~
 // NotesChangedNotification
 

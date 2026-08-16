@@ -1208,8 +1208,10 @@ impl ConsensusApi for Consensus {
     fn get_finality_anchor_status(&self) -> kaspa_consensus_core::finality_anchor::FinalityAnchorStatus {
         let params = &self.config.params.finality_anchor;
         let virtual_state = self.lkg_virtual_state.load();
-        let virtual_daa_score = virtual_state.daa_score;
         let sink = virtual_state.ghostdag_data.selected_parent;
+        // The sink's own header DAA score, not virtual's mergeset-inclusive score —
+        // the same clock the fork-choice guard uses (see `resolve_virtual`)
+        let virtual_daa_score = self.storage.headers_store.get_daa_score(sink).unwrap();
         let anchor_read = self.storage.finality_anchor_store.read();
         let latest = anchor_read.latest().unwrap();
         let deny_list = anchor_read.deny_list().unwrap();
@@ -1234,6 +1236,85 @@ impl ConsensusApi for Consensus {
             current_interval: params.cadence_interval(virtual_daa_score),
             disqualified,
         }
+    }
+
+    fn apply_external_finality_anchor(
+        &self,
+        anchor: kaspa_consensus_core::finality_anchor::FinalityAnchor,
+    ) -> kaspa_consensus_core::finality_anchor::ExternalAnchorOutcome {
+        use kaspa_consensus_core::finality_anchor::{ANCHOR_QUORUM, ExternalAnchorOutcome, bitmap_signers, verify_anchor};
+
+        let params = &self.config.params.finality_anchor;
+        let Some(trustees) = params.trustees.as_ref() else { return ExternalAnchorOutcome::Ignored };
+        let virtual_state = self.lkg_virtual_state.load();
+        let sink_daa_score =
+            self.storage.headers_store.get_daa_score(virtual_state.ghostdag_data.selected_parent).unwrap();
+        // Stage 4: consensus-expired keys — no anchor has any effect, whichever
+        // channel it arrives through.
+        if params.expired(sink_daa_score) || params.expired(anchor.anchored_daa_score) {
+            return ExternalAnchorOutcome::Ignored;
+        }
+        if verify_anchor(&anchor, trustees).is_err() {
+            return ExternalAnchorOutcome::Ignored;
+        }
+        // Deny-list filtering as of the current virtual chain: signatures from keys
+        // disqualified in this POV don't count toward the quorum.
+        let sink = virtual_state.ghostdag_data.selected_parent;
+        let mut anchor_write = self.storage.finality_anchor_store.write();
+        let deny_list = anchor_write.deny_list().unwrap();
+        let countable = bitmap_signers(anchor.signer_bitmap)
+            .filter(|&i| {
+                !deny_list.iter().any(|e| {
+                    e.trustee_index == i && self.services.reachability_service.is_chain_ancestor_of(e.accepting_block, sink)
+                })
+            })
+            .count();
+        if countable < ANCHOR_QUORUM {
+            return ExternalAnchorOutcome::Ignored;
+        }
+        // Monotonicity: only a strictly better score changes anything (checked under
+        // the store write lock so the ratchet contract holds against concurrent
+        // virtual commits).
+        let current_best = anchor_write.latest().unwrap().map(|a| a.anchored_daa_score);
+        if current_best.is_some_and(|best| anchor.anchored_daa_score <= best) {
+            return ExternalAnchorOutcome::Ignored;
+        }
+        // Ratchet iff the anchored block is locally verifiable: known at its claimed
+        // DAA score AND on the selected chain of some body tip — the precondition
+        // that keeps the sink search's termination argument intact (an enforced
+        // anchor must always leave a reachable anchor-compatible candidate).
+        let locally_verifiable = self
+            .storage
+            .headers_store
+            .get_daa_score(anchor.anchored_block)
+            .optional()
+            .unwrap()
+            .is_some_and(|score| score == anchor.anchored_daa_score)
+            && self.virtual_processor.is_chain_ancestor_of_any_body_tip(anchor.anchored_block);
+        if locally_verifiable {
+            anchor_write.set_latest_direct(&anchor).unwrap();
+            info!(
+                "[FINALITY ANCHOR] Gossiped anchor ratcheted: block {} at DAA score {} is now trustee-certified history",
+                anchor.anchored_block, anchor.anchored_daa_score
+            );
+            ExternalAnchorOutcome::Ratcheted
+        } else {
+            let pending_best = anchor_write.pending().unwrap().map(|a| a.anchored_daa_score);
+            if pending_best.is_some_and(|best| anchor.anchored_daa_score <= best) {
+                return ExternalAnchorOutcome::Ignored;
+            }
+            anchor_write.set_pending(&anchor).unwrap();
+            info!(
+                "[FINALITY ANCHOR] Gossiped anchor for not-yet-known block {} (DAA score {}) held pending",
+                anchor.anchored_block, anchor.anchored_daa_score
+            );
+            ExternalAnchorOutcome::Pending
+        }
+    }
+
+    fn get_latest_full_finality_anchor(&self) -> Option<kaspa_consensus_core::finality_anchor::FinalityAnchor> {
+        let anchor_read = self.storage.finality_anchor_store.read();
+        anchor_read.latest_full().unwrap().or_else(|| anchor_read.pending().unwrap())
     }
 
     fn modify_coinbase_payload(&self, payload: Vec<u8>, miner_data: &MinerData) -> CoinbaseResult<Vec<u8>> {

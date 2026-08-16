@@ -361,3 +361,18 @@ message RequestNextPruningPointPoolStateChunkMessage {
 
 message DonePruningPointPoolStateChunksMessage {
 }
+
+// Finality-anchor gossip (POOL-SPEC.md P5.8, FORK-PLAN P6.12): anchors are signed
+// data, distributed redundantly — mined as transactions in the anchor subnetwork AND
+// gossiped directly, so availability never depends on inclusion in a block. On
+// connect, each side requests the peer's best anchor; improvements are re-relayed.
+
+message RequestFinalityAnchorMessage {
+}
+
+message FinalityAnchorMessage {
+  Hash anchoredBlock = 1;
+  uint64 anchoredDaaScore = 2;
+  uint32 signerBitmap = 3;          // bit i = trustee i (low 5 bits)
+  repeated bytes signatures = 4;    // 64 bytes each, one per set bit, ascending
+}

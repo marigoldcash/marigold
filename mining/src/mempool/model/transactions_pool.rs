@@ -217,9 +217,24 @@ impl TransactionsPool {
 
     /// Dynamically builds a transaction selector based on the specific state of the ready transactions frontier
     pub(crate) fn build_selector(&self) -> Box<dyn TemplateTransactionSelector> {
-        self.ready_transactions
+        let inner = self
+            .ready_transactions
             // Params::mempool_block_mass_cofactors asserts that the reference mass is stable across activation.
-            .build_selector(&Policy::new(self.config.mempool_mass_cofactors.after().reference, self.config.block_lane_limits))
+            .build_selector(&Policy::new(self.config.mempool_mass_cofactors.after().reference, self.config.block_lane_limits));
+        // Finality-anchor lane transactions are zero-fee (weight 0 — the sampling
+        // selectors would never pick them) yet templates must carry them for the
+        // anchor to reach the chain (FORK-PLAN P6.12). They have no inputs, hence no
+        // parents in the pool, hence are always ready. Rare by construction (trustee
+        // cadence), so this scan is effectively free.
+        let forced: Vec<_> = self
+            .all_transactions
+            .values()
+            .filter(|mempool_tx| {
+                mempool_tx.mtx.tx.subnetwork_id == kaspa_consensus_core::subnets::SUBNETWORK_ID_FINALITY_ANCHOR
+            })
+            .map(|mempool_tx| mempool_tx.mtx.tx.as_ref().clone())
+            .collect();
+        if forced.is_empty() { inner } else { Box::new(super::frontier::selectors::ForcedInclusionSelector::new(forced, inner)) }
     }
 
     /// Builds a feerate estimator based on internal state of the ready transactions frontier

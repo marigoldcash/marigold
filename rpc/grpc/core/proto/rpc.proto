@@ -1219,3 +1219,22 @@ message GetPoolStatsResponseMessage {
 
   RPCError error = 1000;
 }
+
+// GetFinalityAnchorStatusRequestMessage requests the node's finality-anchor status
+// (POOL-SPEC.md P5.8, FORK-PLAN P6.12) — including the wallet-visible
+// finality_anchor_stale fail-open flag.
+message GetFinalityAnchorStatusRequestMessage {
+}
+
+message GetFinalityAnchorStatusResponseMessage {
+  bool hasAnchor = 1;
+  bytes latestAnchoredBlock = 2;
+  uint64 latestAnchoredDaaScore = 3;
+  bool enforcing = 4;
+  bool stale = 5;
+  bool expired = 6;
+  uint64 currentInterval = 7;
+  repeated uint32 disqualifiedTrustees = 8;
+
+  RPCError error = 1000;
+}

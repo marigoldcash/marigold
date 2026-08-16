@@ -334,6 +334,10 @@ impl Rpc {
                 let result = rpc.get_pool_stats_call(None, GetPoolStatsRequest {}).await?;
                 self.println(&ctx, result);
             }
+            RpcApiOps::GetFinalityAnchorStatus => {
+                let result = rpc.get_finality_anchor_status_call(None, GetFinalityAnchorStatusRequest {}).await?;
+                self.println(&ctx, result);
+            }
             RpcApiOps::NotifyNotesChanged => {
                 if argv.is_empty() {
                     return Err(Error::custom("Usage: rpc notify-notes-changed <serial-hex> [<serial-hex> ...]"));

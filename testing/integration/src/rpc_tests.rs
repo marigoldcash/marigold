@@ -760,6 +760,19 @@ async fn sanity_test() {
                 })
             }
 
+            KaspadPayloadOps::GetFinalityAnchorStatus => {
+                let rpc_client = client.clone();
+                tst!(op, {
+                    // Simnet ships unkeyed (no trustee keys until the P9.1 ceremony):
+                    // the mechanism reports inert. See the P6.12 daemon tests for
+                    // checks against a keyed network with live anchors.
+                    let status = rpc_client.get_finality_anchor_status().await.unwrap();
+                    assert!(!status.has_anchor);
+                    assert!(!status.enforcing);
+                    assert!(!status.stale);
+                })
+            }
+
             KaspadPayloadOps::NotifyBlockAdded => {
                 let rpc_client = client.clone();
                 let id = listener_id;

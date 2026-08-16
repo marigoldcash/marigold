@@ -557,8 +557,24 @@ pub trait ConsensusApi: Send + Sync {
     /// The node's finality-anchor state (POOL-SPEC.md P5.8, FORK-PLAN P6.11): the
     /// latest-anchor ratchet, whether the anchor-conflict rule is currently enforced,
     /// the spec's `finality_anchor_stale` fail-open flag, and the trustee deny-list as
-    /// of the current virtual chain. RPC exposure ships with P6.12's distribution work.
+    /// of the current virtual chain.
     fn get_finality_anchor_status(&self) -> crate::finality_anchor::FinalityAnchorStatus {
+        unimplemented!()
+    }
+
+    /// Offers an externally-received (P2P-gossiped) anchor to consensus (FORK-PLAN
+    /// P6.12): verified context-free against the pinned trustee keys and the current
+    /// deny-list, then either ratcheted (block locally verifiable), held pending
+    /// (block unknown — still guards IBD), or ignored. See `ExternalAnchorOutcome`.
+    fn apply_external_finality_anchor(&self, _anchor: crate::finality_anchor::FinalityAnchor) -> crate::finality_anchor::ExternalAnchorOutcome {
+        unimplemented!()
+    }
+
+    /// The complete latest anchor (signatures included), for serving to peers over
+    /// gossip (FORK-PLAN P6.12). Prefers the enforced ratchet; falls back to a pending
+    /// gossiped anchor so relaying continues even before this node can verify the
+    /// anchored block itself.
+    fn get_latest_full_finality_anchor(&self) -> Option<crate::finality_anchor::FinalityAnchor> {
         unimplemented!()
     }
 

@@ -66,6 +66,7 @@ members = [
     "system-info",
     "build-info",
     "rothschild",
+    "trustee-signer",
     "metrics/core",
     "metrics/perf_monitor",
     "utils/alloc",
@@ -106,6 +107,7 @@ kaspa-core = { version = "2.0.1", path = "core" }
 kaspa-daemon = { version = "2.0.1", path = "daemon" }
 kaspa-database = { version = "2.0.1", path = "database" }
 kaspa-grpc-client = { version = "2.0.1", path = "rpc/grpc/client" }
+kaspa-trustee-signer = { version = "2.0.1", path = "trustee-signer" }
 kaspa-grpc-core = { version = "2.0.1", path = "rpc/grpc/core" }
 kaspa-grpc-server = { version = "2.0.1", path = "rpc/grpc/server" }
 kaspa-hashes = { version = "2.0.1", path = "crypto/hashes", default-features = false }

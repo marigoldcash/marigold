@@ -1867,6 +1867,326 @@ async fn daemon_notepool_multi_node_agreement_test() {
     kaspad3.shutdown();
 }
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// Finality-anchor distribution tests (POOL-SPEC.md P5.8, FORK-PLAN P6.12)
+
+mod finality_anchor_helpers {
+    use super::*;
+    use kaspa_consensus_core::config::params::FinalityAnchorParams;
+    use kaspa_consensus_core::finality_anchor::{FinalityAnchor, TRUSTEE_COUNT, TrusteeKeys, signing_hash};
+
+    pub fn trustee_keypairs() -> Vec<secp256k1::Keypair> {
+        (101..=100 + TRUSTEE_COUNT as u8)
+            .map(|seed| secp256k1::Keypair::from_seckey_slice(secp256k1::SECP256K1, &[seed; 32]).unwrap())
+            .collect()
+    }
+
+    pub fn trustee_keys(keypairs: &[secp256k1::Keypair]) -> TrusteeKeys {
+        let keys: Vec<[u8; 32]> = keypairs.iter().map(|kp| kp.public_key().x_only_public_key().0.serialize()).collect();
+        keys.try_into().unwrap()
+    }
+
+    pub fn sign_anchor(keypairs: &[secp256k1::Keypair], signers: &[u8], block: Hash, score: u64) -> FinalityAnchor {
+        let mut sorted = signers.to_vec();
+        sorted.sort_unstable();
+        FinalityAnchor {
+            anchored_block: block,
+            anchored_daa_score: score,
+            signer_bitmap: sorted.iter().fold(0u8, |bitmap, &i| bitmap | (1 << i)),
+            signatures: sorted
+                .iter()
+                .map(|&i| {
+                    let msg = secp256k1::Message::from_digest(signing_hash(&block, score).into());
+                    *secp256k1::SECP256K1.sign_schnorr_no_aux_rand(&msg, &keypairs[i as usize]).as_ref()
+                })
+                .collect(),
+        }
+    }
+
+    /// Writes a simnet override-params file with trustee keys pinned and a small
+    /// depth/interval (test scale), returning its path. `test_tag` keeps concurrent
+    /// tests' files apart.
+    pub fn write_anchor_params_file(keypairs: &[secp256k1::Keypair], depth: u64, interval: u64, test_tag: &str) -> String {
+        let mut params = SIMNET_PARAMS.clone();
+        params.finality_anchor = FinalityAnchorParams {
+            trustees: Some(trustee_keys(keypairs)),
+            depth,
+            launch_interval: interval,
+            ..FinalityAnchorParams::LAUNCH_UNKEYED
+        };
+        let override_params: OverrideParams = params.into();
+        let path = std::env::temp_dir().join(format!("marigold_anchor_params_{test_tag}.json"));
+        fs::write(&path, serde_json::to_string_pretty(&override_params).unwrap()).unwrap();
+        path.to_string_lossy().to_string()
+    }
+
+    /// Finds the highest selected-chain block whose DAA score is at least `depth`
+    /// behind the current virtual DAA score, returning (hash, daa_score).
+    pub async fn chain_block_at_depth(client: &GrpcClient, depth: u64) -> (Hash, u64) {
+        let dag_info = client.get_block_dag_info().await.unwrap();
+        let bound = client.get_server_info().await.unwrap().virtual_daa_score.saturating_sub(depth);
+        let chain = client.get_virtual_chain_from_block(dag_info.pruning_point_hash, false, None).await.unwrap();
+        for hash in chain.added_chain_block_hashes.iter().rev() {
+            let header = client.get_block(*hash, false).await.unwrap().header;
+            if header.daa_score <= bound {
+                return (*hash, header.daa_score);
+            }
+        }
+        panic!("no chain block at depth {depth}");
+    }
+}
+
+/// P6.12 verify criterion 1: "a fresh node offered only an attacker chain refuses it
+/// once it learns the latest anchor." Node A carries the honest (lighter) anchored
+/// chain — its anchor submitted through real RPC into the real mempool (exercising the
+/// anchor lane's zero-fee exemption and forced template inclusion). Node B mines a
+/// strictly heavier anchor-free chain. A fresh node C syncs from A (learning the
+/// anchor from A's chain and gossip), then connects to B — and must keep refusing B's
+/// heavier chain, both at the P6.11 fork-choice guard and the P6.12 anchor-aware IBD
+/// check.
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn daemon_anchor_refuses_heavier_anchorless_chain_test() {
+    use finality_anchor_helpers::*;
+
+    init_allocator_with_default_settings();
+    kaspa_core::log::try_init_logger("INFO,kaspa_testing_integration=trace");
+
+    let keypairs = trustee_keypairs();
+    let params_file = write_anchor_params_file(&keypairs, 3, 10, "refusal");
+    let args = Args {
+        simnet: true,
+        unsafe_rpc: true,
+        enable_unsynced_mining: true,
+        disable_upnp: true,
+        override_params_file: Some(params_file),
+        ..Default::default()
+    };
+    let total_fd_limit = 10;
+
+    // Node A: the honest chain.
+    let mut kaspad_a = Daemon::new_random_with_args(args.clone(), total_fd_limit);
+    let client_a = kaspad_a.start().await;
+    let (_, miner_pk) = secp256k1::generate_keypair(&mut thread_rng());
+    let miner_address =
+        Address::new(kaspad_a.network.into(), kaspa_addresses::Version::PubKey, &miner_pk.x_only_public_key().0.serialize());
+    for _ in 0..30 {
+        let template = client_a.get_block_template(miner_address.clone(), vec![]).await.unwrap();
+        client_a.submit_block(template.block, false).await.unwrap();
+    }
+
+    // Craft and SUBMIT the anchor through RPC — mempool + forced template inclusion.
+    let (anchored_block, anchored_score) = chain_block_at_depth(&client_a, 3).await;
+    let anchor = sign_anchor(&keypairs, &[0, 1, 2], anchored_block, anchored_score);
+    let anchor_tx = kaspa_trustee_signer::anchor_transaction(&anchor);
+    client_a.submit_transaction((&anchor_tx).into(), false).await.unwrap();
+    let anchor_tx_id = anchor_tx.id();
+    for _ in 0..10 {
+        let template = client_a.get_block_template(miner_address.clone(), vec![]).await.unwrap();
+        client_a.submit_block(template.block, false).await.unwrap();
+    }
+    let check_client = client_a.clone();
+    wait_for(
+        100,
+        200,
+        move || {
+            let client = check_client.clone();
+            Box::pin(async move { client.get_mempool_entry(anchor_tx_id.into(), false, false).await.is_err() })
+        },
+        "the anchor tx did not clear node A's mempool (template inclusion failed?)",
+    )
+    .await;
+    let status_a = client_a.get_finality_anchor_status().await.unwrap();
+    assert!(status_a.has_anchor, "node A must have accepted its own mined anchor");
+    assert!(status_a.enforcing);
+    assert_eq!(status_a.latest_anchored_block, anchored_block);
+
+    // Node B: a strictly heavier, anchor-free chain, never connected to A.
+    let mut kaspad_b = Daemon::new_random_with_args(args.clone(), total_fd_limit);
+    let client_b = kaspad_b.start().await;
+    for _ in 0..80 {
+        let template = client_b.get_block_template(miner_address.clone(), vec![]).await.unwrap();
+        client_b.submit_block(template.block, false).await.unwrap();
+    }
+    let sink_a = client_a.get_block_dag_info().await.unwrap().sink;
+    let sink_b = client_b.get_block_dag_info().await.unwrap().sink;
+    let work_a = client_a.get_block(sink_a, false).await.unwrap().header.blue_work;
+    let work_b = client_b.get_block(sink_b, false).await.unwrap().header.blue_work;
+    assert!(work_b > work_a, "the attacker chain must be strictly heavier for this test to mean anything");
+    assert!(!client_b.get_finality_anchor_status().await.unwrap().has_anchor);
+
+    // Fresh node C: syncs from A first (learning the anchor), then meets B.
+    let mut kaspad_c = Daemon::new_random_with_args(args, total_fd_limit);
+    let client_c = kaspad_c.start().await;
+    client_c.add_peer(format!("127.0.0.1:{}", kaspad_a.p2p_port).try_into().unwrap(), true).await.unwrap();
+    let check_client = client_c.clone();
+    wait_for(
+        100,
+        600,
+        move || {
+            let client = check_client.clone();
+            Box::pin(async move { client.get_block_dag_info().await.unwrap().sink == sink_a })
+        },
+        "node C did not sync node A's chain",
+    )
+    .await;
+    let status_c = client_c.get_finality_anchor_status().await.unwrap();
+    assert!(status_c.has_anchor, "node C must have learned the anchor while syncing A's chain");
+    assert!(status_c.enforcing);
+
+    // Now C meets the heavier attacker chain.
+    client_c.add_peer(format!("127.0.0.1:{}", kaspad_b.p2p_port).try_into().unwrap(), true).await.unwrap();
+    for _ in 0..20 {
+        let template = client_b.get_block_template(miner_address.clone(), vec![]).await.unwrap();
+        client_b.submit_block(template.block, false).await.unwrap();
+    }
+    // Give relay/IBD every chance to (wrongly) capture C, then assert it held.
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    let sink_c = client_c.get_block_dag_info().await.unwrap().sink;
+    assert_ne!(sink_c, client_b.get_block_dag_info().await.unwrap().sink, "node C must not adopt the heavier anchor-free chain");
+    // The anchored block must still be on C's selected chain (the call errs if the
+    // start hash is not a chain block).
+    client_c
+        .get_virtual_chain_from_block(anchored_block, false, None)
+        .await
+        .expect("the anchored block must remain on node C's selected chain");
+    assert!(client_c.get_finality_anchor_status().await.unwrap().enforcing);
+
+    client_a.disconnect().await.unwrap();
+    client_b.disconnect().await.unwrap();
+    client_c.disconnect().await.unwrap();
+    kaspad_a.shutdown();
+    kaspad_b.shutdown();
+    kaspad_c.shutdown();
+}
+
+/// P6.12 verify criterion 2: "a 3-of-5 signer setup on the local testnet produces
+/// anchors continuously and all nodes report finality within one cadence interval."
+/// Three in-process `TrusteeSigner` instances (one key each, exchanging partials over
+/// real localhost TCP) watch a continuously-mined node; both connected nodes must
+/// reach `enforcing && !stale` — "reporting finality" — and the anchor must keep
+/// advancing across cadence intervals.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn daemon_trustee_signers_produce_anchors_test() {
+    use finality_anchor_helpers::*;
+    use kaspa_trustee_signer::{SignerConfig, TrusteeSigner};
+
+    init_allocator_with_default_settings();
+    kaspa_core::log::try_init_logger("INFO,kaspa_testing_integration=trace");
+
+    let keypairs = trustee_keypairs();
+    let params_file = write_anchor_params_file(&keypairs, 3, 10, "signers");
+    let args = Args {
+        simnet: true,
+        unsafe_rpc: true,
+        enable_unsynced_mining: true,
+        disable_upnp: true,
+        override_params_file: Some(params_file),
+        ..Default::default()
+    };
+    let total_fd_limit = 10;
+
+    let (_, miner_pk) = secp256k1::generate_keypair(&mut thread_rng());
+    let mut kaspad_a = Daemon::new_random_with_args(args.clone(), total_fd_limit);
+    let client_a = kaspad_a.start().await;
+    let mut kaspad_b = Daemon::new_random_with_args(args, total_fd_limit);
+    let client_b = kaspad_b.start().await;
+    let miner_address =
+        Address::new(kaspad_a.network.into(), kaspa_addresses::Version::PubKey, &miner_pk.x_only_public_key().0.serialize());
+    client_b.add_peer(format!("127.0.0.1:{}", kaspad_a.p2p_port).try_into().unwrap(), true).await.unwrap();
+
+    // Continuous miner on A.
+    let stop_mining = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let miner = {
+        let client = client_a.clone();
+        let stop = stop_mining.clone();
+        let address = miner_address.clone();
+        tokio::spawn(async move {
+            while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                // Resilient to transient RPC errors under full-suite load: a panicking
+                // spawned task would silently stop the chain (and with it the anchors)
+                if let Ok(template) = client.get_block_template(address.clone(), vec![]).await {
+                    let _ = client.submit_block(template.block, false).await;
+                }
+                tokio::time::sleep(Duration::from_millis(30)).await;
+            }
+        })
+    };
+
+    // Three signers (a 3-of-5 quorum), one key each, real TCP partial exchange.
+    let free_port = || {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        port
+    };
+    let ports: Vec<u16> = (0..3).map(|_| free_port()).collect();
+    let mut signer_tasks = Vec::new();
+    for i in 0..3u8 {
+        let config = SignerConfig {
+            rpc_server: format!("127.0.0.1:{}", kaspad_a.rpc_port),
+            trustee_index: i,
+            secret_key: keypairs[i as usize].secret_bytes(),
+            listen_address: Some(format!("127.0.0.1:{}", ports[i as usize])),
+            peer_addresses: ports
+                .iter()
+                .enumerate()
+                .filter(|&(j, _)| j != i as usize)
+                .map(|(_, p)| format!("127.0.0.1:{p}"))
+                .collect(),
+            depth: 3,
+            interval: 10,
+            poll_millis: 100,
+            trustee_keys: Some(trustee_keys(&keypairs)),
+            state_file: std::env::temp_dir().join(format!("marigold_signer_state_{i}_{}.txt", kaspad_a.rpc_port)),
+        };
+        let signer = TrusteeSigner::new(config).await.expect("signer init");
+        signer_tasks.push(tokio::spawn(signer.run()));
+    }
+
+    // Both nodes must reach enforced, fresh (non-stale) anchored finality.
+    for (name, client) in [("A", &client_a), ("B", &client_b)] {
+        let client = client.clone();
+        wait_for(
+            100,
+            600,
+            move || {
+                let client = client.clone();
+                Box::pin(async move {
+                    let status = client.get_finality_anchor_status().await.unwrap();
+                    status.has_anchor && status.enforcing && !status.stale
+                })
+            },
+            if name == "A" { "node A did not reach enforced anchored finality" } else { "node B did not reach enforced anchored finality" },
+        )
+        .await;
+    }
+
+    // Continuity: the anchor must keep advancing across cadence intervals.
+    let first_score = client_a.get_finality_anchor_status().await.unwrap().latest_anchored_daa_score;
+    let client = client_a.clone();
+    wait_for(
+        100,
+        600,
+        move || {
+            let client = client.clone();
+            let baseline = first_score;
+            Box::pin(async move { client.get_finality_anchor_status().await.unwrap().latest_anchored_daa_score > baseline })
+        },
+        "the anchor did not advance to the next cadence interval",
+    )
+    .await;
+
+    stop_mining.store(true, std::sync::atomic::Ordering::Relaxed);
+    let _ = miner.await;
+    for task in signer_tasks {
+        task.abort();
+    }
+    client_a.disconnect().await.unwrap();
+    client_b.disconnect().await.unwrap();
+    kaspad_a.shutdown();
+    kaspad_b.shutdown();
+}
+
 // The following test runtime parameters are required for a graceful shutdown of the gRPC server
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn daemon_cleaning_test() {

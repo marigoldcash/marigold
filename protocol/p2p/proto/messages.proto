@@ -62,6 +62,8 @@ message KaspadMessage {
     PruningPointPoolStateChunkMessage pruningPointPoolStateChunk = 65;
     RequestNextPruningPointPoolStateChunkMessage requestNextPruningPointPoolStateChunk = 66;
     DonePruningPointPoolStateChunksMessage donePruningPointPoolStateChunks = 67;
+    RequestFinalityAnchorMessage requestFinalityAnchor = 68;
+    FinalityAnchorMessage finalityAnchor = 69;
   }
 }
 

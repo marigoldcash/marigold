@@ -69,6 +69,7 @@ pub mod kaspad_request_convert {
     impl_into_kaspad_request!(GetSeqCommitLaneProof);
     impl_into_kaspad_request!(GetNotesBySerial);
     impl_into_kaspad_request!(GetPoolStats);
+    impl_into_kaspad_request!(GetFinalityAnchorStatus);
 
     impl_into_kaspad_request!(NotifyBlockAdded);
     impl_into_kaspad_request!(NotifyNewBlockTemplate);
@@ -213,6 +214,7 @@ pub mod kaspad_response_convert {
     impl_into_kaspad_response!(GetSeqCommitLaneProof);
     impl_into_kaspad_response!(GetNotesBySerial);
     impl_into_kaspad_response!(GetPoolStats);
+    impl_into_kaspad_response!(GetFinalityAnchorStatus);
 
     impl_into_kaspad_notify_response!(NotifyBlockAdded);
     impl_into_kaspad_notify_response!(NotifyNewBlockTemplate);

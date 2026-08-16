@@ -2481,3 +2481,129 @@ All 5 passed on the first run after the acceptance-timing fix. `kaspa-consensus`
 105 passed (up from 100, plus 7 new consensus-core unit tests → 128 there); full
 `cargo test --workspace --exclude kaspa-testing-integration` and the integration
 suite green; `cargo build --workspace --tests` clean.
+
+### P6.12 — Anchor distribution + trustee signer (2026-08-16)
+
+Continuing directly from P6.11 (same session — the two steps share one
+design and P6.11 was structured with this step's contract in mind). This closes
+Phase 6.
+
+**Gossip channel.** Two new P2P messages (`RequestFinalityAnchor` / `FinalityAnchor`,
+proto tags 68/69 — remember every new p2p message needs FOUR coordinated edits:
+`p2p.proto` body, `messages.proto` oneof, `payload_type.rs` enum variant AND its
+`From` match arm) and one per-peer `FinalityAnchorFlow` in `v10`, handling both
+directions on a single subscription (the router panics on duplicate payload-type
+subscriptions, so one flow owns both types). On start it immediately requests the
+peer's best anchor — the `ReceiveAddressesFlow` on-connect pattern — which is exactly
+what makes IBD anchor-aware per the spec ("requests the latest known anchors from
+EVERY connected peer, not just the sync peer"): the request rides connection setup,
+before any sync decision. Improvements re-relay hub-wide (minus the origin), so one
+honest path delivers the newest anchor network-wide. Spam-bounded by verification
+(nothing not trustee-signed propagates) and by only-improvements-propagate.
+
+**The pending slot, and why gossip needed new consensus surface.** A fresh node
+receives anchors for blocks it doesn't have yet. P6.11's ratchet precondition (block
+known at its claimed score AND on some body tip's selected chain — the condition
+keeping `sink_search_algorithm`'s termination argument valid) can't hold for those,
+so `apply_external_finality_anchor` holds them in a persisted *pending* slot instead:
+not enforced by fork choice, but (a) served onward to peers, (b) consulted by
+anchor-aware IBD, and (c) auto-promoted to the ratchet inside
+`collect_finality_anchor_updates` the moment the anchored block becomes locally
+verifiable (which on a syncing node happens naturally as the honest chain arrives).
+The store gained the full-signed-anchor cache (`latest_full`) for re-serving — the
+P6.11 ratchet only kept (block, score) — plus `pending`; prefixes 99/100.
+
+**Anchor-aware IBD.** One check at the exact point all three IBD types converge with
+headers fully synced, before any body download
+(`verify_syncer_chain_against_finality_anchor`, called just before the first
+`sync_missing_block_bodies`): the offered chain must contain the newest held anchor
+(ratchet or pending) — an anchored block still unknown after a full header sync from
+this peer means the offered chain omits it, same refusal as known-but-reorged-out.
+Refusal is a `ProtocolError` → disconnect, the established IBD abort idiom.
+Fail-open is preserved at IBD with the staleness bound judged against the *offered
+chain's own* tip score: a chain whose trustees stopped anchoring ages ago must stay
+syncable on plain PoW (otherwise an abandoned anchor would deadlock every fresh
+node). The residual this leaves — an attacker chain far enough ahead in DAA score
+looks "stale-relative" and escapes IBD enforcement — is the spec's own acknowledged
+eclipse-residual: a non-eclipsed node keeps hearing fresher anchors and honest blocks
+from other peers, promotes, and the fork-choice guard then applies (and would flip a
+captured node back — trustee-certified history wins by score, not work); a fully
+eclipsed fresh node is the residual risk "every PoW chain's IBD already carries, now
+with an alarm attached."
+
+**THE BUG — fail-open's clock was partially attacker-controlled.** The first
+adversarial run of the refusal test failed: fresh node C, holding and *enforcing* the
+anchor, adopted the heavier anchor-free chain anyway. The log showed why: C went
+STALE first. P6.11 judged staleness by **virtual's DAA score** — deliberately not the
+candidate chain's score (that much was right) — but virtual **merges** a conflicting
+heavier branch even while the guard refuses to *select* it (merging is not chain
+selection; bounded-merge permitting, the branch's blocks enter virtual's mergeset),
+and virtual's DAA score counts the mergeset. So the attacker's 100-block branch
+inflated C's own clock past `depth + 3×interval`, tripped fail-open, and only then
+won on work. Textbook: the guard's off-switch was measured on a quantity the
+adversary could pump without ever winning the guard itself. Fix: the enforcement
+clock (fork-choice guard, status, alert) is now the **sink's own header DAA score** —
+the selected chain's clock, which a refused branch cannot touch. All five P6.11
+consensus tests still pass unchanged (linear-chain scores barely differ), and the
+adversarial daemon test now shows the refusal holding block-by-block ("ignored from
+Virtual chain selection regardless of its accumulated work") with zero stale
+transitions on the defended node. An honest side-observation from the same log: the
+*attacker's own node*, upon learning the honest anchor via gossip relay (block
+initially unknown → pending → honest blocks relayed → promoted), correctly reports
+it stale relative to its own far-ahead chain — fail-open behaving exactly per spec
+from the attacker's own point of view.
+
+**Mempool/relay/template policy.** Anchor-lane txs are zero-input/zero-fee (trustees
+hold no funds — P6.11's carve-out), which the relay-fee floor would reject
+(`minimum_required_transaction_relay_fee` never returns 0 by construction) and the
+feerate-weighted template selectors would never sample (weight `(fee/mass)³ = 0`).
+Two surgical changes: a fee-floor exemption for `SUBNETWORK_ID_FINALITY_ANCHOR` in
+`check_transaction_standard_in_context` (bounded: isolation validation already
+limits the lane to genuinely trustee-signed material, honest rate is one anchor per
+cadence interval, identical anchors dedup by txid), and a `ForcedInclusionSelector`
+wrapper prepending ready anchor-lane txs to whatever selector the frontier builds
+(with duplicate filtering, since `TakeAllSelector` would return them again from the
+frontier). Zero-input txs otherwise flow through the mempool untouched — audited:
+every input-keyed structure (orphan pool, mempool UTXO set, parent tracking) is a
+no-op on an empty input list, and P6.7's zero-input pool ops blazed this trail.
+
+**`GetFinalityAnchorStatus` RPC** — the P6.9 recipe end to end (ops 156, hand-rolled
+serializers, grpc proto 1127/1128 + converters + factory + client route, wrpc arrays,
+both mock impls, the forced `rpc_tests::sanity_test` arm, a cli arm). Exposes the
+spec's wallet-visible `finality_anchor_stale` flag ("a user accepting a large payment
+during an extended anchor outage ... should be able to know it"), enforcing/expired,
+the active cadence interval, and the deny-list. This closes P6.11's deferred RPC
+item.
+
+**The trustee signer** (`trustee-signer/`, lib + bin, new workspace member): one
+instance per trustee key (production topology per the spec's one-live-signer
+guidance). Watches its node over gRPC; finds the highest selected-chain block at
+least `depth` behind the virtual score (selected-chain walk via
+`get_virtual_chain_from_block` from a moving cursor — parent-walking would not be
+selected-chain-safe on a real DAG); signs at most once per cadence interval,
+**persisting the last-signed state BEFORE sharing the signature** — the order
+matters: a crash between the two loses one signing (harmless) instead of enabling a
+double-sign after restart (a restart mid-interval re-signing a *different* block
+would hand anyone a valid equivocation proof against an honest key — the exact
+"misconfigured failover" hazard the spec calls out; the persisted state is the
+defense). Partials travel as length-prefixed borsh over plain TCP — deliberately
+minimal, zero new workspace dependencies (bridge/ set the hand-rolled precedent;
+neither reqwest nor axum is a workspace dep), and explicitly replaceable by the P9.1
+ceremony's ops decisions; the signing discipline is the part that must survive.
+Aggregation: any signer holding ≥ k partials for the identical (block, score)
+assembles the canonical anchor (ascending index) and submits;
+already-in-mempool = success. The signer-liveness test showed the expected view-skew
+behavior: a signer occasionally targets a one-block-different (block, score) than its
+peers for a tick (no quorum forms on it that round — never equivocation, since each
+key still signs once per interval), realigning within the next poll.
+
+✅ *Verify:* `daemon_anchor_refuses_heavier_anchorless_chain_test` (three real
+daemons: honest A — whose anchor goes through real RPC submission, the mempool fee
+exemption, forced template inclusion, and mining; verified-heavier attacker B; fresh
+C syncing A then meeting B and refusing it, anchored block still on C's selected
+chain) and `daemon_trustee_signers_produce_anchors_test` (three in-process signers
+with real localhost TCP partial exchange against a continuously-mined node: 3-of-5
+anchors submitted continuously, both nodes reaching `enforcing && !stale`, the
+anchor advancing across cadence intervals). Full `cargo test --workspace --exclude
+kaspa-testing-integration` and the full integration suite green; `cargo build
+--workspace --tests` clean.

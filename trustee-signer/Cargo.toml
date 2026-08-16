@@ -1,0 +1,28 @@
+[package]
+name = "kaspa-trustee-signer"
+description = "Marigold finality-anchor trustee signer daemon (POOL-SPEC.md P5.8, FORK-PLAN P6.12)"
+rust-version.workspace = true
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+include.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+kaspa-consensus-core.workspace = true
+kaspa-core.workspace = true
+kaspa-grpc-client.workspace = true
+kaspa-hashes.workspace = true
+kaspa-notify.workspace = true
+kaspa-rpc-core.workspace = true
+
+borsh.workspace = true
+clap.workspace = true
+faster-hex.workspace = true
+log.workspace = true
+secp256k1 = { workspace = true, features = ["global-context", "rand-std"] }
+tokio = { workspace = true, features = ["rt", "macros", "rt-multi-thread", "net", "io-util", "time", "sync"] }
+
+[lints]
+workspace = true

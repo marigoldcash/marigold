@@ -10,6 +10,7 @@ use super::{
 use crate::pb as protowire;
 use kaspa_consensus_core::{
     block::Block,
+    finality_anchor::FinalityAnchor,
     header::Header,
     notepool::{DenominationTag, NewNote},
     pruning::{PruningPointProof, PruningPointsList},
@@ -209,6 +210,37 @@ impl TryFrom<protowire::PruningPointPoolStateChunkMessage> for Vec<(Hash, NewNot
 
     fn try_from(msg: protowire::PruningPointPoolStateChunkMessage) -> Result<Self, Self::Error> {
         msg.entries.into_iter().map(|e| e.try_into()).collect()
+    }
+}
+
+impl TryFrom<protowire::FinalityAnchorMessage> for FinalityAnchor {
+    type Error = ConversionError;
+
+    fn try_from(msg: protowire::FinalityAnchorMessage) -> Result<Self, Self::Error> {
+        // Only the wire shape is enforced here; quorum/signature verification is the
+        // receiving flow's job (against the pinned trustee keys).
+        let signatures = msg
+            .signatures
+            .into_iter()
+            .map(|sig| <[u8; 64]>::try_from(sig.as_slice()).map_err(|_| ConversionError::General))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(FinalityAnchor {
+            anchored_block: msg.anchored_block.try_into_ex()?,
+            anchored_daa_score: msg.anchored_daa_score,
+            signer_bitmap: u8::try_from(msg.signer_bitmap)?,
+            signatures,
+        })
+    }
+}
+
+impl From<&FinalityAnchor> for protowire::FinalityAnchorMessage {
+    fn from(anchor: &FinalityAnchor) -> Self {
+        Self {
+            anchored_block: Some(anchor.anchored_block.into()),
+            anchored_daa_score: anchor.anchored_daa_score,
+            signer_bitmap: anchor.signer_bitmap as u32,
+            signatures: anchor.signatures.iter().map(|sig| sig.to_vec()).collect(),
+        }
     }
 }
 

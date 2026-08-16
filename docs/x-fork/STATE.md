@@ -4,8 +4,8 @@ Snapshot of everything decided and built so far, so any fresh coding session on 
 machine can continue from the repo alone. Read this together with [FORK-PLAN.md](../../FORK-PLAN.md).
 Update this file whenever off-repo state changes (domains, accounts, infra).
 
-Last updated: 2026-08-16 (P6.11 complete — finality-anchor consensus rule; next step
-P6.12, anchor distribution + trustee signer)
+Last updated: 2026-08-16 (P6.12 complete — **Phase 6 is done**; next: P7.0, the
+inherited-wallet surface audit DECISION gate opening Phase 7)
 
 ## What this project is
 
@@ -80,12 +80,24 @@ substitute for it.
 
 ## Where execution stands
 
-- **Next step: P6.12 — Anchor distribution + trustee signer.** P2P gossip of
-  anchors/evidence, anchor-aware IBD, mempool/relay policy for the anchor lane, the
-  trustee signer daemon, and RPC exposure of `finality_anchor_stale` + the current
-  decay stage. P6.11 structured its verification (context-free `verify_anchor` vs
-  contextual-effect application) so gossiped anchors slot in without rework — see
-  NOTES.md's P6.11 "Deferred to P6.12" list for the exact contract.
+- **Next step: P7.0 — Inherited-wallet surface audit.** 🧑‍⚖️ **DECISION** gate
+  opening Phase 7 (wallet integration): decide the fate of the inherited seed-phrase
+  wallet stack, and in any case remove/hard-disable the legacy-Kaspa import surfaces
+  (`compat/gen0.rs`, `compat/gen1.rs`, `import_kaspawallet_golang_*`, the CLI's
+  `import legacy` commands) — a key-reuse/phishing hazard on a fair-launch chain.
+  Decision to be recorded in DECISIONS.md.
+- **P6.12 is done — and with it, all of Phase 6 (the full note-pool consensus layer
+  plus the finality-anchor security layer).** Anchor gossip over P2P (on-connect
+  request from every peer + hub-wide relay of improvements), the pending-anchor slot
+  with automatic promotion, anchor-aware IBD refusal at the three-IBD-types
+  convergence point, the anchor lane's mempool fee exemption + forced template
+  inclusion, the `GetFinalityAnchorStatus` RPC (spec's wallet-visible
+  `finality_anchor_stale`), and the `kaspa-trustee-signer` crate (per-key signer with
+  persisted-before-shared equivocation-safe state, TCP partial exchange, canonical
+  k-of-n assembly). **One real security bug found by the adversarial test and
+  fixed:** fail-open's staleness clock was virtual's mergeset-inclusive DAA score,
+  which a refused-but-merged attacker branch could inflate to trip fail-open — now
+  the sink's own header score. Full writeup in NOTES.md's P6.12 entry.
 - **P6.11 is done (⚠️ HARD, done under a stronger model per standing discipline).**
   The P5.8 finality-anchor consensus rule end to end: `consensus-core::finality_anchor`
   (types/hashing/k-of-n + equivocation verification), the "ANCR" subnetwork,
@@ -94,7 +106,8 @@ substitute for it.
   hooks pending the P9.5 T-calibration, deliberately), `DbFinalityAnchorStore`
   (monotone latest-anchor ratchet + reachability-keyed deny-list), the fork-choice
   override in `sink_search_algorithm` (second trigger next to the finality-point
-  refusal, judged against the node's own virtual DAA score), fail-open with
+  refusal — staleness judged, since P6.12's bug fix, against the sink's own header
+  DAA score), fail-open with
   edge-detected loud alerting, and `ConsensusApi::get_finality_anchor_status()`.
   Two structural decisions worth re-reading before touching this code — context-free
   transaction validity vs contextual anchor *effect* (an acceptance-divergence hazard

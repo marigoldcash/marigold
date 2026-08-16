@@ -282,6 +282,7 @@ impl RpcApi for GrpcClient {
     route!(get_seq_commit_lane_proof_call, GetSeqCommitLaneProof);
     route!(get_notes_by_serial_call, GetNotesBySerial);
     route!(get_pool_stats_call, GetPoolStats);
+    route!(get_finality_anchor_status_call, GetFinalityAnchorStatus);
 
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     // Notification API

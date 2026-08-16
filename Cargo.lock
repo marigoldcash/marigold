@@ -4038,6 +4038,7 @@ dependencies = [
  "kaspa-rpc-service",
  "kaspa-seq-commit",
  "kaspa-smt",
+ "kaspa-trustee-signer",
  "kaspa-txscript",
  "kaspa-txscript-errors",
  "kaspa-utils",
@@ -4059,6 +4060,24 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "workflow-perf-monitor",
+]
+
+[[package]]
+name = "kaspa-trustee-signer"
+version = "2.0.1"
+dependencies = [
+ "borsh",
+ "clap",
+ "faster-hex 0.9.0",
+ "kaspa-consensus-core",
+ "kaspa-core",
+ "kaspa-grpc-client",
+ "kaspa-hashes",
+ "kaspa-notify",
+ "kaspa-rpc-core",
+ "log",
+ "secp256k1",
+ "tokio",
 ]
 
 [[package]]
