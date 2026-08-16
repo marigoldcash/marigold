@@ -9,17 +9,51 @@
 
 use crate::config::ConfigBuilder;
 use crate::consensus::test_consensus::TestConsensus;
+use kaspa_addresses::{Address, Prefix, Version};
 use kaspa_consensus_core::{
     api::ConsensusApi,
+    coinbase::MinerData,
     config::params::MAINNET_PARAMS,
     constants::TX_VERSION_TOCCATA,
+    hashing::{sighash::{SigHashReusedValuesUnsync, calc_schnorr_signature_hash}, sighash_type::SIG_HASH_ALL},
+    mass::MassCalculator,
     notepool::{
-        DenominationTag, FreshnessAnchor, MintOp, NewNote, PoolOp, SignedGroup, TransferOp, hashing as pool_hashing,
+        DenominationTag, FreshnessAnchor, MintOp, NewNote, PoolOp, RedeemOp, SignedGroup, TransferOp, hashing as pool_hashing,
     },
     subnets::SUBNETWORK_ID_NOTE_POOL,
-    tx::{Transaction, TransactionId},
+    tx::{
+        ComputeCommit, SignableTransaction, Transaction, TransactionId, TransactionInput, TransactionOutpoint, TransactionOutput,
+        UtxoEntry,
+    },
 };
 use kaspa_hashes::Hash;
+use kaspa_txscript::standard::pay_to_address_script;
+
+/// Deterministic single-key sign, mirroring `kaspa_consensus_core::sign::sign` exactly
+/// except for using `sign_schnorr_no_aux_rand` instead of the (BIP340 aux-randomized)
+/// `Keypair::sign_schnorr`. `parallel_double_rotate_resolves_deterministically` compares
+/// outcomes across two independently-run `TestConsensus` instances that each mine their
+/// own funding chain and sign their own mint from scratch — that comparison is only
+/// meaningful if signing the identical logical transaction twice yields byte-identical
+/// bytes both times, which the real (randomized) `sign()` cannot guarantee.
+fn sign_deterministic(mut signable_tx: SignableTransaction, schnorr_key: &secp256k1::Keypair) -> SignableTransaction {
+    let input_mass = if ComputeCommit::version_expects_compute_budget_field(signable_tx.tx.version) {
+        kaspa_consensus_core::mass::ComputeBudget(10).into()
+    } else {
+        kaspa_consensus_core::mass::SigopCount(1).into()
+    };
+    for i in 0..signable_tx.tx.inputs.len() {
+        signable_tx.tx.inputs[i].compute_commit = input_mass;
+    }
+    let reused_values = SigHashReusedValuesUnsync::new();
+    for i in 0..signable_tx.tx.inputs.len() {
+        let sig_hash = calc_schnorr_signature_hash(&signable_tx.as_verifiable(), i, SIG_HASH_ALL, &reused_values);
+        let msg = secp256k1::Message::from_digest_slice(sig_hash.as_bytes().as_slice()).unwrap();
+        let sig: [u8; 64] = *secp256k1::SECP256K1.sign_schnorr_no_aux_rand(&msg, schnorr_key).as_ref();
+        signable_tx.tx.inputs[i].signature_script = std::iter::once(65u8).chain(sig).chain([SIG_HASH_ALL.to_u8()]).collect();
+    }
+    signable_tx
+}
 
 struct Wallet {
     keypair: secp256k1::Keypair,
@@ -37,26 +71,40 @@ impl Wallet {
         NewNote { d, pk: self.pk }
     }
 
+    /// A standard P2PK script paying this wallet — used as `MinerData` (to receive a
+    /// coinbase reward) and as a transparent change-output script.
+    fn script(&self) -> kaspa_consensus_core::tx::ScriptPublicKey {
+        pay_to_address_script(&Address::new(Prefix::Mainnet, Version::PubKey, &self.pk))
+    }
+
     /// A signed rotate of `serials` (all under this wallet's pk) to `produced`.
     fn rotate(&self, serials: Vec<Hash>, produced: Vec<NewNote>, anchor: u64) -> PoolOp {
         let outputs_hash = pool_hashing::transparent_outputs_hash(&[]);
         let msg_hash = pool_hashing::signing_hash(1, &serials, &produced, outputs_hash, anchor);
         let msg = secp256k1::Message::from_digest(msg_hash.into());
-        let signature = *self.keypair.sign_schnorr(msg).as_ref();
+        // Deterministic (no-aux-rand): see `sign_deterministic`'s doc comment — some of
+        // this file's tests rebuild "the same" rotate across independent runs/instances
+        // and compare outcomes for equality, which needs byte-identical signatures.
+        let signature = *secp256k1::SECP256K1.sign_schnorr_no_aux_rand(&msg, &self.keypair).as_ref();
         PoolOp::Transfer(TransferOp {
             consumed: vec![SignedGroup { serials, signature }],
             produced,
             freshness: FreshnessAnchor { anchor_daa_score: anchor },
         })
     }
+
+    /// A signed redeem of `serials` (all under this wallet's pk) into `outputs`.
+    fn redeem(&self, serials: Vec<Hash>, outputs: &[TransactionOutput], anchor: u64) -> PoolOp {
+        let outputs_hash = pool_hashing::transparent_outputs_hash(outputs);
+        let msg_hash = pool_hashing::signing_hash(2, &serials, &[], outputs_hash, anchor);
+        let msg = secp256k1::Message::from_digest(msg_hash.into());
+        let signature = *secp256k1::SECP256K1.sign_schnorr_no_aux_rand(&msg, &self.keypair).as_ref();
+        PoolOp::Redeem(RedeemOp { consumed: vec![SignedGroup { serials, signature }], freshness: FreshnessAnchor { anchor_daa_score: anchor } })
+    }
 }
 
 fn pool_tx(op: &PoolOp) -> Transaction {
     Transaction::new(TX_VERSION_TOCCATA, vec![], vec![], 0, SUBNETWORK_ID_NOTE_POOL, 0, op.encode_payload())
-}
-
-fn mint_tx(notes: Vec<NewNote>) -> Transaction {
-    pool_tx(&PoolOp::Mint(MintOp { new_notes: notes }))
 }
 
 /// The serial the pool derives for `tx`'s `index`-th produced note.
@@ -70,8 +118,89 @@ fn config() -> crate::config::Config {
         .edit_consensus_params(|p| {
             p.max_block_parents = 4;
             p.mergeset_size_limit = 10;
+            // These tests fund real mint transactions from real mined coinbase rewards
+            // (FORK-PLAN P6.6 requires mint's transparent inputs to actually cover the
+            // notes it creates); zeroing maturity avoids mining ~1000 throwaway blocks
+            // per test just to wait it out, matching this codebase's own established
+            // pattern (e.g. `testing/integration`'s `toccata_activation_test`).
+            p.coinbase_maturity = 0;
         })
         .build()
+}
+
+/// Mines two blocks funding `wallet` with a real, spendable coinbase reward: block A
+/// (on `parent`) pays its reward to `wallet`'s script; block B (on A) is what actually
+/// carries that reward in ITS OWN coinbase transaction — Kaspa/Marigold's mergeset
+/// reward mechanism pays a merged block's subsidy in its child's coinbase, never its
+/// own (`consensus/src/processes/coinbase.rs`'s `expected_coinbase_transaction` loops
+/// `ghostdag_data.mergeset_blues`, not the current block). Returns the funding
+/// `(outpoint, entry)` and B's hash (the new tip for whatever the caller builds next).
+async fn fund(consensus: &TestConsensus, wallet: &Wallet, parent: Hash, hash_a: Hash, hash_b: Hash) -> (TransactionOutpoint, UtxoEntry, Hash) {
+    let block_a = consensus.build_utxo_valid_block_with_parents(hash_a, vec![parent], MinerData::new(wallet.script(), vec![]), vec![]);
+    let daa_score_a = block_a.header.daa_score;
+    consensus.validate_and_insert_block(block_a.to_immutable()).virtual_state_task.await.unwrap();
+
+    let block_b =
+        consensus.build_utxo_valid_block_with_parents(hash_b, vec![hash_a], MinerData::new(Default::default(), vec![]), vec![]);
+    consensus.validate_and_insert_block(block_b.to_immutable()).virtual_state_task.await.unwrap();
+
+    let coinbase = &consensus.get_block(hash_b).unwrap().transactions[0];
+    let outpoint = TransactionOutpoint::new(coinbase.id(), 0);
+    let entry = UtxoEntry::new(coinbase.outputs[0].value, coinbase.outputs[0].script_public_key.clone(), daa_score_a, true, None);
+    (outpoint, entry, hash_b)
+}
+
+/// Computes and commits this transaction's storage-mass field over `entries` (one per
+/// `tx.inputs`, in order — empty for a pool-only tx with no transparent inputs). The block
+/// builder requires this field to already be correct (`check_mass_commitment` in
+/// `tx_validation_in_utxo_context.rs` rejects a mismatch) — in production that's the
+/// mempool's job (`validate_mempool_transaction_in_utxo_context`), which nothing in this
+/// hand-built test path goes through, so it's done explicitly here instead.
+fn commit_storage_mass(tx: Transaction, entries: Vec<UtxoEntry>) -> Transaction {
+    let populated = kaspa_consensus_core::tx::PopulatedTransaction::new(&tx, entries);
+    let storage_mass = MassCalculator::new_with_consensus_params(&MAINNET_PARAMS).calc_contextual_masses(&populated).unwrap().storage_mass;
+    tx.set_storage_mass(storage_mass);
+    tx
+}
+
+/// Builds and signs a real mint transaction spending `funding`, with `outputs` as its
+/// transparent outputs (whatever the caller wants — e.g. no outputs at all, to test
+/// rejection of a mint that doesn't cover the notes it creates).
+fn mint_funded_with_outputs(
+    wallet: &Wallet,
+    funding: (TransactionOutpoint, UtxoEntry),
+    notes: Vec<NewNote>,
+    outputs: Vec<TransactionOutput>,
+) -> Transaction {
+    let (outpoint, entry) = funding;
+    let tx = Transaction::new(
+        TX_VERSION_TOCCATA,
+        vec![TransactionInput::new(outpoint, vec![], 0, 1)],
+        outputs,
+        0,
+        SUBNETWORK_ID_NOTE_POOL,
+        0,
+        PoolOp::Mint(MintOp { new_notes: notes }).encode_payload(),
+    );
+    let signed = sign_deterministic(kaspa_consensus_core::tx::SignableTransaction::with_entries(tx, vec![entry.clone()]), &wallet.keypair);
+    commit_storage_mass(signed.tx, vec![entry])
+}
+
+/// Builds and signs a real mint transaction spending `funding`, creating exactly
+/// `notes` with any leftover value returned to `wallet` as ordinary transparent
+/// change (zero fee — these tests aren't exercising fee amounts).
+fn mint_funded(wallet: &Wallet, funding: (TransactionOutpoint, UtxoEntry), notes: Vec<NewNote>) -> Transaction {
+    let notes_value: u64 = notes.iter().map(|n| n.d.petals()).sum();
+    let change = funding.1.amount - notes_value; // panics on underflow: the test picked notes too large for the funding
+    let outputs = if change > 0 { vec![TransactionOutput::new(change, wallet.script())] } else { vec![] };
+    mint_funded_with_outputs(wallet, funding, notes, outputs)
+}
+
+/// A real redeem transaction: `op` (built via `Wallet::redeem`, over the same `outputs`)
+/// paired with the transparent `outputs` it actually carries.
+fn redeem_tx(op: &PoolOp, outputs: Vec<TransactionOutput>) -> Transaction {
+    let tx = Transaction::new(TX_VERSION_TOCCATA, vec![], outputs, 0, SUBNETWORK_ID_NOTE_POOL, 0, op.encode_payload());
+    commit_storage_mass(tx, vec![])
 }
 
 /// End-to-end happy path: a zero-input mint enters the pool via a block, a rotate moves
@@ -87,22 +216,29 @@ async fn mint_and_rotate_update_pool_state_and_root() {
     let alice = Wallet::new(1);
     let bob = Wallet::new(2);
 
-    // Block 1: mint one 1-MAGLD note to alice.
-    let mint = mint_tx(vec![alice.note(DenominationTag::D1)]);
-    let sn = produced_serial(&mint, 0);
-    consensus.add_utxo_valid_block_with_parents(10.into(), vec![genesis], vec![mint]).await.unwrap();
+    // Blocks A/B: mine and mature a real coinbase reward for alice (P6.6: mint must
+    // spend real transparent inputs summing to at least the notes it creates).
+    let funding = fund(&consensus, &alice, genesis, 5.into(), 10.into()).await;
+    let tip = funding.2;
 
-    assert_eq!(consensus.pool_note(sn), Some(alice.note(DenominationTag::D1)), "minted note must be live at virtual");
+    // Block 3: mint one 0.01-MAGLD note to alice, funded from her coinbase reward (a
+    // single block's coinbase can't cover a full 1-MAGLD note under Marigold's real
+    // subsidy schedule — see `fund`'s doc comment).
+    let mint = mint_funded(&alice, (funding.0, funding.1), vec![alice.note(DenominationTag::D0_01)]);
+    let sn = produced_serial(&mint, 0);
+    consensus.add_utxo_valid_block_with_parents(11.into(), vec![tip], vec![mint]).await.unwrap();
+
+    assert_eq!(consensus.pool_note(sn), Some(alice.note(DenominationTag::D0_01)), "minted note must be live at virtual");
     let root_after_mint = consensus.pool_root();
     assert_ne!(root_after_mint, empty_root, "pool commitment must move when a note enters the pool");
 
-    // Block 2: alice rotates the note to bob.
-    let rotate = pool_tx(&alice.rotate(vec![sn], vec![bob.note(DenominationTag::D1)], 0));
+    // Block 4: alice rotates the note to bob.
+    let rotate = pool_tx(&alice.rotate(vec![sn], vec![bob.note(DenominationTag::D0_01)], 0));
     let rotated_sn = produced_serial(&rotate, 0);
-    consensus.add_utxo_valid_block_with_parents(11.into(), vec![10.into()], vec![rotate]).await.unwrap();
+    consensus.add_utxo_valid_block_with_parents(12.into(), vec![11.into()], vec![rotate]).await.unwrap();
 
     assert_eq!(consensus.pool_note(sn), None, "consumed serial must be retired (invariant I2)");
-    assert_eq!(consensus.pool_note(rotated_sn), Some(bob.note(DenominationTag::D1)), "produced note must be live");
+    assert_eq!(consensus.pool_note(rotated_sn), Some(bob.note(DenominationTag::D0_01)), "produced note must be live");
     let root_after_rotate = consensus.pool_root();
     assert_ne!(root_after_rotate, root_after_mint);
     assert_ne!(root_after_rotate, empty_root);
@@ -119,20 +255,18 @@ async fn parallel_double_rotate_resolves_deterministically() {
     // Run the identical DAG twice with opposite insertion orders for the conflicting
     // blocks; both runs must converge to the same accepted rotate and pool state.
     //
-    // NOTE: the transactions are built ONCE, outside the loop — BIP340 signing uses
-    // randomized aux nonces, so re-signing the same message yields a different signature
-    // and therefore a different tx id and different derived serials. The comparison is
-    // only meaningful over the identical transactions.
+    // NOTE: the mint/rotate transactions are (re)built fresh inside each loop iteration,
+    // against each iteration's own freshly-mined coinbase funding (P6.6: mint must spend
+    // real transparent inputs, and each fresh `TestConsensus` instance has its own
+    // independent UTXO set). This stays comparable across iterations only because signing
+    // in this file is deterministic (no BIP340 aux-rand — see `sign_deterministic`) and
+    // block-building is otherwise a pure function of the DAG structure (same hash-labeled
+    // parents in, same coinbase/tx bytes out): rebuilding "the same" logical transaction
+    // twice yields byte-identical transactions both times, so the two loop iterations are
+    // still comparing the identical DAG, just with insertion order swapped.
     let alice = Wallet::new(1);
     let carol = Wallet::new(3);
     let dave = Wallet::new(4);
-    let mint = mint_tx(vec![alice.note(DenominationTag::D1)]);
-    let sn = produced_serial(&mint, 0);
-    // Two conflicting rotates of the same serial (distinct destinations => distinct txs).
-    let rotate_c = pool_tx(&alice.rotate(vec![sn], vec![carol.note(DenominationTag::D1)], 0));
-    let rotate_d = pool_tx(&alice.rotate(vec![sn], vec![dave.note(DenominationTag::D1)], 0));
-    let sn_c = produced_serial(&rotate_c, 0);
-    let sn_d = produced_serial(&rotate_d, 0);
 
     let mut outcomes = Vec::new();
     for swap_insertion_order in [false, true] {
@@ -140,8 +274,18 @@ async fn parallel_double_rotate_resolves_deterministically() {
         let join_handles = consensus.init();
         let genesis = consensus.params().genesis.hash;
 
+        // Blocks A/B: mine and mature a real coinbase reward for alice, then mint from it.
+        let (outpoint, entry, tip) = fund(&consensus, &alice, genesis, 5.into(), 10.into()).await;
+        let mint = mint_funded(&alice, (outpoint, entry), vec![alice.note(DenominationTag::D0_01)]);
+        let sn = produced_serial(&mint, 0);
+        // Two conflicting rotates of the same serial (distinct destinations => distinct txs).
+        let rotate_c = pool_tx(&alice.rotate(vec![sn], vec![carol.note(DenominationTag::D0_01)], 0));
+        let rotate_d = pool_tx(&alice.rotate(vec![sn], vec![dave.note(DenominationTag::D0_01)], 0));
+        let sn_c = produced_serial(&rotate_c, 0);
+        let sn_d = produced_serial(&rotate_d, 0);
+
         // Base block: mint a note to alice.
-        consensus.add_utxo_valid_block_with_parents(10.into(), vec![genesis], vec![mint.clone()]).await.unwrap();
+        consensus.add_utxo_valid_block_with_parents(11.into(), vec![tip], vec![mint]).await.unwrap();
 
         // Parallel blocks A (hash 20, rotate->carol) and B (hash 21, rotate->dave), both on the mint block.
         // Insertion order varies; block identity (hash) does not.
@@ -152,8 +296,8 @@ async fn parallel_double_rotate_resolves_deterministically() {
         };
         let (first_hash, first_tx): (Hash, Transaction) = first;
         let (second_hash, second_tx): (Hash, Transaction) = second;
-        consensus.add_utxo_valid_block_with_parents(first_hash, vec![10.into()], vec![first_tx]).await.unwrap();
-        consensus.add_utxo_valid_block_with_parents(second_hash, vec![10.into()], vec![second_tx]).await.unwrap();
+        consensus.add_utxo_valid_block_with_parents(first_hash, vec![11.into()], vec![first_tx]).await.unwrap();
+        consensus.add_utxo_valid_block_with_parents(second_hash, vec![11.into()], vec![second_tx]).await.unwrap();
 
         // Chain block C merges both.
         consensus.add_utxo_valid_block_with_parents(30.into(), vec![20.into(), 21.into()], vec![]).await.unwrap();
@@ -192,21 +336,23 @@ async fn reorg_past_pool_op_restores_prior_pool_state() {
     let carol = Wallet::new(3);
     let dave = Wallet::new(4);
 
-    let mint = mint_tx(vec![alice.note(DenominationTag::D1)]);
-    let sn = produced_serial(&mint, 0);
-    let rotate_x = pool_tx(&alice.rotate(vec![sn], vec![carol.note(DenominationTag::D1)], 0));
-    let rotate_y = pool_tx(&alice.rotate(vec![sn], vec![dave.note(DenominationTag::D1)], 0));
-    let sn_x = produced_serial(&rotate_x, 0);
-    let sn_y = produced_serial(&rotate_y, 0);
-
     // Full node: sees the X branch first (rotate->carol becomes the accepted op), then a
     // heavier Y branch (rotate->dave) built on the same mint block.
     let consensus = TestConsensus::new(&config());
     let join_handles = consensus.init();
     let genesis = consensus.params().genesis.hash;
 
-    consensus.add_utxo_valid_block_with_parents(10.into(), vec![genesis], vec![mint.clone()]).await.unwrap();
-    consensus.add_utxo_valid_block_with_parents(20.into(), vec![10.into()], vec![rotate_x.clone()]).await.unwrap();
+    // Blocks A/B: mine and mature a real coinbase reward for alice, then mint from it.
+    let (outpoint, entry, tip) = fund(&consensus, &alice, genesis, 5.into(), 10.into()).await;
+    let mint = mint_funded(&alice, (outpoint, entry), vec![alice.note(DenominationTag::D0_01)]);
+    let sn = produced_serial(&mint, 0);
+    let rotate_x = pool_tx(&alice.rotate(vec![sn], vec![carol.note(DenominationTag::D0_01)], 0));
+    let rotate_y = pool_tx(&alice.rotate(vec![sn], vec![dave.note(DenominationTag::D0_01)], 0));
+    let sn_x = produced_serial(&rotate_x, 0);
+    let sn_y = produced_serial(&rotate_y, 0);
+
+    consensus.add_utxo_valid_block_with_parents(11.into(), vec![tip], vec![mint.clone()]).await.unwrap();
+    consensus.add_utxo_valid_block_with_parents(20.into(), vec![11.into()], vec![rotate_x.clone()]).await.unwrap();
 
     // X branch is the accepted context: carol's note is live.
     assert!(consensus.pool_note(sn_x).is_some());
@@ -214,7 +360,7 @@ async fn reorg_past_pool_op_restores_prior_pool_state() {
     let root_x = consensus.pool_root();
 
     // Heavier Y branch: Y1 carries the conflicting rotate, Y2/Y3 outweigh the X branch.
-    consensus.add_utxo_valid_block_with_parents(31.into(), vec![10.into()], vec![rotate_y.clone()]).await.unwrap();
+    consensus.add_utxo_valid_block_with_parents(31.into(), vec![11.into()], vec![rotate_y.clone()]).await.unwrap();
     consensus.add_utxo_valid_block_with_parents(32.into(), vec![31.into()], vec![]).await.unwrap();
     consensus.add_utxo_valid_block_with_parents(33.into(), vec![32.into()], vec![]).await.unwrap();
 
@@ -227,12 +373,16 @@ async fn reorg_past_pool_op_restores_prior_pool_state() {
     assert_ne!(root_after_reorg, root_x);
 
     // Reference node: never saw the X branch at all. Its pool root is the ground truth
-    // the reorged node must converge to exactly.
+    // the reorged node must converge to exactly. It must independently mine the identical
+    // funding blocks (same hashes) so its own UTXO set also contains the coinbase outpoint
+    // `mint` spends; `mint` itself is reused verbatim (not rebuilt) so there's no question
+    // of whether re-deriving it would be byte-identical.
     let reference = TestConsensus::new(&config());
     let reference_handles = reference.init();
     let reference_genesis = reference.params().genesis.hash;
-    reference.add_utxo_valid_block_with_parents(10.into(), vec![reference_genesis], vec![mint]).await.unwrap();
-    reference.add_utxo_valid_block_with_parents(31.into(), vec![10.into()], vec![rotate_y]).await.unwrap();
+    let (_, _, reference_tip) = fund(&reference, &alice, reference_genesis, 5.into(), 10.into()).await;
+    reference.add_utxo_valid_block_with_parents(11.into(), vec![reference_tip], vec![mint]).await.unwrap();
+    reference.add_utxo_valid_block_with_parents(31.into(), vec![11.into()], vec![rotate_y]).await.unwrap();
     reference.add_utxo_valid_block_with_parents(32.into(), vec![31.into()], vec![]).await.unwrap();
     reference.add_utxo_valid_block_with_parents(33.into(), vec![32.into()], vec![]).await.unwrap();
 
@@ -260,23 +410,25 @@ async fn out_of_window_anchor_op_rejected_in_context() {
     let alice = Wallet::new(1);
     let bob = Wallet::new(2);
 
-    let mint = mint_tx(vec![alice.note(DenominationTag::D1)]);
+    // Blocks A/B: mine and mature a real coinbase reward for alice, then mint from it.
+    let (outpoint, entry, tip) = fund(&consensus, &alice, genesis, 5.into(), 10.into()).await;
+    let mint = mint_funded(&alice, (outpoint, entry), vec![alice.note(DenominationTag::D0_01)]);
     let sn = produced_serial(&mint, 0);
-    consensus.add_utxo_valid_block_with_parents(10.into(), vec![genesis], vec![mint]).await.unwrap();
+    consensus.add_utxo_valid_block_with_parents(11.into(), vec![tip], vec![mint]).await.unwrap();
 
     // Anchor far in the future of any POV this test can reach.
-    let bad_rotate = pool_tx(&alice.rotate(vec![sn], vec![bob.note(DenominationTag::D1)], u64::MAX));
+    let bad_rotate = pool_tx(&alice.rotate(vec![sn], vec![bob.note(DenominationTag::D0_01)], u64::MAX));
     let miner_data = kaspa_consensus_core::coinbase::MinerData::new(kaspa_consensus_core::tx::ScriptPublicKey::from_vec(0, vec![]), vec![]);
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        consensus.build_utxo_valid_block_with_parents(11.into(), vec![10.into()], miner_data, vec![bad_rotate])
+        consensus.build_utxo_valid_block_with_parents(12.into(), vec![11.into()], miner_data, vec![bad_rotate])
     }));
     assert!(result.is_err(), "building a block containing an out-of-window-anchor op must fail template validation");
 
     // The pool state is untouched and a correctly-anchored rotate still works.
     assert!(consensus.pool_note(sn).is_some());
-    let good_rotate = pool_tx(&alice.rotate(vec![sn], vec![bob.note(DenominationTag::D1)], 0));
+    let good_rotate = pool_tx(&alice.rotate(vec![sn], vec![bob.note(DenominationTag::D0_01)], 0));
     let good_sn = produced_serial(&good_rotate, 0);
-    consensus.add_utxo_valid_block_with_parents(12.into(), vec![10.into()], vec![good_rotate]).await.unwrap();
+    consensus.add_utxo_valid_block_with_parents(13.into(), vec![11.into()], vec![good_rotate]).await.unwrap();
     assert!(consensus.pool_note(good_sn).is_some());
 
     consensus.shutdown(join_handles);
@@ -294,12 +446,14 @@ async fn duplicate_mint_across_parallel_blocks_accepted_once() {
     let genesis = consensus.params().genesis.hash;
 
     let alice = Wallet::new(1);
-    let mint = mint_tx(vec![alice.note(DenominationTag::D1)]);
+    // Blocks A/B: mine and mature a real coinbase reward for alice, then mint from it.
+    let (outpoint, entry, tip) = fund(&consensus, &alice, genesis, 5.into(), 10.into()).await;
+    let mint = mint_funded(&alice, (outpoint, entry), vec![alice.note(DenominationTag::D0_01)]);
     let sn = produced_serial(&mint, 0);
 
     // The same tx in two parallel blocks (legal in a blockDAG).
-    consensus.add_utxo_valid_block_with_parents(20.into(), vec![genesis], vec![mint.clone()]).await.unwrap();
-    consensus.add_utxo_valid_block_with_parents(21.into(), vec![genesis], vec![mint.clone()]).await.unwrap();
+    consensus.add_utxo_valid_block_with_parents(20.into(), vec![tip], vec![mint.clone()]).await.unwrap();
+    consensus.add_utxo_valid_block_with_parents(21.into(), vec![tip], vec![mint.clone()]).await.unwrap();
     // Merge both.
     consensus.add_utxo_valid_block_with_parents(30.into(), vec![20.into(), 21.into()], vec![]).await.unwrap();
 
@@ -308,7 +462,7 @@ async fn duplicate_mint_across_parallel_blocks_accepted_once() {
     let accepted_count =
         acceptance.iter().flat_map(|mbad| mbad.accepted_transactions.iter()).filter(|e| e.transaction_id == mint.id()).count();
     assert_eq!(accepted_count, 1, "the duplicated mint must be accepted exactly once");
-    assert_eq!(consensus.pool_note(sn), Some(alice.note(DenominationTag::D1)));
+    assert_eq!(consensus.pool_note(sn), Some(alice.note(DenominationTag::D0_01)));
 
     consensus.shutdown(join_handles);
 }
@@ -336,20 +490,167 @@ async fn incremental_and_full_rebuild_commitments_agree() {
     let alice = Wallet::new(1);
     let bob = Wallet::new(2);
 
-    let mint = mint_tx(vec![alice.note(DenominationTag::D1), alice.note(DenominationTag::D10)]);
+    // Blocks A/B: mine and mature a real coinbase reward for alice, then mint from it.
+    let (outpoint, entry, tip) = fund(&consensus, &alice, genesis, 5.into(), 10.into()).await;
+    let mint = mint_funded(&alice, (outpoint, entry), vec![alice.note(DenominationTag::D0_01), alice.note(DenominationTag::D0_1)]);
     let sn0 = produced_serial(&mint, 0);
-    // Block 10's ancestor (genesis) has an empty pool — matches the canonical empty root.
-    consensus.add_utxo_valid_block_with_parents(10.into(), vec![genesis], vec![mint]).await.unwrap();
-    let root_after_10 = consensus.pool_root();
+    // Block 11's ancestor chain (5, 10) has an empty pool — matches the canonical empty root.
+    consensus.add_utxo_valid_block_with_parents(11.into(), vec![tip], vec![mint]).await.unwrap();
+    let root_after_11 = consensus.pool_root();
 
-    let rotate = pool_tx(&alice.rotate(vec![sn0], vec![bob.note(DenominationTag::D1)], 0));
-    consensus.add_utxo_valid_block_with_parents(11.into(), vec![10.into()], vec![rotate]).await.unwrap();
+    let rotate = pool_tx(&alice.rotate(vec![sn0], vec![bob.note(DenominationTag::D0_01)], 0));
+    consensus.add_utxo_valid_block_with_parents(12.into(), vec![11.into()], vec![rotate]).await.unwrap();
 
-    // Block 11's own commitment reflects its ancestor (block 10)'s state, i.e. exactly
-    // what pool_root() was right after block 10 — not block 11's own rotate.
-    assert_eq!(consensus.header_pool_commitment(11.into()), root_after_10);
-    // ...while virtual's own live root (which replays block 11's own tx too) has moved on.
-    assert_ne!(consensus.pool_root(), root_after_10);
+    // Block 12's own commitment reflects its ancestor (block 11)'s state, i.e. exactly
+    // what pool_root() was right after block 11 — not block 12's own rotate.
+    assert_eq!(consensus.header_pool_commitment(12.into()), root_after_11);
+    // ...while virtual's own live root (which replays block 12's own tx too) has moved on.
+    assert_ne!(consensus.pool_root(), root_after_11);
+
+    consensus.shutdown(join_handles);
+}
+
+/// FORK-PLAN P6.6 verify criterion: a mint whose transparent inputs don't sum to at least
+/// its new notes' total value is rejected — the value-binding conservation check added by
+/// P6.6, not the stateless shape rules (those are unit-tested in consensus-core).
+#[tokio::test]
+async fn mint_with_insufficient_transparent_inputs_rejected() {
+    let consensus = TestConsensus::new(&config());
+    let join_handles = consensus.init();
+    let genesis = consensus.params().genesis.hash;
+
+    let alice = Wallet::new(1);
+    let (outpoint, entry, tip) = fund(&consensus, &alice, genesis, 5.into(), 10.into()).await;
+    assert!(entry.amount < DenominationTag::D1.petals(), "test assumes a single block's coinbase can't cover a 1-MAGLD note");
+
+    // Mint a note worth more than the funding, with no transparent output to expose the
+    // shortfall (an honest change output would itself require the same excess value).
+    let bad_mint = mint_funded_with_outputs(&alice, (outpoint, entry), vec![alice.note(DenominationTag::D1)], vec![]);
+    let miner_data = MinerData::new(kaspa_consensus_core::tx::ScriptPublicKey::from_vec(0, vec![]), vec![]);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        consensus.build_utxo_valid_block_with_parents(11.into(), vec![tip], miner_data, vec![bad_mint])
+    }));
+    assert!(result.is_err(), "a mint whose transparent inputs don't cover its new notes must be rejected");
+
+    // A correctly-funded mint at the same point still works.
+    let (outpoint2, entry2, tip2) = fund(&consensus, &alice, tip, 20.into(), 21.into()).await;
+    let good_mint = mint_funded(&alice, (outpoint2, entry2), vec![alice.note(DenominationTag::D0_01)]);
+    let sn = produced_serial(&good_mint, 0);
+    consensus.add_utxo_valid_block_with_parents(22.into(), vec![tip2], vec![good_mint]).await.unwrap();
+    assert_eq!(consensus.pool_note(sn), Some(alice.note(DenominationTag::D0_01)));
+
+    consensus.shutdown(join_handles);
+}
+
+/// FORK-PLAN P6.6 verify criterion: a redeem claiming more transparent value than its
+/// consumed notes are worth is rejected.
+#[tokio::test]
+async fn redeem_with_excessive_transparent_outputs_rejected() {
+    let consensus = TestConsensus::new(&config());
+    let join_handles = consensus.init();
+    let genesis = consensus.params().genesis.hash;
+
+    let alice = Wallet::new(1);
+    let bob = Wallet::new(2);
+
+    // A 0.1-MAGLD note, not 0.01: a redeem's transparent output has no offsetting
+    // transparent input for the storage-mass (KIP-0009) formula to net against (unlike
+    // mint's real funding input), so an output much smaller than `STORAGE_MASS_PARAMETER`
+    // would trip the anti-dust storage-mass limit on its own, unrelated to what this test
+    // is actually checking.
+    let (outpoint, entry, tip) = fund(&consensus, &alice, genesis, 5.into(), 10.into()).await;
+    let mint = mint_funded(&alice, (outpoint, entry), vec![alice.note(DenominationTag::D0_1)]);
+    let sn = produced_serial(&mint, 0);
+    consensus.add_utxo_valid_block_with_parents(11.into(), vec![tip], vec![mint]).await.unwrap();
+    assert!(consensus.pool_note(sn).is_some());
+
+    // Redeem claims one more petal than the consumed note is actually worth.
+    let over_claim = TransactionOutput::new(DenominationTag::D0_1.petals() + 1, bob.script());
+    let bad_redeem_op = alice.redeem(vec![sn], std::slice::from_ref(&over_claim), 0);
+    let bad_redeem = redeem_tx(&bad_redeem_op, vec![over_claim]);
+    let miner_data = MinerData::new(kaspa_consensus_core::tx::ScriptPublicKey::from_vec(0, vec![]), vec![]);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        consensus.build_utxo_valid_block_with_parents(12.into(), vec![11.into()], miner_data, vec![bad_redeem])
+    }));
+    assert!(result.is_err(), "a redeem claiming more transparent value than its consumed notes must be rejected");
+
+    // The pool state is untouched and a correctly-valued redeem still works.
+    assert!(consensus.pool_note(sn).is_some());
+    let good_output = TransactionOutput::new(DenominationTag::D0_1.petals(), bob.script());
+    let good_redeem_op = alice.redeem(vec![sn], std::slice::from_ref(&good_output), 0);
+    let good_redeem = redeem_tx(&good_redeem_op, vec![good_output]);
+    consensus.add_utxo_valid_block_with_parents(13.into(), vec![11.into()], vec![good_redeem]).await.unwrap();
+    assert_eq!(consensus.pool_note(sn), None, "redeemed note must be retired");
+
+    consensus.shutdown(join_handles);
+}
+
+/// FORK-PLAN P6.6's own stated verify condition: `Σ pool notes + transparent supply ==
+/// emitted supply` holds across a real mint -> transfer -> redeem sequence. Restricted to
+/// the value this test itself injects (one funding block's coinbase reward) rather than
+/// the whole chain's total emission — every other block mined along the way (including the
+/// funding blocks' own predecessor rewards) pays its subsidy to an unrelated null script
+/// this test never queries, so it can't leak into the balances checked below and the
+/// invariant still holds exactly for this closed subsystem.
+#[tokio::test]
+async fn value_conservation_across_mint_transfer_redeem() {
+    let consensus = TestConsensus::new(&config());
+    let join_handles = consensus.init();
+    let genesis = consensus.params().genesis.hash;
+
+    let alice = Wallet::new(1);
+    let bob = Wallet::new(2);
+
+    let balance = |script: &kaspa_consensus_core::tx::ScriptPublicKey| {
+        consensus
+            .get_virtual_utxos(None, usize::MAX, false)
+            .into_iter()
+            .filter(|(_, entry)| &entry.script_public_key == script)
+            .map(|(_, entry)| entry.amount)
+            .sum::<u64>()
+    };
+
+    let (outpoint, entry, tip) = fund(&consensus, &alice, genesis, 5.into(), 10.into()).await;
+    let emitted = entry.amount;
+
+    // A 0.1-MAGLD note, not 0.01: the redeem step's transparent output has no offsetting
+    // transparent input for the storage-mass (KIP-0009) formula to net against, so an
+    // output much smaller than `STORAGE_MASS_PARAMETER` would trip the anti-dust storage-
+    // mass limit on its own, unrelated to what this test is actually checking.
+    //
+    // Mint: part of the funding becomes a pool note, the rest stays transparent change.
+    let mint = mint_funded(&alice, (outpoint, entry), vec![alice.note(DenominationTag::D0_1)]);
+    let sn0 = produced_serial(&mint, 0);
+    consensus.add_utxo_valid_block_with_parents(11.into(), vec![tip], vec![mint]).await.unwrap();
+    assert_eq!(
+        balance(&alice.script()) + balance(&bob.script()) + DenominationTag::D0_1.petals(),
+        emitted,
+        "transparent change + the minted note must equal the funding it came from"
+    );
+
+    // Transfer: alice rotates her note to bob — same total value, now under a different key.
+    let rotate = pool_tx(&alice.rotate(vec![sn0], vec![bob.note(DenominationTag::D0_1)], 0));
+    let sn1 = produced_serial(&rotate, 0);
+    consensus.add_utxo_valid_block_with_parents(12.into(), vec![11.into()], vec![rotate]).await.unwrap();
+    assert_eq!(consensus.pool_note(sn0), None);
+    assert!(consensus.pool_note(sn1).is_some());
+    assert_eq!(
+        balance(&alice.script()) + balance(&bob.script()) + DenominationTag::D0_1.petals(),
+        emitted,
+        "a pure pool transfer must not change total value"
+    );
+
+    // Redeem: bob converts his note back to a transparent output.
+    let redeem_output = TransactionOutput::new(DenominationTag::D0_1.petals(), bob.script());
+    let redeem_op = bob.redeem(vec![sn1], std::slice::from_ref(&redeem_output), 0);
+    let redeem = redeem_tx(&redeem_op, vec![redeem_output]);
+    consensus.add_utxo_valid_block_with_parents(13.into(), vec![12.into()], vec![redeem]).await.unwrap();
+    assert_eq!(consensus.pool_note(sn1), None, "redeemed note must be retired");
+    assert_eq!(
+        balance(&alice.script()) + balance(&bob.script()),
+        emitted,
+        "the pool is empty again — all value must be back in the transparent supply"
+    );
 
     consensus.shutdown(join_handles);
 }

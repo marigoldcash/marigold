@@ -1203,13 +1203,80 @@ store → validation → pipeline → mempool → sync → RPC. Every step lands
   `toccata_activation`-specific version-transition assertions from the now-also-active pool
   fork. Full `cargo build --workspace` clean.
 
-- [ ] **P6.6 — Mint/redeem value binding.** Mint consumes ordinary transparent outputs
+- [x] **P6.6 — Mint/redeem value binding.** Mint consumes ordinary transparent outputs
   summing exactly to the notes created; redeem mints transparent outputs from destroyed
   notes. Assign mass costs per op per P5.3 (rotate ≈ 1-input tx; split priced so
   note-inflation spam is uneconomical — final numbers calibrated in P8.3).
   ✅ *Verify:* value-conservation test: after arbitrary op sequences,
   `Σ pool notes + transparent supply == emitted supply`; mint/redeem with wrong sums
   rejected.
+  **Executed.** Rather than special-casing Mint/Redeem/Transfer separately in the fee code,
+  `validate_populated_transaction_and_get_fee` gained one `pool_value: Option<(u64, u64)>`
+  parameter (`(consumed_petals, produced_petals)`) that unifies with the ordinary
+  transparent in/out totals in a single formula: `available = total_in + consumed`,
+  `spent = total_out + produced`, require `available >= spent`. This derives the correct
+  per-op semantics for free — `consumed_petals` acts like an extra transparent input
+  (Redeem's/Transfer's funding side, zero for Mint), `produced_petals` acts like an extra
+  transparent output (Mint's/Transfer's creation side, zero for Redeem) — matching
+  POOL-SPEC.md P5.2's Mint (`Σ transparent inputs >= Σ new notes`) and Redeem
+  (`Σ consumed notes >= Σ transparent outputs + fee`) rules exactly, with pure Transfer
+  reducing to `consumed - produced`, the fee-stamp difference P5.2 already specifies.
+  **A real, pre-existing mass-costing gap found during implementation**: `calc_non_
+  contextual_masses`'s `script_mass` term is computed entirely from `tx.inputs`' compute
+  budget — for Transfer/Redeem (zero transparent inputs by design) this left the
+  `SignedGroup` Schnorr verification completely uncosted, a genuine fee-evasion/DoS gap
+  unrelated to P6.6's stated scope but blocking it correctly (P5.3 requires "one
+  compute-budget unit per signature, not per serial" and there was previously no signature
+  cost charged at all for these two ops). Fixed by adding `GRAMS_PER_COMPUTE_BUDGET_UNIT *
+  num_signed_groups` to `calc_non_contextual_masses`'s compute-mass total, gated on the
+  note-pool subnetwork and decoded op type (Mint needs no addition — no note-level
+  signature, its real transparent inputs are already costed normally).
+  **Test infrastructure had no precedent for a real, coinbase-funded spend inside a
+  `TestConsensus` unit test** (every consumer of pool tests to this point used
+  intentionally-invalid zero-input mints). Building it required combining two things not
+  previously used together: (1) Kaspa/Marigold's mergeset reward mechanism pays a block's
+  own coinbase subsidy out through its *child's* coinbase transaction, never its own
+  (`processes/coinbase.rs`'s `expected_coinbase_transaction` loops `mergeset_blues`) — so
+  funding a wallet takes two mined blocks, not one; (2) the correct P2PK script shape is
+  `OP_DATA_32 <x-only pubkey> OP_CHECKSIG` via `pay_to_address_script`, NOT the raw 33-byte
+  SEC1 pubkey `consensus/src/pipeline/virtual_processor/tests.rs`'s existing `new_miner_data`
+  test helper uses (confirmed invalid — it "works" there only because that helper never
+  actually spends from it). `coinbase_maturity = 0` (an existing pattern from
+  `testing/integration`) avoids mining ~1000 blocks per test to clear real maturity.
+  **A second instance of a bug already found once this fork's history (P6.4's NOTES.md
+  entry)**: two of the six pre-existing pool consensus tests build a shared transaction once
+  and compare outcomes across independently-run `TestConsensus` instances/loop iterations —
+  now broken again because a real mint's funding UTXO is inherently instance-specific, which
+  seemed to force a rebuild-per-instance, and BIP340 Schnorr signing's randomized aux-nonce
+  makes "the same" rebuilt transaction hash differently every time, silently comparing two
+  different DAGs. Fixed the same way as before, but this time applied file-wide rather than
+  patched around the one call site: switched every signature in this test file (`Wallet::
+  rotate` and a new local, deterministic reimplementation of `consensus_core::sign::sign`
+  for the mint's transparent input) to `secp256k1::SECP256K1.sign_schnorr_no_aux_rand`
+  instead of the randomized default, making "rebuild the same logical transaction" actually
+  produce byte-identical output — the real `sign()` couldn't be changed since it's used by
+  real signing paths elsewhere, not test-only.
+  Also discovered and fixed: the block builder requires a transaction's storage-mass
+  commitment field to already be correct before submission (`check_mass_commitment` in
+  `tx_validation_in_utxo_context.rs`) — in production this is the mempool's job
+  (P6.7, not yet built), so every hand-built test transaction with real transparent
+  inputs/outputs now explicitly computes and commits its storage mass via `MassCalculator`
+  before insertion. Relatedly, a Redeem's transparent output has no offsetting transparent
+  input for the KIP-0009 storage-mass formula to net against (unlike Mint), so an output
+  much smaller than `STORAGE_MASS_PARAMETER` trips the anti-dust storage-mass limit on its
+  own — the redeem-focused tests use 0.1 MAGLD notes rather than 0.01 to stay clear of this,
+  unrelated to what those tests are actually checking.
+  Added three new tests per this step's own verify condition: `mint_with_insufficient_
+  transparent_inputs_rejected`, `redeem_with_excessive_transparent_outputs_rejected`, and
+  `value_conservation_across_mint_transfer_redeem` (the literal `Σ pool notes + transparent
+  supply == emitted supply` check across a real mint → transfer → redeem sequence, scoped to
+  the one funding block's reward this test itself injects rather than the whole chain's
+  emission — every other block mined along the way pays its own subsidy to an unrelated
+  null script the test never queries, so it can't leak into the balance check).
+  ✅ *Verify:* all 9 tests in `consensus/src/pipeline/virtual_processor/notepool_tests.rs`
+  pass (6 pre-existing rewired to real funding + 3 new). Full `cargo test -p kaspa-consensus`
+  (90 passed) and `cargo test --workspace --exclude kaspa-testing-integration` (0 failed
+  across every crate) both green; `cargo build --workspace` clean.
 
 - [ ] **P6.7 — Mempool integration.** In [mining/src/mempool](mining/): accept pool-op
   transactions, standardness checks, same-serial conflict policy (first-seen holds, second

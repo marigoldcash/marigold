@@ -160,12 +160,15 @@ fn validate_mint_stateful<V: PoolStateView>(mint: &MintOp, tx_id: Hash, pool_vie
     for (i, note) in mint.new_notes.iter().enumerate() {
         let sn = hashing::serial_hash(&tx_id, i as u32);
         // P5.3 Mint step 4 calls serial uniqueness "guaranteed by construction ... not an
-        // active check" — but that reasoning assumes P6.6's value binding (a mint MUST
-        // spend transparent inputs, so the same mint tx can never be accepted twice: its
-        // second instance is a UTXO double-spend). Until P6.6 lands, a zero-input mint
-        // duplicated across parallel blocks would otherwise validate in both contexts, so
-        // this check is REAL consensus for now; after P6.6 it degrades to the cheap
-        // insurance the spec permits.
+        // active check", on the assumption a mint always spends real transparent inputs
+        // (P6.6's value binding, now in force: a zero-input mint fails
+        // `InsufficientConsumedValue`-equivalent conservation before this check ever
+        // matters, and a mint duplicated across parallel blocks is now a genuine UTXO
+        // double-spend on its own transparent inputs — the second instance never reaches
+        // pool validation at all). This check is now exactly the cheap insurance the
+        // spec describes, not load-bearing consensus logic — kept as defense in depth
+        // rather than removed, since it's one map lookup and the invariant is still
+        // worth asserting explicitly.
         check_produced_serial_is_fresh(sn, pool_view)?;
         validated.diff.add_note(sn, *note)?;
         validated.produced_petals += note.d.petals();

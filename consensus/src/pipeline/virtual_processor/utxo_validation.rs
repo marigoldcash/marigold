@@ -452,6 +452,7 @@ impl VirtualStateProcessor {
         } else {
             None
         };
+        let pool_value = validated_pool_op.as_ref().map(|v| (v.consumed_petals, v.produced_petals));
         let res = self.transaction_validator.validate_populated_transaction_and_get_fee(
             &populated_tx,
             pov_daa_score,
@@ -459,6 +460,7 @@ impl VirtualStateProcessor {
             flags,
             None,
             seq_commit_accessor.as_ref().map(|v| v as _),
+            pool_value,
         );
         match res {
             Ok(calculated_fee) => Ok(match validated_pool_op {
@@ -545,6 +547,8 @@ impl VirtualStateProcessor {
             None
         };
 
+        // No pool_value: note-pool transactions are rejected at the top of this function
+        // (FORK-PLAN P6.7 owns mempool entry), so `mutable_tx` here is never a pool op.
         let calculated_fee = self.transaction_validator.validate_populated_transaction_and_get_fee(
             &mutable_tx.as_verifiable(),
             pov_daa_score,
@@ -552,6 +556,7 @@ impl VirtualStateProcessor {
             TxValidationFlags::SkipMassCheck, // we can skip the mass check since we just set it
             mass_and_feerate_threshold,
             seq_commit_accessor.as_ref().map(|v| v as _),
+            None,
         )?;
         mutable_tx.calculated_fee = Some(calculated_fee);
         Ok(())

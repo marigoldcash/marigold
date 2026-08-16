@@ -4,7 +4,7 @@ Snapshot of everything decided and built so far, so any fresh coding session on 
 machine can continue from the repo alone. Read this together with [FORK-PLAN.md](../../FORK-PLAN.md).
 Update this file whenever off-repo state changes (domains, accounts, infra).
 
-Last updated: 2026-08-16 (P6.5 complete — pool_commitment header field live end-to-end; next step P6.6)
+Last updated: 2026-08-16 (P6.6 complete — mint/redeem value binding + pool-op mass costing; next step P6.7)
 
 ## What this project is
 
@@ -79,14 +79,52 @@ substitute for it.
 
 ## Where execution stands
 
-- **Next step: P6.6 — Mint/redeem value binding.** bite-size (not HARD).
-  Binds mint's transparent inputs to exactly the notes it creates, redeem's
-  transparent outputs to exactly the notes it destroys, and assigns real mass costs
-  per op (rotate ≈ 1-input tx; split priced against note-inflation spam). Pool ops
-  currently contribute 0 to `calculated_fee` — P6.6 makes conservation/fees real on
-  the transparent side. Also the step that retires P6.4's "produced-serial existence
-  check is an active rule for now" caveat (mint duplication becomes a genuine UTXO
-  double-spend once mint must spend real inputs).
+- **Next step: P6.7 — Mempool integration.** bite-size (not HARD). In
+  `mining/src/mempool`: accept pool-op transactions (currently rejected at the top
+  of `validate_mempool_transaction_in_utxo_context` per P6.4), standardness checks,
+  same-serial conflict policy (first-seen holds, second rejected), eviction on
+  confirmation, and block-template inclusion.
+- **P6.6 is done.** Mint/redeem value binding, unified into
+  `validate_populated_transaction_and_get_fee` via one `pool_value:
+  Option<(u64, u64)>` parameter (`consumed_petals`, `produced_petals`) rather than
+  three separate per-op checks: `available = total_in + consumed`,
+  `spent = total_out + produced`, `available >= spent` — this single formula
+  derives Mint's "transparent inputs cover new notes", Redeem's "consumed notes
+  cover transparent outputs + fee", and pure Transfer's `consumed - produced`
+  fee-stamp rule all at once, matching POOL-SPEC.md P5.2 exactly for every op.
+  **A real mass-costing gap found, not called out by the plan text**:
+  `calc_non_contextual_masses`'s signature-verification cost was computed entirely
+  from `tx.inputs`, which is always empty for Transfer/Redeem — meaning their
+  `SignedGroup` Schnorr verification was completely uncosted (a genuine fee-evasion
+  gap) before this step added `GRAMS_PER_COMPUTE_BUDGET_UNIT * num_signed_groups`,
+  gated on the pool subnetwork and decoded op type.
+  **The same class of bug already found once in P6.4 recurred and was fixed
+  file-wide this time**: two pre-existing tests compare outcomes across
+  independently-run `TestConsensus` instances by rebuilding "the same" transaction
+  in each — safe when mints were zero-input, broken once a real mint's funding UTXO
+  became instance-specific, since BIP340's randomized aux-nonce makes a rebuilt
+  signature hash differently every time. Fixed by switching every signature in
+  `notepool_tests.rs` to `sign_schnorr_no_aux_rand` (both `Wallet::rotate` and a new
+  local, deterministic reimplementation of `sign()` for the mint's transparent
+  input — the real `sign()` couldn't be changed, since real signing paths elsewhere
+  depend on its genuine randomization).
+  Test infrastructure needed building from scratch (no precedent existed for a
+  real, coinbase-funded spend in a `TestConsensus` unit test): confirmed Kaspa/
+  Marigold's mergeset reward mechanism pays a block's subsidy through its CHILD's
+  coinbase, never its own, and confirmed the correct P2PK script shape
+  (`OP_DATA_32 <x-only pk> OP_CHECKSIG` via `pay_to_address_script`) — explicitly
+  NOT the raw-pubkey shape `pipeline/virtual_processor/tests.rs`'s pre-existing
+  `new_miner_data()` helper uses, which is invalid and must not be copied.
+  Added the three tests this step's own verify condition calls for:
+  `mint_with_insufficient_transparent_inputs_rejected`,
+  `redeem_with_excessive_transparent_outputs_rejected`, and
+  `value_conservation_across_mint_transfer_redeem` (the literal
+  `Σ pool notes + transparent supply == emitted supply` check across a real mint →
+  transfer → redeem sequence).
+  ✅ *Verify*: all 9 `notepool_tests.rs` tests pass (6 pre-existing rewired to real
+  funding + 3 new). `cargo test -p kaspa-consensus` 90 passed, 0 failed. Full
+  `cargo test --workspace --exclude kaspa-testing-integration`: 0 failed across
+  every crate. Full `cargo build --workspace` clean.
 - **P6.5 is done.** `Header` gained `pool_commitment: Hash`, hashed right after
   `utxo_commitment` in `hashing::header::hash_override_nonce_time` — confirmed via
   direct code reading (not assumed) that this is the FIRST genuinely new field this

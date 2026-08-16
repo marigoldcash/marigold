@@ -9,7 +9,8 @@ use crate::{
     config::params::Params,
     constants::TRANSIENT_BYTE_TO_MASS_FACTOR,
     mass::units::GRAMS_PER_SIGOP_COUNT_UNIT,
-    subnets::SUBNETWORK_ID_SIZE,
+    notepool::PoolOp,
+    subnets::{SUBNETWORK_ID_NOTE_POOL, SUBNETWORK_ID_SIZE},
     tx::{ComputeCommit, ScriptPublicKey, Transaction, TransactionInput, TransactionOutput, UtxoEntry, VerifiableTransaction},
 };
 use kaspa_hashes::HASH_SIZE;
@@ -363,7 +364,28 @@ impl MassCalculator {
             total_sigops * GRAMS_PER_SIGOP_COUNT_UNIT
         };
 
-        let compute_mass = compute_mass_for_size + total_script_public_key_mass + script_mass;
+        // Note-pool op signature verification (POOL-SPEC.md P5.3, FORK-PLAN P6.6): a
+        // SignedGroup's Schnorr verify is real CPU cost that `tx.inputs`-based costing
+        // above cannot see at all for Transfer/Redeem (both have zero transparent
+        // inputs by design). Charged once per signature (per `SignedGroup`), not once
+        // per serial — a 20-serial merchant sweep under one shared pk is one signature,
+        // matching P5.3's explicit batch-sweep cost-savings rule. Priced at one
+        // compute-budget unit per group, the same unit Toccata-era (v1) inputs use —
+        // pool ops always ride `TX_VERSION_TOCCATA` (gated by the subnetwork check), so
+        // this never needs the legacy v0 sigop-count pricing branch above. Mint needs no
+        // addition: it has no note-level signature, only its real transparent inputs,
+        // already costed normally.
+        let pool_signature_mass = if tx.subnetwork_id == SUBNETWORK_ID_NOTE_POOL {
+            match PoolOp::decode_payload(&tx.payload) {
+                Some(PoolOp::Transfer(op)) => GRAMS_PER_COMPUTE_BUDGET_UNIT * op.consumed.len() as u64,
+                Some(PoolOp::Redeem(op)) => GRAMS_PER_COMPUTE_BUDGET_UNIT * op.consumed.len() as u64,
+                Some(PoolOp::Mint(_)) | None => 0,
+            }
+        } else {
+            0
+        };
+
+        let compute_mass = compute_mass_for_size + total_script_public_key_mass + script_mass + pool_signature_mass;
         let transient_mass = size * TRANSIENT_BYTE_TO_MASS_FACTOR;
 
         NonContextualMasses::new(compute_mass, transient_mass)

@@ -34,6 +34,15 @@ pub enum TxValidationFlags {
 }
 
 impl TransactionValidator {
+    /// `pool_value` is `Some((consumed_petals, produced_petals))` for a note-pool op
+    /// transaction (FORK-PLAN P6.6) — the pool's own contribution to this transaction's
+    /// value conservation, unifying with the ordinary transparent in/out totals exactly
+    /// as POOL-SPEC.md P5.2/P5.3 specify per op: `consumed_petals` acts like additional
+    /// transparent input value (funding transparent outputs and/or fee — Redeem's role;
+    /// zero for Mint), `produced_petals` acts like additional transparent output value
+    /// (drawn from transparent inputs — Mint's role; zero for Redeem). For `Transfer`
+    /// (no transparent side at all), this reduces to exactly `consumed - produced`, the
+    /// fee-stamp difference P5.2 already specifies. `None` for non-pool transactions.
     pub fn validate_populated_transaction_and_get_fee(
         &self,
         tx: &(impl VerifiableTransaction + Sync),
@@ -42,11 +51,15 @@ impl TransactionValidator {
         flags: TxValidationFlags,
         mass_and_feerate_threshold: Option<(u64, f64)>,
         seq_commit_accessor: Option<&dyn SeqCommitAccessor>,
+        pool_value: Option<(u64, u64)>,
     ) -> TxResult<u64> {
         self.check_transaction_coinbase_maturity(tx, pov_daa_score)?;
         let total_in = self.check_transaction_input_amounts(tx)?;
-        let total_out = Self::check_transaction_output_values(tx, total_in)?;
-        let fee = total_in - total_out;
+        let (pool_consumed, pool_produced) = pool_value.unwrap_or_default();
+        let available = total_in.checked_add(pool_consumed).ok_or(TxRuleError::InputAmountOverflow)?;
+        let total_out = Self::check_transaction_output_values(tx, available, pool_produced)?;
+        // Safe: `check_transaction_output_values` already proved `available >= total_out + pool_produced`.
+        let fee = available - total_out - pool_produced;
         if flags != TxValidationFlags::SkipMassCheck {
             self.check_mass_commitment(tx)?;
         }
@@ -113,11 +126,17 @@ impl TransactionValidator {
         Ok(total)
     }
 
-    fn check_transaction_output_values(tx: &impl VerifiableTransaction, total_in: u64) -> TxResult<u64> {
+    /// `reserved` is note-pool value already spoken for beyond the transparent outputs
+    /// (FORK-PLAN P6.6) — `produced_petals` for a pool op that creates notes (Mint,
+    /// Transfer), zero otherwise. `available` is the transparent input total, already
+    /// including any pool `consumed_petals` (Redeem's/Transfer's funding side) — see
+    /// `validate_populated_transaction_and_get_fee`'s doc comment for the full picture.
+    fn check_transaction_output_values(tx: &impl VerifiableTransaction, available: u64, reserved: u64) -> TxResult<u64> {
         // There's no need to check for overflow here because it was already checked by check_transaction_output_value_ranges
         let total_out: u64 = tx.outputs().iter().map(|out| out.value).sum();
-        if total_in < total_out {
-            return Err(TxRuleError::SpendTooHigh(total_out, total_in));
+        let spent = total_out.checked_add(reserved).ok_or(TxRuleError::OutputsValueOverflow)?;
+        if available < spent {
+            return Err(TxRuleError::SpendTooHigh(spent, available));
         }
 
         Ok(total_out)
@@ -420,7 +439,7 @@ mod tests {
             let verifiable_tx = signed_tx.as_verifiable();
 
             let result =
-                tv.validate_populated_transaction_and_get_fee(&verifiable_tx, 0, 0, TxValidationFlags::SkipMassCheck, None, None);
+                tv.validate_populated_transaction_and_get_fee(&verifiable_tx, 0, 0, TxValidationFlags::SkipMassCheck, None, None, None);
             assert_match!(
                 result,
                 Err(TxRuleError::SignatureInvalid(TxScriptError::ExceededCommittedScriptUnits { .. })),
