@@ -13,6 +13,7 @@ pub mod interface;
 pub mod keydata;
 pub mod local;
 pub mod metadata;
+pub mod notekeys;
 pub mod storable;
 pub mod transaction;
 
@@ -22,11 +23,13 @@ pub use binding::{Binding, BindingT};
 pub use hint::Hint;
 pub use id::IdT;
 pub use interface::{
-    AccountStore, Interface, PrvKeyDataStore, StorageDescriptor, TransactionRecordStore, WalletDescriptor, WalletExportOptions,
+    AccountStore, Interface, NoteKeyStore, PrvKeyDataStore, StorageDescriptor, TransactionRecordStore, WalletDescriptor,
+    WalletExportOptions,
 };
 pub use keydata::{AssocPrvKeyDataIds, PrvKeyData, PrvKeyDataId, PrvKeyDataInfo, PrvKeyDataMap, PrvKeyDataPayload};
 pub use local::interface::make_filename;
 pub use metadata::AccountMetadata;
+pub use notekeys::{NoteKeyEntry, NoteKeyInfo, NoteKeyMap, NoteProvenance, NoteStatus};
 pub use storable::Storable;
 pub use transaction::{TransactionData, TransactionId, TransactionKind, TransactionRecord};
 

@@ -4,8 +4,9 @@ Snapshot of everything decided and built so far, so any fresh coding session on 
 machine can continue from the repo alone. Read this together with [FORK-PLAN.md](../../FORK-PLAN.md).
 Update this file whenever off-repo state changes (domains, accounts, infra).
 
-Last updated: 2026-08-16 (P7.0 complete — wallet decision recorded, legacy-Kaspa
-import surfaces removed; next: P7.1, the note key DB)
+Last updated: 2026-08-16 (P7.1 complete — wallet-core note key DB, encrypted
+serial-keyed store + NotesChanged subscription plumbing; next: P7.2, mint & redeem
+commands)
 
 ## What this project is
 
@@ -94,8 +95,27 @@ substitute for it.
 
 ## Where execution stands
 
-- **Next step: P7.1 — Note key DB.** Phase 7 wallet work proper begins: a
-  serial-keyed store of note keys in `wallet/core`.
+- **Next step: P7.2 — Mint & redeem commands.** CLI `note mint <amount>` /
+  `note redeem <serials|amount>` against the P7.1 key DB.
+- **P7.1 is done.** `wallet/core::storage::notekeys` — `NoteKeyEntry{sn,sk,d,
+  provenance}` (encrypted, zeroized on drop) split from `NoteKeyInfo{sn,pk,d,
+  provenance,status}` (plaintext index — nothing but `sk` is actually sensitive,
+  the pool being plaintext means `sn`/`pk`/`d`/`provenance` are already public or
+  wallet-internal). `NoteKeyStore` trait wired through `Interface`/`Payload`/
+  `Cache`/`LocalStoreInner` exactly like `PrvKeyDataStore`. `import_bearer_key`
+  takes no provenance argument — bearer imports are structurally always `Hot`.
+  `apply_notes_changed(wallet_secret: Option<&Secret>, notification)` is the
+  P6.9-subscription landing point, split so the safe half (superseding a removed
+  serial's `status`) never needs the wallet secret and can run from a passive
+  background listener even while locked; the half that inserts a new row (a
+  rotation landing on a `pk` we hold) needs the secret and is `deferred` if none
+  is supplied. `UtxoProcessor` gained `register_note_serials`/
+  `unregister_note_serials` + `NotesChanged` dispatch, forwarded to `Wallet` via a
+  new `WalletBusMessage::NotesChanged` arm, mirroring the existing
+  `UtxosChanged`/`Discovery` wiring exactly. 3 new unit tests, full wallet-core
+  suite green (46), workspace check + wallet-core clippy clean. Full design
+  writeup (including why serial-keyed over POOL-SPEC's key-keyed sketch) in
+  NOTES.md's P7.1 entry.
 - **P7.0 is done.** Decision (user-ratified, recorded in DECISIONS.md): the
   inherited seed-phrase wallet stack **stays as the transparent-tier wallet tool**;
   every legacy-Kaspa import surface was removed in the same step (compat/gen0+gen1

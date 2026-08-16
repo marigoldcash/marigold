@@ -1686,12 +1686,42 @@ wallet. WASM/mobile wallets are post-launch — CLI proves the protocol.*
   a test vector, and our own crate name — no reachable path. Full workspace suite
   green after removal.
 
-- [ ] **P7.1 — Note key DB.** In `wallet/core`: a serial-keyed store of
+- [x] **P7.1 — Note key DB.** In `wallet/core`: a serial-keyed store of
   `(serial, sk, denomination, provenance)` with the hot/cold provenance flag from P5.6,
   persisted with the wallet's existing encrypted-storage machinery; subscribes to
   `NotesChanged` (P6.9) for its serials.
   ✅ *Verify:* unit tests: DB round-trips; a rotation observed on-chain updates note
   status; hot keys are flagged at import.
+  **Executed (2026-08-16):** new `storage::notekeys` module —
+  `NoteKeyEntry{sn,sk,d,provenance}` (the sensitive row, zeroized on drop) and
+  `NoteKeyInfo{sn,pk,d,provenance,status}` (a plaintext-safe index alongside it,
+  mirroring `PrvKeyDataInfo`'s split from `PrvKeyData` — none of `sn`/`pk`/`d`/
+  `provenance` are secret, only `sk` is, so `status` lives here and can be flipped
+  without the wallet secret). `NoteKeyStore` trait (`is_empty`/`iter`/`load_info`/
+  `load_key`/`store`/`remove`/`import_bearer_key`/`mark_status`/
+  `apply_notes_changed`) added alongside `PrvKeyDataStore`, wired through
+  `Interface::as_note_key_store()`, `Payload`/`Cache`/`LocalStoreInner` exactly like
+  the existing key-data store (encrypted `sn -> NoteKeyEntry` map re-encrypted on
+  every mutation, `NoteKeyInfo` collection cached in plaintext). `import_bearer_key`
+  takes no provenance argument — it always records `Hot`, so "flagged at import" is
+  structural, not caller-trusted. `apply_notes_changed` is the P6.9 subscription's
+  landing point: serials in a notification's `removed` list are flipped to
+  `Superseded` unconditionally (plaintext-only, no secret needed — safe for a locked
+  wallet's passive background listener); serials in `added` whose `pk` matches an
+  already-held key insert a new row inheriting that key's `sk`/provenance, but only
+  when a wallet secret is supplied — deferred otherwise for a later reconcile once
+  the wallet unlocks (there's no session-wide cached secret anywhere else in this
+  storage layer either, so this isn't a gap P7.1 introduces). Live wiring: RPC scope
+  registration/dispatch added to `UtxoProcessor` (`register_note_serials`/
+  `unregister_note_serials`, `Notification::NotesChanged` handling) mirroring
+  `register_addresses`/`UtxosChanged`, forwarding to `Wallet` over a new
+  `WalletBusMessage::NotesChanged` bus arm that calls `apply_notes_changed(None,
+  ..)` — the always-safe half. 3 new unit tests (round-trip incl. remove; hot-flagged
+  at import; rotation notification supersedes the old row and — once a secret is
+  supplied — inserts the new one), full wallet-core suite green (46 tests),
+  `cargo check --workspace --all-targets` and `cargo clippy -p kaspa-wallet-core`
+  clean (one pre-existing enum-size lint fixed with a scoped `#[allow]` rather than
+  reshaping the unrelated pre-existing `Discovery` variant).
 
 - [ ] **P7.2 — Mint & redeem commands.** CLI: `note mint <amount>` (splits into P1.6
   denominations, pays from transparent balance) and `note redeem <serials|amount>`.

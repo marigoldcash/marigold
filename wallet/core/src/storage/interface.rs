@@ -5,6 +5,8 @@
 use crate::imports::*;
 use async_trait::async_trait;
 use downcast::{AnySync, downcast_sync};
+use kaspa_consensus_core::Hash;
+use kaspa_consensus_core::notepool::DenominationTag;
 
 #[derive(Debug, Clone)]
 pub struct WalletExportOptions {
@@ -80,6 +82,32 @@ pub trait PrvKeyDataStore: Send + Sync {
     async fn load_key_data(&self, wallet_secret: &Secret, id: &PrvKeyDataId) -> Result<Option<PrvKeyData>>;
     async fn store(&self, wallet_secret: &Secret, data: PrvKeyData) -> Result<()>;
     async fn remove(&self, wallet_secret: &Secret, id: &PrvKeyDataId) -> Result<()>;
+}
+
+#[async_trait]
+pub trait NoteKeyStore: Send + Sync {
+    async fn is_empty(&self) -> Result<bool>;
+    async fn iter(&self) -> Result<StorageStream<Arc<NoteKeyInfo>>>;
+    async fn load_info(&self, sn: &Hash) -> Result<Option<Arc<NoteKeyInfo>>>;
+    async fn load_key(&self, wallet_secret: &Secret, sn: &Hash) -> Result<Option<NoteKeyEntry>>;
+    /// Store a row with caller-supplied provenance (used for locally-generated `Cold`
+    /// keys, and rotation-derived rows that inherit an existing key's provenance).
+    async fn store(&self, wallet_secret: &Secret, entry: NoteKeyEntry) -> Result<()>;
+    async fn remove(&self, wallet_secret: &Secret, sn: &Hash) -> Result<()>;
+    /// Import a key that crossed a wallet boundary (bearer handover, cross-device
+    /// export, backup restore) — always recorded `Hot` regardless of the imported
+    /// key's prior state (POOL-SPEC.md P5.6's same-key-in-two-wallets hazard).
+    async fn import_bearer_key(&self, wallet_secret: &Secret, sn: Hash, sk: [u8; 32], d: DenominationTag) -> Result<()>;
+    /// Flip a row's `status` — plaintext-only, never needs the wallet secret.
+    async fn mark_status(&self, sn: &Hash, status: NoteStatus) -> Result<()>;
+    /// Apply a live `NotesChanged` notification (FORK-PLAN P6.9). See the trait-level
+    /// doc on [`crate::storage::notekeys::NotesChangedApplyResult`] for the split
+    /// between what always applies (status) and what needs `wallet_secret` (new rows).
+    async fn apply_notes_changed(
+        &self,
+        wallet_secret: Option<&Secret>,
+        notification: &kaspa_rpc_core::message::NotesChangedNotification,
+    ) -> Result<crate::storage::notekeys::NotesChangedApplyResult>;
 }
 
 #[async_trait]
@@ -248,6 +276,7 @@ pub trait Interface: Send + Sync + AnySync {
     fn as_account_store(&self) -> Result<Arc<dyn AccountStore>>;
     fn as_address_book_store(&self) -> Result<Arc<dyn AddressBookStore>>;
     fn as_transaction_record_store(&self) -> Result<Arc<dyn TransactionRecordStore>>;
+    fn as_note_key_store(&self) -> Result<Arc<dyn NoteKeyStore>>;
 }
 
 downcast_sync!(dyn Interface);

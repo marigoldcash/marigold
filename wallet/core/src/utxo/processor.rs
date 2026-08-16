@@ -9,7 +9,7 @@ use crate::imports::*;
 // use futures::pin_mut;
 use kaspa_notify::{
     listener::ListenerId,
-    scope::{Scope, UtxosChangedScope, VirtualDaaScoreChangedScope},
+    scope::{NotesChangedScope, Scope, UtxosChangedScope, VirtualDaaScoreChangedScope},
 };
 use kaspa_rpc_core::{
     GetServerInfoResponse, RpcFeeEstimate,
@@ -17,7 +17,7 @@ use kaspa_rpc_core::{
         ctl::{RpcCtl, RpcState},
         ops::{RPC_API_REVISION, RPC_API_VERSION},
     },
-    message::UtxosChangedNotification,
+    message::{NotesChangedNotification, UtxosChangedNotification},
 };
 use kaspa_wrpc_client::KaspaRpcClient;
 use workflow_core::channel::{Channel, DuplexChannel, Sender};
@@ -25,6 +25,7 @@ use workflow_core::task::spawn;
 
 use crate::events::Events;
 use crate::result::Result;
+use kaspa_consensus_core::Hash;
 use crate::utxo::{Maturity, OutgoingTransaction, PendingUtxoEntryReference, SyncMonitor, UtxoContext, UtxoEntryId};
 use crate::wallet::WalletBusMessage;
 use kaspa_rpc_core::{
@@ -246,6 +247,35 @@ impl UtxoProcessor {
         Ok(())
     }
 
+    /// Subscribe for `NotesChanged` notifications (FORK-PLAN P6.9) touching the given
+    /// note serials/owner pks — the note-pool analog of [`Self::register_addresses`].
+    /// Unlike UTXO addresses, note serials/pks aren't tracked in a local map here (the
+    /// note key database lives in wallet storage, not `UtxoProcessor`); this just
+    /// forwards the subscription request to the RPC layer.
+    pub async fn register_note_serials(&self, serials: Vec<Hash>, pks: Vec<[u8; 32]>) -> Result<()> {
+        if self.is_connected() {
+            if serials.is_empty() && pks.is_empty() {
+                log_error!("registering an empty note serial/pk list!");
+            } else {
+                let notes_changed_scope = NotesChangedScope::new(serials, pks);
+                self.rpc_api().start_notify(self.listener_id()?, notes_changed_scope.into()).await?;
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn unregister_note_serials(&self, serials: Vec<Hash>, pks: Vec<[u8; 32]>) -> Result<()> {
+        if self.is_connected() {
+            if serials.is_empty() && pks.is_empty() {
+                log_error!("unregistering an empty note serial/pk list!");
+            } else {
+                let notes_changed_scope = NotesChangedScope::new(serials, pks);
+                self.rpc_api().stop_notify(self.listener_id()?, notes_changed_scope.into()).await?;
+            }
+        }
+        Ok(())
+    }
+
     pub async fn notify(&self, event: Events) -> Result<()> {
         self.multiplexer()
             .try_broadcast(Box::new(event))
@@ -387,6 +417,18 @@ impl UtxoProcessor {
             }
         }
 
+        Ok(())
+    }
+
+    /// Forward a live `NotesChanged` notification (FORK-PLAN P6.9) to the owning
+    /// wallet, mirroring [`Self::handle_discovery`]'s wallet_bus cascade. The note key
+    /// store's mutation surface lives in `wallet/core::storage`, not here, and (for
+    /// rows that add a new key) needs the wallet secret — so this is a pure forward;
+    /// `Wallet::handle_wallet_bus` decides what it can apply passively.
+    pub async fn handle_notes_changed(&self, notification: NotesChangedNotification) -> Result<()> {
+        if let Some(wallet_bus) = self.wallet_bus() {
+            wallet_bus.sender.send(WalletBusMessage::NotesChanged { notification: Arc::new(notification) }).await?;
+        }
         Ok(())
     }
 
@@ -648,6 +690,10 @@ impl UtxoProcessor {
                 }
 
                 self.handle_utxo_changed(utxos_changed_notification).await?;
+            }
+
+            Notification::NotesChanged(notes_changed_notification) => {
+                self.handle_notes_changed(notes_changed_notification).await?;
             }
 
             _ => {

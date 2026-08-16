@@ -6,7 +6,7 @@
 
 use crate::imports::*;
 use crate::storage::interface::{
-    AddressBookStore, CreateArgs, OpenArgs, StorageDescriptor, StorageStream, WalletDescriptor, WalletExportOptions,
+    AddressBookStore, CreateArgs, NoteKeyStore, OpenArgs, StorageDescriptor, StorageStream, WalletDescriptor, WalletExportOptions,
 };
 use crate::storage::local::Payload;
 use crate::storage::local::Storage;
@@ -14,6 +14,10 @@ use crate::storage::local::cache::*;
 use crate::storage::local::streams::*;
 use crate::storage::local::transaction::*;
 use crate::storage::local::wallet::WalletStorage;
+use crate::storage::notekeys::NotesChangedApplyResult;
+use kaspa_consensus_core::Hash;
+use kaspa_consensus_core::notepool::DenominationTag;
+use kaspa_rpc_core::message::NotesChangedNotification;
 use slugify_rs::slugify;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
@@ -338,6 +342,10 @@ impl Interface for LocalStore {
         Ok(self.inner()?.transactions.clone())
     }
 
+    fn as_note_key_store(&self) -> Result<Arc<dyn NoteKeyStore>> {
+        Ok(self.inner()?)
+    }
+
     fn descriptor(&self) -> Option<WalletDescriptor> {
         self.inner.lock().unwrap().as_ref().map(|inner| inner.descriptor())
     }
@@ -528,6 +536,119 @@ impl PrvKeyDataStore for LocalStoreInner {
 }
 
 #[async_trait]
+impl NoteKeyStore for LocalStoreInner {
+    async fn is_empty(&self) -> Result<bool> {
+        Ok(self.cache.read().unwrap().note_key_info.is_empty())
+    }
+
+    async fn iter(&self) -> Result<StorageStream<Arc<NoteKeyInfo>>> {
+        Ok(Box::pin(NoteKeyInfoStream::new(self.cache.clone())))
+    }
+
+    async fn load_info(&self, sn: &Hash) -> Result<Option<Arc<NoteKeyInfo>>> {
+        Ok(self.cache.read().unwrap().note_key_info.map.get(sn).cloned())
+    }
+
+    async fn load_key(&self, wallet_secret: &Secret, sn: &Hash) -> Result<Option<NoteKeyEntry>> {
+        let note_key_map: Decrypted<NoteKeyMap> = self.cache.read().unwrap().note_key_data.decrypt(wallet_secret)?;
+        Ok(note_key_map.get(sn).cloned())
+    }
+
+    async fn store(&self, wallet_secret: &Secret, entry: NoteKeyEntry) -> Result<()> {
+        let mut cache = self.cache.write().unwrap();
+        let encryption_kind = cache.encryption_kind;
+        let mut note_key_map: Decrypted<NoteKeyMap> = cache.note_key_data.decrypt(wallet_secret)?;
+        let note_key_info = Arc::new(NoteKeyInfo::try_from(&entry)?);
+        cache.note_key_info.insert(entry.sn, note_key_info)?;
+        note_key_map.insert(entry.sn, entry);
+        cache.note_key_data.replace(note_key_map.encrypt(wallet_secret, encryption_kind)?);
+        self.set_modified(true);
+        Ok(())
+    }
+
+    async fn remove(&self, wallet_secret: &Secret, sn: &Hash) -> Result<()> {
+        let mut cache = self.cache.write().unwrap();
+        let encryption_kind = cache.encryption_kind;
+        let mut note_key_map: Decrypted<NoteKeyMap> = cache.note_key_data.decrypt(wallet_secret)?;
+        note_key_map.remove(sn);
+        cache.note_key_data.replace(note_key_map.encrypt(wallet_secret, encryption_kind)?);
+        cache.note_key_info.remove(&[sn])?;
+        self.set_modified(true);
+        Ok(())
+    }
+
+    async fn import_bearer_key(&self, wallet_secret: &Secret, sn: Hash, sk: [u8; 32], d: DenominationTag) -> Result<()> {
+        // A key crossing a wallet boundary is Hot by definition (POOL-SPEC.md P5.6) —
+        // this entry point never accepts a caller-supplied provenance.
+        let entry = NoteKeyEntry::new(sn, sk, d, NoteProvenance::Hot);
+        NoteKeyStore::store(self, wallet_secret, entry).await
+    }
+
+    async fn mark_status(&self, sn: &Hash, status: NoteStatus) -> Result<()> {
+        let mut cache = self.cache.write().unwrap();
+        if let Some(info) = cache.note_key_info.map.get(sn).cloned() {
+            let mut updated = (*info).clone();
+            updated.status = status;
+            cache.note_key_info.insert(*sn, Arc::new(updated))?;
+            self.set_modified(true);
+        }
+        Ok(())
+    }
+
+    async fn apply_notes_changed(
+        &self,
+        wallet_secret: Option<&Secret>,
+        notification: &NotesChangedNotification,
+    ) -> Result<NotesChangedApplyResult> {
+        let mut result = NotesChangedApplyResult::default();
+
+        let superseded: Vec<Hash> = {
+            let cache = self.cache.read().unwrap();
+            notification.removed.iter().map(|entry| entry.sn).filter(|sn| cache.note_key_info.map.contains_key(sn)).collect()
+        };
+        for sn in superseded {
+            self.mark_status(&sn, NoteStatus::Superseded).await?;
+            result.superseded.push(sn);
+        }
+
+        // A new serial lands under a `pk` we already hold a key for iff some existing
+        // row's derived `pk` matches — that row is the source of the `sk`/provenance
+        // the new row inherits (POOL-SPEC.md P5.6's receive/rotation flow).
+        let candidates: Vec<(Hash, Hash, u8, NoteProvenance)> = {
+            let cache = self.cache.read().unwrap();
+            notification
+                .added
+                .iter()
+                .filter_map(|entry| {
+                    cache
+                        .note_key_info
+                        .vec
+                        .iter()
+                        .find(|info| info.pk == entry.pk)
+                        .map(|info| (entry.sn, info.sn, entry.denomination, info.provenance))
+                })
+                .collect()
+        };
+
+        for (new_sn, source_sn, denomination, provenance) in candidates {
+            let Some(secret) = wallet_secret else {
+                result.deferred.push(new_sn);
+                continue;
+            };
+            let d = DenominationTag::try_from(denomination)
+                .map_err(|_| Error::Custom(format!("NotesChanged: unknown denomination tag {denomination}")))?;
+            if let Some(source) = self.load_key(secret, &source_sn).await? {
+                let entry = NoteKeyEntry::new(new_sn, source.sk, d, provenance);
+                NoteKeyStore::store(self, secret, entry).await?;
+                result.added.push(new_sn);
+            }
+        }
+
+        Ok(result)
+    }
+}
+
+#[async_trait]
 impl AccountStore for LocalStoreInner {
     async fn is_empty(&self) -> Result<bool> {
         Ok(self.cache.read().unwrap().accounts.is_empty())
@@ -624,5 +745,107 @@ impl AddressBookStore for LocalStoreInner {
             .collect();
 
         Ok(matches)
+    }
+}
+
+#[cfg(test)]
+mod note_key_store_tests {
+    use super::*;
+    use kaspa_rpc_core::message::RpcNoteEntry;
+
+    async fn resident_store(wallet_secret: &Secret) -> LocalStoreInner {
+        let args = CreateArgs::new(None, None, EncryptionKind::XChaCha20Poly1305, None, false);
+        LocalStoreInner::try_create(wallet_secret, "", args, true).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_note_key_store_round_trip() -> Result<()> {
+        let wallet_secret = Secret::from("note-key-db-test-secret");
+        let store = resident_store(&wallet_secret).await;
+
+        let sn = Hash::from([0x11u8; 32]);
+        let sk = [0x22u8; 32];
+        let entry = NoteKeyEntry::new(sn, sk, DenominationTag::D1, NoteProvenance::Cold);
+
+        assert!(NoteKeyStore::is_empty(&store).await?);
+        NoteKeyStore::store(&store, &wallet_secret, entry.clone()).await?;
+        assert!(!NoteKeyStore::is_empty(&store).await?);
+
+        let loaded = NoteKeyStore::load_key(&store, &wallet_secret, &sn).await?.expect("entry round-trips");
+        assert_eq!(loaded, entry);
+
+        let info = NoteKeyStore::load_info(&store, &sn).await?.expect("info round-trips");
+        assert_eq!(info.provenance, NoteProvenance::Cold);
+        assert_eq!(info.status, NoteStatus::Active);
+        assert_eq!(info.d, DenominationTag::D1);
+        assert_eq!(info.pk, entry.derive_pk()?);
+
+        NoteKeyStore::remove(&store, &wallet_secret, &sn).await?;
+        assert!(NoteKeyStore::load_key(&store, &wallet_secret, &sn).await?.is_none());
+        assert!(NoteKeyStore::load_info(&store, &sn).await?.is_none());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_hot_keys_flagged_at_import() -> Result<()> {
+        let wallet_secret = Secret::from("note-key-db-test-secret");
+        let store = resident_store(&wallet_secret).await;
+
+        let sn = Hash::from([0x33u8; 32]);
+        let sk = [0x44u8; 32];
+
+        // Even though nothing here claims Cold, a bearer import is always Hot
+        // (POOL-SPEC.md P5.6's same-key-in-two-wallets hazard) — the entry point
+        // itself doesn't accept a provenance argument.
+        NoteKeyStore::import_bearer_key(&store, &wallet_secret, sn, sk, DenominationTag::D0_1).await?;
+
+        let info = NoteKeyStore::load_info(&store, &sn).await?.expect("imported entry present");
+        assert_eq!(info.provenance, NoteProvenance::Hot);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_rotation_observed_on_chain_updates_status() -> Result<()> {
+        let wallet_secret = Secret::from("note-key-db-test-secret");
+        let store = resident_store(&wallet_secret).await;
+
+        let sn_old = Hash::from([0x55u8; 32]);
+        let sn_new = Hash::from([0x66u8; 32]);
+        let sk = [0x77u8; 32];
+        let entry = NoteKeyEntry::new(sn_old, sk, DenominationTag::D1, NoteProvenance::Cold);
+        let pk = entry.derive_pk()?;
+        NoteKeyStore::store(&store, &wallet_secret, entry).await?;
+
+        let notification = kaspa_rpc_core::message::NotesChangedNotification {
+            added: Arc::new(vec![RpcNoteEntry { sn: sn_new, denomination: DenominationTag::D1 as u8, pk }]),
+            removed: Arc::new(vec![RpcNoteEntry { sn: sn_old, denomination: DenominationTag::D1 as u8, pk }]),
+        };
+
+        // Without a secret: the removed half (plaintext-only) always applies; the
+        // added half (needs to write a new encrypted row) is deferred.
+        let result = NoteKeyStore::apply_notes_changed(&store, None, &notification).await?;
+        assert_eq!(result.superseded, vec![sn_old]);
+        assert!(result.added.is_empty());
+        assert_eq!(result.deferred, vec![sn_new]);
+
+        let old_info = NoteKeyStore::load_info(&store, &sn_old).await?.expect("old row retained as tombstone");
+        assert_eq!(old_info.status, NoteStatus::Superseded);
+        assert!(NoteKeyStore::load_info(&store, &sn_new).await?.is_none());
+
+        // With a secret: the deferred row is now written too, inheriting sk/provenance
+        // from the row that shares its pk.
+        let result = NoteKeyStore::apply_notes_changed(&store, Some(&wallet_secret), &notification).await?;
+        assert!(result.deferred.is_empty());
+        assert_eq!(result.added, vec![sn_new]);
+
+        let new_info = NoteKeyStore::load_info(&store, &sn_new).await?.expect("new row inserted");
+        assert_eq!(new_info.status, NoteStatus::Active);
+        assert_eq!(new_info.provenance, NoteProvenance::Cold);
+        let new_key = NoteKeyStore::load_key(&store, &wallet_secret, &sn_new).await?.expect("new row's key stored");
+        assert_eq!(new_key.sk, sk);
+
+        Ok(())
     }
 }

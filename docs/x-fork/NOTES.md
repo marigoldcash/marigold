@@ -2652,4 +2652,65 @@ STATE.md), and a draft API contract for the P9-era anchoring gateway was publish
 at [ANCHORING-GATEWAY.md](ANCHORING-GATEWAY.md) so the partner's Workers-side
 integration can start against a stable shape now (submit/lookup/health endpoints,
 the 33-byte on-chain payload encoding an independent verifier relies on, and the
-open items — namespace pinning, tokens, rate limits — flagged explicitly).
+open items — namespace pinning, tokens, rate limits — flagged explicitly). A
+follow-up round with the partner pinned the subnetwork namespace to `"T360"` and
+specified zero-downtime token-set rotation (rev 2 of the doc).
+
+### P7.1 — Note key DB (2026-08-16)
+
+**Design decision — serial-keyed, not key-keyed.** POOL-SPEC.md P5.6 sketches
+`KeyDbEntry{sk, provenance, known_serials: Vec<Hash>}` — one row per key, a list of
+serials underneath. FORK-PLAN's own P7.1 wording flattens this to
+`(serial, sk, denomination, provenance)` — one row per serial. Went with the
+FORK-PLAN shape: P7.1 is infra, not the receive/spend/POS flows (P7.2–P7.5) where
+the shared-`pk` case (POS landing pad) actually gets exercised, and a flat per-serial
+row is what spend selection wants to query directly. The cost is redundant `sk`
+storage when a `pk` genuinely is shared — acceptable, `sk` is 32 bytes, and the spec
+itself treats shared-`pk` as the deliberate exception (POS), not the default (a
+personal wallet defaults to a fresh `pk` per note specifically to avoid ever needing
+this).
+
+**Split into a sensitive row and a plaintext index**, mirroring `PrvKeyData`/
+`PrvKeyDataInfo`: `NoteKeyEntry{sn, sk, d, provenance}` is the only thing that needs
+encryption — everything else about a held note is either already public on-chain
+(the pool is plaintext) or wallet-internal hygiene metadata, so `NoteKeyInfo{sn, pk,
+d, provenance, status}` lives in a separate plaintext collection. This split turned
+out to be exactly what made the live subscription problem tractable (next
+paragraph) — not planned up front, found while working out how a passive listener
+could react to a `NotesChanged` notification without the wallet secret in hand.
+
+**The live-update problem and its resolution.** "Subscribes to `NotesChanged` for
+its serials" sounds like it wants a background task that mutates the encrypted key
+map on every notification — but nothing else in this storage layer keeps a
+session-wide cached secret; every existing mutating call (`PrvKeyDataStore::store`,
+etc.) takes `wallet_secret` explicitly from whatever caller already has it (a CLI
+prompt, a wizard). A background listener has no such caller. Resolution: give
+`NoteKeyInfo` a `status: NoteStatus{Active, Superseded}` field that can be flipped
+with no secret at all (plaintext-only mutation), and split
+`NoteKeyStore::apply_notes_changed(wallet_secret: Option<&Secret>, notification)`
+into two halves accordingly — `removed` entries always supersede their row (safe
+even while locked), `added` entries that match an already-held key's derived `pk`
+only insert the new row when a secret is supplied, otherwise landing in the result's
+`deferred` list for a later caller (a P7.2+ wizard that already has the secret) to
+retry. `UtxoProcessor` gained `register_note_serials`/`unregister_note_serials`
+(mirrors `register_addresses`, using the P6.9 `NotesChangedScope`) and a
+`Notification::NotesChanged` dispatch arm forwarding to `Wallet` over a new
+`WalletBusMessage::NotesChanged` variant, mirroring exactly how `UtxosChanged`
+already reaches `Wallet` via `WalletBusMessage::Discovery`. `Wallet::handle_notes_changed`
+calls `apply_notes_changed(None, ..)` — the always-safe half — logging (not
+silently dropping) how many rows are waiting on a secret.
+
+**`import_bearer_key` takes no provenance argument.** "Hot keys are flagged at
+import" is enforced structurally, not by trusting a caller-supplied flag: the one
+entry point for a key that crossed a wallet boundary hard-codes `NoteProvenance::Hot`
+in its own body, so there's no call shape that could import a bearer key as `Cold`.
+
+✅ *Verify*: 3 new unit tests against a resident (in-memory) `LocalStoreInner` via
+the public `NoteKeyStore` trait — round-trip (store/load/remove, including that
+`NoteKeyInfo::pk` matches the entry's derived BIP340 x-only pubkey), hot-flagged at
+import, and a synthetic rotation notification (remove old `sn`, add new `sn` under
+the same `pk`) that supersedes the old row unconditionally and, once a secret is
+supplied on a second `apply_notes_changed` call, inserts the new row inheriting the
+old row's `sk`/provenance. Full wallet-core suite green (46 tests, up from 43),
+`cargo check --workspace --all-targets` and `cargo clippy -p kaspa-wallet-core`
+clean.

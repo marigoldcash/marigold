@@ -3,7 +3,7 @@
 //!
 
 use crate::imports::*;
-use crate::storage::{AddressBookEntry, PrvKeyData, PrvKeyDataId};
+use crate::storage::{AddressBookEntry, NoteKeyEntry, PrvKeyData, PrvKeyDataId};
 use kaspa_bip32::Mnemonic;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
@@ -13,6 +13,8 @@ pub struct Payload {
     pub accounts: Vec<AccountStorage>,
     pub address_book: Vec<AddressBookEntry>,
     pub encrypt_transactions: Option<EncryptionKind>,
+    /// Note key database rows (FORK-PLAN P7.1, POOL-SPEC.md P5.6).
+    pub note_key_data: Vec<NoteKeyEntry>,
 }
 
 impl Payload {
@@ -20,7 +22,7 @@ impl Payload {
     const STORAGE_VERSION: u32 = 0;
 
     pub fn new(prv_key_data: Vec<PrvKeyData>, accounts: Vec<AccountStorage>, address_book: Vec<AddressBookEntry>) -> Self {
-        Self { prv_key_data, accounts, address_book, encrypt_transactions: None }
+        Self { prv_key_data, accounts, address_book, encrypt_transactions: None, note_key_data: Vec::new() }
     }
 }
 
@@ -29,6 +31,7 @@ impl ZeroizeOnDrop for Payload {}
 impl Zeroize for Payload {
     fn zeroize(&mut self) {
         self.prv_key_data.zeroize();
+        self.note_key_data.iter_mut().for_each(|entry| entry.zeroize());
     }
 }
 
@@ -61,6 +64,7 @@ impl BorshSerialize for Payload {
         BorshSerialize::serialize(&self.accounts, writer)?;
         BorshSerialize::serialize(&self.address_book, writer)?;
         BorshSerialize::serialize(&self.encrypt_transactions, writer)?;
+        BorshSerialize::serialize(&self.note_key_data, writer)?;
 
         Ok(())
     }
@@ -74,8 +78,9 @@ impl BorshDeserialize for Payload {
         let accounts = BorshDeserialize::deserialize_reader(reader)?;
         let address_book = BorshDeserialize::deserialize_reader(reader)?;
         let encrypt_transactions = BorshDeserialize::deserialize_reader(reader)?;
+        let note_key_data = BorshDeserialize::deserialize_reader(reader)?;
 
-        Ok(Self { prv_key_data, accounts, address_book, encrypt_transactions })
+        Ok(Self { prv_key_data, accounts, address_book, encrypt_transactions, note_key_data })
     }
 }
 

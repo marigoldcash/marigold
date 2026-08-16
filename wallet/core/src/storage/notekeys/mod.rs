@@ -1,0 +1,139 @@
+//!
+//! The wallet's note key database (FORK-PLAN P7.1, POOL-SPEC.md P5.6 "Key database
+//! format"). Unlike the seed-derived `PrvKeyData` accounts, a note has no derivation
+//! path — the wallet is "a key-database manager, not an identity" (P5.6) holding one
+//! raw private key per note (or, under the shared-pk policy, one key shared by
+//! several). This module is serial-keyed (one row per `sn`, per FORK-PLAN P7.1's own
+//! wording) rather than key-keyed (POOL-SPEC's `KeyDbEntry` sketch, which lists
+//! `known_serials` per key) — a deliberate simplification for this initial DB: the
+//! shared-pk case (POS landing pad, P7.5) tolerates the small redundancy of storing
+//! the same `sk` under more than one `sn`, and a flat per-serial row is what P7.2-P7.4's
+//! spend/receive selection logic wants to query directly.
+//!
+
+use crate::imports::*;
+use kaspa_consensus_core::Hash;
+use kaspa_consensus_core::notepool::DenominationTag;
+use secp256k1::{Keypair, SECP256K1, SecretKey};
+
+/// Whether a note's key ever crossed a wallet boundary (POOL-SPEC.md P5.6,
+/// "same-key-in-two-wallets hazard", rule 2). `Cold` keys were generated locally and
+/// never exported; lazy isolation is fine. `Hot` keys — bearer imports, cross-device
+/// exports, backup restores — must be rotated to a fresh `Cold` key at the next
+/// opportunity, since their shared-state history may include a wallet this one
+/// doesn't control or trust in this moment.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
+pub enum NoteProvenance {
+    Cold,
+    Hot,
+}
+
+/// Whether the wallet still believes a serial's row reflects live pool state. Flipped
+/// by [`crate::storage::NoteKeyStore::mark_status`] as `NotesChanged` notifications
+/// (FORK-PLAN P6.9) arrive for a watched serial or pk — deliberately a plaintext-only
+/// mutation (see [`NoteKeyInfo`]) so it never needs the wallet secret, and can be
+/// applied by a passive background listener even while the wallet is locked.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
+pub enum NoteStatus {
+    /// Still believed to be a live, spendable note under this row's key.
+    Active,
+    /// The serial was consumed on-chain (spent by us via rotation/split/merge, spent
+    /// elsewhere by a wallet sharing this key, or redeemed) — kept as a tombstone
+    /// rather than deleted immediately, so a caller with the wallet secret can later
+    /// reconcile (e.g. drop the row, or confirm a rotation landed under a new `sn`).
+    Superseded,
+}
+
+/// One row of the note key database (POOL-SPEC.md P5.6's `KeyDbEntry`, flattened to
+/// per-serial per FORK-PLAN P7.1). Holds the sole copy of a note's private key —
+/// "losing the key database is losing the notes" (P5.6) — so this is the sensitive
+/// half of the store; kept encrypted at rest (mirrors `PrvKeyData`'s handling of raw
+/// key material) and zeroized on drop.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
+pub struct NoteKeyEntry {
+    pub sn: Hash,
+    pub sk: [u8; 32],
+    pub d: DenominationTag,
+    pub provenance: NoteProvenance,
+}
+
+impl NoteKeyEntry {
+    pub fn new(sn: Hash, sk: [u8; 32], d: DenominationTag, provenance: NoteProvenance) -> Self {
+        Self { sn, sk, d, provenance }
+    }
+
+    /// The x-only BIP340 Schnorr public key this entry's `sk` corresponds to — never
+    /// stored redundantly on this type (POOL-SPEC.md P5.6's `KeyDbEntry` doc comment:
+    /// "the corresponding pk is derivable, not stored redundantly"), but cached
+    /// plaintext on [`NoteKeyInfo`] since, unlike `sk`, a note's `pk` is not sensitive
+    /// (the pool is plaintext — anyone can already see it on-chain).
+    pub fn derive_pk(&self) -> Result<[u8; 32]> {
+        let secret_key = SecretKey::from_slice(&self.sk).map_err(|e| Error::Custom(format!("invalid note secret key: {e}")))?;
+        let keypair = Keypair::from_secret_key(SECP256K1, &secret_key);
+        Ok(keypair.x_only_public_key().0.serialize())
+    }
+}
+
+impl Zeroize for NoteKeyEntry {
+    fn zeroize(&mut self) {
+        self.sk.zeroize();
+    }
+}
+
+impl Drop for NoteKeyEntry {
+    fn drop(&mut self) {
+        self.sk.zeroize();
+    }
+}
+
+/// The plaintext-safe half of a note key row: everything about a held note that isn't
+/// the private key itself — `sn`, `pk`, `d` and `provenance` are all either already
+/// public on-chain or metadata about the wallet's own key hygiene, none of it secret.
+/// Kept as a separate in-memory index (mirrors `PrvKeyDataInfo` alongside
+/// `PrvKeyData`) so cheap operations — enumeration, building a `NotesChangedScope`,
+/// flipping `status` on a live notification — never need the wallet secret.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
+pub struct NoteKeyInfo {
+    pub sn: Hash,
+    pub pk: [u8; 32],
+    pub d: DenominationTag,
+    pub provenance: NoteProvenance,
+    pub status: NoteStatus,
+}
+
+impl NoteKeyInfo {
+    pub fn new(sn: Hash, pk: [u8; 32], d: DenominationTag, provenance: NoteProvenance) -> Self {
+        Self { sn, pk, d, provenance, status: NoteStatus::Active }
+    }
+}
+
+impl TryFrom<&NoteKeyEntry> for NoteKeyInfo {
+    type Error = Error;
+
+    fn try_from(entry: &NoteKeyEntry) -> Result<Self> {
+        Ok(Self::new(entry.sn, entry.derive_pk()?, entry.d, entry.provenance))
+    }
+}
+
+impl crate::storage::IdT for NoteKeyInfo {
+    type Id = Hash;
+    fn id(&self) -> &Hash {
+        &self.sn
+    }
+}
+
+pub type NoteKeyMap = HashMap<Hash, NoteKeyEntry>;
+
+/// Result of [`crate::storage::NoteKeyStore::apply_notes_changed`] — which serials it
+/// actually updated, split by kind so a caller can tell "fully reconciled" from
+/// "partially applied, retry `deferred` once a wallet secret is available."
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct NotesChangedApplyResult {
+    /// Rows whose `status` was flipped to `Superseded` (plaintext-only, always applied).
+    pub superseded: Vec<Hash>,
+    /// New rows inserted for a `pk` this wallet already held a key for.
+    pub added: Vec<Hash>,
+    /// `added`-notification serials that matched a held `pk` but couldn't be written
+    /// because no wallet secret was supplied.
+    pub deferred: Vec<Hash>,
+}

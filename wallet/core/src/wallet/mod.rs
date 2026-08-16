@@ -35,8 +35,10 @@ use workflow_core::task::spawn;
 pub type WalletGuard<'l> = AsyncMutexGuard<'l, ()>;
 
 #[derive(Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum WalletBusMessage {
     Discovery { record: TransactionRecord },
+    NotesChanged { notification: Arc<kaspa_rpc_core::message::NotesChangedNotification> },
 }
 
 /// Internal wallet state.
@@ -1039,6 +1041,24 @@ impl Wallet {
             WalletBusMessage::Discovery { record } => {
                 self.handle_discovery(record).await?;
             }
+            WalletBusMessage::NotesChanged { notification } => {
+                self.handle_notes_changed(&notification).await?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Reconcile the note key database against a live `NotesChanged` notification
+    /// (FORK-PLAN P6.9/P7.1). Only ever applied without a wallet secret here — status
+    /// flips (a watched serial was superseded on-chain) are plaintext-only and always
+    /// go through; new rows (a note landed on a `pk` we hold a key for) need the
+    /// secret to write, so they're left `deferred` for a caller — a receive/spend
+    /// wizard (P7.2+) that already has the secret in hand — to reconcile explicitly.
+    async fn handle_notes_changed(self: &Arc<Self>, notification: &kaspa_rpc_core::message::NotesChangedNotification) -> Result<()> {
+        let note_key_store = self.store().as_note_key_store()?;
+        let result = note_key_store.apply_notes_changed(None, notification).await?;
+        if !result.deferred.is_empty() {
+            log_info!("{} note(s) pending reconciliation once the wallet is unlocked", result.deferred.len());
         }
         Ok(())
     }
