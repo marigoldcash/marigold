@@ -2,6 +2,7 @@ use super::events::EventType;
 use borsh::{BorshDeserialize, BorshSerialize};
 use derive_more::Display;
 use kaspa_addresses::Address;
+use kaspa_hashes::Hash;
 use serde::{Deserialize, Serialize};
 use workflow_serializer::prelude::*;
 
@@ -45,6 +46,7 @@ pub enum Scope {
     VirtualDaaScoreChanged,
     PruningPointUtxoSetOverride,
     NewBlockTemplate,
+    NotesChanged,
 }
 }
 
@@ -264,5 +266,59 @@ impl Deserializer for NewBlockTemplateScope {
     fn deserialize<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
         let _version = load!(u16, reader)?;
         Ok(Self {})
+    }
+}
+
+/// Watch a set of note serials and/or note owner pubkeys (FORK-PLAN P6.9). Either list
+/// alone is a valid partial subscription (OR semantics, like [`UtxosChangedScope`]'s
+/// address list); both empty means "all notes" — the note-pool analog of the empty
+/// address list there. `pks` exists because a wallet naturally knows the keys it holds
+/// long before it knows which serials currently exist under them (a serial is only
+/// derivable once the note-creating transaction is known), so subscribing by pk lets a
+/// wallet learn about newly-produced notes it never explicitly asked for by serial.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
+pub struct NotesChangedScope {
+    pub serials: Vec<Hash>,
+    pub pks: Vec<[u8; 32]>,
+}
+
+impl std::fmt::Display for NotesChangedScope {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "NotesChangedScope ({} serials, {} pks)", self.serials.len(), self.pks.len())
+    }
+}
+
+impl PartialEq for NotesChangedScope {
+    fn eq(&self, other: &Self) -> bool {
+        self.serials.len() == other.serials.len()
+            && self.serials.iter().all(|x| other.serials.contains(x))
+            && self.pks.len() == other.pks.len()
+            && self.pks.iter().all(|x| other.pks.contains(x))
+    }
+}
+
+impl Eq for NotesChangedScope {}
+
+impl NotesChangedScope {
+    pub fn new(serials: Vec<Hash>, pks: Vec<[u8; 32]>) -> Self {
+        Self { serials, pks }
+    }
+}
+
+impl Serializer for NotesChangedScope {
+    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        store!(u16, &1, writer)?;
+        store!(Vec<Hash>, &self.serials, writer)?;
+        store!(Vec<[u8; 32]>, &self.pks, writer)?;
+        Ok(())
+    }
+}
+
+impl Deserializer for NotesChangedScope {
+    fn deserialize<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
+        let _version = load!(u16, reader)?;
+        let serials = load!(Vec<Hash>, reader)?;
+        let pks = load!(Vec<[u8; 32]>, reader)?;
+        Ok(Self { serials, pks })
     }
 }

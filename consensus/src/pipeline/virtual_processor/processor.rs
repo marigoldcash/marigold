@@ -71,8 +71,8 @@ use kaspa_consensus_core::{
 };
 use kaspa_consensus_notify::{
     notification::{
-        NewBlockTemplateNotification, Notification, SinkBlueScoreChangedNotification, UtxosChangedNotification,
-        VirtualChainChangedNotification, VirtualDaaScoreChangedNotification,
+        NewBlockTemplateNotification, Notification, NotesChangedNotification, SinkBlueScoreChangedNotification,
+        UtxosChangedNotification, VirtualChainChangedNotification, VirtualDaaScoreChangedNotification,
     },
     root::ConsensusNotificationRoot,
 };
@@ -373,12 +373,19 @@ impl VirtualStateProcessor {
 
         // Emit notifications
         let accumulated_diff = Arc::new(accumulated_diff);
+        let accumulated_pool_diff = Arc::new(accumulated_pool_diff);
         let virtual_parents = Arc::new(new_virtual_state.parents.clone());
         self.notification_root
             .notify(Notification::NewBlockTemplate(NewBlockTemplateNotification {}))
             .expect("expecting an open unbounded channel");
         self.notification_root
-            .notify(Notification::UtxosChanged(UtxosChangedNotification::new(accumulated_diff, virtual_parents)))
+            .notify(Notification::UtxosChanged(UtxosChangedNotification::new(accumulated_diff, virtual_parents.clone())))
+            .expect("expecting an open unbounded channel");
+        // The note-pool analog of the UTXO notification above (FORK-PLAN P6.9) — same
+        // accumulated-diff shape, same unconditional emission; per-serial/per-pk
+        // filtering happens downstream at the subscription layer, not here.
+        self.notification_root
+            .notify(Notification::NotesChanged(NotesChangedNotification::new(accumulated_pool_diff, virtual_parents)))
             .expect("expecting an open unbounded channel");
         self.notification_root
             .notify(Notification::SinkBlueScoreChanged(SinkBlueScoreChangedNotification::new(compact_sink_ghostdag_data.blue_score)))

@@ -522,6 +522,29 @@ pub trait ConsensusApi: Send + Sync {
         unimplemented!()
     }
 
+    /// A live point lookup of a single note by serial, against virtual's own pool state
+    /// (FORK-PLAN P6.9) — `None` if `sn` doesn't currently exist in the pool. This is the
+    /// first single-key live-state RPC-facing query this trait exposes (the UTXO side has
+    /// no equivalent either — `get_virtual_utxos` is chunk/scan-only).
+    fn get_pool_note(&self, _sn: Hash) -> Option<crate::notepool::NewNote> {
+        unimplemented!()
+    }
+
+    /// Batched form of [`Self::get_pool_note`] — avoids one round-trip per serial for a
+    /// wallet checking many serials at once (the plan's own "get note(s)", plural).
+    /// Returns one `Option` per input `sn`, same order, `None` for serials not (currently)
+    /// in the pool.
+    fn get_pool_notes(&self, _sns: &[Hash]) -> Vec<Option<crate::notepool::NewNote>> {
+        unimplemented!()
+    }
+
+    /// Live note count per denomination (FORK-PLAN P6.9's "pool stats") — a full scan of
+    /// virtual's pool state, the same correctness-first tradeoff `recompute_pool_commitment`
+    /// (P6.5) already established for this fork's pool rather than an incremental counter.
+    fn get_pool_stats(&self) -> crate::notepool::PoolStats {
+        unimplemented!()
+    }
+
     fn get_missing_block_body_hashes(&self, high: Hash) -> ConsensusResult<Vec<Hash>> {
         unimplemented!()
     }

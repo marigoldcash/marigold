@@ -1181,6 +1181,26 @@ impl ConsensusApi for Consensus {
         Ok(())
     }
 
+    fn get_pool_note(&self, sn: Hash) -> Option<kaspa_consensus_core::notepool::NewNote> {
+        use crate::model::stores::notepool::NotePoolStoreReader;
+        self.virtual_stores.read().pool_state.get(sn).optional().unwrap()
+    }
+
+    fn get_pool_notes(&self, sns: &[Hash]) -> Vec<Option<kaspa_consensus_core::notepool::NewNote>> {
+        use crate::model::stores::notepool::NotePoolStoreReader;
+        let virtual_read = self.virtual_stores.read();
+        sns.iter().map(|&sn| virtual_read.pool_state.get(sn).optional().unwrap()).collect()
+    }
+
+    fn get_pool_stats(&self) -> kaspa_consensus_core::notepool::PoolStats {
+        let mut counts = [0u64; 8];
+        for res in self.virtual_stores.read().pool_state.iterator() {
+            let (_, note) = res.expect("live pool state must be readable");
+            counts[note.d as usize] += 1;
+        }
+        kaspa_consensus_core::notepool::PoolStats { counts }
+    }
+
     fn modify_coinbase_payload(&self, payload: Vec<u8>, miner_data: &MinerData) -> CoinbaseResult<Vec<u8>> {
         self.services.coinbase_manager.modify_coinbase_payload(payload, miner_data)
     }

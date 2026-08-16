@@ -214,6 +214,22 @@ impl RpcApi for RpcCoreMock {
         Err(RpcError::NotImplemented)
     }
 
+    async fn get_notes_by_serial_call(
+        &self,
+        _connection: Option<&DynRpcConnection>,
+        _request: GetNotesBySerialRequest,
+    ) -> RpcResult<GetNotesBySerialResponse> {
+        Err(RpcError::NotImplemented)
+    }
+
+    async fn get_pool_stats_call(
+        &self,
+        _connection: Option<&DynRpcConnection>,
+        _request: GetPoolStatsRequest,
+    ) -> RpcResult<GetPoolStatsResponse> {
+        Err(RpcError::NotImplemented)
+    }
+
     async fn get_subnetwork_call(
         &self,
         _connection: Option<&DynRpcConnection>,

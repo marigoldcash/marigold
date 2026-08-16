@@ -665,6 +665,8 @@ impl RpcApi for KaspaRpcClient {
             SubmitTransactionReplacement,
             Unban,
             GetSeqCommitLaneProof,
+            GetNotesBySerial,
+            GetPoolStats,
         ]
     );
 

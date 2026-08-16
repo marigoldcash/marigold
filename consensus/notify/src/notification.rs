@@ -1,5 +1,5 @@
 use derive_more::Display;
-use kaspa_consensus_core::{acceptance_data::AcceptanceData, block::Block, utxo::utxo_diff::UtxoDiff};
+use kaspa_consensus_core::{acceptance_data::AcceptanceData, block::Block, notepool::PoolDiff, utxo::utxo_diff::UtxoDiff};
 use kaspa_hashes::Hash;
 use kaspa_notify::{
     events::EventType,
@@ -8,7 +8,7 @@ use kaspa_notify::{
     subscription::{
         Subscription,
         context::SubscriptionContext,
-        single::{OverallSubscription, UtxosChangedSubscription, VirtualChainChangedSubscription},
+        single::{NotesChangedSubscription, OverallSubscription, UtxosChangedSubscription, VirtualChainChangedSubscription},
     },
 };
 use std::sync::Arc;
@@ -42,6 +42,9 @@ pub enum Notification {
 
     #[display(fmt = "NewBlockTemplate notification")]
     NewBlockTemplate(NewBlockTemplateNotification),
+
+    #[display(fmt = "NotesChanged notification")]
+    NotesChanged(NotesChangedNotification),
 }
 }
 
@@ -85,6 +88,17 @@ impl NotificationTrait for Notification {
     ) -> Option<Self> {
         // No effort is made here to apply the subscription addresses.
         // This will be achieved farther along the notification backbone.
+        Some(self.clone())
+    }
+
+    fn apply_notes_changed_subscription(
+        &self,
+        _subscription: &NotesChangedSubscription,
+        _context: &SubscriptionContext,
+    ) -> Option<Self> {
+        // Same rationale as `apply_utxos_changed_subscription` above: this raw,
+        // unindexed layer has no per-serial/per-pk resolution to apply; real filtering
+        // happens in `rpc_core::Notification` (FORK-PLAN P6.9).
         Some(self.clone())
     }
 
@@ -152,6 +166,23 @@ pub struct UtxosChangedNotification {
 impl UtxosChangedNotification {
     pub fn new(accumulated_utxo_diff: Arc<UtxoDiff>, virtual_parents: Arc<Vec<Hash>>) -> Self {
         Self { accumulated_utxo_diff, virtual_parents }
+    }
+}
+
+/// The note-pool analog of [`UtxosChangedNotification`] (FORK-PLAN P6.9) — raw,
+/// unfiltered accumulated pool diff between the last virtual state and the current one.
+/// Filtering by watched serial/pk happens farther along the notification backbone
+/// (`rpc_core::Notification::apply_notes_changed_subscription`), exactly like the UTXO
+/// notification's address filtering.
+#[derive(Debug, Clone)]
+pub struct NotesChangedNotification {
+    pub accumulated_pool_diff: Arc<PoolDiff>,
+    pub virtual_parents: Arc<Vec<Hash>>,
+}
+
+impl NotesChangedNotification {
+    pub fn new(accumulated_pool_diff: Arc<PoolDiff>, virtual_parents: Arc<Vec<Hash>>) -> Self {
+        Self { accumulated_pool_diff, virtual_parents }
     }
 }
 

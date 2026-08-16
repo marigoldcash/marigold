@@ -85,6 +85,8 @@ impl Factory {
                 GetUtxoReturnAddress,
                 GetVirtualChainFromBlockV2,
                 GetSeqCommitLaneProof,
+                GetNotesBySerial,
+                GetPoolStats,
                 NotifyBlockAdded,
                 NotifyNewBlockTemplate,
                 NotifyFinalityConflict,
@@ -93,6 +95,7 @@ impl Factory {
                 NotifyPruningPointUtxoSetOverride,
                 NotifyVirtualDaaScoreChanged,
                 NotifyVirtualChainChanged,
+                NotifyNotesChanged,
                 StopNotifyingUtxosChanged,
                 StopNotifyingPruningPointUtxoSetOverride,
             ]

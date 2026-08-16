@@ -171,6 +171,14 @@ mod tests {
             unimplemented!()
         }
 
+        fn apply_notes_changed_subscription(
+            &self,
+            _: &crate::subscription::single::NotesChangedSubscription,
+            _: &SubscriptionContext,
+        ) -> Option<Self> {
+            unimplemented!()
+        }
+
         fn event_type(&self) -> EventType {
             unimplemented!()
         }

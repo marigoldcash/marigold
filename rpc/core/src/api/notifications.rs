@@ -10,7 +10,7 @@ use kaspa_notify::{
     subscription::{
         Subscription,
         context::SubscriptionContext,
-        single::{OverallSubscription, UtxosChangedSubscription, VirtualChainChangedSubscription},
+        single::{NotesChangedSubscription, OverallSubscription, UtxosChangedSubscription, VirtualChainChangedSubscription},
     },
 };
 use serde::{Deserialize, Serialize};
@@ -48,6 +48,9 @@ pub enum Notification {
 
     #[display(fmt = "NewBlockTemplate notification")]
     NewBlockTemplate(NewBlockTemplateNotification),
+
+    #[display(fmt = "NotesChanged notification: {} removed, {} added", "_0.removed.len()", "_0.added.len()")]
+    NotesChanged(NotesChangedNotification),
 }
 }
 
@@ -64,6 +67,7 @@ impl Notification {
             Notification::VirtualDaaScoreChanged(v) => to_value(&v),
             Notification::SinkBlueScoreChanged(v) => to_value(&v),
             Notification::VirtualChainChanged(v) => to_value(&v),
+            Notification::NotesChanged(v) => to_value(&v),
         }
     }
 }
@@ -108,6 +112,20 @@ impl NotificationTrait for Notification {
             true => {
                 let Self::UtxosChanged(notification) = self else { return None };
                 notification.apply_utxos_changed_subscription(subscription, context).map(Self::UtxosChanged)
+            }
+            false => None,
+        }
+    }
+
+    fn apply_notes_changed_subscription(
+        &self,
+        subscription: &NotesChangedSubscription,
+        _context: &SubscriptionContext,
+    ) -> Option<Self> {
+        match subscription.active() {
+            true => {
+                let Self::NotesChanged(notification) = self else { return None };
+                notification.apply_notes_changed_subscription(subscription).map(Self::NotesChanged)
             }
             false => None,
         }
@@ -158,6 +176,10 @@ impl Serializer for Notification {
                 store!(u16, &8, writer)?;
                 serialize!(NewBlockTemplateNotification, notification, writer)?;
             }
+            Notification::NotesChanged(notification) => {
+                store!(u16, &9, writer)?;
+                serialize!(NotesChangedNotification, notification, writer)?;
+            }
         }
         Ok(())
     }
@@ -202,6 +224,10 @@ impl Deserializer for Notification {
             8 => {
                 let notification = deserialize!(NewBlockTemplateNotification, reader)?;
                 Ok(Notification::NewBlockTemplate(notification))
+            }
+            9 => {
+                let notification = deserialize!(NotesChangedNotification, reader)?;
+                Ok(Notification::NotesChanged(notification))
             }
             _ => Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid variant")),
         }

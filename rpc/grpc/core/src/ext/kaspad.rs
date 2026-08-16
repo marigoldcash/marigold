@@ -2,9 +2,9 @@ use kaspa_notify::{scope::Scope, subscription::Command};
 
 use crate::protowire::{
     KaspadRequest, KaspadResponse, NotifyBlockAddedRequestMessage, NotifyFinalityConflictRequestMessage,
-    NotifyNewBlockTemplateRequestMessage, NotifyPruningPointUtxoSetOverrideRequestMessage, NotifySinkBlueScoreChangedRequestMessage,
-    NotifyUtxosChangedRequestMessage, NotifyVirtualChainChangedRequestMessage, NotifyVirtualDaaScoreChangedRequestMessage,
-    kaspad_request, kaspad_response,
+    NotifyNewBlockTemplateRequestMessage, NotifyNotesChangedRequestMessage, NotifyPruningPointUtxoSetOverrideRequestMessage,
+    NotifySinkBlueScoreChangedRequestMessage, NotifyUtxosChangedRequestMessage, NotifyVirtualChainChangedRequestMessage,
+    NotifyVirtualDaaScoreChangedRequestMessage, kaspad_request, kaspad_response,
 };
 
 impl KaspadRequest {
@@ -64,6 +64,11 @@ impl kaspad_request::Payload {
                     command: command.into(),
                 })
             }
+            Scope::NotesChanged(scope) => kaspad_request::Payload::NotifyNotesChangedRequest(NotifyNotesChangedRequestMessage {
+                serials: scope.serials.iter().map(|x| x.as_bytes().to_vec()).collect(),
+                pks: scope.pks.iter().map(|x| x.to_vec()).collect(),
+                command: command.into(),
+            }),
         }
     }
 
@@ -81,6 +86,7 @@ impl kaspad_request::Payload {
                 | Payload::NotifyNewBlockTemplateRequest(_)
                 | Payload::StopNotifyingUtxosChangedRequest(_)
                 | Payload::StopNotifyingPruningPointUtxoSetOverrideRequest(_)
+                | Payload::NotifyNotesChangedRequest(_)
         )
     }
 }
@@ -108,6 +114,7 @@ impl kaspad_response::Payload {
             Payload::VirtualDaaScoreChangedNotification(_) => true,
             Payload::PruningPointUtxoSetOverrideNotification(_) => true,
             Payload::NewBlockTemplateNotification(_) => true,
+            Payload::NotesChangedNotification(_) => true,
             _ => false,
         }
     }

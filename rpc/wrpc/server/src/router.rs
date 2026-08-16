@@ -72,6 +72,8 @@ impl Router {
                 GetVirtualChainFromBlock,
                 GetVirtualChainFromBlockV2,
                 GetSeqCommitLaneProof,
+                GetNotesBySerial,
+                GetPoolStats,
                 ResolveFinalityConflict,
                 Shutdown,
                 SubmitBlock,

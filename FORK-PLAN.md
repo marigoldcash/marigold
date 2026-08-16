@@ -1407,13 +1407,71 @@ store → validation → pipeline → mempool → sync → RPC. Every step lands
   (`streaming_rebuild_detects_tampered_leaf`, plus rebuild-vs-incremental agreement and
   post-rebuild incremental updatability). Full workspace + integration suites green.
 
-- [ ] **P6.9 — RPC + notifications.** Add RPC methods: get note(s) by serial, pool stats
+- [x] **P6.9 — RPC + notifications.** Add RPC methods: get note(s) by serial, pool stats
   (count per denomination); add a `NotesChanged`-style subscription (model:
   `UtxosChanged` through the [notify](notify/) system) scoped to watched serials/pks —
   this is what wallets poll-free receive/sweep flows (P7) depend on. Wire through
   rpc/core, grpc (proto files), and wrpc.
-  ✅ *Verify:* `kaspa-cli`-level manual check: subscribe to a serial, rotate it, receive
-  the notification; grpc + wrpc both serve the new methods.
+  **Executed (2026-08-16):** `NotesChanged` was modeled as a much lighter cousin of
+  `UtxosChanged`, not a copy of it. A note's identity (`sn`, `d`, `pk`) is fully
+  resolvable from the raw consensus pool diff alone, so unlike `UtxosChanged` it
+  needs no second-stage/`utxoindex`-style re-resolution — the emission is a single
+  `self.notification_root.notify(Notification::NotesChanged(...))` call sitting
+  right next to the existing `UtxosChanged` emission in
+  `virtual_processor/processor.rs`, using `accumulated_pool_diff` that P6.4 already
+  computed at that exact point (a nearly-free hook). `rpc/service`'s event routing
+  needed zero extra wiring too, since `EventSwitches` defaults every new `EventType`
+  to enabled. The subscription itself (`NotesChangedSubscription` in
+  `notify/src/subscription/single.rs`) deliberately skips `UtxosChangedSubscription`'s
+  `Tracker`-based reference-counting apparatus (`notify/src/address/tracker.rs`) —
+  that exists because many wallets watch overlapping *address* sets through one
+  shared index, and there's no analogous multi-listener-sharing need for note
+  serials/pks — so it's a plain value-type subscription (`BTreeSet<Hash>` +
+  `BTreeSet<[u8;32]>`; `BTreeSet` over `HashSet` specifically because it implements
+  `std::hash::Hash`, needed for the subscription struct's own `#[derive(Hash)]`).
+  Plumbed three independent `Notification` enums (`consensus_notify`, `rpc_core`;
+  `index_core` only needed a trivial passthrough since it has no `NotesChanged`
+  variant at all), `EventType`/`Scope`/`ArrayBuilder` in the base `notify` crate, two
+  new one-shot RPC methods (`get_notes_by_serial`, `get_pool_stats`, the latter
+  backed by a new `ConsensusApi::get_pool_stats` full-scan — same correctness-first,
+  no-incremental-counter tradeoff as P6.5's commitment rebuild), and full grpc wire
+  plumbing (new proto messages + macro-array entries across
+  `rpc/grpc/{core,server,client}`). **Confirmed architectural asymmetry**: wrpc
+  needed almost no bespoke code — `Subscribe`/`Unsubscribe` in
+  `rpc/wrpc/server/src/router.rs` are already fully generic over `Scope`, so once
+  the `Scope::NotesChanged` variant existed, wrpc subscription support was free;
+  only the two new non-subscription "get" ops needed macro-array entries on the
+  wrpc client/server. grpc, by contrast, needed real per-op proto messages and
+  converters for everything, since it has no generic subscription payload. Also
+  added a genuinely new capability to `kaspa-cli` (`cli/src/modules/rpc.rs`): a
+  `rpc notify-notes-changed <serial-hex>...` command that registers a listener
+  (`ChannelConnection` + `register_new_listener`, the pattern lifted from
+  `rpc/wrpc/examples/subscriber`), subscribes, and prints incoming
+  `NotesChanged` notifications for up to 120s — every prior `RpcApiOps` arm in that
+  file was a one-shot request/response call with no precedent for a persistent
+  subscribe-and-print flow. (`cli/src/notifier.rs` looked like a candidate reference
+  but turned out to be an unrelated UI toast-icon system — a dead end worth noting
+  so a future reader doesn't repeat the detour.)
+  ✅ *Verify:* new `daemon_notes_changed_notification_test` (one real simnet daemon,
+  `--utxoindex`): mints two notes (1 + 0.01 MAGLD) through the real P6.6/P6.7 path
+  while subscribed to `NotesChangedScope::default()` (the "watch everything"
+  wildcard), asserts the notification's `added` carries both new notes with correct
+  denomination/pk and empty `removed`; cross-checks `get_pool_stats` and
+  `get_notes_by_serial` agree; then rotates both notes to a new key (consuming both,
+  producing one — the D0_01 difference is the rotate's required non-zero fee) and
+  asserts a second notification reports both old serials `removed` and the new one
+  `added`. Passed on the second attempt (first two attempts hit test-harness bugs,
+  not product bugs: missing `--utxoindex` arg, then a zero-fee rotate the standard
+  relay policy correctly rejected — fixed by minting a second, larger note). Also
+  extended the pre-existing `rpc_tests::sanity_test` (which forces a match arm per
+  `KaspadPayloadOps` variant) with `GetNotesBySerial`, `GetPoolStats`, and
+  `NotifyNotesChanged` arms. Full `cargo build --workspace --tests` clean (after
+  fixing two `RpcApi` trait-completeness gaps in `rpc/grpc/server` and
+  `wallet/core`'s test-only mock implementors, surfaced only by `--tests`, not plain
+  `build`); `cargo test --workspace --exclude kaspa-testing-integration` all green
+  (142/142 result groups, kaspa-notify 20, kaspa-rpc-core 131, kaspa-consensus 93,
+  kaspa-consensus-core 121); full integration suite green (44 passed, 0 failed, 6
+  pre-existing `#[ignore]`d).
 
 - [ ] **P6.10 — Consensus test battery + simpa.** A dedicated integration-test module
   running the full matrix: all five ops happy-path, every P5.3 rejection case, parallel

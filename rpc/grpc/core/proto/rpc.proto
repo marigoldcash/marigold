@@ -1166,3 +1166,56 @@ message GetSeqCommitLaneProofResponseMessage {
 
   RPCError error = 1000;
 }
+
+// NotifyNotesChangedRequestMessage registers this connection for notesChanged
+// notifications (FORK-PLAN P6.9), scoped to the given note serials and/or owner
+// pubkeys. Leave both empty to start/stop all updates.
+//
+// See: NotesChangedNotificationMessage
+message NotifyNotesChangedRequestMessage {
+  repeated bytes serials = 1;
+  repeated bytes pks = 2;
+  RpcNotifyCommand command = 101;
+}
+
+message NotifyNotesChangedResponseMessage {
+  RPCError error = 1000;
+}
+
+// NotesChangedNotificationMessage is sent whenever virtual's note-pool state changes.
+//
+// See: NotifyNotesChangedRequestMessage
+message NotesChangedNotificationMessage {
+  repeated RpcNoteEntryMessage added = 1;
+  repeated RpcNoteEntryMessage removed = 2;
+}
+
+message RpcNoteEntryMessage {
+  bytes sn = 1;
+  uint32 denomination = 2;
+  bytes pk = 3;
+}
+
+// GetNotesBySerialRequestMessage requests the current pool notes for the given
+// serials (FORK-PLAN P6.9). Serials not currently in the pool are simply absent
+// from the response.
+message GetNotesBySerialRequestMessage {
+  repeated bytes serials = 1;
+}
+
+message GetNotesBySerialResponseMessage {
+  repeated RpcNoteEntryMessage notes = 1;
+
+  RPCError error = 1000;
+}
+
+// GetPoolStatsRequestMessage requests the live note-pool stats: note count per
+// denomination (FORK-PLAN P6.9), indexed by DenominationTag's declaration order.
+message GetPoolStatsRequestMessage {
+}
+
+message GetPoolStatsResponseMessage {
+  repeated uint64 counts = 1;
+
+  RPCError error = 1000;
+}

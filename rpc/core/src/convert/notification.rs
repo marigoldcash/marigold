@@ -2,9 +2,11 @@
 
 use crate::{
     BlockAddedNotification, FinalityConflictNotification, FinalityConflictResolvedNotification, NewBlockTemplateNotification,
-    Notification, PruningPointUtxoSetOverrideNotification, RpcAcceptedTransactionIds, SinkBlueScoreChangedNotification,
-    UtxosChangedNotification, VirtualChainChangedNotification, VirtualDaaScoreChangedNotification, convert::utxo::utxo_set_into_rpc,
+    Notification, NotesChangedNotification, PruningPointUtxoSetOverrideNotification, RpcAcceptedTransactionIds, RpcNoteEntry,
+    SinkBlueScoreChangedNotification, UtxosChangedNotification, VirtualChainChangedNotification, VirtualDaaScoreChangedNotification,
+    convert::utxo::utxo_set_into_rpc,
 };
+use kaspa_consensus_core::notepool::ImmutablePoolDiff;
 use kaspa_consensus_notify::notification as consensus_notify;
 use kaspa_index_core::notification as index_notify;
 use std::sync::Arc;
@@ -31,6 +33,7 @@ impl From<&consensus_notify::Notification> for Notification {
             consensus_notify::Notification::VirtualDaaScoreChanged(msg) => Notification::VirtualDaaScoreChanged(msg.into()),
             consensus_notify::Notification::PruningPointUtxoSetOverride(msg) => Notification::PruningPointUtxoSetOverride(msg.into()),
             consensus_notify::Notification::NewBlockTemplate(msg) => Notification::NewBlockTemplate(msg.into()),
+            consensus_notify::Notification::NotesChanged(msg) => Notification::NotesChanged(msg.into()),
         }
     }
 }
@@ -109,6 +112,22 @@ impl From<&consensus_notify::PruningPointUtxoSetOverrideNotification> for Prunin
 impl From<&consensus_notify::NewBlockTemplateNotification> for NewBlockTemplateNotification {
     fn from(_: &consensus_notify::NewBlockTemplateNotification) -> Self {
         Self {}
+    }
+}
+
+/// Unlike `UtxosChangedNotification` above, this conversion is real, not a stub: a
+/// note's identity (`sn`, `d`, `pk`) needs no external index to resolve (no
+/// ScriptPublicKey → Address lookup equivalent exists for notes), so this raw
+/// consensus-notify layer already carries everything `RpcNoteEntry` needs.
+impl From<&consensus_notify::NotesChangedNotification> for NotesChangedNotification {
+    fn from(item: &consensus_notify::NotesChangedNotification) -> Self {
+        let to_entries = |collection: &kaspa_consensus_core::notepool::PoolCollection| {
+            collection.iter().map(|(sn, note)| RpcNoteEntry { sn: *sn, denomination: note.d as u8, pk: note.pk }).collect()
+        };
+        Self {
+            added: Arc::new(to_entries(item.accumulated_pool_diff.added())),
+            removed: Arc::new(to_entries(item.accumulated_pool_diff.removed())),
+        }
     }
 }
 

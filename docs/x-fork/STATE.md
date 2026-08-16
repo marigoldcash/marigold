@@ -4,7 +4,8 @@ Snapshot of everything decided and built so far, so any fresh coding session on 
 machine can continue from the repo alone. Read this together with [FORK-PLAN.md](../../FORK-PLAN.md).
 Update this file whenever off-repo state changes (domains, accounts, infra).
 
-Last updated: 2026-08-16 (P6.8 complete — pool state syncs over IBD; next step P6.9)
+Last updated: 2026-08-16 (P6.9 complete — RPC + notifications; next step P6.10, then
+stop at P6.11 ⚠️ HARD)
 
 ## What this project is
 
@@ -79,12 +80,19 @@ substitute for it.
 
 ## Where execution stands
 
-- **Next step: P6.9 — RPC + notifications.** bite-size (not HARD). Add RPC
-  methods (get note(s) by serial, pool stats per denomination) and a
-  `NotesChanged`-style subscription through the notify system, scoped to watched
-  serials/pks — what P7's wallet poll-free receive/sweep flows depend on. Wire
-  through rpc/core, grpc proto, and wrpc. (`DenominationTag: TryFrom<u8>` already
-  exists from P6.8 for integer-carrying wire formats.)
+- **Next step: P6.10 — Consensus test battery + simpa.** bite-size (not
+  HARD). A dedicated integration-test module running the full op matrix (all five ops
+  happy-path, every P5.3 rejection case, parallel conflicts, deep reorg, value
+  conservation, pool-root agreement across nodes) plus teaching `simpa` to generate
+  random pool ops for DAG-level stress. **Stop at P6.11 (⚠️ HARD — finality-anchor
+  consensus rule) and flag for a model switch, per standing instruction.**
+- **P6.9 is done.** RPC methods `get_notes_by_serial`/`get_pool_stats` plus a
+  `NotesChanged` subscription (through the notify system, scoped to watched
+  serials/pks), wired through rpc/core, grpc proto, and wrpc, plus a new
+  `kaspa-cli` `rpc notify-notes-changed` command. Full design rationale — why
+  `NotesChanged` needed no `UtxosChanged`-style second index stage, why its
+  subscription skips the `Tracker` machinery, the wrpc-vs-grpc plumbing asymmetry —
+  is in NOTES.md's P6.9 entry.
 - **P6.8 is done (done under a stronger model — the prior session scoped it and
   correctly judged it HARD-caliber despite the plan not flagging it).** New nodes
   syncing from a pruning point download the pool state, verify it against the

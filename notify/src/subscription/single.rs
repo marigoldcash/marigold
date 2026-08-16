@@ -3,7 +3,7 @@ use crate::{
     error::Result,
     events::EventType,
     listener::ListenerId,
-    scope::{Scope, UtxosChangedScope, VirtualChainChangedScope},
+    scope::{NotesChangedScope, Scope, UtxosChangedScope, VirtualChainChangedScope},
     subscription::{
         BroadcastingSingle, Command, DynSubscription, Mutation, MutationOutcome, MutationPolicies, Single, Subscription,
         UtxosChangedMutationPolicy, context::SubscriptionContext,
@@ -169,6 +169,145 @@ impl Subscription for VirtualChainChangedSubscription {
 
     fn scope(&self, _context: &SubscriptionContext) -> Scope {
         VirtualChainChangedScope::new(self.include_accepted_transaction_ids).into()
+    }
+}
+
+/// Subscription to NotesChanged notifications (FORK-PLAN P6.9), scoped by watched note
+/// serials and/or note owner pubkeys. Deliberately simpler than
+/// [`UtxosChangedSubscription`]: notes have no analog of "many independent wallets
+/// watching overlapping address sets through a shared index," which is what motivates
+/// that subscription's [`crate::address::tracker::Tracker`]-based reference counting —
+/// each listener's own small set is sufficient here, no shared tracker needed. Filtering
+/// itself happens per-notification in the `Notification` implementor that actually knows
+/// a note's serial/pk (`rpc_core::Notification::apply_notes_changed_subscription`); this
+/// type only tracks subscription STATE (mirrors `UtxosChangedSubscription`'s split).
+#[derive(Eq, PartialEq, Hash, Clone, Debug, Default)]
+pub struct NotesChangedSubscription {
+    active: bool,
+    all: bool,
+    serials: Arc<std::collections::BTreeSet<kaspa_hashes::Hash>>,
+    pks: Arc<std::collections::BTreeSet<[u8; 32]>>,
+}
+
+impl NotesChangedSubscription {
+    pub fn new(active: bool, all: bool, serials: Arc<std::collections::BTreeSet<kaspa_hashes::Hash>>, pks: Arc<std::collections::BTreeSet<[u8; 32]>>) -> Self {
+        Self { active, all, serials, pks }
+    }
+
+    pub fn to_all(&self) -> bool {
+        self.all
+    }
+
+    pub fn contains_serial(&self, sn: &kaspa_hashes::Hash) -> bool {
+        self.all || self.serials.contains(sn)
+    }
+
+    pub fn contains_pk(&self, pk: &[u8; 32]) -> bool {
+        self.all || self.pks.contains(pk)
+    }
+}
+
+impl Single for NotesChangedSubscription {
+    fn apply_mutation(
+        &self,
+        _: &Arc<dyn Single>,
+        mutation: Mutation,
+        _: MutationPolicies,
+        _: &SubscriptionContext,
+    ) -> Result<MutationOutcome> {
+        assert_eq!(self.event_type(), mutation.event_type());
+        let Scope::NotesChanged(ref scope) = mutation.scope else {
+            return Ok(MutationOutcome::new());
+        };
+        let wants_all = scope.serials.is_empty() && scope.pks.is_empty();
+
+        let outcome = match (mutation.command, self.all, wants_all) {
+            // Start, target is "all": (re)subscribe to everything, dropping any selection.
+            (Command::Start, _, true) => {
+                if self.active && self.all {
+                    MutationOutcome::new()
+                } else {
+                    let mutated = Self::new(true, true, Default::default(), Default::default());
+                    MutationOutcome::with_mutated(Arc::new(mutated), vec![mutation])
+                }
+            }
+            // Start with a specific selection while already subscribed to "all": no-op,
+            // the wildcard already covers it.
+            (Command::Start, true, false) => MutationOutcome::new(),
+            // Start with a specific selection: union it into the current (possibly empty) set.
+            (Command::Start, false, false) => {
+                let mut serials = (*self.serials).clone();
+                let mut pks = (*self.pks).clone();
+                serials.extend(scope.serials.iter().copied());
+                pks.extend(scope.pks.iter().copied());
+                if serials.len() == self.serials.len() && pks.len() == self.pks.len() && self.active {
+                    MutationOutcome::new()
+                } else {
+                    let mutated = Self::new(true, false, Arc::new(serials), Arc::new(pks));
+                    MutationOutcome::with_mutated(Arc::new(mutated), vec![mutation])
+                }
+            }
+            // Stop everything: full unsubscribe regardless of current state.
+            (Command::Stop, _, true) => {
+                if !self.active {
+                    MutationOutcome::new()
+                } else {
+                    let mutated = Self::default();
+                    MutationOutcome::with_mutated(Arc::new(mutated), vec![mutation])
+                }
+            }
+            // Stop a specific selection while subscribed to "all": ambiguous (there's no
+            // wildcard-minus-exclusions concept here), so treated as a no-op — matches
+            // this subscription's overall "correctness-first, no partial-wildcard
+            // narrowing" scope, consistent with how a bare wildcard subscription behaves
+            // elsewhere in this notify backbone.
+            (Command::Stop, true, false) => MutationOutcome::new(),
+            // Stop a specific selection: remove it from the current set.
+            (Command::Stop, false, false) => {
+                if !self.active {
+                    MutationOutcome::new()
+                } else {
+                    let mut serials = (*self.serials).clone();
+                    let mut pks = (*self.pks).clone();
+                    scope.serials.iter().for_each(|sn| {
+                        serials.remove(sn);
+                    });
+                    scope.pks.iter().for_each(|pk| {
+                        pks.remove(pk);
+                    });
+                    if serials.is_empty() && pks.is_empty() {
+                        let mutated = Self::default();
+                        MutationOutcome::with_mutated(
+                            Arc::new(mutated),
+                            vec![Mutation::new(Command::Stop, NotesChangedScope::default().into())],
+                        )
+                    } else if serials.len() == self.serials.len() && pks.len() == self.pks.len() {
+                        MutationOutcome::new()
+                    } else {
+                        let mutated = Self::new(true, false, Arc::new(serials), Arc::new(pks));
+                        MutationOutcome::with_mutated(Arc::new(mutated), vec![mutation])
+                    }
+                }
+            }
+        };
+        Ok(outcome)
+    }
+}
+
+impl Subscription for NotesChangedSubscription {
+    fn event_type(&self) -> EventType {
+        EventType::NotesChanged
+    }
+
+    fn active(&self) -> bool {
+        self.active
+    }
+
+    fn scope(&self, _context: &SubscriptionContext) -> Scope {
+        match self.all {
+            true => NotesChangedScope::default().into(),
+            false => NotesChangedScope::new(self.serials.iter().copied().collect(), self.pks.iter().copied().collect()).into(),
+        }
     }
 }
 
@@ -813,6 +952,129 @@ mod tests {
                 mutation: stop_all(),
                 new_state: none(),
                 outcome: MutationOutcome::with_mutated(none(), vec![stop_all()]),
+            },
+        ]);
+        tests.run(&context)
+    }
+
+    #[test]
+    fn test_notes_changed_mutation() {
+        let context = SubscriptionContext::new();
+
+        let sn = |byte: u8| kaspa_hashes::Hash::from_bytes([byte; 32]);
+        let pk = |byte: u8| [byte; 32];
+
+        let s = |active: bool, all: bool, serials: &[u8], pks: &[u8]| {
+            Arc::new(NotesChangedSubscription::new(
+                active,
+                all,
+                Arc::new(serials.iter().map(|&b| sn(b)).collect()),
+                Arc::new(pks.iter().map(|&b| pk(b)).collect()),
+            )) as DynSubscription
+        };
+        let m = |command: Command, serials: &[u8], pks: &[u8]| -> Mutation {
+            Mutation {
+                command,
+                scope: Scope::NotesChanged(NotesChangedScope::new(
+                    serials.iter().map(|&b| sn(b)).collect(),
+                    pks.iter().map(|&b| pk(b)).collect(),
+                )),
+            }
+        };
+
+        // Subscriptions
+        let none = || s(false, false, &[], &[]);
+        let selected_1 = || s(true, false, &[1], &[]);
+        let selected_12 = || s(true, false, &[1, 2], &[]);
+        let selected_pk9 = || s(true, false, &[], &[9]);
+        let all = || s(true, true, &[], &[]);
+
+        // Mutations
+        let start_all = || m(Command::Start, &[], &[]);
+        let stop_all = || m(Command::Stop, &[], &[]);
+        let start_1 = || m(Command::Start, &[1], &[]);
+        let start_2 = || m(Command::Start, &[2], &[]);
+        let start_pk9 = || m(Command::Start, &[], &[9]);
+        let stop_1 = || m(Command::Stop, &[1], &[]);
+        let stop_2 = || m(Command::Stop, &[2], &[]);
+
+        let tests = MutationTests::new(vec![
+            MutationTest {
+                name: "NotesChangedSubscription None to All",
+                state: none(),
+                mutation: start_all(),
+                new_state: all(),
+                outcome: MutationOutcome::with_mutated(all(), vec![start_all()]),
+            },
+            MutationTest {
+                name: "NotesChangedSubscription None to Selected(serial 1)",
+                state: none(),
+                mutation: start_1(),
+                new_state: selected_1(),
+                outcome: MutationOutcome::with_mutated(selected_1(), vec![start_1()]),
+            },
+            MutationTest {
+                name: "NotesChangedSubscription None to Selected(pk 9)",
+                state: none(),
+                mutation: start_pk9(),
+                new_state: selected_pk9(),
+                outcome: MutationOutcome::with_mutated(selected_pk9(), vec![start_pk9()]),
+            },
+            MutationTest {
+                name: "NotesChangedSubscription Selected(1) union Start(2) -> Selected(1,2)",
+                state: selected_1(),
+                mutation: start_2(),
+                new_state: selected_12(),
+                outcome: MutationOutcome::with_mutated(selected_12(), vec![start_2()]),
+            },
+            MutationTest {
+                name: "NotesChangedSubscription Selected(1) re-Start(1) is a no-op",
+                state: selected_1(),
+                mutation: start_1(),
+                new_state: selected_1(),
+                outcome: MutationOutcome::new(),
+            },
+            MutationTest {
+                name: "NotesChangedSubscription All + Start(1) stays All (already covers it)",
+                state: all(),
+                mutation: start_1(),
+                new_state: all(),
+                outcome: MutationOutcome::new(),
+            },
+            MutationTest {
+                name: "NotesChangedSubscription Selected(1,2) Stop(1) -> Selected(2)",
+                state: selected_12(),
+                mutation: stop_1(),
+                new_state: s(true, false, &[2], &[]),
+                outcome: MutationOutcome::with_mutated(s(true, false, &[2], &[]), vec![stop_1()]),
+            },
+            MutationTest {
+                name: "NotesChangedSubscription Selected(1) Stop(1) empties to None",
+                state: selected_1(),
+                mutation: stop_1(),
+                new_state: none(),
+                outcome: MutationOutcome::with_mutated(none(), vec![stop_all()]),
+            },
+            MutationTest {
+                name: "NotesChangedSubscription Selected(1) Stop(2) (not watched) is a no-op",
+                state: selected_1(),
+                mutation: stop_2(),
+                new_state: selected_1(),
+                outcome: MutationOutcome::new(),
+            },
+            MutationTest {
+                name: "NotesChangedSubscription All Stop(all) -> None",
+                state: all(),
+                mutation: stop_all(),
+                new_state: none(),
+                outcome: MutationOutcome::with_mutated(none(), vec![stop_all()]),
+            },
+            MutationTest {
+                name: "NotesChangedSubscription All partial Stop(1) is a no-op (no wildcard-minus-exclusion)",
+                state: all(),
+                mutation: stop_1(),
+                new_state: all(),
+                outcome: MutationOutcome::new(),
             },
         ]);
         tests.run(&context)

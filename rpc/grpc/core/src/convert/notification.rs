@@ -6,8 +6,8 @@ use crate::protowire::{
     NotifyPruningPointUtxoSetOverrideResponseMessage, NotifyUtxosChangedRequestMessage, NotifyUtxosChangedResponseMessage,
     PruningPointUtxoSetOverrideNotificationMessage, SinkBlueScoreChangedNotificationMessage,
     StopNotifyingPruningPointUtxoSetOverrideRequestMessage, StopNotifyingPruningPointUtxoSetOverrideResponseMessage,
-    StopNotifyingUtxosChangedRequestMessage, StopNotifyingUtxosChangedResponseMessage, UtxosChangedNotificationMessage,
-    VirtualChainChangedNotificationMessage, VirtualDaaScoreChangedNotificationMessage,
+    NotesChangedNotificationMessage, StopNotifyingUtxosChangedRequestMessage, StopNotifyingUtxosChangedResponseMessage,
+    UtxosChangedNotificationMessage, VirtualChainChangedNotificationMessage, VirtualDaaScoreChangedNotificationMessage,
 };
 use crate::{from, try_from};
 use kaspa_notify::subscription::Command;
@@ -34,6 +34,7 @@ from!(item: &kaspa_rpc_core::Notification, Payload, {
         Notification::PruningPointUtxoSetOverride(notification) => {
             Payload::PruningPointUtxoSetOverrideNotification(notification.into())
         },
+        Notification::NotesChanged(notification) => Payload::NotesChangedNotification(notification.into()),
     }
 });
 
@@ -58,6 +59,13 @@ from!(item: &kaspa_rpc_core::FinalityConflictResolvedNotification, FinalityConfl
 });
 
 from!(item: &kaspa_rpc_core::UtxosChangedNotification, UtxosChangedNotificationMessage, {
+    Self {
+        added: item.added.iter().map(|x| x.into()).collect::<Vec<_>>(),
+        removed: item.removed.iter().map(|x| x.into()).collect::<Vec<_>>(),
+    }
+});
+
+from!(item: &kaspa_rpc_core::NotesChangedNotification, NotesChangedNotificationMessage, {
     Self {
         added: item.added.iter().map(|x| x.into()).collect::<Vec<_>>(),
         removed: item.removed.iter().map(|x| x.into()).collect::<Vec<_>>(),
@@ -117,6 +125,7 @@ try_from!(item: &Payload, kaspa_rpc_core::Notification, {
         Payload::PruningPointUtxoSetOverrideNotification(notification) => {
             Notification::PruningPointUtxoSetOverride(notification.try_into()?)
         }
+        Payload::NotesChangedNotification(notification) => Notification::NotesChanged(notification.try_into()?),
         _ => Err(RpcError::UnsupportedFeature)?,
     }
 });
@@ -155,6 +164,13 @@ try_from!(item: &FinalityConflictResolvedNotificationMessage, kaspa_rpc_core::Fi
 });
 
 try_from!(item: &UtxosChangedNotificationMessage, kaspa_rpc_core::UtxosChangedNotification, {
+    Self {
+        added: Arc::new(item.added.iter().map(|x| x.try_into()).collect::<Result<Vec<_>, _>>()?),
+        removed: Arc::new(item.removed.iter().map(|x| x.try_into()).collect::<Result<Vec<_>, _>>()?),
+    }
+});
+
+try_from!(item: &NotesChangedNotificationMessage, kaspa_rpc_core::NotesChangedNotification, {
     Self {
         added: Arc::new(item.added.iter().map(|x| x.try_into()).collect::<Result<Vec<_>, _>>()?),
         removed: Arc::new(item.removed.iter().map(|x| x.try_into()).collect::<Result<Vec<_>, _>>()?),

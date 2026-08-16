@@ -75,6 +75,10 @@ impl ListeningClient {
     pub fn virtual_daa_score_changed_listener(&self) -> Option<Listener> {
         self.listener(EventType::VirtualDaaScoreChanged)
     }
+
+    pub fn notes_changed_listener(&self) -> Option<Listener> {
+        self.listener(EventType::NotesChanged)
+    }
 }
 
 impl Deref for ListeningClient {

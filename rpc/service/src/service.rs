@@ -517,6 +517,34 @@ NOTE: This error usually indicates an RPC conversion error between the node and 
         })
     }
 
+    async fn get_notes_by_serial_call(
+        &self,
+        _connection: Option<&DynRpcConnection>,
+        request: GetNotesBySerialRequest,
+    ) -> RpcResult<GetNotesBySerialResponse> {
+        // A live point lookup against virtual's own pool state — no index dependency,
+        // unlike `get_utxos_by_addresses_call` above (FORK-PLAN P6.9).
+        let session = self.consensus_manager.consensus().unguarded_session();
+        let notes = session.async_get_pool_notes(request.serials.clone()).await;
+        let entries = request
+            .serials
+            .iter()
+            .zip(notes)
+            .filter_map(|(sn, note)| note.map(|n| RpcNoteEntry { sn: *sn, denomination: n.d as u8, pk: n.pk }))
+            .collect();
+        Ok(GetNotesBySerialResponse::new(entries))
+    }
+
+    async fn get_pool_stats_call(
+        &self,
+        _connection: Option<&DynRpcConnection>,
+        _request: GetPoolStatsRequest,
+    ) -> RpcResult<GetPoolStatsResponse> {
+        let session = self.consensus_manager.consensus().unguarded_session();
+        let stats = session.async_get_pool_stats().await;
+        Ok(GetPoolStatsResponse::new(stats.counts))
+    }
+
     async fn get_blocks_call(
         &self,
         _connection: Option<&DynRpcConnection>,

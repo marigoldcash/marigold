@@ -23,9 +23,9 @@ use kaspa_grpc_client::GrpcClient;
 use kaspa_hashes::Hash;
 use kaspa_notify::{
     events::EventType,
-    scope::{BlockAddedScope, UtxosChangedScope, VirtualDaaScoreChangedScope},
+    scope::{BlockAddedScope, NotesChangedScope, UtxosChangedScope, VirtualDaaScoreChangedScope},
 };
-use kaspa_rpc_core::{Notification, RpcTransaction, RpcTransactionId, api::rpc::RpcApi};
+use kaspa_rpc_core::{Notification, RpcNoteEntry, RpcTransaction, RpcTransactionId, api::rpc::RpcApi};
 use kaspa_txscript::{
     opcodes::codes, pay_to_address_script, pay_to_script_hash_script, pay_to_script_hash_signature_script,
     script_builder::ScriptBuilder,
@@ -1516,6 +1516,149 @@ async fn daemon_ibd_pool_state_sync_test() {
     rpc_client2.disconnect().await.unwrap();
     kaspad1.shutdown();
     kaspad2.shutdown();
+}
+
+// FORK-PLAN P6.9's verify condition: a client subscribed to NotesChanged sees a notification
+// when a mint lands and again when a rotate consumes/produces notes, proving the full
+// consensus -> notify -> rpc-core -> grpc wiring end to end (the notify crate's own unit
+// tests already cover the subscription-filtering logic in isolation). Also exercises the two
+// new "get" RPC methods added alongside the notification.
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn daemon_notes_changed_notification_test() {
+    use kaspa_consensus_core::notepool::{
+        DenominationTag, FreshnessAnchor, MintOp, NewNote, PoolOp, SignedGroup, TransferOp, hashing as pool_hashing,
+    };
+    use kaspa_consensus_core::subnets::SUBNETWORK_ID_NOTE_POOL;
+
+    init_allocator_with_default_settings();
+    kaspa_core::log::try_init_logger("INFO,kaspa_testing_integration=trace,kaspa_notify=debug,kaspa_rpc_core=debug");
+
+    let args =
+        Args { simnet: true, unsafe_rpc: true, enable_unsynced_mining: true, disable_upnp: true, utxoindex: true, ..Default::default() };
+    let total_fd_limit = 10;
+    let mut kaspad1 = Daemon::new_random_with_args(args, total_fd_limit);
+    let rpc_client1 = kaspad1.start().await;
+
+    let (miner_sk, miner_pk) = secp256k1::generate_keypair(&mut thread_rng());
+    let miner_address =
+        Address::new(kaspad1.network.into(), kaspa_addresses::Version::PubKey, &miner_pk.x_only_public_key().0.serialize());
+    let miner_schnorr_key = secp256k1::Keypair::from_secret_key(secp256k1::SECP256K1, &miner_sk);
+    let miner_note_pk: [u8; 32] = miner_pk.x_only_public_key().0.serialize();
+    let holder_key = secp256k1::Keypair::new(secp256k1::SECP256K1, &mut thread_rng());
+    let holder_pk: [u8; 32] = holder_key.public_key().x_only_public_key().0.serialize();
+
+    // Mine to a mature coinbase (a margin beyond coinbase_maturity blocks so the earliest
+    // coinbase output is actually spendable, mirroring daemon_ibd_pool_state_sync_test).
+    let coinbase_maturity = SIMNET_PARAMS.coinbase_maturity();
+    let initial_blocks = coinbase_maturity + 20;
+    for _ in 0..initial_blocks {
+        let template = rpc_client1.get_block_template(miner_address.clone(), vec![]).await.unwrap();
+        rpc_client1.submit_block(template.block, false).await.unwrap();
+    }
+
+    // Subscribe to ALL NotesChanged events: an empty scope means "all", mirroring
+    // UtxosChangedScope's empty-addresses convention (see the notify crate's own
+    // "None -> All" mutation test case for the underlying subscription logic).
+    let mut client = ListeningClient::connect(&kaspad1).await;
+    client.start_notify(NotesChangedScope::default().into()).await.unwrap();
+
+    // Mint two notes (1 + 0.01 MAGLD) from a real mature coinbase input (P6.6's value
+    // binding) through the real mempool (P6.7's entry path). Minting more than the rotate
+    // below will consume leaves a real pool-value fee (D0_01) behind on the rotate, since a
+    // consumed == produced rotate carries zero fee and is rejected by the standard relay
+    // policy exactly like a zero-fee transparent transaction would be.
+    let utxos = fetch_spendable_utxos(&rpc_client1, miner_address.clone(), coinbase_maturity).await;
+    let (outpoint, entry) = utxos.first().expect("mature utxo").clone();
+    let mint_notes = vec![NewNote { d: DenominationTag::D1, pk: miner_note_pk }, NewNote { d: DenominationTag::D0_01, pk: miner_note_pk }];
+    let notes_value: u64 = mint_notes.iter().map(|n| n.d.petals()).sum();
+    let mint_fee = 2 * fee::calc_for_plain_standard_tx_with_extra_serialized_bytes(1, 1, 200);
+    assert!(entry.amount > notes_value + mint_fee, "coinbase utxo too small to fund the mint");
+    let change = entry.amount - notes_value - mint_fee;
+    let unsigned_mint = Transaction::new(
+        TX_VERSION_TOCCATA,
+        vec![TransactionInput::new(outpoint, vec![], 0, 1)],
+        vec![TransactionOutput { value: change, script_public_key: pay_to_address_script(&miner_address), covenant: None }],
+        0,
+        SUBNETWORK_ID_NOTE_POOL,
+        0,
+        PoolOp::Mint(MintOp { new_notes: mint_notes }).encode_payload(),
+    );
+    let mint = sign(MutableTransaction::with_entries(unsigned_mint, vec![entry]), miner_schnorr_key).tx;
+    let mint_id = mint.id();
+    let mint_serials: Vec<Hash> = (0..2).map(|i| pool_hashing::serial_hash(&mint_id, i)).collect();
+    rpc_client1.submit_transaction((&mint).into(), false).await.unwrap();
+
+    for _ in 0..10 {
+        let template = rpc_client1.get_block_template(miner_address.clone(), vec![]).await.unwrap();
+        rpc_client1.submit_block(template.block, false).await.unwrap();
+    }
+
+    let mint_notification = client
+        .wait_for_notification(EventType::NotesChanged, Duration::from_secs(30), |n| {
+            matches!(n, Notification::NotesChanged(msg) if msg.added.iter().any(|e| e.sn == mint_serials[0]))
+        })
+        .await;
+    let Notification::NotesChanged(msg) = mint_notification else { unreachable!() };
+    assert_eq!(msg.added.len(), 2);
+    for (serial, expected_d) in mint_serials.iter().zip([DenominationTag::D1, DenominationTag::D0_01]) {
+        let entry = msg.added.iter().find(|e| e.sn == *serial).unwrap();
+        assert_eq!(entry.denomination, expected_d as u8);
+        assert_eq!(entry.pk, miner_note_pk);
+    }
+    assert!(msg.removed.is_empty(), "a fresh mint must not report any removed notes");
+
+    // The two new "get" RPC methods agree with what the notification reported.
+    let stats = rpc_client1.get_pool_stats().await.unwrap();
+    assert_eq!(stats[DenominationTag::D1 as usize], 1);
+    assert_eq!(stats[DenominationTag::D0_01 as usize], 1);
+    let fetched = rpc_client1.get_notes_by_serial(mint_serials.clone()).await.unwrap();
+    assert_eq!(
+        fetched,
+        vec![
+            RpcNoteEntry { sn: mint_serials[0], denomination: DenominationTag::D1 as u8, pk: miner_note_pk },
+            RpcNoteEntry { sn: mint_serials[1], denomination: DenominationTag::D0_01 as u8, pk: miner_note_pk },
+        ]
+    );
+
+    client.notes_changed_listener().unwrap().drain();
+
+    // Rotate both notes to a new key, producing only the D1 note: the D0_01 difference is
+    // the rotate's fee. The notification should now report both old serials as removed and
+    // the new one as added.
+    let outputs_hash = pool_hashing::transparent_outputs_hash(&[]);
+    let rotate_produced = vec![NewNote { d: DenominationTag::D1, pk: holder_pk }];
+    let sig_hash = pool_hashing::signing_hash(1, &mint_serials, &rotate_produced, outputs_hash, 0);
+    let sig_msg = secp256k1::Message::from_digest(sig_hash.into());
+    let signature = *miner_schnorr_key.sign_schnorr(sig_msg).as_ref();
+    let rotate_op = PoolOp::Transfer(TransferOp {
+        consumed: vec![SignedGroup { serials: mint_serials.clone(), signature }],
+        produced: rotate_produced,
+        freshness: FreshnessAnchor { anchor_daa_score: 0 },
+    });
+    let rotate = Transaction::new(TX_VERSION_TOCCATA, vec![], vec![], 0, SUBNETWORK_ID_NOTE_POOL, 0, rotate_op.encode_payload());
+    let rotate_id = rotate.id();
+    let holder_serial = pool_hashing::serial_hash(&rotate_id, 0);
+    rpc_client1.submit_transaction((&rotate).into(), false).await.unwrap();
+
+    for _ in 0..10 {
+        let template = rpc_client1.get_block_template(miner_address.clone(), vec![]).await.unwrap();
+        rpc_client1.submit_block(template.block, false).await.unwrap();
+    }
+
+    let rotate_notification = client
+        .wait_for_notification(EventType::NotesChanged, Duration::from_secs(30), |n| {
+            matches!(n, Notification::NotesChanged(msg) if msg.removed.iter().any(|e| e.sn == mint_serials[0]))
+        })
+        .await;
+    let Notification::NotesChanged(msg) = rotate_notification else { unreachable!() };
+    assert_eq!(msg.removed.len(), 2);
+    for serial in &mint_serials {
+        assert!(msg.removed.iter().any(|e| e.sn == *serial));
+    }
+    assert!(msg.added.iter().any(|e| e.sn == holder_serial && e.pk == holder_pk));
+
+    rpc_client1.disconnect().await.unwrap();
+    kaspad1.shutdown();
 }
 
 // The following test runtime parameters are required for a graceful shutdown of the gRPC server

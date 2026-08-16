@@ -40,6 +40,8 @@ pub enum RpcApiOps {
     NotifyVirtualDaaScoreChanged = 16,
     NotifyVirtualChainChanged = 17,
     NotifySinkBlueScoreChanged = 18,
+    /// FORK-PLAN P6.9: subscribe to note-pool changes, scoped to watched serials/pks.
+    NotifyNotesChanged = 19,
 
     // Notification ops required by wRPC
 
@@ -54,6 +56,7 @@ pub enum RpcApiOps {
     VirtualDaaScoreChangedNotification = 66,
     PruningPointUtxoSetOverrideNotification = 67,
     NewBlockTemplateNotification = 68,
+    NotesChangedNotification = 69,
 
     // RPC methods
     /// Ping the node to check if connection is alive
@@ -144,6 +147,10 @@ pub enum RpcApiOps {
     GetBlockRewardInfo = 152,
     /// Get Seq-Commit Lane Proof
     GetSeqCommitLaneProof = 153,
+    /// Get note(s) by serial (FORK-PLAN P6.9)
+    GetNotesBySerial = 154,
+    /// Get note-pool stats: live note count per denomination (FORK-PLAN P6.9)
+    GetPoolStats = 155,
 }
 
 impl RpcApiOps {
@@ -159,6 +166,7 @@ impl RpcApiOps {
                 | RpcApiOps::NotifyFinalityConflictResolved
                 | RpcApiOps::NotifySinkBlueScoreChanged
                 | RpcApiOps::NotifyVirtualDaaScoreChanged
+                | RpcApiOps::NotifyNotesChanged
                 | RpcApiOps::Subscribe
                 | RpcApiOps::Unsubscribe
         )
@@ -185,6 +193,7 @@ impl From<EventType> for RpcApiOps {
             EventType::VirtualDaaScoreChanged => RpcApiOps::VirtualDaaScoreChangedNotification,
             EventType::PruningPointUtxoSetOverride => RpcApiOps::PruningPointUtxoSetOverrideNotification,
             EventType::NewBlockTemplate => RpcApiOps::NewBlockTemplateNotification,
+            EventType::NotesChanged => RpcApiOps::NotesChangedNotification,
         }
     }
 }

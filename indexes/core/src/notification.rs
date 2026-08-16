@@ -7,7 +7,7 @@ use kaspa_notify::{
     subscription::{
         Subscription,
         context::SubscriptionContext,
-        single::{OverallSubscription, UtxosChangedSubscription, VirtualChainChangedSubscription},
+        single::{NotesChangedSubscription, OverallSubscription, UtxosChangedSubscription, VirtualChainChangedSubscription},
     },
 };
 use std::{collections::HashMap, sync::Arc};
@@ -51,6 +51,18 @@ impl NotificationTrait for Notification {
             }
             false => None,
         }
+    }
+
+    fn apply_notes_changed_subscription(
+        &self,
+        _subscription: &NotesChangedSubscription,
+        _context: &SubscriptionContext,
+    ) -> Option<Self> {
+        // This index's Notification enum carries no NotesChanged variant (the pool has
+        // no indexer stage — see rpc/service's routing comment for why); this exists
+        // only to satisfy the trait, mirrors `apply_virtual_chain_changed_subscription`
+        // above, which is in the same position for the same reason.
+        Some(self.clone())
     }
 
     fn event_type(&self) -> EventType {

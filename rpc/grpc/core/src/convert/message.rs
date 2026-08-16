@@ -606,6 +606,31 @@ from!(item: RpcResult<&kaspa_rpc_core::GetSeqCommitLaneProofResponse>, protowire
     }
 });
 
+from!(item: &kaspa_rpc_core::RpcNoteEntry, protowire::RpcNoteEntryMessage, {
+    Self { sn: item.sn.as_bytes().to_vec(), denomination: item.denomination as u32, pk: item.pk.to_vec() }
+});
+
+from!(item: &kaspa_rpc_core::NotifyNotesChangedRequest, protowire::NotifyNotesChangedRequestMessage, {
+    Self {
+        serials: item.serials.iter().map(|x| x.as_bytes().to_vec()).collect(),
+        pks: item.pks.iter().map(|x| x.to_vec()).collect(),
+        command: item.command.into(),
+    }
+});
+from!(RpcResult<&kaspa_rpc_core::NotifyNotesChangedResponse>, protowire::NotifyNotesChangedResponseMessage);
+
+from!(item: &kaspa_rpc_core::GetNotesBySerialRequest, protowire::GetNotesBySerialRequestMessage, {
+    Self { serials: item.serials.iter().map(|x| x.as_bytes().to_vec()).collect() }
+});
+from!(item: RpcResult<&kaspa_rpc_core::GetNotesBySerialResponse>, protowire::GetNotesBySerialResponseMessage, {
+    Self { notes: item.notes.iter().map(|x| x.into()).collect(), error: None }
+});
+
+from!(&kaspa_rpc_core::GetPoolStatsRequest, protowire::GetPoolStatsRequestMessage);
+from!(item: RpcResult<&kaspa_rpc_core::GetPoolStatsResponse>, protowire::GetPoolStatsResponseMessage, {
+    Self { counts: item.counts.to_vec(), error: None }
+});
+
 // ----------------------------------------------------------------------------
 // protowire to rpc_core
 // ----------------------------------------------------------------------------
@@ -1156,6 +1181,45 @@ try_from!(item: &protowire::GetSeqCommitLaneProofResponseMessage, RpcResult<kasp
         inactivity_shortcut: hash_from_bytes(&item.inactivity_shortcut)?,
     }
 });
+
+try_from!(item: &protowire::RpcNoteEntryMessage, kaspa_rpc_core::RpcNoteEntry, {
+    Self {
+        sn: hash_from_bytes(&item.sn)?,
+        denomination: item.denomination as u8,
+        pk: array_from_bytes(&item.pk)?,
+    }
+});
+
+try_from!(item: &protowire::NotifyNotesChangedRequestMessage, kaspa_rpc_core::NotifyNotesChangedRequest, {
+    Self {
+        serials: item.serials.iter().map(|x| hash_from_bytes(x)).collect::<RpcResult<Vec<_>>>()?,
+        pks: item.pks.iter().map(|x| array_from_bytes(x)).collect::<RpcResult<Vec<_>>>()?,
+        command: item.command.into(),
+    }
+});
+try_from!(&protowire::NotifyNotesChangedResponseMessage, RpcResult<kaspa_rpc_core::NotifyNotesChangedResponse>);
+
+try_from!(item: &protowire::GetNotesBySerialRequestMessage, kaspa_rpc_core::GetNotesBySerialRequest, {
+    Self { serials: item.serials.iter().map(|x| hash_from_bytes(x)).collect::<RpcResult<Vec<_>>>()? }
+});
+try_from!(item: &protowire::GetNotesBySerialResponseMessage, RpcResult<kaspa_rpc_core::GetNotesBySerialResponse>, {
+    Self { notes: item.notes.iter().map(|x| x.try_into()).collect::<RpcResult<Vec<_>>>()? }
+});
+
+try_from!(&protowire::GetPoolStatsRequestMessage, kaspa_rpc_core::GetPoolStatsRequest);
+try_from!(item: &protowire::GetPoolStatsResponseMessage, RpcResult<kaspa_rpc_core::GetPoolStatsResponse>, {
+    Self {
+        counts: item
+            .counts
+            .as_slice()
+            .try_into()
+            .map_err(|_| RpcError::General(format!("expected 8 pool stat counts, got {}", item.counts.len())))?,
+    }
+});
+
+fn array_from_bytes(bytes: &[u8]) -> RpcResult<[u8; 32]> {
+    <[u8; 32]>::try_from(bytes).map_err(|_| RpcError::General(format!("expected 32 bytes, got {}", bytes.len())))
+}
 
 fn hash_from_bytes(bytes: &[u8]) -> RpcResult<RpcHash> {
     <[u8; 32]>::try_from(bytes)

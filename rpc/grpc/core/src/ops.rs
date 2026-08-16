@@ -91,6 +91,8 @@ pub enum KaspadPayloadOps {
     GetVirtualChainFromBlockV2,
     GetBlockRewardInfo,
     GetSeqCommitLaneProof,
+    GetNotesBySerial,
+    GetPoolStats,
 
     // Subscription commands for starting/stopping notifications
     NotifyBlockAdded,
@@ -101,6 +103,7 @@ pub enum KaspadPayloadOps {
     NotifyPruningPointUtxoSetOverride,
     NotifyVirtualDaaScoreChanged,
     NotifyVirtualChainChanged,
+    NotifyNotesChanged,
 
     // Legacy stop subscription commands
     StopNotifyingUtxosChanged,

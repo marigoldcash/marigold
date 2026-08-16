@@ -559,6 +559,15 @@ impl ConsensusSessionOwned {
     pub async fn async_is_pruning_pool_state_stable(&self) -> bool {
         self.clone().spawn_blocking(move |c| c.is_pruning_pool_state_stable()).await
     }
+    pub async fn async_get_pool_note(&self, sn: Hash) -> Option<kaspa_consensus_core::notepool::NewNote> {
+        self.clone().spawn_blocking(move |c| c.get_pool_note(sn)).await
+    }
+    pub async fn async_get_pool_notes(&self, sns: Vec<Hash>) -> Vec<Option<kaspa_consensus_core::notepool::NewNote>> {
+        self.clone().spawn_blocking(move |c| c.get_pool_notes(&sns)).await
+    }
+    pub async fn async_get_pool_stats(&self) -> kaspa_consensus_core::notepool::PoolStats {
+        self.clone().spawn_blocking(move |c| c.get_pool_stats()).await
+    }
     pub async fn async_get_pruning_point_smt_metadata(
         &self,
         expected_pp: Hash,

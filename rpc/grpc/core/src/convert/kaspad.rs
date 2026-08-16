@@ -67,6 +67,8 @@ pub mod kaspad_request_convert {
     impl_into_kaspad_request!(GetVirtualChainFromBlockV2);
     impl_into_kaspad_request!(GetBlockRewardInfo);
     impl_into_kaspad_request!(GetSeqCommitLaneProof);
+    impl_into_kaspad_request!(GetNotesBySerial);
+    impl_into_kaspad_request!(GetPoolStats);
 
     impl_into_kaspad_request!(NotifyBlockAdded);
     impl_into_kaspad_request!(NotifyNewBlockTemplate);
@@ -76,6 +78,7 @@ pub mod kaspad_request_convert {
     impl_into_kaspad_request!(NotifyVirtualDaaScoreChanged);
     impl_into_kaspad_request!(NotifyVirtualChainChanged);
     impl_into_kaspad_request!(NotifySinkBlueScoreChanged);
+    impl_into_kaspad_request!(NotifyNotesChanged);
 
     macro_rules! impl_into_kaspad_request {
         ($name:tt) => {
@@ -208,6 +211,8 @@ pub mod kaspad_response_convert {
     impl_into_kaspad_response!(GetVirtualChainFromBlockV2);
     impl_into_kaspad_response!(GetBlockRewardInfo);
     impl_into_kaspad_response!(GetSeqCommitLaneProof);
+    impl_into_kaspad_response!(GetNotesBySerial);
+    impl_into_kaspad_response!(GetPoolStats);
 
     impl_into_kaspad_notify_response!(NotifyBlockAdded);
     impl_into_kaspad_notify_response!(NotifyNewBlockTemplate);
@@ -217,6 +222,7 @@ pub mod kaspad_response_convert {
     impl_into_kaspad_notify_response!(NotifyVirtualDaaScoreChanged);
     impl_into_kaspad_notify_response!(NotifyVirtualChainChanged);
     impl_into_kaspad_notify_response!(NotifySinkBlueScoreChanged);
+    impl_into_kaspad_notify_response!(NotifyNotesChanged);
 
     impl_into_kaspad_notify_response!(NotifyUtxosChanged, StopNotifyingUtxosChanged);
     impl_into_kaspad_notify_response!(NotifyPruningPointUtxoSetOverride, StopNotifyingPruningPointUtxoSetOverride);

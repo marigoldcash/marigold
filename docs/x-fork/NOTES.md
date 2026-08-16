@@ -2023,3 +2023,138 @@ incremental path produce identical roots AND identically-updatable branch struct
 and `clear_resets_to_empty_root`. Full `cargo test --workspace --exclude
 kaspa-testing-integration` and the integration suite both green; `cargo build
 --workspace` clean.
+
+### P6.9 — RPC + notifications (2026-08-16)
+
+A research pass first mapped the existing `UtxosChanged` pipeline in
+full (`notify`'s generic `EventType`/`Scope`/`Subscription`/`Notification` apparatus,
+the three independent per-crate `Notification` enums each built via the same
+`full_featured!` macro, and the two-stage consensus→index emission `UtxosChanged`
+uses) before writing any `NotesChanged` code, specifically to answer one question:
+does a note need the same second-stage/index re-resolution UTXOs do?
+
+**Answer: no, and that's the single decision that made this step small.**
+`UtxosChanged` needs two stages because a raw consensus UTXO diff only carries
+`ScriptPublicKey`s, and resolving those to addresses (what listeners actually filter
+on) requires the optional `utxoindex`'s own separate re-emission on an `IndexNotifier`
+— see `rpc/service/src/service.rs`'s `index_collector`, wired only
+`if index_notifier.is_some()`. A note's identity (`sn`, `d`, `pk`) has no such
+indirection — everything a listener could filter on is already sitting in the raw
+`PoolDiff` the virtual processor computes on every commit. So `NotesChanged` emission
+is one call, `self.notification_root.notify(Notification::NotesChanged(...))`, dropped
+right next to the existing `UtxosChanged` emission in
+`consensus/src/pipeline/virtual_processor/processor.rs`, reusing
+`accumulated_pool_diff` — P6.4 had already computed it at that exact point in
+`resolve_virtual`, just never wrapped it in a `Notification`. `rpc/service`'s routing
+needed zero extra code for the same reason: `EventSwitches` defaults every new
+`EventType` to enabled, and only `UtxosChanged`/`PruningPointUtxoSetOverride` are
+explicitly carved out for the index path.
+
+**Subscription design — deliberately not reusing `UtxosChangedSubscription`.** The
+existing UTXO subscription is built on `notify/src/address/tracker.rs`'s `Tracker`, an
+`IndexMap`-based reference-counting structure that exists because many independent
+wallets watch *overlapping* address sets through one shared index — recycling entries
+across listeners matters at scale. There's no analogous sharing need for note
+serials/pks (nothing indexes them the way addresses are indexed), so
+`NotesChangedSubscription` (`notify/src/subscription/single.rs`) is a plain
+standalone value type: `active: bool, all: bool, serials: Arc<BTreeSet<Hash>>, pks:
+Arc<BTreeSet<[u8;32]>>`. `BTreeSet` over the more obvious `HashSet` for one concrete
+reason: `BTreeSet<T: Hash>` itself implements `std::hash::Hash` (needed because
+`Single: ... + DynHash + ...` requires `#[derive(Hash)]` on the subscription struct),
+`HashSet` does not. One file-scope gotcha this produced: `single.rs` already has `use
+std::hash::{Hash, Hasher}` for its existing manual `Hash` impls, which shadows the
+type name `Hash` — every new reference to `kaspa_hashes::Hash` in that file had to be
+fully qualified, caught with a pre-build `sed` sweep rather than a wasted compile.
+
+**Plumbing, crate by crate (each following the plan's own instruction to model this on
+`UtxosChanged`, mechanically, once the two decisions above were made):**
+- `notify` (base crate): `EventType::NotesChanged` (event #10), `Scope::NotesChanged`
+  + `NotesChangedScope` (hand-rolled `Serializer`/`Deserializer`, borsh underneath),
+  `ArrayBuilder::single`'s new match arm (the `compounded()` aggregate-gating builder
+  was deliberately left on its existing catch-all — it only needs to know "is anyone
+  listening," which `NotesChanged` doesn't complicate). `apply_notes_changed_subscription`
+  became a new *required* method on the core `Notification` trait, which rippled a
+  trivial passthrough into every implementor with no `NotesChanged` variant of its own
+  (`indexes/core`'s `Notification`, two test-fixture types) — caught one at a time by
+  successive `cargo build --workspace` runs, not surprising, exactly as predicted.
+- Three independent per-crate `Notification` enums, each needing its own variant +
+  impl: `consensus_notify` (raw), `rpc_core` (wasm/serde-friendly, its own integer
+  discriminants), and a trivial-passthrough-only touch to `index_core` (no variant —
+  confirms the "no index stage needed" decision at the type level, not just logically).
+- `rpc/core`: two new `RpcApiOps` (`GetNotesBySerial`, `GetPoolStats`) plus
+  `NotifyNotesChanged`/`NotesChangedNotification`, new wire types in
+  `model/message.rs` (`RpcNoteEntry`, request/response pairs, all hand-rolled
+  Serializer/Deserializer per the file's existing convention), and — unlike
+  `UtxosChangedNotification`'s converter, which is a TODO-stub in this codebase — a
+  REAL `consensus_notify::NotesChangedNotification → rpc_core::NotesChangedNotification`
+  converter, because there's no index step deferring real resolution to later.
+  `get_pool_stats` is backed by a new `ConsensusApi::get_pool_stats` that does a full
+  `DbNotePoolStore::iterator()` scan — the same correctness-first,
+  no-incremental-counter tradeoff P6.5 already established for commitment rebuilds,
+  applied here on purpose rather than adding a maintained running counter.
+- `rpc/grpc/{core,server,client}`: full bespoke proto messages (grpc has no generic
+  subscription payload — every `Notify*`/notification type needs its own
+  `.proto` message and converter) plus the usual macro-array entries
+  (`payload_type_enum!`, `build_grpc_server_interface!`, `impl_into_kaspad_request!`
+  etc.) mirroring the existing `GetSeqCommitLaneProof`/`UtxosChanged` precedents
+  exactly — no design surprises here, confirming the research pass's predicted file
+  list was complete.
+- `rpc/wrpc/{server,client}`: a real, confirmed architectural asymmetry worth noting
+  for future RPC additions — `Subscribe`/`Unsubscribe` in
+  `rpc/wrpc/server/src/router.rs` are already fully generic over `Serializable<Scope>`,
+  so once `Scope::NotesChanged` existed as a variant, wrpc subscription support was
+  **entirely free**, zero notify-specific code. Only the two new non-subscription "get"
+  ops needed macro-array entries on the wrpc client and server interfaces.
+  `rpc/wrpc/wasm` needed nothing, consistent with it having no route even for the
+  pre-existing `GetSeqCommitLaneProof` method — WASM JS bindings are wired per-method
+  on a separate, later schedule, not automatically.
+
+**A genuinely new CLI capability, not just a mirrored one.** Every existing
+`RpcApiOps::*` arm in `cli/src/modules/rpc.rs` is a one-shot
+`rpc.xxx_call(...).await?` — there was no precedent anywhere in the file for
+registering a listener and consuming a notification stream. `cli/src/notifier.rs`
+looked like the obvious place to find that pattern and turned out to be a completely
+unrelated wallet-UI toast/icon system (`Transaction`/`Clipboard`/`Processing` icons) —
+a dead end worth recording so a future reader doesn't repeat the detour. The actual
+pattern came from `rpc/wrpc/examples/subscriber/src/main.rs`, a maintained example
+built for exactly this: `rpc.register_new_listener(ChannelConnection::new(...))` →
+`rpc.start_notify(listener_id, Scope::NotesChanged(...))` → drain the channel. The new
+`rpc notify-notes-changed <serial-hex>...` command treats all args as watched
+serials (mirroring `GetUtxosByAddresses`'s all-args-are-addresses convention), prints
+each `NotesChanged` notification received via the existing `tprintln!`/`self.println`
+helpers, and gives up after 120s so a manual verify session doesn't hang forever — a
+one-shot demonstration command, not a permanent daemon feature. One naming gotcha:
+`crate::imports::*` already brings in `crate::notifier::Notification` (the unrelated
+toast-icon enum) as an explicit, non-glob `pub use`, which — per normal Rust
+resolution — shadows the glob-imported `kaspa_rpc_core::Notification` from
+`kaspa_wrpc_client::prelude::*`. Every reference to the RPC notification type in
+`rpc.rs` had to be written as `kaspa_rpc_core::Notification`, not bare `Notification`.
+
+✅ *Verify:* new `daemon_notes_changed_notification_test` (one real simnet daemon,
+`--utxoindex` — `fetch_spendable_utxos` needs it): subscribes a `ListeningClient` to
+`NotesChangedScope::default()` (empty serials/pks on `Start` == "watch everything",
+mirroring `UtxosChangedScope`'s empty-addresses convention), mints two notes (1 MAGLD
++ 0.01 MAGLD) through the real P6.6-funded/P6.7-mempool path, and asserts the
+resulting notification's `added` carries both new notes with the right
+denomination/pk and an empty `removed`. Cross-checks the two new "get" RPC methods
+agree with what the notification reported (`get_pool_stats`, `get_notes_by_serial`).
+Then rotates both notes to a new key, producing only one note back (the D0_01
+difference is retained as the rotate's fee — a consumed-equals-produced rotate has
+zero fee and is correctly rejected by the standard mass-based relay-fee policy, the
+same as a zero-fee transparent transaction would be; this was the second of two
+test-harness bugs caught while writing the test, not product bugs — the first was a
+forgotten `--utxoindex` arg). Asserts the second notification reports both old
+serials `removed` and the new one `added`. Also extended the pre-existing
+`rpc_tests::sanity_test` — which force-matches every `KaspadPayloadOps` variant with
+`#[allow(unreachable_patterns)]` deliberately absent, so a new RPC op without a test
+arm fails to compile — with `GetNotesBySerial`, `GetPoolStats`, and
+`NotifyNotesChanged` arms. Along the way, `cargo build --workspace --tests` (not
+plain `build`, which doesn't compile test-only code) surfaced two more `RpcApi`
+trait-completeness gaps in test-only mock implementors
+(`rpc/grpc/server/src/tests/rpc_core_mock.rs`, `wallet/core/src/tests/rpc_core_mock.rs`)
+needing the same two new methods stubbed with `Err(RpcError::NotImplemented)`,
+matching their neighbors. Full `cargo test --workspace --exclude
+kaspa-testing-integration` green (142/142 result groups; kaspa-notify 20 passed,
+kaspa-rpc-core 131, kaspa-consensus 93, kaspa-consensus-core 121); full integration
+suite green (44 passed, 0 failed, 6 pre-existing `#[ignore]`d); `cargo build
+--workspace` clean throughout.

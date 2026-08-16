@@ -71,6 +71,22 @@ pub enum DenominationTag {
 pub const DENOMINATION_PETALS: [u64; 8] =
     [1_000_000, 10_000_000, 100_000_000, 1_000_000_000, 10_000_000_000, 100_000_000_000, 1_000_000_000_000, 10_000_000_000_000];
 
+/// Live pool note count per denomination, indexed by [`DenominationTag`]'s declaration
+/// order (same convention [`DENOMINATION_PETALS`] uses) — the RPC-facing "pool stats"
+/// query (FORK-PLAN P6.9). Computed by a full scan of the live pool state
+/// (`DbNotePoolStore::iterator`), the same correctness-first, no-incremental-counter
+/// tradeoff `recompute_pool_commitment` already established for this fork's pool (P6.5).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PoolStats {
+    pub counts: [u64; 8],
+}
+
+impl PoolStats {
+    pub fn total_notes(&self) -> u64 {
+        self.counts.iter().sum()
+    }
+}
+
 impl DenominationTag {
     /// The note value this tag represents, in petals.
     pub const fn petals(self) -> u64 {

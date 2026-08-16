@@ -245,6 +245,27 @@ pub trait RpcApi: Sync + Send + AnySync {
         request: GetSeqCommitLaneProofRequest,
     ) -> RpcResult<GetSeqCommitLaneProofResponse>;
 
+    /// Get note(s) by serial (FORK-PLAN P6.9). Serials not currently in the pool are
+    /// simply absent from the response.
+    async fn get_notes_by_serial(&self, serials: Vec<RpcHash>) -> RpcResult<Vec<RpcNoteEntry>> {
+        Ok(self.get_notes_by_serial_call(None, GetNotesBySerialRequest::new(serials)).await?.notes)
+    }
+    async fn get_notes_by_serial_call(
+        &self,
+        connection: Option<&DynRpcConnection>,
+        request: GetNotesBySerialRequest,
+    ) -> RpcResult<GetNotesBySerialResponse>;
+
+    /// Get live note-pool stats: note count per denomination (FORK-PLAN P6.9).
+    async fn get_pool_stats(&self) -> RpcResult<[u64; 8]> {
+        Ok(self.get_pool_stats_call(None, GetPoolStatsRequest {}).await?.counts)
+    }
+    async fn get_pool_stats_call(
+        &self,
+        connection: Option<&DynRpcConnection>,
+        request: GetPoolStatsRequest,
+    ) -> RpcResult<GetPoolStatsResponse>;
+
     /// Requests information about a specific subnetwork.
     async fn get_subnetwork(&self, subnetwork_id: RpcSubnetworkId) -> RpcResult<GetSubnetworkResponse> {
         self.get_subnetwork_call(None, GetSubnetworkRequest::new(subnetwork_id)).await

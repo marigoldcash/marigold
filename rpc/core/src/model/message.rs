@@ -2,7 +2,7 @@ use crate::model::*;
 use borsh::{BorshDeserialize, BorshSerialize};
 use kaspa_consensus_core::api::stats::BlockCount;
 use kaspa_core::debug;
-use kaspa_notify::subscription::{Command, context::SubscriptionContext, single::UtxosChangedSubscription};
+use kaspa_notify::subscription::{Command, context::SubscriptionContext, single::{NotesChangedSubscription, UtxosChangedSubscription}};
 use kaspa_utils::hex::ToHex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -3809,5 +3809,256 @@ impl Deserializer for GetSeqCommitLaneProofResponse {
         let parent_seq_commit = load!(RpcHash, reader)?;
         let inactivity_shortcut = load!(RpcHash, reader)?;
         Ok(Self { smt_proof, lane, payload_and_ctx_digest, parent_seq_commit, inactivity_shortcut })
+    }
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~
+// Note-pool RPC (FORK-PLAN P6.9)
+
+/// A single live note, as served over RPC: its serial plus everything
+/// `PoolStateView::get_note` returns (`d`, `pk`) — `denomination` is
+/// `DenominationTag`'s declaration-order ordinal (0..=7, see `DenominationTag`'s own
+/// `TryFrom<u8>`, added in P6.8 for exactly this wire shape).
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RpcNoteEntry {
+    pub sn: RpcHash,
+    pub denomination: u8,
+    pub pk: [u8; 32],
+}
+
+impl Serializer for RpcNoteEntry {
+    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        store!(u16, &1, writer)?;
+        store!(RpcHash, &self.sn, writer)?;
+        store!(u8, &self.denomination, writer)?;
+        store!([u8; 32], &self.pk, writer)?;
+        Ok(())
+    }
+}
+
+impl Deserializer for RpcNoteEntry {
+    fn deserialize<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
+        let _version = load!(u16, reader)?;
+        let sn = load!(RpcHash, reader)?;
+        let denomination = load!(u8, reader)?;
+        let pk = load!([u8; 32], reader)?;
+        Ok(Self { sn, denomination, pk })
+    }
+}
+
+/// Get note(s) by serial. Requested serials that don't currently exist in the pool are
+/// simply absent from the response (not an error, not an explicit `None` entry) —
+/// mirrors `GetUtxosByAddressesResponse`'s "just the entries that exist" shape.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetNotesBySerialRequest {
+    pub serials: Vec<RpcHash>,
+}
+
+impl GetNotesBySerialRequest {
+    pub fn new(serials: Vec<RpcHash>) -> Self {
+        Self { serials }
+    }
+}
+
+impl Serializer for GetNotesBySerialRequest {
+    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        store!(u16, &1, writer)?;
+        store!(Vec<RpcHash>, &self.serials, writer)?;
+        Ok(())
+    }
+}
+
+impl Deserializer for GetNotesBySerialRequest {
+    fn deserialize<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
+        let _version = load!(u16, reader)?;
+        let serials = load!(Vec<RpcHash>, reader)?;
+        Ok(Self { serials })
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetNotesBySerialResponse {
+    pub notes: Vec<RpcNoteEntry>,
+}
+
+impl GetNotesBySerialResponse {
+    pub fn new(notes: Vec<RpcNoteEntry>) -> Self {
+        Self { notes }
+    }
+}
+
+impl Serializer for GetNotesBySerialResponse {
+    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        store!(u16, &1, writer)?;
+        serialize!(Vec<RpcNoteEntry>, &self.notes, writer)?;
+        Ok(())
+    }
+}
+
+impl Deserializer for GetNotesBySerialResponse {
+    fn deserialize<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
+        let _version = load!(u16, reader)?;
+        let notes = deserialize!(Vec<RpcNoteEntry>, reader)?;
+        Ok(Self { notes })
+    }
+}
+
+/// Live note count per denomination — `counts[i]` corresponds to `DenominationTag`'s
+/// `i`-th declared variant, same indexing `DENOMINATION_PETALS` uses.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetPoolStatsRequest {}
+
+impl Serializer for GetPoolStatsRequest {
+    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        store!(u16, &1, writer)?;
+        Ok(())
+    }
+}
+
+impl Deserializer for GetPoolStatsRequest {
+    fn deserialize<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
+        let _version = load!(u16, reader)?;
+        Ok(Self {})
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetPoolStatsResponse {
+    pub counts: [u64; 8],
+}
+
+impl GetPoolStatsResponse {
+    pub fn new(counts: [u64; 8]) -> Self {
+        Self { counts }
+    }
+}
+
+impl Serializer for GetPoolStatsResponse {
+    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        store!(u16, &1, writer)?;
+        store!([u64; 8], &self.counts, writer)?;
+        Ok(())
+    }
+}
+
+impl Deserializer for GetPoolStatsResponse {
+    fn deserialize<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
+        let _version = load!(u16, reader)?;
+        let counts = load!([u64; 8], reader)?;
+        Ok(Self { counts })
+    }
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~
+// NotesChangedNotification
+
+/// Registers this connection for notesChanged notifications, scoped to `serials`
+/// and/or `pks` (OR semantics — matching either watches a note; mirrors
+/// `NotifyUtxosChangedRequest`'s address-list shape, generalized to two independent
+/// criteria since a note is identified by both a serial and an owner pubkey). If both
+/// are empty, notifications start or stop for every note.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotifyNotesChangedRequest {
+    pub serials: Vec<RpcHash>,
+    pub pks: Vec<[u8; 32]>,
+    pub command: Command,
+}
+
+impl NotifyNotesChangedRequest {
+    pub fn new(serials: Vec<RpcHash>, pks: Vec<[u8; 32]>, command: Command) -> Self {
+        Self { serials, pks, command }
+    }
+}
+
+impl Serializer for NotifyNotesChangedRequest {
+    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        store!(u16, &1, writer)?;
+        store!(Vec<RpcHash>, &self.serials, writer)?;
+        store!(Vec<[u8; 32]>, &self.pks, writer)?;
+        store!(Command, &self.command, writer)?;
+        Ok(())
+    }
+}
+
+impl Deserializer for NotifyNotesChangedRequest {
+    fn deserialize<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
+        let _version = load!(u16, reader)?;
+        let serials = load!(Vec<RpcHash>, reader)?;
+        let pks = load!(Vec<[u8; 32]>, reader)?;
+        let command = load!(Command, reader)?;
+        Ok(Self { serials, pks, command })
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotifyNotesChangedResponse {}
+
+impl Serializer for NotifyNotesChangedResponse {
+    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        store!(u16, &1, writer)?;
+        Ok(())
+    }
+}
+
+impl Deserializer for NotifyNotesChangedResponse {
+    fn deserialize<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
+        let _version = load!(u16, reader)?;
+        Ok(Self {})
+    }
+}
+
+/// Sent whenever virtual's note-pool state changes. Raw shape mirrors
+/// `UtxosChangedNotification`: `added`/`removed` relative to the previous virtual
+/// state, filtered against a listener's subscribed serials/pks farther along the
+/// notification backbone (see `apply_notes_changed_subscription` below).
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotesChangedNotification {
+    pub added: Arc<Vec<RpcNoteEntry>>,
+    pub removed: Arc<Vec<RpcNoteEntry>>,
+}
+
+impl NotesChangedNotification {
+    pub(crate) fn apply_notes_changed_subscription(&self, subscription: &NotesChangedSubscription) -> Option<Self> {
+        if subscription.to_all() {
+            Some(self.clone())
+        } else {
+            let added = Self::filter_notes(&self.added, subscription);
+            let removed = Self::filter_notes(&self.removed, subscription);
+            if added.is_empty() && removed.is_empty() {
+                None
+            } else {
+                Some(Self { added: Arc::new(added), removed: Arc::new(removed) })
+            }
+        }
+    }
+
+    fn filter_notes(notes: &[RpcNoteEntry], subscription: &NotesChangedSubscription) -> Vec<RpcNoteEntry> {
+        notes.iter().filter(|n| subscription.contains_serial(&n.sn) || subscription.contains_pk(&n.pk)).cloned().collect()
+    }
+}
+
+impl Serializer for NotesChangedNotification {
+    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        store!(u16, &1, writer)?;
+        serialize!(Vec<RpcNoteEntry>, &self.added, writer)?;
+        serialize!(Vec<RpcNoteEntry>, &self.removed, writer)?;
+        Ok(())
+    }
+}
+
+impl Deserializer for NotesChangedNotification {
+    fn deserialize<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
+        let _version = load!(u16, reader)?;
+        let added = deserialize!(Vec<RpcNoteEntry>, reader)?;
+        let removed = deserialize!(Vec<RpcNoteEntry>, reader)?;
+        Ok(Self { added: Arc::new(added), removed: Arc::new(removed) })
     }
 }

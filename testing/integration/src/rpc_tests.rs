@@ -16,7 +16,7 @@ use kaspa_hashes::Hash;
 use kaspa_notify::{
     connection::{ChannelConnection, ChannelType},
     scope::{
-        BlockAddedScope, FinalityConflictScope, NewBlockTemplateScope, PruningPointUtxoSetOverrideScope, Scope,
+        BlockAddedScope, FinalityConflictScope, NewBlockTemplateScope, NotesChangedScope, PruningPointUtxoSetOverrideScope, Scope,
         SinkBlueScoreChangedScope, UtxosChangedScope, VirtualChainChangedScope, VirtualDaaScoreChangedScope,
     },
 };
@@ -740,6 +740,26 @@ async fn sanity_test() {
                 })
             }
 
+            KaspadPayloadOps::GetNotesBySerial => {
+                let rpc_client = client.clone();
+                tst!(op, {
+                    // Unknown serials are simply absent from the response (no error), unlike
+                    // GetSeqCommitLaneProof's not-found-is-an-error convention; see the
+                    // dedicated `daemon_notes_changed_notification_test` for a full mint/rotate
+                    // sanity check of this method against real notes.
+                    let result = rpc_client.get_notes_by_serial(vec![0.into()]).await.unwrap();
+                    assert!(result.is_empty());
+                })
+            }
+
+            KaspadPayloadOps::GetPoolStats => {
+                let rpc_client = client.clone();
+                tst!(op, {
+                    // See `daemon_notes_changed_notification_test` for a check against real counts.
+                    rpc_client.get_pool_stats().await.unwrap();
+                })
+            }
+
             KaspadPayloadOps::NotifyBlockAdded => {
                 let rpc_client = client.clone();
                 let id = listener_id;
@@ -799,6 +819,13 @@ async fn sanity_test() {
                         .start_notify(id, VirtualChainChangedScope { include_accepted_transaction_ids: false }.into())
                         .await
                         .unwrap();
+                })
+            }
+            KaspadPayloadOps::NotifyNotesChanged => {
+                let rpc_client = client.clone();
+                let id = listener_id;
+                tst!(op, {
+                    rpc_client.start_notify(id, NotesChangedScope::default().into()).await.unwrap();
                 })
             }
             KaspadPayloadOps::StopNotifyingUtxosChanged => {

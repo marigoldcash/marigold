@@ -322,6 +322,67 @@ impl Rpc {
 
                 self.println(&ctx, result);
             }
+            RpcApiOps::GetNotesBySerial => {
+                if argv.is_empty() {
+                    return Err(Error::custom("Please specify at least one note serial (hex hash)"));
+                }
+                let serials = argv.iter().map(|s| RpcHash::from_hex(s.as_str())).collect::<std::result::Result<Vec<_>, _>>()?;
+                let result = rpc.get_notes_by_serial_call(None, GetNotesBySerialRequest::new(serials)).await?;
+                self.println(&ctx, result);
+            }
+            RpcApiOps::GetPoolStats => {
+                let result = rpc.get_pool_stats_call(None, GetPoolStatsRequest {}).await?;
+                self.println(&ctx, result);
+            }
+            RpcApiOps::NotifyNotesChanged => {
+                if argv.is_empty() {
+                    return Err(Error::custom("Usage: rpc notify-notes-changed <serial-hex> [<serial-hex> ...]"));
+                }
+                let serials = argv.iter().map(|s| RpcHash::from_hex(s.as_str())).collect::<std::result::Result<Vec<_>, _>>()?;
+
+                let notification_channel = Channel::<kaspa_rpc_core::Notification>::unbounded();
+                let listener_id = rpc.register_new_listener(ChannelConnection::new(
+                    "cli-notify-notes-changed",
+                    notification_channel.sender.clone(),
+                    ChannelType::Closable,
+                ));
+                rpc.start_notify(listener_id, Scope::NotesChanged(NotesChangedScope::new(serials, vec![]))).await?;
+
+                let timeout = Duration::from_secs(120);
+                tprintln!(
+                    ctx,
+                    "Subscribed to NotesChanged for {} serial(s). Waiting up to {}s for notifications (Ctrl+C to abort)...",
+                    argv.len(),
+                    timeout.as_secs()
+                );
+
+                let deadline = Instant::now() + timeout;
+                loop {
+                    let now = Instant::now();
+                    if now >= deadline {
+                        tprintln!(ctx, "Timed out waiting for notifications.");
+                        break;
+                    }
+                    let remaining = deadline - now;
+                    select! {
+                        notification = notification_channel.receiver.recv().fuse() => {
+                            match notification {
+                                Ok(kaspa_rpc_core::Notification::NotesChanged(notification)) => {
+                                    self.println(&ctx, notification);
+                                }
+                                Ok(_) => {}
+                                Err(_) => break,
+                            }
+                        }
+                        _ = sleep(remaining).fuse() => {
+                            tprintln!(ctx, "Timed out waiting for notifications.");
+                            break;
+                        }
+                    }
+                }
+
+                rpc.unregister_listener(listener_id).await?;
+            }
             _ => {
                 tprintln!(ctx, "rpc method exists but is not supported by the cli: '{op_str}'\r\n");
                 return Ok(());

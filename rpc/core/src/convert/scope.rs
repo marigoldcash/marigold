@@ -1,9 +1,9 @@
 //! Conversion of Notification Scope related types
 
 use crate::{
-    NotifyBlockAddedRequest, NotifyFinalityConflictRequest, NotifyNewBlockTemplateRequest, NotifyPruningPointUtxoSetOverrideRequest,
-    NotifySinkBlueScoreChangedRequest, NotifyUtxosChangedRequest, NotifyVirtualChainChangedRequest,
-    NotifyVirtualDaaScoreChangedRequest,
+    NotifyBlockAddedRequest, NotifyFinalityConflictRequest, NotifyNewBlockTemplateRequest, NotifyNotesChangedRequest,
+    NotifyPruningPointUtxoSetOverrideRequest, NotifySinkBlueScoreChangedRequest, NotifyUtxosChangedRequest,
+    NotifyVirtualChainChangedRequest, NotifyVirtualDaaScoreChangedRequest,
 };
 use kaspa_notify::scope::*;
 
@@ -62,3 +62,6 @@ from!(SinkBlueScoreChanged);
 from!(VirtualDaaScoreChanged);
 from!(PruningPointUtxoSetOverride);
 from!(NewBlockTemplate);
+from!(item: NotesChanged, {
+    Self::new(item.serials.clone(), item.pks.clone())
+});

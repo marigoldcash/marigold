@@ -18,6 +18,7 @@ impl ArrayBuilder {
                     listener_id,
                     utxos_changed_capacity.unwrap_or_default(),
                 )),
+                EventType::NotesChanged => Arc::<single::NotesChangedSubscription>::default(),
                 _ => Arc::new(single::OverallSubscription::new(event_type, false)),
             };
             subscription
