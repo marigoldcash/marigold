@@ -1201,6 +1201,10 @@ impl ConsensusApi for Consensus {
         kaspa_consensus_core::notepool::PoolStats { counts }
     }
 
+    fn get_pool_root(&self) -> Hash {
+        self.virtual_stores.read().pool_smt.current_root().expect("live pool root must be readable")
+    }
+
     fn modify_coinbase_payload(&self, payload: Vec<u8>, miner_data: &MinerData) -> CoinbaseResult<Vec<u8>> {
         self.services.coinbase_manager.modify_coinbase_payload(payload, miner_data)
     }

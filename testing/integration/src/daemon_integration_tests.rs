@@ -1661,6 +1661,212 @@ async fn daemon_notes_changed_notification_test() {
     kaspad1.shutdown();
 }
 
+/// FORK-PLAN P6.10's "pool-root agreement across nodes" verify criterion: three real,
+/// independent nodes (not two, unlike `daemon_ibd_pool_state_sync_test` — genuinely N,
+/// not a special-cased pair) in a star topology around a miner, fed a real mix of mint,
+/// split, merge, and redeem transactions relayed over P2P (not hand-imported), converge
+/// on identical pool state. Cross-checked two ways: `header.pool_commitment` at the
+/// shared sink (the same signal `daemon_ibd_pool_state_sync_test` uses) AND
+/// `get_pool_stats()` (P6.9's own RPC surface) at the live tip — the latter is a more
+/// direct "the actual pool contents agree" signal than a commitment hash alone.
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn daemon_notepool_multi_node_agreement_test() {
+    use kaspa_consensus_core::notepool::{
+        DenominationTag, FreshnessAnchor, MintOp, NewNote, PoolOp, SignedGroup, TransferOp, hashing as pool_hashing,
+    };
+    use kaspa_consensus_core::subnets::SUBNETWORK_ID_NOTE_POOL;
+
+    init_allocator_with_default_settings();
+    kaspa_core::log::try_init_logger("INFO,kaspa_testing_integration=trace");
+
+    let args =
+        Args { simnet: true, unsafe_rpc: true, enable_unsynced_mining: true, disable_upnp: true, utxoindex: true, ..Default::default() };
+    let total_fd_limit = 10;
+    let mut kaspad1 = Daemon::new_random_with_args(args.clone(), total_fd_limit);
+    let mut kaspad2 = Daemon::new_random_with_args(args.clone(), total_fd_limit);
+    let mut kaspad3 = Daemon::new_random_with_args(args, total_fd_limit);
+    let rpc_client1 = kaspad1.start().await;
+    let rpc_client2 = kaspad2.start().await;
+    let rpc_client3 = kaspad3.start().await;
+
+    // Star topology: kaspad2 and kaspad3 both peer directly to kaspad1, the miner.
+    for client in [&rpc_client2, &rpc_client3] {
+        client.add_peer(format!("127.0.0.1:{}", kaspad1.p2p_port).try_into().unwrap(), true).await.unwrap();
+    }
+    let check_client = rpc_client1.clone();
+    wait_for(
+        50,
+        40,
+        move || {
+            let client = check_client.clone();
+            Box::pin(async move { client.get_connected_peer_info().await.unwrap().peer_info.len() == 2 })
+        },
+        "kaspad1 did not see both peers connect",
+    )
+    .await;
+
+    let (miner_sk, miner_pk) = secp256k1::generate_keypair(&mut thread_rng());
+    let miner_address =
+        Address::new(kaspad1.network.into(), kaspa_addresses::Version::PubKey, &miner_pk.x_only_public_key().0.serialize());
+    let miner_schnorr_key = secp256k1::Keypair::from_secret_key(secp256k1::SECP256K1, &miner_sk);
+    let alice_note_pk: [u8; 32] = miner_pk.x_only_public_key().0.serialize();
+    let bob_key = secp256k1::Keypair::new(secp256k1::SECP256K1, &mut thread_rng());
+    let bob_pk: [u8; 32] = bob_key.public_key().x_only_public_key().0.serialize();
+
+    // Signs a one-group Transfer (rotate/split/merge — same shape, POOL-SPEC.md P5.3
+    // draws no wire-level distinction between them) consuming `serials`, producing
+    // `produced`, mirroring `daemon_ibd_pool_state_sync_test`'s `build_rotate`.
+    let build_transfer = |signer: &secp256k1::Keypair, serials: Vec<Hash>, produced: Vec<NewNote>| -> Transaction {
+        let outputs_hash = pool_hashing::transparent_outputs_hash(&[]);
+        let msg_hash = pool_hashing::signing_hash(1, &serials, &produced, outputs_hash, 0);
+        let msg = secp256k1::Message::from_digest(msg_hash.into());
+        let signature = *signer.sign_schnorr(msg).as_ref();
+        let op = PoolOp::Transfer(TransferOp {
+            consumed: vec![SignedGroup { serials, signature }],
+            produced,
+            freshness: FreshnessAnchor { anchor_daa_score: 0 },
+        });
+        Transaction::new(TX_VERSION_TOCCATA, vec![], vec![], 0, SUBNETWORK_ID_NOTE_POOL, 0, op.encode_payload())
+    };
+    // Signs a one-group Redeem consuming `serials` into `outputs`.
+    let build_redeem = |signer: &secp256k1::Keypair, serials: Vec<Hash>, outputs: Vec<TransactionOutput>| -> Transaction {
+        let outputs_hash = pool_hashing::transparent_outputs_hash(&outputs);
+        let msg_hash = pool_hashing::signing_hash(2, &serials, &[], outputs_hash, 0);
+        let msg = secp256k1::Message::from_digest(msg_hash.into());
+        let signature = *signer.sign_schnorr(msg).as_ref();
+        let op = kaspa_consensus_core::notepool::RedeemOp {
+            consumed: vec![SignedGroup { serials, signature }],
+            freshness: FreshnessAnchor { anchor_daa_score: 0 },
+        };
+        Transaction::new(TX_VERSION_TOCCATA, vec![], outputs, 0, SUBNETWORK_ID_NOTE_POOL, 0, PoolOp::Redeem(op).encode_payload())
+    };
+    // Mines `n` blocks on kaspad1 and waits for a transaction to leave its mempool
+    // (i.e. confirmed) before returning — P6.7's no-unconfirmed-chaining scope means
+    // each op below must be buried before the next one (which consumes its output) can
+    // enter the mempool.
+    async fn mine_until_confirmed(rpc_client1: &GrpcClient, miner_address: &Address, txid: Hash) {
+        for _ in 0..10 {
+            let template = rpc_client1.get_block_template(miner_address.clone(), vec![]).await.unwrap();
+            rpc_client1.submit_block(template.block, false).await.unwrap();
+        }
+        let client = rpc_client1.clone();
+        wait_for(
+            50,
+            40,
+            move || {
+                let client = client.clone();
+                Box::pin(async move { client.get_mempool_entry(txid.into(), false, false).await.is_err() })
+            },
+            "pool-op transaction did not clear the mempool",
+        )
+        .await;
+    }
+
+    // Mine to a mature coinbase.
+    let coinbase_maturity = SIMNET_PARAMS.coinbase_maturity();
+    for _ in 0..(coinbase_maturity + 20) {
+        let template = rpc_client1.get_block_template(miner_address.clone(), vec![]).await.unwrap();
+        rpc_client1.submit_block(template.block, false).await.unwrap();
+    }
+
+    // TX1 — Mint: 0.1 + 0.01 + 0.01 MAGLD to alice, from a real coinbase input.
+    let utxos = fetch_spendable_utxos(&rpc_client1, miner_address.clone(), coinbase_maturity).await;
+    let (outpoint, entry) = utxos.first().expect("mature utxo").clone();
+    let mint_notes = vec![
+        NewNote { d: DenominationTag::D0_1, pk: alice_note_pk },
+        NewNote { d: DenominationTag::D0_01, pk: alice_note_pk },
+        NewNote { d: DenominationTag::D0_01, pk: alice_note_pk },
+    ];
+    let notes_value: u64 = mint_notes.iter().map(|n| n.d.petals()).sum();
+    let mint_fee = 2 * fee::calc_for_plain_standard_tx_with_extra_serialized_bytes(1, 1, 200);
+    assert!(entry.amount > notes_value + mint_fee, "coinbase utxo too small to fund the mint");
+    let change = entry.amount - notes_value - mint_fee;
+    let unsigned_mint = Transaction::new(
+        TX_VERSION_TOCCATA,
+        vec![TransactionInput::new(outpoint, vec![], 0, 1)],
+        vec![TransactionOutput { value: change, script_public_key: pay_to_address_script(&miner_address), covenant: None }],
+        0,
+        SUBNETWORK_ID_NOTE_POOL,
+        0,
+        PoolOp::Mint(MintOp { new_notes: mint_notes }).encode_payload(),
+    );
+    let mint = sign(MutableTransaction::with_entries(unsigned_mint, vec![entry]), miner_schnorr_key).tx;
+    let mint_id = mint.id();
+    let d01_sn = pool_hashing::serial_hash(&mint_id, 0);
+    let split_source_sn0 = pool_hashing::serial_hash(&mint_id, 1);
+    let split_source_sn1 = pool_hashing::serial_hash(&mint_id, 2);
+    rpc_client1.submit_transaction((&mint).into(), false).await.unwrap();
+    mine_until_confirmed(&rpc_client1, &miner_address, mint_id).await;
+
+    // TX2 — Split: 0.1 MAGLD -> 4 x 0.01 MAGLD to bob (0.06 fee).
+    let split_produced: Vec<NewNote> = (0..4).map(|_| NewNote { d: DenominationTag::D0_01, pk: bob_pk }).collect();
+    let split = build_transfer(&miner_schnorr_key, vec![d01_sn], split_produced);
+    let split_id = split.id();
+    let split_sns: Vec<Hash> = (0..4).map(|i| pool_hashing::serial_hash(&split_id, i)).collect();
+    rpc_client1.submit_transaction((&split).into(), false).await.unwrap();
+    mine_until_confirmed(&rpc_client1, &miner_address, split_id).await;
+
+    // TX3 — Merge: alice's original two 0.01-MAGLD notes -> one 0.01 to bob (0.01 fee).
+    let merge = build_transfer(
+        &miner_schnorr_key,
+        vec![split_source_sn0, split_source_sn1],
+        vec![NewNote { d: DenominationTag::D0_01, pk: bob_pk }],
+    );
+    let merge_id = merge.id();
+    let merged_sn = pool_hashing::serial_hash(&merge_id, 0);
+    rpc_client1.submit_transaction((&merge).into(), false).await.unwrap();
+    mine_until_confirmed(&rpc_client1, &miner_address, merge_id).await;
+
+    // TX4 — Redeem: bob's 4 x 0.01 from the split -> a 0.03 transparent output (0.01 fee).
+    let bob_address = Address::new(kaspad1.network.into(), kaspa_addresses::Version::PubKey, &bob_pk);
+    let redeem_output = TransactionOutput::new(3 * DenominationTag::D0_01.petals(), pay_to_address_script(&bob_address));
+    let redeem = build_redeem(&bob_key, split_sns, vec![redeem_output]);
+    let redeem_id = redeem.id();
+    rpc_client1.submit_transaction((&redeem).into(), false).await.unwrap();
+    mine_until_confirmed(&rpc_client1, &miner_address, redeem_id).await;
+
+    // Final live pool state: exactly the merged note. Wait for all three nodes to reach
+    // the same sink (P2P relay + mining, not a hand-import), then compare.
+    let target_sink = rpc_client1.get_block_dag_info().await.unwrap().sink;
+    for client in [&rpc_client2, &rpc_client3] {
+        let client = client.clone();
+        wait_for(
+            50,
+            40,
+            move || {
+                let client = client.clone();
+                Box::pin(async move { client.get_block_dag_info().await.unwrap().sink == target_sink })
+            },
+            "a peer did not sync to the miner's sink",
+        )
+        .await;
+    }
+
+    let commitment1 = rpc_client1.get_block(target_sink, false).await.unwrap().header.pool_commitment;
+    let commitment2 = rpc_client2.get_block(target_sink, false).await.unwrap().header.pool_commitment;
+    let commitment3 = rpc_client3.get_block(target_sink, false).await.unwrap().header.pool_commitment;
+    assert_eq!(commitment1, commitment2, "kaspad2's pool commitment must match the miner's at the shared sink");
+    assert_eq!(commitment1, commitment3, "kaspad3's pool commitment must match the miner's at the shared sink");
+
+    let stats1 = rpc_client1.get_pool_stats().await.unwrap();
+    let stats2 = rpc_client2.get_pool_stats().await.unwrap();
+    let stats3 = rpc_client3.get_pool_stats().await.unwrap();
+    assert_eq!(stats1, stats2, "kaspad2's live pool stats must match the miner's");
+    assert_eq!(stats1, stats3, "kaspad3's live pool stats must match the miner's");
+    assert_eq!(stats1[DenominationTag::D0_01 as usize], 1, "exactly the merged note should remain live");
+    assert_eq!(stats1.iter().sum::<u64>(), 1, "no other denomination should have a live note");
+
+    let merged = rpc_client1.get_notes_by_serial(vec![merged_sn]).await.unwrap();
+    assert_eq!(merged, vec![RpcNoteEntry { sn: merged_sn, denomination: DenominationTag::D0_01 as u8, pk: bob_pk }]);
+
+    rpc_client1.disconnect().await.unwrap();
+    rpc_client2.disconnect().await.unwrap();
+    rpc_client3.disconnect().await.unwrap();
+    kaspad1.shutdown();
+    kaspad2.shutdown();
+    kaspad3.shutdown();
+}
+
 // The following test runtime parameters are required for a graceful shutdown of the gRPC server
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn daemon_cleaning_test() {

@@ -247,6 +247,16 @@ impl PoolOp {
             PoolOp::Redeem(_) => 2,
         }
     }
+
+    /// Every serial this op consumes across all its `SignedGroup`s — empty for
+    /// `Mint`, which consumes nothing.
+    pub fn consumed_serials(&self) -> Vec<Hash> {
+        match self {
+            PoolOp::Mint(_) => Vec::new(),
+            PoolOp::Transfer(op) => op.consumed.iter().flat_map(|g| g.serials.iter().copied()).collect(),
+            PoolOp::Redeem(op) => op.consumed.iter().flat_map(|g| g.serials.iter().copied()).collect(),
+        }
+    }
 }
 
 #[cfg(test)]

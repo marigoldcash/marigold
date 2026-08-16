@@ -100,6 +100,14 @@ struct Args {
     #[arg(long, default_value_t = false)]
     test_pruning: bool,
 
+    /// Per-block probability [0.0, 1.0] each miner attempts one note-pool op (mint/
+    /// rotate/merge/redeem, self-targeted) alongside its ordinary transfers, for
+    /// DAG-level pool stress (FORK-PLAN P6.10). `0.0` (the default) generates none.
+    /// When positive, the simulation additionally asserts every miner's own consensus
+    /// instance agrees on the live note-pool root once it completes.
+    #[arg(long, default_value_t = 0.0)]
+    pool_op_probability: f64,
+
     /// Use the legacy full-window DAA mechanism (note: the size of this window scales with bps)
     #[arg(long, default_value_t = false)]
     daa_legacy: bool,
@@ -200,6 +208,13 @@ fn main_impl(mut args: Args) {
     args.bps = if args.testnet11 { TenBps::bps() as f64 } else { args.bps };
     let mut params = if args.testnet11 { SIMNET_PARAMS } else { DEVNET_PARAMS };
     params.crescendo_activation = ForkActivation::always();
+    // FORK-PLAN P6.10: note-pool transactions carry TX_VERSION_TOCCATA, gated the same
+    // way `crescendo_activation` already is above — without these, `--pool-op-probability`
+    // runs reject every pool-op tx as UnknownTxVersion (toccata/pool never activate
+    // during a short simulation otherwise). `test_pruning`'s own `toccata_activation`
+    // override in `apply_args_to_consensus_params` still applies afterward for that mode.
+    params.toccata_activation = ForkActivation::always();
+    params.pool_activation = ForkActivation::always();
     params.coinbase_maturity = 200;
     params.storage_mass_parameter = 10_000;
     let mut builder = ConfigBuilder::new(params)
@@ -259,17 +274,22 @@ fn main_impl(mut args: Args) {
     } else {
         let until = if args.target_blocks.is_none() { config.genesis.timestamp + args.sim_time * 1000 } else { u64::MAX }; // milliseconds
         let mut sim = KaspaNetworkSimulator::new(args.delay, args.bps, args.target_blocks, config.clone(), args.output_dir);
-        let (consensus, handles, lifetime) = sim
-            .init(
-                args.miners,
-                args.tpb,
-                args.rocksdb_stats,
-                args.rocksdb_stats_period_sec,
-                args.rocksdb_files_limit,
-                args.rocksdb_mem_budget,
-                args.long_payload,
-            )
-            .run(until);
+        sim.init_with_lane_producer(
+            args.miners,
+            args.tpb,
+            args.rocksdb_stats,
+            args.rocksdb_stats_period_sec,
+            args.rocksdb_files_limit,
+            args.rocksdb_mem_budget,
+            args.long_payload,
+            args.pool_op_probability,
+            |_| Box::new(simpa::simulator::miner::NativeLaneProducer),
+        );
+        let (consensus, handles, lifetime) = if args.pool_op_probability > 0.0 {
+            sim.run_and_verify_pool_root_agreement(until)
+        } else {
+            sim.run(until)
+        };
         consensus.shutdown(handles);
         (consensus, lifetime)
     };
@@ -517,13 +537,47 @@ fn print_stats(src_consensus: &Consensus, hashes: &[Hash], delay: f64, bps: f64,
 mod tests {
     use super::*;
 
+    /// Both tests in this module run a full multi-consensus simulation and size their
+    /// own file-descriptor budget off `fd_budget::limit()`, which reflects the whole
+    /// process's ulimit — an assumption that only holds if one simulation runs at a
+    /// time. Rust's default test harness runs `#[test]`s concurrently, so without this
+    /// lock the two tests' budgets overlap and can together exceed the real ulimit
+    /// (observed as an `fd_budget`/semaphore acquire error during a 5000-block pruning
+    /// run racing FORK-PLAN P6.10's own `test_pool_ops_via_simpa`).
+    static SIMPA_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn test_pruning_via_simpa() {
+        let _guard = SIMPA_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut args = Args::parse_from(std::iter::empty::<&str>());
         args.bps = 1.0;
         args.target_blocks = Some(5000);
         args.tpb = 1;
         args.test_pruning = true;
+
+        kaspa_core::log::try_init_logger(&args.log_level);
+        // As we log the panic, we want to set it up after the logger
+        kaspa_core::panic::configure_panic();
+        main_impl(args);
+    }
+
+    /// FORK-PLAN P6.10's own verify criterion: "simpa run with pool ops completes with
+    /// all nodes agreeing on the pool root." Three independent miners (not one — a
+    /// single miner trivially "agrees" with itself) relay blocks to each other while
+    /// each also mints/rotates/merges/redeems its own notes;
+    /// `run_and_verify_pool_root_agreement` (wired in via `pool_op_probability > 0.0`)
+    /// asserts all three converge before this test would otherwise report success.
+    /// `target_blocks` clears `coinbase_maturity` (200, set unconditionally above) with
+    /// room to spare for several op cycles after.
+    #[test]
+    fn test_pool_ops_via_simpa() {
+        let _guard = SIMPA_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut args = Args::parse_from(std::iter::empty::<&str>());
+        args.bps = 1.0;
+        args.miners = 3;
+        args.target_blocks = Some(400);
+        args.tpb = 5;
+        args.pool_op_probability = 0.5;
 
         kaspa_core::log::try_init_logger(&args.log_level);
         // As we log the panic, we want to set it up after the logger

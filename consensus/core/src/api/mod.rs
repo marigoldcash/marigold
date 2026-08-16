@@ -545,6 +545,15 @@ pub trait ConsensusApi: Send + Sync {
         unimplemented!()
     }
 
+    /// Virtual's live note-pool commitment root (the same value `TestConsensus::pool_root`
+    /// exposes internally, FORK-PLAN P6.10) — lets callers outside the `kaspa-consensus`
+    /// crate (simpa, cross-node agreement checks) compare pool roots without needing a
+    /// block header's `pool_commitment`, which reflects a block's ancestors rather than its
+    /// own body (see `notepool_tests.rs`'s `incremental_and_full_rebuild_commitments_agree`).
+    fn get_pool_root(&self) -> Hash {
+        unimplemented!()
+    }
+
     fn get_missing_block_body_hashes(&self, high: Hash) -> ConsensusResult<Vec<Hash>> {
         unimplemented!()
     }

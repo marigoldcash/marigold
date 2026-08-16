@@ -4,8 +4,8 @@ Snapshot of everything decided and built so far, so any fresh coding session on 
 machine can continue from the repo alone. Read this together with [FORK-PLAN.md](../../FORK-PLAN.md).
 Update this file whenever off-repo state changes (domains, accounts, infra).
 
-Last updated: 2026-08-16 (P6.9 complete — RPC + notifications; next step P6.10, then
-stop at P6.11 ⚠️ HARD)
+Last updated: 2026-08-16 (P6.10 complete — consensus test battery + simpa pool ops;
+stopped at P6.11 ⚠️ HARD per standing instruction, awaiting a model switch)
 
 ## What this project is
 
@@ -80,12 +80,21 @@ substitute for it.
 
 ## Where execution stands
 
-- **Next step: P6.10 — Consensus test battery + simpa.** bite-size (not
-  HARD). A dedicated integration-test module running the full op matrix (all five ops
-  happy-path, every P5.3 rejection case, parallel conflicts, deep reorg, value
-  conservation, pool-root agreement across nodes) plus teaching `simpa` to generate
-  random pool ops for DAG-level stress. **Stop at P6.11 (⚠️ HARD — finality-anchor
-  consensus rule) and flag for a model switch, per standing instruction.**
+- **Next step: P6.11 — Finality-anchor consensus rule.** ⚠️ **HARD**, per the plan's
+  own flag. Execution is stopped here per standing instruction — needs a model
+  switch before proceeding (mirrors the P5.9/P6.4/P6.8 pattern).
+- **P6.10 is done.** New split/merge/`BadPublicKey`/`MalformedNotePoolPayload`/deep-
+  reorg/cross-op-conflict tests in `consensus/src/pipeline/virtual_processor/
+  notepool_tests.rs` (reusing its existing harness rather than duplicating it into
+  `testing/integration` — see NOTES.md for why); a new three-daemon
+  `daemon_notepool_multi_node_agreement_test`; `ConsensusApi::get_pool_root()`; and
+  simpa taught to self-target mint/rotate/merge/redeem pool ops per miner, gated by a
+  new `pool_op_probability` flag, with a `run_and_verify_pool_root_agreement` check.
+  Found and fixed three real bugs along the way, all in simpa's own harness (not the
+  pool implementation): missing `toccata_activation`/`pool_activation` in simpa's
+  config, an opaque `unimplemented!()` masking real validation errors (plus a latent
+  `None.unwrap()` it was hiding), and two heavy simpa tests racing for the same
+  process-wide file-descriptor budget when run concurrently. Full writeup in NOTES.md.
 - **P6.9 is done.** RPC methods `get_notes_by_serial`/`get_pool_stats` plus a
   `NotesChanged` subscription (through the notify system, scoped to watched
   serials/pks), wired through rpc/core, grpc proto, and wrpc, plus a new

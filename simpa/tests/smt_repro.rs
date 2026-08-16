@@ -78,7 +78,7 @@ fn assert_pruning_point_smt_roundtrip(seed: u64) {
 
     let mut sim = KaspaNetworkSimulator::new_with_seed(DELAY, BPS, Some(TARGET_BLOCKS), config, None, Some(seed));
     let (consensus, handles, lifetime) = sim
-        .init_with_lane_producer(MINERS, TXS_PER_BLOCK, false, None, None, None, false, |miner_id| {
+        .init_with_lane_producer(MINERS, TXS_PER_BLOCK, false, None, None, None, false, 0.0, |miner_id| {
             Box::new(ChurningLaneProducer::new(seed ^ miner_id, LANE_COUNT, LANE_BAND, LANE_EPOCH_BLOCKS, LANE_CARRY_PERCENT))
         })
         .run(u64::MAX);

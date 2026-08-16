@@ -2158,3 +2158,162 @@ kaspa-testing-integration` green (142/142 result groups; kaspa-notify 20 passed,
 kaspa-rpc-core 131, kaspa-consensus 93, kaspa-consensus-core 121); full integration
 suite green (44 passed, 0 failed, 6 pre-existing `#[ignore]`d); `cargo build
 --workspace` clean throughout.
+
+### P6.10 — Consensus test battery + simpa (2026-08-16)
+
+Continued directly from P6.9. Started with a research pass (not a
+line of code) specifically to answer "what does P6.10's own text actually add, versus
+what P6.3-P6.9 already left behind" — the plan bullet reads like a from-scratch
+battery, but this codebase already had a lot of it:
+`consensus/core/src/notepool/validate.rs`'s own `#[cfg(test)]` module already
+unit-tests every stateless AND stateful rejection case from POOL-SPEC.md P5.3's
+validation order (empty/oversized collections, duplicate serials, `SerialNotFound`,
+`BadSignature`, `MixedKeysInGroup`, freshness boundaries, conservation, op-type
+domain separation — 20+ cases), and
+`consensus/src/pipeline/virtual_processor/notepool_tests.rs` (P6.4-P6.6's own test
+module) already covers mint→rotate happy-path, one parallel-double-rotate conflict, a
+3-block reorg, and value conservation across mint→transfer→redeem, all via a real
+`TestConsensus` harness with reusable `Wallet`/`fund`/`mint_funded` helpers.
+
+**The real, previously-uncovered gaps**, found by cross-referencing that inventory
+against P6.10's own text line by line:
+- **Split and merge had zero coverage above the `validate_stateful` unit-test
+  layer.** `PoolOp` has exactly three wire variants — `Mint`, `Transfer`, `Redeem`
+  (POOL-SPEC.md's own doc comment: "rotate," "split," and "merge" are descriptive
+  labels for what a `TransferOp`'s consumed/produced shape happens to do, not
+  distinct types) — so "all five ops happy-path" meant proving split (1→N) and merge
+  (N→1) specifically actually mine, commit, and update the pool root through a real
+  block, not just pass `validate_stateful` in isolation.
+- `PoolOpContextError::BadPublicKey` had no test anywhere in the codebase.
+- `TxRuleError::MalformedNotePoolPayload` was tested only at `PoolOp::decode_payload`
+  itself (consensus-core's own unit test); nothing drove an undecodable payload
+  through a real transaction into `tx_validation_in_isolation`, the gate that
+  actually protects the chain.
+- The one existing reorg test was 3 blocks deep — a correctness proof, not a scale
+  proof (a bounded-depth walk optimization bug could pass that and still fail on
+  something with dozens of blocks to unwind).
+- Every existing conflict test pit the same op TYPE against itself (rotate vs.
+  rotate); nothing exercised a cross-op-type conflict (e.g. a rotate and a redeem
+  racing to consume the identical serial).
+
+**Where the new tests live, and why not a new crate/module.** P6.10's own text says
+"a dedicated integration-test module" and its verify condition names `-p
+kaspa-testing-integration` — a literal reading would put everything there. But
+`notepool_tests.rs` already has the full `Wallet`/`fund`/`mint_funded`/`pool_tx`
+harness (~150 lines) that every one of these new tests needs, and it's `#[cfg(test)]`-
+gated inside `kaspa-consensus`, so `testing/integration` (a different crate) cannot
+import it — duplicating that harness into a second location just to satisfy a literal
+"lives in this crate" reading would be exactly the kind of premature/unneeded
+duplication this fork's own conventions warn against, for zero new signal (P6.8 set
+the same precedent: its own new test was added to the SAME existing
+`daemon_integration_tests.rs` file rather than a new module). So: the seven new
+op-mechanics/rejection/reorg tests (below) went into `notepool_tests.rs` where the
+infrastructure already lives — genuine reuse, not laziness — and `testing/
+integration` got exactly the one piece that actually NEEDS that crate: a real,
+multi-daemon "pool-root agreement across nodes" test (below), which shows up green
+under the exact `cargo test --release -p kaspa-testing-integration` command the
+plan's verify line names.
+
+**The seven new `notepool_tests.rs` tests** (all passed first or second run):
+`split_happy_path_mines_and_updates_pool_state` (0.1 MAGLD → 9×0.01, mirroring
+`validate.rs`'s own split unit test's ratio one denomination tier down so it fits a
+single funding block's coinbase) and `merge_happy_path_mines_and_updates_pool_state`
+(two 0.01-MAGLD notes, one shared key, one signature, folding into one) prove the
+op-mechanics through a real mined block, not just `validate_stateful`.
+`bad_public_key_on_stored_note_rejects_consumption` mints a note with `pk: [0u8;
+32]` (x=0 isn't a valid secp256k1 x-only point — mint never checks curve
+membership, only denomination validity) and shows ANY attempted consumption fails
+parsing the *stored* note's pk before signature verification is even reached,
+regardless of who signs. `malformed_pool_payload_rejected_in_block` drives the same
+invalid discriminant-3 payload consensus-core's own unit test uses through a real
+block build. `parallel_rotate_vs_redeem_conflict_resolves_deterministically` races a
+rotate against a redeem of the same note across two parallel blocks, confirming the
+first-accepted-wins mechanism is genuinely op-type-agnostic (`TransferOp` and
+`RedeemOp` both implement `ImmutablePoolDiff` the same way). 
+`deep_reorg_past_pool_op_restores_prior_pool_state` extends the existing 3-block
+reorg test's exact shape to a 60-block winning branch (comfortably inside
+`finality_depth`, so this is a depth-of-walk stress, not a finality-boundary test) —
+same walk-down/walk-up correctness, at a scale that would catch a bounded-depth bug
+the shallow version couldn't. `value_conservation_across_split_and_merge` extends the
+existing mint→transfer→redeem conservation test to split and merge specifically,
+asserting each op's produced value equals consumed minus exactly its fee (caught one
+real test-authoring bug along the way: the merge step's `SignedGroup` was initially
+signed by the WRONG wallet — the split's produced notes belonged to `bob`, not
+`alice` — surfaced immediately as `BadSignature`, not a product bug).
+
+**`ConsensusApi::get_pool_root()`** (new, mirrors P6.9's `get_pool_stats`): lets code
+outside the `kaspa-consensus` crate read virtual's live pool-commitment root without
+`TestConsensus`-only internals (`TestConsensus::pool_root()` reaches
+`self.consensus.storage.virtual_stores.read().pool_smt.current_root()`, fields only
+visible from within the crate). Used by both the new daemon test (as a cheaper
+alternative was available there — see below — so it ended up unused by that test,
+but genuinely needed by simpa, which holds `Arc<Consensus>` from an external crate)
+and simpa's own agreement check.
+
+**`daemon_notepool_multi_node_agreement_test`** (`testing/integration`): three real,
+independent daemons — not the special-cased pair `daemon_ibd_pool_state_sync_test`
+uses — in a star topology around one miner. A real mint→split→merge→redeem sequence
+(each op relayed over P2P and mined, not hand-imported, with the `no-unconfirmed-
+chaining` mempool wait between each) leaves exactly one live note; asserts all three
+nodes converge to the identical `header.pool_commitment` at the shared sink AND
+identical `get_pool_stats()` at their live tips — the latter a more direct
+"the actual pool contents agree" signal than a commitment hash alone. Used the
+existing RPC surface (`header.pool_commitment`, `get_pool_stats`) rather than adding
+a new "get the live root" RPC method, since P6.10's text doesn't ask for new RPC
+surface and the existing signals were already sufficient to prove agreement.
+
+**Teaching simpa pool ops.** `simpa/src/simulator/miner.rs`'s `Miner` already tracks
+its own UTXOs locally (`possible_unspent_outpoints`, populated by scanning each
+processed block's outputs) and builds real signed transactions from live consensus
+state every block — not a structural-only DAG simulator. The natural extension: a
+`possible_notes: IndexSet<Hash>` mirroring that same pattern, and a new
+`maybe_build_pool_op` step in `build_txs`, gated by a new `pool_op_probability`
+(`0.0` by default — every existing simpa caller's behavior is untouched). Each
+miner self-targets its own note key (no cross-miner note transfers — unnecessary
+complexity for a DAG-stress test, not a semantics test) and prefers consuming an
+existing note over minting a new one, so its own backlog doesn't grow unbounded: two
+notes sharing a denomination tier merge into one; otherwise a note rotates down one
+tier (denomination values are strictly increasing, so this is always a valid,
+strictly-positive fee) or, at the smallest tier, redeems to transparent value minus a
+fee. Mint only fires when there are no live notes to work with. One real borrow-
+checker wrinkle: `maybe_build_pool_op` had to be a free function, not a `&mut self`
+method — its `pool_state`/`virtual_utxo_view` parameters alias `self.consensus`
+through the read guard `build_txs` already holds, and a `&mut self` call can't
+coexist with that live borrow (disjoint-FIELD borrows work inline in one function
+body — as the pre-existing `self.lane_producer.next_lane(...)` call already
+demonstrated — but not across a `&mut self`-taking method call).
+
+**Three real bugs found by actually running this, not by inspection** — all in
+simpa's own harness code, not the pool implementation itself:
+1. `simpa/src/main.rs`'s `main_impl` force-activates `crescendo_activation` for every
+   run but never did the same for `toccata_activation`/`pool_activation` — pool-op
+   transactions carry `TX_VERSION_TOCCATA`, so every one was silently rejected as
+   `UnknownTxVersion` until both are force-activated the same way.
+2. `OnetimeTxSelector::reject_selection` was a blind `unimplemented!()`, and
+   `is_successful()` unconditionally returned `true` — meaning ANY rejected
+   transaction crashed immediately with an opaque panic, before the actual
+   `RuleError` (already computed by `build_block_template`) was ever visible. Fixed
+   by tracking whether a rejection happened and having `is_successful()` report it
+   honestly, so a genuine rejection now panics via `build_new_block`'s own
+   `.expect(...)` WITH the real error attached — same "this must never happen" hard-
+   assertion semantics, just debuggable now. Fixing this surfaced a second, entirely
+   latent bug behind it: `select_transactions`'s `self.txs.take().unwrap()` would
+   panic on `None` on the template-builder's retry-loop second call — previously
+   masked because the first bug always crashed before the retry loop ever ran.
+3. The new `test_pool_ops_via_simpa` intermittently failed
+   `test_pruning_via_simpa` (a pre-existing, untouched 5000-block test) with an
+   `fd_budget`/semaphore acquire error one below its limit — both tests size their
+   file-descriptor budget off the whole process's ulimit, an assumption that only
+   holds with one simulation running at a time, but Rust's test harness runs
+   `#[test]`s in the same binary concurrently by default. Fixed with a shared
+   `static Mutex` serializing the two (no new dependency).
+
+✅ *Verify:* `cargo test --workspace --exclude kaspa-testing-integration` green
+(142/142 result groups; `kaspa-consensus` now 100 passed, up from 93 — the seven new
+tests); full `cargo test --release -p kaspa-testing-integration` green, including the
+new three-daemon agreement test; `cargo test --release -p simpa --bin simpa` green
+running both `test_pruning_via_simpa` and `test_pool_ops_via_simpa` together (3
+miners, 400 blocks, `pool_op_probability = 0.5`) — the pool-root agreement assertion
+never fired, and the independent-replay cross-check against a fresh consensus
+(simpa's own existing post-simulation validation) passed too; `cargo build
+--workspace --tests` clean throughout.

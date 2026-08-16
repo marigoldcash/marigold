@@ -585,6 +585,297 @@ async fn redeem_with_excessive_transparent_outputs_rejected() {
     consensus.shutdown(join_handles);
 }
 
+/// FORK-PLAN P6.10: split's own happy path mined end-to-end (previously only unit-tested
+/// at the `validate_stateful` level, `transfer_split_under_conservation_passes`) — one
+/// consumed note fans out into several smaller produced notes, same shape and ratio as
+/// that unit test (1 MAGLD -> 9 x 0.1, scaled down one denomination tier so it fits a
+/// single funding block's coinbase, matching this file's other single-`fund()` tests).
+#[tokio::test]
+async fn split_happy_path_mines_and_updates_pool_state() {
+    let consensus = TestConsensus::new(&config());
+    let join_handles = consensus.init();
+    let genesis = consensus.params().genesis.hash;
+
+    let alice = Wallet::new(1);
+    let bob = Wallet::new(2);
+
+    let (outpoint, entry, tip) = fund(&consensus, &alice, genesis, 5.into(), 10.into()).await;
+    let mint = mint_funded(&alice, (outpoint, entry), vec![alice.note(DenominationTag::D0_1)]);
+    let sn = produced_serial(&mint, 0);
+    consensus.add_utxo_valid_block_with_parents(11.into(), vec![tip], vec![mint]).await.unwrap();
+    assert!(consensus.pool_note(sn).is_some());
+    let root_before_split = consensus.pool_root();
+
+    // 0.1 MAGLD -> 9 x 0.01 MAGLD (0.01 to fee): a real split, mined through a block.
+    let produced: Vec<NewNote> = (0..9).map(|_| bob.note(DenominationTag::D0_01)).collect();
+    let split = pool_tx(&alice.rotate(vec![sn], produced.clone(), 0));
+    let produced_sns: Vec<Hash> = (0..9).map(|i| produced_serial(&split, i)).collect();
+    consensus.add_utxo_valid_block_with_parents(12.into(), vec![11.into()], vec![split]).await.unwrap();
+
+    assert_eq!(consensus.pool_note(sn), None, "the split consumed note must be retired");
+    for sn in &produced_sns {
+        assert_eq!(consensus.pool_note(*sn), Some(bob.note(DenominationTag::D0_01)), "every produced note must be live");
+    }
+    let root_after_split = consensus.pool_root();
+    assert_ne!(root_after_split, root_before_split);
+
+    consensus.shutdown(join_handles);
+}
+
+/// FORK-PLAN P6.10: merge's own happy path mined end-to-end (previously only unit-tested
+/// at the `validate_stateful` level, `merchant_sweep_one_signature_many_serials` — which
+/// re-keys the same note *count*, not a value merge). Two consumed notes under one shared
+/// key, one signature, fold into a single smaller produced note.
+#[tokio::test]
+async fn merge_happy_path_mines_and_updates_pool_state() {
+    let consensus = TestConsensus::new(&config());
+    let join_handles = consensus.init();
+    let genesis = consensus.params().genesis.hash;
+
+    let alice = Wallet::new(1);
+    let bob = Wallet::new(2);
+
+    // One mint tx produces two 0.01-MAGLD notes to alice, both under her one key.
+    let (outpoint, entry, tip) = fund(&consensus, &alice, genesis, 5.into(), 10.into()).await;
+    let mint = mint_funded(&alice, (outpoint, entry), vec![alice.note(DenominationTag::D0_01), alice.note(DenominationTag::D0_01)]);
+    let sn0 = produced_serial(&mint, 0);
+    let sn1 = produced_serial(&mint, 1);
+    consensus.add_utxo_valid_block_with_parents(11.into(), vec![tip], vec![mint]).await.unwrap();
+    assert!(consensus.pool_note(sn0).is_some());
+    assert!(consensus.pool_note(sn1).is_some());
+    let root_before_merge = consensus.pool_root();
+
+    // Merge: both consumed by one signature, one smaller note produced (0.01 to fee).
+    let merge = pool_tx(&alice.rotate(vec![sn0, sn1], vec![bob.note(DenominationTag::D0_01)], 0));
+    let merged_sn = produced_serial(&merge, 0);
+    consensus.add_utxo_valid_block_with_parents(12.into(), vec![11.into()], vec![merge]).await.unwrap();
+
+    assert_eq!(consensus.pool_note(sn0), None, "both merged serials must be retired");
+    assert_eq!(consensus.pool_note(sn1), None);
+    assert_eq!(consensus.pool_note(merged_sn), Some(bob.note(DenominationTag::D0_01)), "the merged note must be live");
+    let root_after_merge = consensus.pool_root();
+    assert_ne!(root_after_merge, root_before_merge);
+
+    consensus.shutdown(join_handles);
+}
+
+/// FORK-PLAN P6.10: `PoolOpContextError::BadPublicKey` had no test anywhere in the
+/// codebase before this. A note minted with a `pk` that isn't a valid secp256k1 x-only
+/// public key (P5.1's mint validation never checks curve membership, only denomination
+/// validity — see `validate_mint`) can't be consumed: any attempt to rotate/redeem it
+/// fails parsing the *stored* note's pk before signature verification is even reached,
+/// regardless of who signs or what they sign.
+#[tokio::test]
+async fn bad_public_key_on_stored_note_rejects_consumption() {
+    let consensus = TestConsensus::new(&config());
+    let join_handles = consensus.init();
+    let genesis = consensus.params().genesis.hash;
+
+    let alice = Wallet::new(1);
+    let bob = Wallet::new(2);
+
+    // x = 0 is not a valid secp256k1 x-only public key (not on the curve).
+    let bogus_note = NewNote { d: DenominationTag::D0_01, pk: [0u8; 32] };
+    let (outpoint, entry, tip) = fund(&consensus, &alice, genesis, 5.into(), 10.into()).await;
+    let mint = mint_funded(&alice, (outpoint, entry), vec![bogus_note]);
+    let sn = produced_serial(&mint, 0);
+    consensus.add_utxo_valid_block_with_parents(11.into(), vec![tip], vec![mint]).await.unwrap();
+    assert_eq!(consensus.pool_note(sn), Some(bogus_note), "an unparseable pk is not rejected at mint time");
+
+    // Any attempted consumption — signer identity is irrelevant, parsing the stored pk
+    // fails first.
+    let bad_rotate = pool_tx(&alice.rotate(vec![sn], vec![bob.note(DenominationTag::D0_01)], 0));
+    let miner_data = MinerData::new(kaspa_consensus_core::tx::ScriptPublicKey::from_vec(0, vec![]), vec![]);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        consensus.build_utxo_valid_block_with_parents(12.into(), vec![11.into()], miner_data, vec![bad_rotate])
+    }));
+    assert!(result.is_err(), "a note with an unparseable stored pk must reject any attempt to consume it");
+    assert!(consensus.pool_note(sn).is_some(), "the unconsumable note is untouched, not silently dropped");
+
+    consensus.shutdown(join_handles);
+}
+
+/// FORK-PLAN P6.10: `TxRuleError::MalformedNotePoolPayload` (an on-`SUBNETWORK_ID_NOTE_POOL`
+/// transaction whose payload doesn't borsh-decode as any `PoolOp` variant) was previously
+/// tested only at `PoolOp::decode_payload` itself (consensus-core's own unit tests); this
+/// drives the identical invalid payload through a real block build, pinning the
+/// `tx_validation_in_isolation` gate that actually protects the chain.
+#[tokio::test]
+async fn malformed_pool_payload_rejected_in_block() {
+    let consensus = TestConsensus::new(&config());
+    let join_handles = consensus.init();
+    let genesis = consensus.params().genesis.hash;
+
+    // Discriminant 3 doesn't exist (only Mint=0, Transfer=1, Redeem=2) — same invalid
+    // payload consensus-core's own `malformed_pool_op_discriminant_rejected` uses.
+    let malformed =
+        Transaction::new(TX_VERSION_TOCCATA, vec![], vec![], 0, SUBNETWORK_ID_NOTE_POOL, 0, vec![3u8]);
+    let miner_data = MinerData::new(kaspa_consensus_core::tx::ScriptPublicKey::from_vec(0, vec![]), vec![]);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        consensus.build_utxo_valid_block_with_parents(11.into(), vec![genesis], miner_data, vec![malformed])
+    }));
+    assert!(result.is_err(), "a note-pool transaction with an undecodable payload must be rejected");
+
+    consensus.shutdown(join_handles);
+}
+
+/// FORK-PLAN P6.10: a conflict across two DIFFERENT op *types* on the same serial, not
+/// just two rotates (`parallel_double_rotate_resolves_deterministically`) — a rotate and a
+/// redeem race to consume the same note in parallel blocks. Same first-accepted-wins
+/// mechanism, exercised on a shape the existing conflict test never covers (Transfer vs.
+/// Redeem both implementing `ImmutablePoolDiff` the same way).
+#[tokio::test]
+async fn parallel_rotate_vs_redeem_conflict_resolves_deterministically() {
+    let consensus = TestConsensus::new(&config());
+    let join_handles = consensus.init();
+    let genesis = consensus.params().genesis.hash;
+
+    let alice = Wallet::new(1);
+    let bob = Wallet::new(2);
+
+    let (outpoint, entry, tip) = fund(&consensus, &alice, genesis, 5.into(), 10.into()).await;
+    let mint = mint_funded(&alice, (outpoint, entry), vec![alice.note(DenominationTag::D0_1)]);
+    let sn = produced_serial(&mint, 0);
+    consensus.add_utxo_valid_block_with_parents(11.into(), vec![tip], vec![mint]).await.unwrap();
+
+    let rotate = pool_tx(&alice.rotate(vec![sn], vec![bob.note(DenominationTag::D0_1)], 0));
+    let rotated_sn = produced_serial(&rotate, 0);
+    let redeem_output = TransactionOutput::new(DenominationTag::D0_1.petals(), bob.script());
+    let redeem_op = alice.redeem(vec![sn], std::slice::from_ref(&redeem_output), 0);
+    let redeem = redeem_tx(&redeem_op, vec![redeem_output]);
+
+    consensus.add_utxo_valid_block_with_parents(20.into(), vec![11.into()], vec![rotate.clone()]).await.unwrap();
+    consensus.add_utxo_valid_block_with_parents(21.into(), vec![11.into()], vec![redeem.clone()]).await.unwrap();
+    consensus.add_utxo_valid_block_with_parents(30.into(), vec![20.into(), 21.into()], vec![]).await.unwrap();
+
+    let acceptance = consensus.get_block_acceptance_data(30.into()).unwrap();
+    let accepted_ids: Vec<TransactionId> =
+        acceptance.iter().flat_map(|mbad| mbad.accepted_transactions.iter().map(|e| e.transaction_id)).collect();
+    let rotate_accepted = accepted_ids.contains(&rotate.id());
+    let redeem_accepted = accepted_ids.contains(&redeem.id());
+    assert_ne!(rotate_accepted, redeem_accepted, "exactly one of the conflicting rotate/redeem must be accepted");
+
+    assert_eq!(consensus.pool_note(sn), None);
+    if rotate_accepted {
+        assert!(consensus.pool_note(rotated_sn).is_some());
+    } else {
+        assert_eq!(consensus.pool_note(rotated_sn), None, "the losing rotate's produced note must not be live");
+    }
+
+    consensus.shutdown(join_handles);
+}
+
+/// FORK-PLAN P6.10's "deep reorg" verify criterion: the same walk-down/walk-up correctness
+/// `reorg_past_pool_op_restores_prior_pool_state` already proves at a 3-block scale must
+/// hold over a materially longer replacement chain too — not just as a matter of degree,
+/// since a bounded-depth optimization bug in the mergeset/diff walk could pass a shallow
+/// reorg and still fail here. The Y branch is stretched to `DEEP_REORG_BLOCKS` blocks
+/// (comfortably inside `finality_depth`, so this is purely a depth-of-walk stress, not a
+/// finality-boundary test).
+#[tokio::test]
+async fn deep_reorg_past_pool_op_restores_prior_pool_state() {
+    const DEEP_REORG_BLOCKS: u64 = 60;
+
+    let alice = Wallet::new(1);
+    let carol = Wallet::new(3);
+    let dave = Wallet::new(4);
+
+    let consensus = TestConsensus::new(&config());
+    let join_handles = consensus.init();
+    let genesis = consensus.params().genesis.hash;
+
+    let (outpoint, entry, tip) = fund(&consensus, &alice, genesis, 5.into(), 10.into()).await;
+    let mint = mint_funded(&alice, (outpoint, entry), vec![alice.note(DenominationTag::D0_01)]);
+    let sn = produced_serial(&mint, 0);
+    let rotate_x = pool_tx(&alice.rotate(vec![sn], vec![carol.note(DenominationTag::D0_01)], 0));
+    let rotate_y = pool_tx(&alice.rotate(vec![sn], vec![dave.note(DenominationTag::D0_01)], 0));
+    let sn_x = produced_serial(&rotate_x, 0);
+    let sn_y = produced_serial(&rotate_y, 0);
+
+    consensus.add_utxo_valid_block_with_parents(11.into(), vec![tip], vec![mint.clone()]).await.unwrap();
+    consensus.add_utxo_valid_block_with_parents(20.into(), vec![11.into()], vec![rotate_x.clone()]).await.unwrap();
+    assert!(consensus.pool_note(sn_x).is_some());
+    let root_x = consensus.pool_root();
+
+    // A Y branch DEEP_REORG_BLOCKS long, carrying the conflicting rotate at its base —
+    // deep enough that the reorg's walk-up has to replay dozens of blocks, not a handful.
+    let y_hashes: Vec<Hash> = (0..DEEP_REORG_BLOCKS).map(|i| (1000 + i).into()).collect();
+    consensus.add_utxo_valid_block_with_parents(y_hashes[0], vec![11.into()], vec![rotate_y.clone()]).await.unwrap();
+    for w in y_hashes.windows(2) {
+        consensus.add_utxo_valid_block_with_parents(w[1], vec![w[0]], vec![]).await.unwrap();
+    }
+
+    assert_eq!(consensus.pool_note(sn_x), None, "losing branch's produced note must be unapplied after a deep reorg");
+    assert!(consensus.pool_note(sn_y).is_some(), "winning branch's produced note must be live after a deep reorg");
+    let root_after_reorg = consensus.pool_root();
+    assert_ne!(root_after_reorg, root_x);
+
+    // Reference node: mines only the Y branch from scratch, never sees X at all.
+    let reference = TestConsensus::new(&config());
+    let reference_handles = reference.init();
+    let reference_genesis = reference.params().genesis.hash;
+    let (_, _, reference_tip) = fund(&reference, &alice, reference_genesis, 5.into(), 10.into()).await;
+    reference.add_utxo_valid_block_with_parents(11.into(), vec![reference_tip], vec![mint]).await.unwrap();
+    reference.add_utxo_valid_block_with_parents(y_hashes[0], vec![11.into()], vec![rotate_y]).await.unwrap();
+    for w in y_hashes.windows(2) {
+        reference.add_utxo_valid_block_with_parents(w[1], vec![w[0]], vec![]).await.unwrap();
+    }
+
+    assert_eq!(
+        root_after_reorg,
+        reference.pool_root(),
+        "a deeply reorged node's pool root must equal a never-forked node's root — no residue"
+    );
+
+    consensus.shutdown(join_handles);
+    reference.shutdown(reference_handles);
+}
+
+/// FORK-PLAN P6.10's value-conservation verify criterion extended to split and merge (
+/// `value_conservation_across_mint_transfer_redeem` already covers plain mint/transfer/
+/// redeem): `Σ pool notes + transparent supply` stays constant — modulo each op's own
+/// fee, which strictly decreases it — across a mint, a split, and a merge.
+#[tokio::test]
+async fn value_conservation_across_split_and_merge() {
+    let consensus = TestConsensus::new(&config());
+    let join_handles = consensus.init();
+    let genesis = consensus.params().genesis.hash;
+
+    let alice = Wallet::new(1);
+    let bob = Wallet::new(2);
+
+    let pool_value = |sns: &[Hash]| -> u64 { sns.iter().filter_map(|sn| consensus.pool_note(*sn)).map(|n| n.d.petals()).sum() };
+
+    let (outpoint, entry, tip) = fund(&consensus, &alice, genesis, 5.into(), 10.into()).await;
+    let mint = mint_funded(&alice, (outpoint, entry), vec![alice.note(DenominationTag::D0_1)]);
+    let sn = produced_serial(&mint, 0);
+    consensus.add_utxo_valid_block_with_parents(11.into(), vec![tip], vec![mint]).await.unwrap();
+    assert_eq!(pool_value(&[sn]), DenominationTag::D0_1.petals());
+
+    // Split: 0.1 -> 9 x 0.01 (0.01 fee) — pool value must strictly decrease by the fee.
+    let split_produced: Vec<NewNote> = (0..9).map(|_| bob.note(DenominationTag::D0_01)).collect();
+    let split = pool_tx(&alice.rotate(vec![sn], split_produced, 0));
+    let split_sns: Vec<Hash> = (0..9).map(|i| produced_serial(&split, i)).collect();
+    consensus.add_utxo_valid_block_with_parents(12.into(), vec![11.into()], vec![split]).await.unwrap();
+    assert_eq!(
+        pool_value(&split_sns),
+        DenominationTag::D0_1.petals() - DenominationTag::D0_01.petals(),
+        "split's produced value must equal consumed minus its fee, exactly"
+    );
+
+    // Merge: fold 9 x 0.01 back down to 1 x 0.01 (0.08 fee) — value can only shrink
+    // further. Signed by bob, not alice: the split's produced notes belong to bob.
+    let merge = pool_tx(&bob.rotate(split_sns.clone(), vec![bob.note(DenominationTag::D0_01)], 0));
+    let merged_sn = produced_serial(&merge, 0);
+    consensus.add_utxo_valid_block_with_parents(13.into(), vec![12.into()], vec![merge]).await.unwrap();
+    for sn in &split_sns {
+        assert_eq!(consensus.pool_note(*sn), None);
+    }
+    assert_eq!(pool_value(&[merged_sn]), DenominationTag::D0_01.petals(), "merge's produced value must equal its one output note");
+
+    consensus.shutdown(join_handles);
+}
+
 /// FORK-PLAN P6.6's own stated verify condition: `Σ pool notes + transparent supply ==
 /// emitted supply` holds across a real mint -> transfer -> redeem sequence. Restricted to
 /// the value this test itself injects (one funding block's coinbase reward) rather than

@@ -9,6 +9,7 @@ use super::miner::{LaneProducer, Miner, MinerOptions, NativeLaneProducer};
 
 use kaspa_consensus::config::Config;
 use kaspa_consensus::consensus::Consensus;
+use kaspa_consensus_core::api::ConsensusApi;
 use kaspa_consensus_core::block::Block;
 use kaspa_database::prelude::ConnBuilder;
 use kaspa_database::utils::DbLifetime;
@@ -75,10 +76,12 @@ impl KaspaNetworkSimulator {
             rocksdb_files_limit,
             rocksdb_mem_budget,
             long_payload,
+            0.0,
             |_| Box::new(NativeLaneProducer),
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn init_with_lane_producer(
         &mut self,
         num_miners: u64,
@@ -88,6 +91,7 @@ impl KaspaNetworkSimulator {
         rocksdb_files_limit: Option<i32>,
         rocksdb_mem_budget: Option<usize>,
         long_payload: bool,
+        pool_op_probability: f64,
         lane_producer: impl Fn(u64) -> Box<dyn LaneProducer>,
     ) -> &mut Self {
         let secp = secp256k1::Secp256k1::new();
@@ -143,6 +147,7 @@ impl KaspaNetworkSimulator {
                     target_blocks: self.target_blocks,
                     long_payload,
                     lane_producer: lane_producer(i),
+                    pool_op_probability,
                 },
             ));
             self.simulation.register(i, miner_process);
@@ -153,6 +158,25 @@ impl KaspaNetworkSimulator {
 
     pub fn run(&mut self, until: u64) -> ConsensusWrapper {
         self.simulation.run(until);
+        for (consensus, handles, _) in self.consensuses.drain(1..) {
+            consensus.shutdown(handles);
+        }
+        self.consensuses.pop().unwrap()
+    }
+
+    /// FORK-PLAN P6.10's own verify criterion: run the simulation, then assert every
+    /// miner's own consensus instance agrees on the live note-pool root — before `run`'s
+    /// own shutdown/drain would otherwise discard all but the first. Genuinely
+    /// independent per-miner instances relaying blocks to each other, not a single
+    /// shared consensus, so this is a real cross-node agreement check.
+    pub fn run_and_verify_pool_root_agreement(&mut self, until: u64) -> ConsensusWrapper {
+        self.simulation.run(until);
+        let roots: Vec<kaspa_hashes::Hash> =
+            self.consensuses.iter().map(|(consensus, _, _)| consensus.get_pool_root()).collect();
+        assert!(
+            roots.windows(2).all(|w| w[0] == w[1]),
+            "miners disagree on the note-pool root after the simulation: {roots:?}"
+        );
         for (consensus, handles, _) in self.consensuses.drain(1..) {
             consensus.shutdown(handles);
         }

@@ -1473,12 +1473,55 @@ store → validation → pipeline → mempool → sync → RPC. Every step lands
   kaspa-consensus-core 121); full integration suite green (44 passed, 0 failed, 6
   pre-existing `#[ignore]`d).
 
-- [ ] **P6.10 — Consensus test battery + simpa.** A dedicated integration-test module
+- [x] **P6.10 — Consensus test battery + simpa.** A dedicated integration-test module
   running the full matrix: all five ops happy-path, every P5.3 rejection case, parallel
   conflicts, deep reorg, value conservation, pool-root agreement across nodes. Teach
   `simpa` to generate random pool ops so DAG-level stress includes the pool.
-  ✅ *Verify:* `cargo nextest run --release -p kaspa-testing-integration` green including
-  new module; simpa run with pool ops completes with all nodes agreeing on the pool root.
+  **Executed (2026-08-16):** a research pass first inventoried what already existed
+  (P6.3-P6.9 already left `consensus/core/src/notepool/validate.rs`'s unit tests
+  covering every stateless/stateful rejection case, and
+  `consensus/src/pipeline/virtual_processor/notepool_tests.rs` covering mint/rotate
+  happy-path, one parallel-conflict shape, one shallow reorg, and value conservation
+  across mint→transfer→redeem) and found the real gaps: split and merge had ZERO
+  coverage above the unit-test layer (no real mined block ever exercised them),
+  `PoolOpContextError::BadPublicKey` had no test anywhere, `TxRuleError::
+  MalformedNotePoolPayload` was untested at the transaction/pipeline layer, the one
+  existing reorg test was only 3 blocks deep, and no test exercised a genuinely
+  cross-op-type conflict (only rotate-vs-rotate). All of these were added directly to
+  `notepool_tests.rs` (reusing its existing `Wallet`/`fund`/`mint_funded` harness
+  rather than duplicating it into `testing/integration` — see NOTES.md for why): 7 new
+  tests (split happy-path, merge happy-path, `BadPublicKey`, `MalformedNotePoolPayload`
+  in-block, rotate-vs-redeem parallel conflict, a 60-block-deep reorg, and value
+  conservation across split+merge) — every one passed on its first or second run.
+  Added a `ConsensusApi::get_pool_root()` (mirroring P6.9's `get_pool_stats`) so
+  code outside `kaspa-consensus` can read the live pool root without `TestConsensus`-
+  only internals — used by both the new daemon test and simpa. New
+  `daemon_notepool_multi_node_agreement_test` in `testing/integration` (genuinely
+  three independent daemons in a star topology, not the special-cased pair
+  `daemon_ibd_pool_state_sync_test` uses): a real mint→split→merge→redeem sequence
+  relayed over P2P, converging to identical `header.pool_commitment` AND identical
+  `get_pool_stats()` across all three. simpa's `Miner` gained real note-pool
+  awareness (a `possible_notes` set mirroring its existing UTXO tracking) and a new
+  `pool_op_probability`-gated code path that self-targets mint/de-tier-rotate/merge/
+  redeem each block; `KaspaNetworkSimulator::run_and_verify_pool_root_agreement`
+  asserts every miner's own consensus instance agrees on the pool root before
+  shutdown. New `test_pool_ops_via_simpa` (3 miners, 400 blocks) passed after fixing
+  two real bugs the exercise surfaced: `OnetimeTxSelector`'s `reject_selection` was a
+  blind `unimplemented!()` masking the actual validation error (now surfaces the real
+  `RuleError` via `is_successful()`, which also fixed a latent `None.unwrap()` panic
+  in the template-builder's retry loop), and simpa's `main_impl` never activated
+  `toccata_activation`/`pool_activation` (pool-op transactions carry
+  `TX_VERSION_TOCCATA`, silently rejected as `UnknownTxVersion` until fixed —
+  `crescendo_activation` was already force-enabled the same way, this was just a
+  gap). A third bug — the new simpa test racing the pre-existing 5000-block
+  `test_pruning_via_simpa` for the same process-wide file-descriptor budget when
+  Rust's default test harness ran them concurrently — was fixed with a shared
+  `Mutex` serializing the two.
+  ✅ *Verify:* `cargo test --workspace --exclude kaspa-testing-integration` green
+  (142/142 result groups; `kaspa-consensus` 100 passed, up from 93); full `cargo test
+  --release -p kaspa-testing-integration` green; `cargo test --release -p simpa --bin
+  simpa` green (`test_pruning_via_simpa` + `test_pool_ops_via_simpa` together, no
+  resource contention); `cargo build --workspace --tests` clean throughout.
 
 - [ ] **P6.11 — Finality-anchor consensus rule.** ⚠️ **HARD.** Implement per P5.8: anchor
   tx parsing and k-of-n signature verification against trustee pubkeys pinned in
