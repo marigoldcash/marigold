@@ -509,3 +509,174 @@ async fn wallet_notepool_receive_flows_test() {
     miner_client.disconnect().await.unwrap();
     kaspad.shutdown();
 }
+
+/// FORK-PLAN P7.4's verify criterion: "spends of amounts requiring splits succeed;
+/// bearer-exporting a shared-key note demonstrably isolates first (two txs
+/// on-chain)."
+///
+/// - Split spend: A holds exactly ONE 0.1 note and pays a 0.03 request — the
+///   covering planner must consume the 0.1 and emit payment (3x0.01 to B), change
+///   (back to A under fresh keys), and the fee in ONE `TransferOp` ("split then pay
+///   is one transaction", POOL-SPEC.md P5.6).
+/// - Shared-key export: B's claimed notes share the request pk (landing pad), so
+///   exporting one MUST auto-isolate onto a fresh solo key first (tx 1); the
+///   receiving wallet's import-rotation is tx 2 — the exported serial's journey is
+///   demonstrably two on-chain transactions, vs. a solo export which skips
+///   isolation entirely (also asserted).
+///
+/// `cargo test --release --package kaspa-testing-integration --lib -- notepool_wallet_integration_tests::wallet_notepool_spend_flows_test --ignored --nocapture`
+#[ignore]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn wallet_notepool_spend_flows_test() {
+    use kaspa_wallet_core::account::notepool::{BearerNote, await_payment_request, create_payment_request};
+    use kaspa_wallet_core::storage::NoteProvenance;
+
+    init_allocator_with_default_settings();
+    kaspa_core::log::try_init_logger("INFO,kaspa_testing_integration=trace");
+
+    let args =
+        Args { simnet: true, unsafe_rpc: true, enable_unsynced_mining: true, disable_upnp: true, utxoindex: true, ..Default::default() };
+    let total_fd_limit = 10;
+    let mut kaspad = Daemon::new_random_with_args(args, total_fd_limit);
+    let miner_client = kaspad.start().await;
+
+    let secret_a = Secret::from("payer-wallet-password");
+    let secret_b = Secret::from("receiver-wallet-password");
+    let (wallet_a, account_a) = connect_and_bootstrap_wallet(&kaspad, &secret_a).await;
+    let (wallet_b, account_b) = connect_and_bootstrap_wallet(&kaspad, &secret_b).await;
+
+    let receive_a = account_a.receive_address().expect("payer receive address");
+    let throwaway = Address::new(kaspad.network.into(), Version::PubKey, &[7u8; 32]);
+    let mut mine = |n: usize, to: Address| {
+        let miner_client = miner_client.clone();
+        async move {
+            for _ in 0..n {
+                let template = miner_client.get_block_template(to.clone(), vec![]).await.unwrap();
+                miner_client.submit_block(template.block, false).await.unwrap();
+            }
+        }
+    };
+
+    // Fund A (one tracked coinbase + maturity), then mint exactly ONE 0.1 note — the
+    // smallest holding that forces every later spend through the split planner.
+    let coinbase_maturity = SIMNET_PARAMS.coinbase_maturity();
+    mine(1, receive_a.clone()).await;
+    mine((coinbase_maturity + 20) as usize, throwaway.clone()).await;
+    let poll_account = account_a.clone();
+    wait_for(
+        200,
+        150,
+        move || {
+            let account = poll_account.clone();
+            Box::pin(async move { account.balance().map(|b| b.mature).unwrap_or(0) > 0 })
+        },
+        "payer wallet did not observe a mature transparent balance after mining",
+    )
+    .await;
+
+    let mint = account_a.clone().mint(secret_a.clone(), None, 10_000_000, None, &Abortable::default()).await.expect("mint failed");
+    assert_eq!(mint.notes.len(), 1, "0.1 MAGLD mints as exactly one D0_1 note");
+    assert_eq!(mint.notes[0].d, DenominationTag::D0_1);
+    mine(10, throwaway.clone()).await;
+
+    // ---------- split-requiring spend ----------
+    const PAYMENT_PETALS: u64 = 3_000_000; // 0.03 — no exact representation from one 0.1
+
+    let request = create_payment_request(&wallet_b, &secret_b, Some(PAYMENT_PETALS)).await.expect("create_payment_request failed");
+    let awaiter = {
+        let wallet_b = wallet_b.clone();
+        let secret_b = secret_b.clone();
+        let pk = request.pk;
+        tokio::spawn(async move { await_payment_request(&wallet_b, &secret_b, pk, std::time::Duration::from_secs(90)).await })
+    };
+    workflow_core::task::sleep(std::time::Duration::from_millis(1_000)).await;
+
+    let pay = account_a.clone().pay_payment_request(secret_a.clone(), request, None).await.expect("split-requiring pay failed");
+    // ONE transaction: consumed the single 0.1, produced 3x0.01 payment + change,
+    // with the fee withheld — payment, split, change, fee all in the same TransferOp.
+    assert_eq!(pay.consumed_serials.len(), 1, "the covering planner must consume the single 0.1 note");
+    assert_eq!(pay.consumed_serials[0], mint.notes[0].sn);
+    assert_eq!(pay.external_serials.len(), 3, "0.03 pays as 3x0.01");
+    let change_value: u64 = pay.own_notes.iter().map(|n| DENOMINATION_PETALS[n.d as usize]).sum();
+    assert_eq!(
+        change_value + PAYMENT_PETALS + pay.fee_petals,
+        10_000_000,
+        "consumed value must exactly split into payment + change + fee"
+    );
+    println!(
+        "split spend: 1 note in -> {} payment + {} change notes + {} petals fee, tx {}",
+        pay.external_serials.len(),
+        pay.own_notes.len(),
+        pay.fee_petals,
+        pay.transaction_id
+    );
+
+    mine(10, throwaway.clone()).await;
+    let claimed = awaiter.await.expect("awaiter task panicked").expect("await_payment_request failed");
+    assert_eq!(claimed.total_petals, PAYMENT_PETALS);
+    assert_eq!(claimed.notes.len(), 3);
+
+    // ---------- bearer export: shared key isolates first (two txs on-chain) ----------
+    let store_b = wallet_b.store().as_note_key_store().expect("receiver note key store");
+    let exported_origin = claimed.notes[0].clone();
+
+    let export = account_b.clone().bearer_export(secret_b.clone(), exported_origin.sn).await.expect("shared-key export failed");
+    let isolation = export.isolation.as_ref().expect("a landing-pad note's key is shared — export MUST isolate first");
+    assert_ne!(export.bearer.sn, exported_origin.sn, "the exported serial is the freshly isolated one");
+    assert_eq!(export.bearer.d, exported_origin.d, "isolation preserves the denomination");
+    assert_ne!(export.bearer.sk, exported_origin.sk, "the isolated key is fresh — the shared key is never handed out");
+    // The isolation consumed the exported note plus a same-key sibling as fee stamp —
+    // one SignedGroup covering both serials under the shared landing-pad key.
+    assert_eq!(isolation.consumed_serials.len(), 2);
+    assert!(isolation.consumed_serials.contains(&exported_origin.sn));
+
+    mine(10, throwaway.clone()).await;
+    // Isolation (tx 1) on-chain: origin serial gone, isolated serial live.
+    let gone = miner_client.get_notes_by_serial(vec![exported_origin.sn]).await.unwrap();
+    assert!(gone.is_empty(), "the shared-key origin serial must be rotated away before handover");
+    let live = miner_client.get_notes_by_serial(vec![export.bearer.sn]).await.unwrap();
+    assert_eq!(live.len(), 1, "the isolated serial must be live for the receiver to verify");
+
+    // B's books: origin + stamp Superseded, isolated note HandedOver.
+    assert_eq!(store_b.load_info(&exported_origin.sn).await.unwrap().unwrap().status, NoteStatus::Superseded);
+    assert_eq!(store_b.load_info(&export.bearer.sn).await.unwrap().unwrap().status, NoteStatus::HandedOver);
+
+    // The receiver (A) imports the handover — tx 2 of the exported note's journey.
+    let bearer = BearerNote::from_text(&export.bearer.to_text()).expect("bearer text round-trip");
+    let import = account_a.clone().bearer_import(secret_a.clone(), bearer).await.expect("import of exported note failed");
+    mine(10, throwaway.clone()).await;
+    let handover_gone = miner_client.get_notes_by_serial(vec![export.bearer.sn]).await.unwrap();
+    assert!(handover_gone.is_empty(), "the handed-over serial must be rotated away by the receiver (second on-chain tx)");
+    let received: Vec<Hash> = import.rotation.own_notes.iter().map(|n| n.sn).collect();
+    assert_eq!(miner_client.get_notes_by_serial(received).await.unwrap().len(), import.rotation.own_notes.len());
+    println!(
+        "shared-key export journey: isolation tx {} -> handover -> receiver rotation tx {}",
+        isolation.transaction_id, import.rotation.transaction_id
+    );
+
+    // ---------- solo export skips isolation ----------
+    // Any of A's change notes that is still Active (the bearer import above consumed
+    // one of them as its rotation's fee stamp — skip that one).
+    let store_a = wallet_a.store().as_note_key_store().expect("payer note key store");
+    let mut solo = None;
+    for note in &pay.own_notes {
+        if store_a.load_info(&note.sn).await.unwrap().unwrap().status == NoteStatus::Active {
+            solo = Some(note.clone());
+            break;
+        }
+    }
+    let solo = solo.expect("at least one change note remains active");
+    let solo_export = account_a.clone().bearer_export(secret_a.clone(), solo.sn).await.expect("solo export failed");
+    assert!(solo_export.isolation.is_none(), "a fresh solo Cold key needs no isolation");
+    assert_eq!(solo_export.bearer.sn, solo.sn, "a solo note is handed over as-is");
+    assert_eq!(store_a.load_info(&solo.sn).await.unwrap().unwrap().status, NoteStatus::HandedOver);
+    assert_eq!(store_a.load_info(&solo.sn).await.unwrap().unwrap().provenance, NoteProvenance::Cold);
+
+    for wallet in [&wallet_a, &wallet_b] {
+        if let Some(client) = wallet.try_wrpc_client() {
+            client.disconnect().await.ok();
+        }
+    }
+    miner_client.disconnect().await.unwrap();
+    kaspad.shutdown();
+}

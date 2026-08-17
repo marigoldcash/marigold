@@ -2921,3 +2921,65 @@ including must-not-overshoot cases, fee-quanta sizing). P7.2's mint/redeem live
 test re-passes after its bootstrap was factored into the shared
 `connect_and_bootstrap_wallet` helper. Wallet-core suite 55 green; full workspace
 check + clippy clean.
+
+### P7.4 — Spend flows (2026-08-17)
+
+Same session as P7.3, and deliberately small on top of it — the P7.3 transfer
+builder was designed with this step's contract in mind, so P7.4 is two focused
+changes rather than a new subsystem.
+
+**Split planning is a selection policy, not a transaction plan.** The naive
+reading of "note selection + split planning to hit the exact sum" is a two-phase
+pipeline (split tx, then pay tx). P5.2/P5.6 make that unnecessary — a `TransferOp`'s
+`produced` list is arbitrary, so "split then pay" is one transaction — and P7.3's
+`submit_transfer` already takes (consumed, external produced, own produced). All
+P7.4(a) actually needed was `select_covering`: exact representation first (via the
+existing `select_exact` — no change, fewest moving parts), else accumulate
+smallest-first until `amount + fee` is covered, with the overshoot decomposed as
+change to fresh own Cold keys. Smallest-first is a deliberate choice, not an
+accident: paying with dust sweeps it into change that the decomposition re-issues
+in canonical largest-first form — organic merge hygiene (the P5.6 merge
+motivation) without a dedicated merge step, and it leaves large notes intact.
+Bonus simplification: the P7.3-era separate fee-source stage dissolved — the fee is
+just part of the covering target, withheld from change.
+
+**`NoteStatus::HandedOver` — the bearer window made visible.** A bearer-exported
+note is not spent (the wallet still holds a valid key) and not safely spendable
+(so does the receiver) — a third state, exactly the spec's "handed over, pending
+their rotation". Borsh-appended enum variant (no stored wallets predate it);
+excluded from balance and from every selection filter (they all filter
+`== Active`, so the exclusion was automatic); flips to `Superseded` through the
+ordinary `NotesChanged`-removal path when the receiver's rotation lands — the
+"pending their rotation" clock needs no new machinery.
+
+**`bearer_export` and the solo-key invariant.** The solo check runs on plaintext
+info alone (same sk ⇔ same pk, so "any other non-superseded row under this pk"
+detects wallet-visible sharing without decrypting anything), with `Hot` provenance
+treated as shared-by-history regardless of rows — a key that ever crossed a wallet
+boundary might be held elsewhere even if this wallet sees no sibling. Isolation
+reuses `rotate_notes` unchanged; the exported payload always carries the *isolated*
+serial and its fresh key — there is no code path that emits a shared `sk`, same
+structural-enforcement philosophy as P7.1's `import_bearer_key` (no caller-supplied
+provenance) and P7.3's `bearer_import` (no rotation-skipping import). One honest
+edge: if the wallet holds no spare note, isolation runs in slack mode and splits
+the denomination — the export then errors with the rotated serials listed
+(re-export one of those) rather than silently exporting a different denomination
+than asked. The CLI waits for the isolation to confirm before displaying the QR
+(the receiver's `bearer_import` verifies against live pool state — an unconfirmed
+serial would just fail their verification) and words the handover window honestly.
+
+**A pleasing detail from the live test**: B's isolation of a landing-pad note
+consumed the exported note *and* a same-key sibling as fee stamp in a single
+`SignedGroup` — one signature covering two serials under the shared request pk —
+exercising the multi-serial group path (P5.2's merchant-sweep primitive) for the
+first time in a wallet-constructed transaction.
+
+✅ *Verify*: `wallet_notepool_spend_flows_test` — A holds exactly ONE 0.1 note and
+pays a 0.03 request: one on-chain transaction consuming the 0.1, producing 3×0.01
+to B's request pk + 6×0.01 change + 0.01 fee (exact value-split asserted); B
+bearer-exports a claimed landing-pad note: isolation tx first (origin serial
+verified gone, isolated serial verified live, denomination preserved, fresh key),
+then A's import-rotation as the second on-chain tx of the note's journey —
+"demonstrably isolates first (two txs on-chain)" literally; a solo-note export
+asserted to skip isolation (handed over as-is, `HandedOver` in the books). All 3
+notepool live tests green, wallet-core 56 green, workspace check + clippy clean.

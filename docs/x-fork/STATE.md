@@ -4,9 +4,9 @@ Snapshot of everything decided and built so far, so any fresh coding session on 
 machine can continue from the repo alone. Read this together with [FORK-PLAN.md](../../FORK-PLAN.md).
 Update this file whenever off-repo state changes (domains, accounts, infra).
 
-Last updated: 2026-08-16 (P7.3 complete — receive flows (bearer import +
-sign-to-fresh-pk), live-verified between two wallet instances; next: P7.4, spend
-flows)
+Last updated: 2026-08-17 (P7.4 complete — spend flows (split-planning payer +
+bearer export with solo-key isolation), live-verified; next: P7.5, POS
+landing-pad mode)
 
 ## What this project is
 
@@ -95,10 +95,27 @@ substitute for it.
 
 ## Where execution stands
 
-- **Next step: P7.4 — Spend flows.** Note selection + split planning to hit exact
-  sums (the transfer builder, exact-selection, and rotation primitives all exist
-  from P7.3 — P7.4 adds the split planner and bearer *export* with solo-key
-  enforcement).
+- **Next step: P7.5 — POS landing-pad mode.** Merchant generates fresh-pk
+  `{pk, amount}` checkout QRs and auto-sweeps on confirmation (one multi-serial
+  rotation to per-note fresh cold keys); payer scans/confirms/pays exact. Nearly
+  every primitive exists: payment requests + await/claim (P7.3), exact/covering
+  payment (P7.4), multi-serial shared-key `SignedGroup` rotation (exercised in
+  P7.4's test) — P7.5 is mostly the merchant-side auto-sweep loop + a scripted
+  two-wallet demo.
+- **P7.4 is done — split spends + bearer export, live-verified.**
+  `select_covering` (exact-first, else smallest-first sweep — organic dust
+  consolidation via change), with payment/split/change/fee in ONE `TransferOp`;
+  the separate P7.3 fee-source stage dissolved into the covering target. New
+  `NoteStatus::HandedOver` for bearer-exported notes (excluded from balance and
+  all selection; flips to Superseded via the ordinary NotesChanged-removal path
+  when the receiver rotates). `bearer_export` enforces P5.6's solo-key invariant
+  structurally — shared or Hot keys are auto-isolated via `rotate_notes` first
+  and only the isolated fresh key is ever exported; CLI `note export` waits for
+  the isolation to confirm before displaying the QR. Live test: one 0.1 note
+  pays a 0.03 request in a single split+pay+change+fee tx; a landing-pad
+  (shared-pk) export demonstrably isolates first — two on-chain txs for the
+  note's journey — and a solo export skips isolation. Full writeup in NOTES.md's
+  P7.4 entry.
 - **P7.3 is done — both receive flows live-verified between two wallet
   instances.** The wallet's first `TransferOp` construction
   (`account::notepool::submit_transfer` + `rotate_notes`/`pay_payment_request`),

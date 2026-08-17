@@ -406,8 +406,8 @@ pub trait Account: AnySync + Send + Sync + 'static {
         notepool::bearer_import(self.as_dyn_arc(), wallet_secret, bearer).await
     }
 
-    /// Pay a payment request with exact denominations (FORK-PLAN P7.3 flow (b),
-    /// payer half).
+    /// Pay a payment request (FORK-PLAN P7.3 flow (b) payer half; split planning
+    /// per P7.4 — payment, split, change, and fee in one `TransferOp`).
     async fn pay_payment_request(
         self: Arc<Self>,
         wallet_secret: Secret,
@@ -415,6 +415,12 @@ pub trait Account: AnySync + Send + Sync + 'static {
         amount_override: Option<u64>,
     ) -> Result<notepool::TransferResult> {
         notepool::pay_payment_request(self.as_dyn_arc(), wallet_secret, request, amount_override).await
+    }
+
+    /// Bearer-export a note, auto-isolating first if its key isn't solo
+    /// (FORK-PLAN P7.4 flow (b)).
+    async fn bearer_export(self: Arc<Self>, wallet_secret: Secret, sn: Hash) -> Result<notepool::BearerExportResult> {
+        notepool::bearer_export(self.as_dyn_arc(), wallet_secret, sn).await
     }
 
     async fn commit_reveal_manual(

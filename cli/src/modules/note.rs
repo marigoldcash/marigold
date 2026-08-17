@@ -35,6 +35,7 @@ impl Note {
             "request" => self.request(&ctx, argv).await,
             "pay" => self.pay(&ctx, argv).await,
             "import" => self.import(&ctx, argv).await,
+            "export" => self.export(&ctx, argv).await,
             "balance" => self.balance(&ctx).await,
             "list" => self.list(&ctx).await,
             v => {
@@ -127,6 +128,56 @@ impl Note {
             "rotation tx: {} (fee {} MAGLD); the note is yours once this confirms",
             result.rotation.transaction_id,
             sompi_to_kaspa_string(result.rotation.fee_petals)
+        );
+        tprintln!(ctx, "");
+        Ok(())
+    }
+
+    /// `note export <serial>` — bearer-export a note: auto-isolate if its key is
+    /// shared, wait for the isolation to land on-chain, then show the handover
+    /// QR + text and mark the note handed over.
+    async fn export(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
+        if argv.is_empty() {
+            tprintln!(ctx, "usage: 'note export <serial>'\r\n");
+            return Ok(());
+        }
+        let account = ctx.wallet().account()?;
+        let sn = argv[0].parse::<Hash>().map_err(|_| Error::Custom(format!("'{}' is not a valid note serial (32-byte hex)", argv[0])))?;
+        let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(Some(&account)).await?;
+
+        let result = account.bearer_export(wallet_secret, sn).await?;
+        if let Some(isolation) = &result.isolation {
+            tprintln!(
+                ctx,
+                "key was shared - isolated onto a fresh solo key first (tx {}, fee {} MAGLD)",
+                isolation.transaction_id,
+                sompi_to_kaspa_string(isolation.fee_petals)
+            );
+            tprintln!(ctx, "waiting for the isolation to confirm before the receiver can verify it...");
+            let rpc = ctx.wallet().rpc_api();
+            let mut confirmed = false;
+            for _ in 0..120 {
+                if rpc.get_notes_by_serial(vec![result.bearer.sn]).await?.iter().any(|entry| entry.sn == result.bearer.sn) {
+                    confirmed = true;
+                    break;
+                }
+                workflow_core::task::sleep(Duration::from_millis(500)).await;
+            }
+            if !confirmed {
+                tprintln!(ctx, "isolation not yet confirmed - share the payload below only once it is (check 'note list')\r\n");
+            }
+        }
+
+        let text = result.bearer.to_text();
+        if let Some(qr) = qr_string(&text) {
+            tprintln!(ctx, "{}", qr);
+        }
+        tprintln!(ctx, "{text}");
+        tprintln!(
+            ctx,
+            "note {} ({} MAGLD) handed over - it is the receiver's once they rotate it; both of you can spend it until then",
+            result.bearer.sn,
+            sompi_to_kaspa_string(DENOMINATION_PETALS[result.bearer.d as usize])
         );
         tprintln!(ctx, "");
         Ok(())
@@ -251,6 +302,7 @@ impl Note {
                 ("request [<amount>]", "Create a payment request (QR + text), then watch for the payment"),
                 ("pay <request-text> [<amount>]", "Pay a payment request from held notes"),
                 ("import <bearer-text>", "Import a bearer note and immediately rotate it to fresh keys"),
+                ("export <serial>", "Bearer-export a note (auto-isolates first if its key is shared)"),
                 ("balance", "Show note balance by denomination"),
                 ("list", "List every held note (serial, denomination, provenance, status)"),
             ],

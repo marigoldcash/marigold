@@ -1829,12 +1829,43 @@ wallet. WASM/mobile wallets are post-launch — CLI proves the protocol.*
   fee-quanta sizing); mint/redeem live test re-passes after the bootstrap-helper
   refactor; wallet-core suite 55 green; workspace check + clippy clean.
 
-- [ ] **P7.4 — Spend flows.** Given an amount: note selection + split planning to hit the
+- [x] **P7.4 — Spend flows.** Given an amount: note selection + split planning to hit the
   exact sum, then (a) rotate to a supplied payment-request pk, or (b) bearer export —
   which must enforce solo-key: auto-isolate the note first if its key is shared, then
   emit the key QR and mark the note "handed over, pending their rotation".
   ✅ *Verify:* spends of amounts requiring splits succeed; bearer-exporting a shared-key
   note demonstrably isolates first (two txs on-chain).
+  **Executed (2026-08-17):** (a) `pay_payment_request` upgraded from
+  exact-selection-only to a covering planner (`select_covering`): exact
+  representation preferred (no change, fewest parts), else notes accumulate
+  smallest-first until `amount + fee` is covered — deliberately sweeping small
+  denominations into change that the decomposition re-issues canonically (organic
+  merge hygiene: paying with dust consolidates it, no dedicated merge step).
+  Payment, split, change, and fee all land in ONE `TransferOp` (P5.6's "'split
+  then pay' is one `TransferOp`, not two sequential ones" taken literally) — the
+  P7.3 fee-source stage dissolved into the same selection. (b) `bearer_export`:
+  solo-key check on the plaintext info alone (same sk ⇔ same pk — any other
+  non-superseded row under the pk means shared; `Hot` provenance means shared by
+  history regardless of rows), auto-isolation via `rotate_notes` onto a fresh solo
+  Cold key (preserving denomination — the exported payload carries the *isolated*
+  serial and key, never the shared one), and a new third `NoteStatus`:
+  **`HandedOver`** — excluded from balance and every selection, flipped to
+  `Superseded` when the receiver's rotation is observed (the ordinary
+  `NotesChanged` removal path). CLI: `note export <serial>` (waits for the
+  isolation to confirm before showing the QR — the receiver can't verify an
+  unconfirmed serial — and states the bearer-window honestly: "both of you can
+  spend it until they rotate"). Verified live (`wallet_notepool_spend_flows_test`,
+  two wallets, one daemon): A holds exactly ONE 0.1 note and pays a 0.03 request —
+  one transaction consumes the 0.1 and produces 3×0.01 to B + 6×0.01 change +
+  0.01 fee (value split asserted exactly); B then bearer-exports one of its
+  claimed landing-pad notes (shared pk) — isolation runs first as its own on-chain
+  tx (one `SignedGroup` covering the exported note + a same-key sibling as fee
+  stamp), origin serial verified gone / isolated serial verified live, then A
+  imports the handover and its rotation is the second on-chain tx of the exported
+  note's journey; a solo-key export is asserted to skip isolation entirely
+  (handed over as-is). Unit test for the covering planner (exact-first,
+  smallest-first sweep, big-note preservation); all 3 notepool live tests green,
+  wallet-core 56 green, workspace check + clippy clean.
 
 - [ ] **P7.5 — POS landing-pad mode.** Implement P5.6's flow: merchant side generates
   `{pk, amount}` payment-request QRs (fresh pk per checkout) and auto-sweeps on

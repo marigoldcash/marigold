@@ -42,6 +42,13 @@ pub enum NoteStatus {
     /// rather than deleted immediately, so a caller with the wallet secret can later
     /// reconcile (e.g. drop the row, or confirm a rotation landed under a new `sn`).
     Superseded,
+    /// Bearer-exported (FORK-PLAN P7.4, POOL-SPEC.md P5.5a): the key was handed to
+    /// someone else, and the note is theirs the moment they rotate it — until then
+    /// both parties can technically spend it (the defining property of a bearer
+    /// instrument). Excluded from balance and from every spend/fee-source selection;
+    /// flips to [`Self::Superseded`] when the receiver's rotation is observed
+    /// on-chain (the ordinary `NotesChanged` removal path).
+    HandedOver,
 }
 
 /// One row of the note key database (POOL-SPEC.md P5.6's `KeyDbEntry`, flattened to
