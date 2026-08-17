@@ -119,6 +119,39 @@ pub trait NoteKeyStore: Send + Sync {
     async fn payment_requests(&self) -> Result<Vec<PaymentRequestInfo>>;
     async fn load_payment_request_key(&self, wallet_secret: &Secret, pk: &[u8; 32]) -> Result<Option<PaymentRequestKey>>;
     async fn remove_payment_request(&self, wallet_secret: &Secret, pk: &[u8; 32]) -> Result<()>;
+
+    // ~~~ vault ceremony (FORK-PLAN P7.6) ~~~
+    //
+    // Backends that store notes some other way (there are none today, but the
+    // trait stays storage-agnostic on principle) simply don't support these —
+    // default to `NotImplemented` rather than forcing every implementor to
+    // define vault-specific semantics.
+
+    /// Whether the vault has already been through its 24-word creation ceremony.
+    /// `store()`/`import_bearer_key()` auto-provision one silently on first use
+    /// if this is false when they're called (see `LocalStoreInner::ensure_note_vault`)
+    /// — `vault_create` lets a caller run the ceremony explicitly and properly
+    /// beforehand instead, so the words are actually shown to the user.
+    async fn vault_exists(&self) -> Result<bool> {
+        Err(Error::NotImplemented)
+    }
+    /// Run the 24-word creation ceremony now. Returns the words — the caller MUST
+    /// display/record them; they are never retrievable again. Errs if a vault
+    /// already exists.
+    async fn vault_create(&self, _wallet_secret: &Secret) -> Result<String> {
+        Err(Error::NotImplemented)
+    }
+    /// Recover `K` from its 24-word encoding, re-wrapping it under `wallet_secret`
+    /// for daily use afterward (FORK-PLAN P7.6 restore flow: "24 words + the
+    /// files" — the files themselves are a separate, out-of-band copy step).
+    async fn vault_restore_from_words(&self, _words: &str, _wallet_secret: &Secret) -> Result<()> {
+        Err(Error::NotImplemented)
+    }
+    /// The vault's on-disk folder, for standalone copy-out (`note vault backup`)
+    /// — the CLI does the actual file copy natively; this just says where from.
+    async fn vault_folder(&self) -> Result<std::path::PathBuf> {
+        Err(Error::NotImplemented)
+    }
 }
 
 #[async_trait]

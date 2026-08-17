@@ -3034,6 +3034,166 @@ watch-once-then-retire model), effectively an unbounded-lifetime request the fre
 primitives weren't shaped for. FORK-PLAN's own P7.5 verify criterion doesn't exercise
 it. Left as a named gap rather than silently dropped or half-built.
 
+### P7.6 — Note vault, backup, and restore (2026-08-17)
+
+The largest single step of Phase 7 — expanded ahead of execution in a three-exchange
+design conversation with the user (DECISIONS.md's "Note vault, backup, and
+restore-rotation policy" entry, POOL-SPEC.md P5.6's corresponding rewrite) — and the
+only step this phase where the live daemon test caught real bugs *in the vault code
+itself*, not just in surrounding infrastructure. Four for four this time: every bug
+below was found by `wallet_notepool_vault_test`, none by the 13 new unit tests (which
+exercise the storage layer in isolation and, correctly, don't know what a live daemon
+would do differently).
+
+**Storage: `storage::local::notevault::NoteVault`, mirroring `fsio::TransactionStore`'s
+folder/filename convention exactly**, but as a plain struct with inherent `async fn`s
+(`is_empty`/`iter`/`load_info`/`load_key`/`store`/`remove`/`import_bearer_key`/
+`mark_status`/`apply_notes_changed`) rather than a `NoteKeyStore` trait impl —
+`NoteKeyStore` also owns the four `PaymentRequestKey` methods, and per the recorded
+design those explicitly stay on the old `Payload`/`Cache` blob, unmigrated (still
+short-lived unpaid-invoice state, not held bearer value). `LocalStoreInner`'s
+`NoteKeyStore` impl now delegates its sn-keyed half straight to a `notevault: Arc<NoteVault>`
+field (constructed identically to the existing `transactions` field, including for
+resident wallets — see the resident-collision bug below for why that turned out to
+matter) and keeps the payment-request quartet exactly as P7.3 left it. The old blob
+fields (`Payload::note_key_data`, `Cache::note_key_data`/`note_key_info`,
+`streams::NoteKeyInfoStream`) are deleted outright, not deprecated — no real wallets
+exist yet, so there's nothing to migrate forward. A consequence worth stating: `wallet_export`/
+`wallet_import` no longer round-trip note keys at all — backup/restore of notes is
+now exclusively the vault's own mechanism, a deliberate split, not an oversight.
+
+**The mandatory plaintext index and the user-facing manifest are the same file,
+`manifest.tsv`, by deliberate consolidation.** DECISIONS.md specs an *optional*
+human-legible manifest (`serial, value, last-rotated-at`) separately from the vault's
+own need for a fast in-memory index (`iter()`/`load_info()` must answer without
+decrypting every note file, which needs `pk`/`provenance`/`status` too — none of it
+sensitive, since the pool is plaintext and status/provenance are wallet-internal
+hygiene). Keeping those as two separate files invites them drifting out of sync for
+no real benefit; `manifest.tsv` carries both jobs. Recorded here as the one place this
+implementation's letter diverges from DECISIONS.md's text, not its intent.
+
+**Real bug #1 (found live): a fresh `try_create` never wiped a stale `vault.key` left
+by an earlier same-named wallet.** `overwrite_wallet: true` already recreates the
+`.wallet` blob from scratch, but nothing analogous existed for the new vault folder —
+so the very first live run after this step's wiring landed broke *every* P7.1-P7.5
+regression test (`mint failed: Chacha20poly1305(Error)`), because every one of those
+tests calls `wallet_create` more than once against the same default folder/filename
+with different secrets. Fixed with `NoteVault::reset()` (best-effort
+`std::fs::remove_dir_all`, native-only — a documented wasm32 no-op), called from both
+`try_create` and `try_import` (never `try_load`, which must preserve whatever vault
+already exists). This is a real bug independent of the test harness: any user
+recreating a same-named wallet in production would have hit it too.
+
+**Real bug #2 (found live, same failure signature as #1, different root cause):
+resident wallets all share the literal filename `"resident"` under one default
+folder (`~/.marigold` even for "resident" storage — a pre-existing, previously-inert
+quirk of `LocalStoreInner::try_create`'s resident branch).** Harmless for the
+in-memory blob it replaced (nothing ever hit disk for a resident wallet's note keys)
+and harmless for `transactions` (content-addressed by transaction ID, so two
+resident wallets' records merely interleave). Actively harmful for a secret-keyed
+vault: two independent resident `Wallet` instances in one process — which is exactly
+what every multi-wallet live test (`receive`/`spend`/`pos`, and this step's own vault
+test) constructs — collide on one `vault.key`, wrapped under whichever wallet created
+it last. Fixed by routing resident vaults to a fresh, randomly-suffixed OS temp
+directory per `LocalStoreInner` instance instead of the shared default folder — a
+better semantic match for "resident" (nothing should outlive the process) than a
+real, git-adjacent storage folder would have been anyway.
+
+**Real bug #3 (found live, the subtlest of the four): `restore_key_from_words`
+didn't invalidate an already-cached in-memory index.** The restore flow (both the CLI
+command and the live test) checks the destination vault's state (`is_empty()`) before
+copying anything in — exactly the natural order a human would do it in. That check,
+on a not-yet-restored vault, correctly caches an *empty* index and marks the vault
+"loaded." The subsequent file copy (the backup's `manifest.tsv` and note files landing
+on disk) happens entirely behind the `NoteVault` handle's back — plain filesystem
+operations, no channel back to the in-memory cache — so `restore_key_from_words`
+recovering `K` from the words did nothing to invalidate that stale empty cache.
+Every subsequent `iter()`/`load_key()` call kept answering from the empty snapshot
+taken before the files existed, silently discarding the entire restore. Fixed by
+having `restore_key_from_words` reset the `loaded` flag itself — the whole point of
+calling it is that the caller just changed what's on disk out from under this handle.
+A new unit test (`restore_from_words_reloads_even_if_the_index_was_already_cached_empty`)
+reproduces the exact sequence (prime empty → copy files in behind the handle's back →
+restore → assert the copied note is visible) so this can't silently regress; it's the
+one unit test in this step's new set that specifically targets a bug the live test
+found, added after the fact rather than written blind.
+
+**Real bug #4 (found live, in `deep_verify` itself, not the storage layer): a
+decrypt failure surfaced as a hard `Err`, aborting the whole call instead of being
+classified `corrupted`.** `deep_verify`'s entire reason for existing is to catch
+exactly this — a note whose ciphertext won't decrypt — but the first implementation
+used `note_key_store.load_key(...).await?`, and `?` on a genuine AEAD failure
+propagates it straight up through `deep_verify`'s own `Result`, killing the call for
+every note, not just the corrupted one. The live test's corruption case (corrupt one
+note file, call `deep_verify`, expect that one serial in `report.corrupted` and
+everything else unaffected) caught it immediately — no unit test would have, since
+none of the pure-storage tests call through the RPC-backed `Account`/`Wallet` path
+`deep_verify` needs. Fixed by matching on `Ok(Some(_))` / `Ok(None) | Err(_)` instead
+of `?`-propagating.
+
+**Design point worth stating plainly, since it looks like a bug the first time you
+hit it: batched restore-rotation cannot be executed by blindly submitting each
+pre-planned batch in order.** `plan_restore_rotation` is a pure batching function —
+it shuffles and round-robins serials into 2-5 groups purely for spacing/mixing, with
+zero visibility into `rotate_notes`'s own fee-source selection. `rotate_notes`, given
+one batch, freely pulls in *any other currently-Active note* as a fee stamp
+(POOL-SPEC.md P5.2's mechanism) if the batch's own value doesn't self-fund — including
+a note a *later* batch was independently planning to target as its own primary
+subject. That note's value still gets reissued under a fresh key (as the fee source's
+change), so it genuinely *is* rotated — just earlier and as a side effect rather than
+on its own planned turn. This is precisely "rotation doubles as backup revocation"
+(DECISIONS.md) working correctly, not a defect — but naively looping over
+`plan_restore_rotation`'s output and calling `rotate_notes(batch)` for each one
+verbatim hits a real, confusing node-level rejection ("consumed serial ... does not
+exist in the pool") the moment an earlier batch's fee-sourcing beat a later batch to
+one of its own targets. The correct orchestration (now in both the CLI's
+`vault_restore` and the live test) re-checks each batch's serials against current
+`NoteStatus::Active` immediately before submitting, skips whatever's already gone, and
+only submits what's left — a small but essential piece of glue that has nothing to do
+with storage correctness and everything to do with pool-op economics.
+
+**Vault-ceremony methods added to `NoteKeyStore`** (`vault_exists`/`vault_create`/
+`vault_restore_from_words`/`vault_folder`), all defaulting to `Error::NotImplemented`
+so the trait stays storage-agnostic in principle, with `LocalStoreInner` delegating
+each straight to `self.notevault`. This is the CLI's only way to reach vault-specific
+operations without leaking the concrete `NoteVault` type through the public
+`Interface`/`NoteKeyStore` abstraction boundary — `store()`/`import_bearer_key()`
+auto-provision a vault silently on first use if none exists (so every pre-P7.6 mint/
+receive/import flow keeps working unmodified, `log_warn!`ing the words as a stopgap),
+but `note vault create` runs the ceremony explicitly and properly, showing the words
+before anything is ever stored under them.
+
+**CLI: `note vault create/backup <dir>/verify[|deep|backup <dir>]/restore <dir> <24
+words>/export <dir>/import <password> <page-file>...`.** `vault backup`/`restore` do
+the actual file copy natively (`std::fs`, CLI-only — `NoteVault` itself stays
+wasm32-buildable via `workflow_store::fs`, even though full browser support isn't in
+scope this phase); `vault export` generates a fresh 12-word paper password per
+session (`Mnemonic::random`, printed once, matching DECISIONS.md's "the paper
+export's password may be written on the printed page itself" — a deliberately
+independent secret from both the wallet password and the vault's own 24-word K).
+
+✅ **Verify** (`wallet_notepool_vault_test`, live daemon — see FORK-PLAN.md's P7.6
+entry for the full run-through): mint → explicit 24-word ceremony → back up the vault
+folder to a standalone directory → light-verify that backup with no wallet open and
+no secret, confirms all 3 notes live → restore into a completely independent second
+wallet via "24 words + the files" → deep-verify recovers exactly the 3 still-owned
+notes → accept the default batched rotation (2-3 batches this run, re-checked per
+batch) → light-verify the OLD backup directory again, now 0 live / 3 stale — the old
+backup is provably worthless without ever having been restored → corrupt one live
+note's file on disk → light verify still reports it live (it never decrypts, so it
+structurally cannot see the corruption) while deep verify correctly flags it
+`corrupted`. All 5 notepool live tests green together in one run; wallet-core 68 unit
+tests green (13 new); workspace check + clippy clean.
+
+**Scoped out of this step, left as named gaps**: the deep-verify-driven `known_serials`
+recovery path for a key-only export (POOL-SPEC.md P5.6's "one sanctioned use of
+pk-enumeration" — this vault's normal format always stores `(sn, sk, d)` together, so
+the scenario it exists for doesn't arise here); a UI-level "prompt a fresh backup
+periodically" nudge (a UX policy, not a wallet-core primitive — natural fit for P7.7);
+an interactive password prompt for `note vault import` (currently a plain CLI arg,
+consistent with how `note pay`/`note import` already pass sensitive text, but the
+weakest link in this step's UX and worth revisiting in P7.7's polish pass).
+
 ✅ *Verify*: `wallet_notepool_pos_test` — a customer holding exactly one 0.1 note pays
 a 0.04 POS checkout (splitting into 4×0.01, exercising the payer-side covering planner
 inside a POS sale rather than a peer-to-peer payment); the instant it confirms, the

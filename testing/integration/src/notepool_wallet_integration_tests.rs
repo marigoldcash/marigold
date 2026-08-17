@@ -823,3 +823,218 @@ async fn wallet_notepool_pos_test() {
     miner_client.disconnect().await.unwrap();
     kaspad.shutdown();
 }
+
+/// FORK-PLAN P7.6's verify criterion: mint -> back up the vault -> restore into a
+/// completely independent wallet using only "24 words + the files" -> deep-verify
+/// recovers exactly the still-owned notes -> accept batched restore-time rotation
+/// -> the OLD backup copy is now provably stale (light-verifiable without ever
+/// restoring it) -> a corrupted vault file is caught by deep verify but not light
+/// verify. `cargo test --release --package kaspa-testing-integration --lib --
+/// notepool_wallet_integration_tests::wallet_notepool_vault_test --ignored --nocapture`
+#[ignore]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn wallet_notepool_vault_test() {
+    use kaspa_wallet_core::account::notepool::{deep_verify, light_verify, light_verify_vault, plan_restore_rotation};
+    use kaspa_wallet_core::storage::NoteKeyInfo;
+    use kaspa_wallet_core::storage::local::notevault::NoteVault;
+    use kaspa_utils::hex::ToHex;
+    use futures_util::TryStreamExt;
+
+    fn copy_dir_recursive(from: &std::path::Path, to: &std::path::Path) {
+        std::fs::create_dir_all(to).unwrap();
+        for entry in std::fs::read_dir(from).unwrap() {
+            let entry = entry.unwrap();
+            let target = to.join(entry.file_name());
+            if entry.file_type().unwrap().is_dir() {
+                copy_dir_recursive(&entry.path(), &target);
+            } else {
+                std::fs::copy(entry.path(), &target).unwrap();
+            }
+        }
+    }
+
+    init_allocator_with_default_settings();
+    kaspa_core::log::try_init_logger("INFO,kaspa_testing_integration=trace,kaspa_wallet_core=debug");
+
+    let args =
+        Args { simnet: true, unsafe_rpc: true, enable_unsynced_mining: true, disable_upnp: true, utxoindex: true, ..Default::default() };
+    let total_fd_limit = 10;
+    let mut kaspad = Daemon::new_random_with_args(args, total_fd_limit);
+    let miner_client = kaspad.start().await;
+
+    let secret_a = Secret::from("vault-test-wallet-a-password");
+    let (wallet_a, account_a) = connect_and_bootstrap_wallet(&kaspad, &secret_a).await;
+
+    // Run the 24-word ceremony explicitly (rather than letting the first mint
+    // auto-provision it silently, per `LocalStoreInner::ensure_note_vault`) so the
+    // test can capture the words for the restore step below.
+    let store_a = wallet_a.store().as_note_key_store().expect("note key store");
+    assert!(!store_a.vault_exists().await.unwrap(), "a fresh wallet must start with no vault");
+    let words = store_a.vault_create(&secret_a).await.expect("vault_create failed");
+    assert_eq!(words.split(' ').count(), 24, "the ceremony must produce exactly 24 words");
+    assert!(store_a.vault_exists().await.unwrap());
+
+    let receive_a = account_a.receive_address().expect("account should have a receive address");
+    let throwaway = Address::new(kaspad.network.into(), Version::PubKey, &[7u8; 32]);
+    let mine = |n: usize, to: Address| {
+        let miner_client = miner_client.clone();
+        async move {
+            for _ in 0..n {
+                let template = miner_client.get_block_template(to.clone(), vec![]).await.unwrap();
+                miner_client.submit_block(template.block, false).await.unwrap();
+            }
+        }
+    };
+
+    let coinbase_maturity = SIMNET_PARAMS.coinbase_maturity();
+    mine(1, receive_a.clone()).await;
+    mine((coinbase_maturity + 20) as usize, throwaway.clone()).await;
+    let poll_account = account_a.clone();
+    wait_for(
+        200,
+        150,
+        move || {
+            let account = poll_account.clone();
+            Box::pin(async move { account.balance().map(|b| b.mature).unwrap_or(0) > 0 })
+        },
+        "wallet did not observe a mature transparent balance after mining",
+    )
+    .await;
+
+    // --- Mint, then back up the vault files to a standalone directory ---
+    let abortable = Abortable::default();
+    let mint_result =
+        account_a.clone().mint(secret_a.clone(), None, MINT_AMOUNT_PETALS, None, &abortable).await.expect("mint failed");
+    assert_eq!(mint_result.notes.len(), 3, "1.11 MAGLD should decompose into exactly 3 notes");
+    let minted_serials: Vec<Hash> = mint_result.notes.iter().map(|n| n.sn).collect();
+    mine(10, throwaway.clone()).await;
+
+    let vault_a_folder = store_a.vault_folder().await.unwrap();
+    let backup_dir = tempfile::tempdir().expect("tempdir");
+    copy_dir_recursive(&vault_a_folder, backup_dir.path());
+    println!("backed up vault ({} note(s)) to {:?}", minted_serials.len(), backup_dir.path());
+
+    // --- Light-verify the backup directly, no wallet open, no secret ---
+    let backup_vault = NoteVault::at(backup_dir.path());
+    let rpc_a = wallet_a.rpc_api();
+    let backup_report = light_verify_vault(&backup_vault, &rpc_a).await.expect("light_verify_vault failed");
+    assert_eq!(backup_report.stale.len(), 0, "a fresh backup must show every note as live");
+    assert_eq!(
+        backup_report.live.iter().collect::<std::collections::HashSet<_>>(),
+        minted_serials.iter().collect::<std::collections::HashSet<_>>(),
+        "the backup's live set must be exactly what was minted"
+    );
+
+    // --- Bootstrap a completely independent, empty wallet ("wipe and get a new one") ---
+    let secret_b = Secret::from("vault-test-wallet-b-password");
+    let (wallet_b, account_b) = connect_and_bootstrap_wallet(&kaspad, &secret_b).await;
+    let store_b = wallet_b.store().as_note_key_store().expect("note key store");
+    assert!(store_b.is_empty().await.unwrap(), "the fresh wallet must start with no notes");
+
+    // --- Restore: "24 words + the files" ---
+    let vault_b_folder = store_b.vault_folder().await.unwrap();
+    copy_dir_recursive(backup_dir.path(), &vault_b_folder);
+    store_b.vault_restore_from_words(&words, &secret_b).await.expect("vault_restore_from_words failed");
+
+    let deep_report = deep_verify(account_b.clone(), secret_b.clone()).await.expect("deep_verify failed");
+    assert!(deep_report.corrupted.is_empty());
+    assert!(deep_report.stale.is_empty());
+    assert_eq!(
+        deep_report.live.iter().collect::<std::collections::HashSet<_>>(),
+        minted_serials.iter().collect::<std::collections::HashSet<_>>(),
+        "restore must recover exactly the still-owned minted notes"
+    );
+
+    // --- Accept the default restore-time rotation, batched ---
+    //
+    // `plan_restore_rotation` groups serials for spacing/mixing purposes only; it
+    // has no visibility into `rotate_notes`'s own fee-source selection, which
+    // freely pulls in *any* other currently-Active note as a fee stamp (P5.2's
+    // mechanism) -- including one a *later* planned batch was going to target
+    // directly. That note's value still gets reissued under a fresh key (as the
+    // fee source's change), so it genuinely IS rotated -- just earlier than
+    // planned, as a side effect ("rotation doubles as backup revocation",
+    // DECISIONS.md). A later batch whose only serial already went this way has
+    // nothing left to do and must be skipped rather than resubmitted.
+    let batches = plan_restore_rotation(deep_report.live.clone());
+    assert!((2..=5).contains(&batches.len()) || deep_report.live.len() < 2);
+    let mut rotated_notes = Vec::new();
+    for batch in &batches {
+        let mut still_active = Vec::new();
+        for sn in batch {
+            if let Some(info) = store_b.load_info(sn).await.unwrap() {
+                if info.status == NoteStatus::Active {
+                    still_active.push(*sn);
+                }
+            }
+        }
+        if still_active.is_empty() {
+            continue;
+        }
+        let result = account_b.clone().rotate_notes(secret_b.clone(), still_active).await.expect("rotate_notes failed");
+        rotated_notes.extend(result.own_notes);
+        mine(10, throwaway.clone()).await;
+    }
+    // Every originally-minted serial must be gone (Superseded) one way or another
+    // -- either as a batch's own direct target, or consumed as another batch's
+    // fee source.
+    for sn in &minted_serials {
+        let info = store_b.load_info(sn).await.unwrap().expect("original serial must still be a tombstoned row");
+        assert_eq!(info.status, NoteStatus::Superseded, "every original note must have been rotated away by the end of the loop");
+    }
+
+    // --- The OLD backup is now provably stale, checkable without restoring it ---
+    let backup_report_after_rotation = light_verify_vault(&backup_vault, &rpc_a).await.expect("light_verify_vault failed");
+    assert_eq!(
+        backup_report_after_rotation.live.len(),
+        0,
+        "every serial in the old backup must show stale once rotated -- rotation doubles as backup revocation"
+    );
+    assert_eq!(backup_report_after_rotation.stale.len(), minted_serials.len());
+
+    // --- A corrupted note file is caught by deep verify but not light verify ---
+    //
+    // Pick any note that's actually still `Active` after the full rotation loop
+    // settled -- `rotated_notes` includes every fresh row minted along the way,
+    // some of which (an early batch's fee-stamp *change*) may have themselves
+    // been consumed as a later batch's fee source before the loop finished.
+    let mut active_after_rotation: Vec<Arc<NoteKeyInfo>> = store_b.iter().await.unwrap().try_collect().await.unwrap();
+    active_after_rotation.retain(|info| info.status == NoteStatus::Active);
+    assert!(!active_after_rotation.is_empty(), "the wallet must hold at least one active note after rotation");
+    let corrupt_info = active_after_rotation[0].clone();
+    let corrupt_note =
+        rotated_notes.iter().find(|n| n.sn == corrupt_info.sn).expect("the active row must correspond to a rotated entry");
+    let note_path = vault_b_folder
+        .join("active")
+        .join(format!("{}_{}.note", DENOMINATION_PETALS[corrupt_note.d as usize], corrupt_note.sn.to_hex()));
+    assert!(note_path.exists(), "expected the rotated note's file to exist at {note_path:?}");
+    std::fs::write(&note_path, b"not-valid-ciphertext-at-all").expect("failed to corrupt note file");
+
+    let light_report_after_corruption = light_verify(account_b.clone()).await.expect("light_verify failed");
+    assert!(
+        light_report_after_corruption.live.contains(&corrupt_note.sn),
+        "light verify never decrypts, so it cannot see the corruption -- it must still report the note live"
+    );
+
+    let deep_report_after_corruption = deep_verify(account_b.clone(), secret_b.clone()).await.expect("deep_verify failed");
+    assert!(
+        deep_report_after_corruption.corrupted.contains(&corrupt_note.sn),
+        "deep verify decrypts every note and must catch the corrupted ciphertext"
+    );
+
+    println!(
+        "vault test: minted {} note(s), backed up, restored into an independent wallet via words+files, deep-verified, \
+         rotated in {} batch(es), confirmed the old backup went stale, and confirmed a corrupted file is caught only by deep verify",
+        minted_serials.len(),
+        batches.len()
+    );
+
+    if let Some(client) = wallet_a.try_wrpc_client() {
+        client.disconnect().await.ok();
+    }
+    if let Some(client) = wallet_b.try_wrpc_client() {
+        client.disconnect().await.ok();
+    }
+    miner_client.disconnect().await.unwrap();
+    kaspad.shutdown();
+}

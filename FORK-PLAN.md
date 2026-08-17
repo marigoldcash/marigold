@@ -1898,28 +1898,72 @@ wallet. WASM/mobile wallets are post-launch — CLI proves the protocol.*
   pool, swept serials confirmed live. All 4 notepool live tests green; wallet-core
   56 green; workspace check + clippy clean.
 
-- [ ] **P7.6 — Note vault, backup, and restore.** Scope expanded ahead of execution
+- [x] **P7.6 — Note vault, backup, and restore.** Scope expanded ahead of execution
   (design decided 2026-08-17 by coder — see DECISIONS.md's "Note vault, backup,
   and restore-rotation policy" entry and POOL-SPEC.md P5.6's corresponding rewrite):
-  migrate the P7.1 key store (and P7.3's payment-request keys) from a single encrypted
-  map to a **vault** — one file per note, plaintext filename (denomination/serial),
-  contents encrypted under a per-wallet vault key K; status (`Active`/`HandedOver`/
-  `Superseded`) as a directory, a status change is an atomic rename. 24-word ceremony
-  for K (explicitly not a note-deriving seed — recovery needs the words **and** the
-  vault files). Optional plaintext manifest (`serial, value, last-rotated-at`). Two
-  verify tiers: light (keyless, manifest serials vs. live `PoolState`) and deep
-  (decrypt + re-derive `pk`, the mandatory first restore step). Restore-time rotation
-  is the existing full self-sweep with a confirmation dialog in front — default on,
-  overridable, batched into 2-5 randomly-spaced/composed transactions rather than one
-  all-at-once sweep, nags while deferred, prompts a fresh backup the moment it
-  completes. Paper QR export (P5.6's original format) survives as one printable
-  representation of the same vault entries, not a separate mechanism.
-  ✅ *Verify:* backup → wipe wallet → light-verify the manifest without restoring →
-  restore → deep-verify recovers exactly the still-owned notes → accept batched
-  rotation → confirm every old backup copy (vault and any paper export) is now
-  invalidated (rotated notes no longer match) and a fresh backup is prompted; a
-  corrupted vault file is caught by deep verify but not light verify (both paths
-  exercised); a missing paper-export page is detected and reported.
+  migrated the P7.1 key store from a single encrypted map to a **vault** — one file
+  per note, plaintext filename (`<value_petals>_<serial_hex>.note`), contents encrypted
+  under a per-wallet vault key K (`XChaCha20Poly1305`, raw-key variant — no Argon2
+  stretch, since K is already CSPRNG entropy, not a human password); status
+  (`Active`/`HandedOver`/`Superseded`) as a directory, a status change an atomic
+  rename (`storage/local/notevault.rs`, new). `PaymentRequestKey` storage stays in the
+  existing `Payload`/`Cache` blob, unmigrated, per the recorded design. 24-word ceremony
+  for K via `kaspa_bip32::Mnemonic::from_entropy`/`.entropy()` (exact round-trip,
+  explicitly not a note-deriving seed — recovery needs the words **and** the vault
+  files); auto-provisions silently on first `store()`/`import_bearer_key()` if no
+  vault exists yet (`LocalStoreInner::ensure_note_vault`, keeps every pre-P7.6 flow
+  working unmodified), with `note vault create` as the proper explicit ceremony.
+  Mandatory plaintext `manifest.tsv` doubles as DECISIONS.md's user-facing manifest
+  and the vault's own fast in-memory index (deliberate consolidation over two
+  separate plaintext files — recorded as a deviation from the letter of the spec,
+  not the intent). Two verify tiers, both in `account::notepool`: `light_verify`
+  (keyless, `NoteKeyInfo` vs. live `get_notes_by_serial`) and `deep_verify` (decrypt +
+  re-derive `pk`, catches ciphertext corruption light verify can't — its decrypt
+  failure must be caught and classified `corrupted`, not propagated as a hard error,
+  a real bug found live). `light_verify_vault` runs the same check against an
+  arbitrary standalone `NoteVault::at(dir)` — a backup copy — with no open wallet at
+  all. `plan_restore_rotation` batches into 2-5 randomly-shuffled, round-robin-dealt
+  groups; the CLI/orchestration loop must re-check each batch's serials are still
+  `Active` immediately before submitting (a `rotate_notes` fee-stamp can legitimately
+  consume a note a *later* batch was going to target directly — genuinely correct
+  behavior, "rotation doubles as backup revocation," not a bug, but naively executing
+  pre-planned batches blindly hits "consumed serial does not exist" on the node).
+  Paper QR export (`paper_export_encode`/`_decode_page`/`_peek_header`/
+  `_missing_pages`) reuses `BearerNote`'s exact `(sn, sk, d)` 65-byte encoding per
+  entry (POOL-SPEC.md's own format), ~40 entries/page, `QrPageHeader` (13 bytes:
+  `backup_id`/`chunk_index`/`chunk_count`/`format_version`) readable without the
+  page password. CLI: `note vault create/backup/verify/verify deep/verify backup
+  <dir>/restore/export/import`.
+  ✅ *Verify (`wallet_notepool_vault_test`, live daemon)*: mint 3 notes → explicit
+  24-word ceremony → back up the vault folder to a standalone directory →
+  light-verify that backup directly (no wallet open, no secret) confirms all 3 live →
+  bootstrap a completely independent second wallet, restore into it via "24 words +
+  the files" → deep-verify recovers exactly the 3 still-owned notes → accept the
+  default batched rotation (re-checking liveness per batch) → light-verify the OLD
+  backup directory again, now shows 0 live / 3 stale (old backup provably
+  invalidated, without ever restoring it) → corrupt one live note's ciphertext file
+  on disk → light verify still reports it live (never decrypts, can't see it) while
+  deep verify correctly classifies it `corrupted`. Real bugs found and fixed by this
+  live test, not caught by unit tests: (1) `try_create`/`try_import` never wiped a
+  stale `vault.key` from an earlier same-named wallet — `overwrite_wallet: true`
+  recreated the `.wallet` blob but left the OLD vault.key (wrapped under the old
+  secret) in place, breaking every subsequent P7.1-P7.5 live test the moment this
+  step's wiring landed; fixed via `NoteVault::reset()`, called from both
+  constructors. (2) Resident wallets all share the literal filename `"resident"`
+  under the same default folder — harmless for the old in-memory note-key blob and
+  for content-addressed transaction records, catastrophic for a secret-keyed vault
+  shared by two independent resident `Wallet`s in one process (or two unrelated
+  processes); fixed by giving every resident vault instance its own random OS-temp
+  location. (3) `restore_key_from_words` didn't invalidate an already-cached (e.g.
+  empty, from an earlier `is_empty()` check on the not-yet-restored destination)
+  in-memory index, silently shadowing the just-copied-in files forever; fixed by
+  resetting the `loaded` flag inside `restore_key_from_words` itself, with a unit
+  test reproducing the exact stale-cache sequence. (4) `deep_verify` used `?` on a
+  decrypt failure instead of classifying it `corrupted`, aborting the whole call
+  instead of reporting the one bad entry — the live test's corruption case is what
+  caught it. All 5 notepool live tests green together (mint/redeem, receive, spend,
+  pos, vault); wallet-core 68 unit tests green (13 new: 7 `notevault`, 6
+  `notepool` verify/restore/paper-export); workspace check + clippy clean.
 
 - [ ] **P7.7 — Wallet UX & docs pass.** Consistent CLI command naming, human-readable
   errors for every rejection case, and `docs/x-fork/WALLET.md` walking through every flow

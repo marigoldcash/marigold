@@ -36,6 +36,8 @@ use kaspa_hashes::Hash;
 use kaspa_notify::scope::{NotesChangedScope, Scope};
 use kaspa_rpc_core::notify::connection::{ChannelConnection, ChannelType};
 use kaspa_txscript::pay_to_address_script;
+use rand::seq::SliceRandom;
+use rand::{Rng, RngCore};
 use secp256k1::{Keypair, Message, SECP256K1, SecretKey};
 use std::time::Duration;
 use workflow_core::abortable::Abortable;
@@ -1069,6 +1071,310 @@ pub async fn pos_checkout(
     Ok(PosCheckoutResult { request, claimed, sweep })
 }
 
+// ~~~ FORK-PLAN P7.6: vault verify, restore-rotation planning, paper QR export ~~~
+//
+// DECISIONS.md's "Note vault, backup, and restore-rotation policy" / POOL-SPEC.md
+// P5.6's "Restore flow" section, implemented here rather than in
+// `storage::local::notevault` since every function below needs live chain state
+// (`get_notes_by_serial`) via `Account`/`Wallet`, not just storage — the vault
+// itself stays a pure storage primitive, reachable only through the existing
+// `NoteKeyStore` trait (`iter`/`load_key`), exactly like every other function in
+// this module.
+
+/// Result of [`light_verify`]: which of the wallet's believed-`Active` serials the
+/// live pool still confirms as unspent under the expected `(pk, denomination)`.
+/// Needs no secret at all — a serial's `(denomination, pk)` binding never changes
+/// during its life (POOL-SPEC.md P5.6), so this alone distinguishes "still mine"
+/// from "already spent/rotated away" without decrypting anything.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LightVerifyReport {
+    pub live: Vec<Hash>,
+    pub stale: Vec<Hash>,
+}
+
+/// Check every `Active` row's claimed `(pk, d)` against live `PoolState` — the
+/// "confirm a backup's health without restoring" capability from DECISIONS.md.
+/// Reads only the plaintext `NoteKeyInfo` index (`iter()`); never touches `sk`.
+pub async fn light_verify(account: Arc<dyn Account>) -> Result<LightVerifyReport> {
+    let note_key_store = account.wallet().store().as_note_key_store()?;
+    let active: Vec<Arc<NoteKeyInfo>> = note_key_store
+        .iter()
+        .await?
+        .try_filter(|info| futures::future::ready(info.status == NoteStatus::Active))
+        .try_collect()
+        .await?;
+    if active.is_empty() {
+        return Ok(LightVerifyReport::default());
+    }
+
+    let serials: Vec<Hash> = active.iter().map(|info| info.sn).collect();
+    let on_chain = account.wallet().rpc_api().get_notes_by_serial(serials).await?;
+    let mut report = LightVerifyReport::default();
+    for info in &active {
+        match on_chain.iter().find(|entry| entry.sn == info.sn) {
+            Some(entry) if entry.pk == info.pk && entry.denomination == info.d as u8 => report.live.push(info.sn),
+            _ => report.stale.push(info.sn),
+        }
+    }
+    Ok(report)
+}
+
+/// Result of [`deep_verify`]: like [`LightVerifyReport`], but additionally catches
+/// entries whose stored ciphertext (or plaintext index) is internally inconsistent
+/// — corruption light verify's keyless check cannot see.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DeepVerifyReport {
+    pub live: Vec<Hash>,
+    pub stale: Vec<Hash>,
+    pub corrupted: Vec<Hash>,
+}
+
+/// Decrypt every `Active` row and re-derive its `pk` fresh from `sk`, comparing
+/// against both the stored index (catches corruption) and the live pool (catches
+/// spent-elsewhere) — POOL-SPEC.md P5.6's mandatory first step of an actual
+/// restore. One `get_notes_by_serial` call total, not one per note.
+pub async fn deep_verify(account: Arc<dyn Account>, wallet_secret: Secret) -> Result<DeepVerifyReport> {
+    let note_key_store = account.wallet().store().as_note_key_store()?;
+    let active: Vec<Arc<NoteKeyInfo>> = note_key_store
+        .iter()
+        .await?
+        .try_filter(|info| futures::future::ready(info.status == NoteStatus::Active))
+        .try_collect()
+        .await?;
+    let mut report = DeepVerifyReport::default();
+    if active.is_empty() {
+        return Ok(report);
+    }
+
+    let serials: Vec<Hash> = active.iter().map(|info| info.sn).collect();
+    let on_chain = account.wallet().rpc_api().get_notes_by_serial(serials).await?;
+
+    for info in &active {
+        // A decrypt failure (corrupted ciphertext) surfaces as `Err`, not `Ok(None)`
+        // — deep verify's entire purpose is to catch exactly this, so it must be
+        // classified as `corrupted` here rather than aborting the whole call via `?`.
+        let entry = match note_key_store.load_key(&wallet_secret, &info.sn).await {
+            Ok(Some(entry)) => entry,
+            Ok(None) | Err(_) => {
+                report.corrupted.push(info.sn);
+                continue;
+            }
+        };
+        let derived_pk = match entry.derive_pk() {
+            Ok(pk) => pk,
+            Err(_) => {
+                report.corrupted.push(info.sn);
+                continue;
+            }
+        };
+        if derived_pk != info.pk {
+            report.corrupted.push(info.sn);
+            continue;
+        }
+        match on_chain.iter().find(|chain_entry| chain_entry.sn == info.sn) {
+            Some(chain_entry) if chain_entry.pk == derived_pk => report.live.push(info.sn),
+            _ => report.stale.push(info.sn),
+        }
+    }
+    Ok(report)
+}
+
+/// Like [`light_verify`], but against an arbitrary standalone vault directory —
+/// e.g. a `note vault backup` copy — rather than the currently open wallet: "the
+/// possibility of someone just checking their backups against the manifest
+/// without actually restoring" (DECISIONS.md). Needs an RPC handle but no
+/// `Account`/open wallet at all.
+pub async fn light_verify_vault(
+    vault: &crate::storage::local::notevault::NoteVault,
+    rpc: &Arc<DynRpcApi>,
+) -> Result<LightVerifyReport> {
+    let active: Vec<Arc<NoteKeyInfo>> = vault
+        .iter()
+        .await?
+        .try_filter(|info| futures::future::ready(info.status == NoteStatus::Active))
+        .try_collect()
+        .await?;
+    if active.is_empty() {
+        return Ok(LightVerifyReport::default());
+    }
+
+    let serials: Vec<Hash> = active.iter().map(|info| info.sn).collect();
+    let on_chain = rpc.get_notes_by_serial(serials).await?;
+    let mut report = LightVerifyReport::default();
+    for info in &active {
+        match on_chain.iter().find(|entry| entry.sn == info.sn) {
+            Some(entry) if entry.pk == info.pk && entry.denomination == info.d as u8 => report.live.push(info.sn),
+            _ => report.stale.push(info.sn),
+        }
+    }
+    Ok(report)
+}
+
+/// Every `Active` entry's full `(sn, sk, d, provenance)`, decrypted — the input
+/// [`paper_export_encode`] needs. Kept as its own function rather than inlined at
+/// call sites since it's the one place that legitimately holds every held `sk` in
+/// memory at once (paper export's whole point); everywhere else in this module
+/// touches only the notes a single operation actually selects.
+pub async fn export_active_entries(account: Arc<dyn Account>, wallet_secret: Secret) -> Result<Vec<NoteKeyEntry>> {
+    let note_key_store = account.wallet().store().as_note_key_store()?;
+    let active: Vec<Arc<NoteKeyInfo>> = note_key_store
+        .iter()
+        .await?
+        .try_filter(|info| futures::future::ready(info.status == NoteStatus::Active))
+        .try_collect()
+        .await?;
+    let mut entries = Vec::with_capacity(active.len());
+    for info in &active {
+        let entry = note_key_store
+            .load_key(&wallet_secret, &info.sn)
+            .await?
+            .ok_or_else(|| Error::Custom(format!("serial {} has no stored key", info.sn)))?;
+        entries.push(entry);
+    }
+    Ok(entries)
+}
+
+/// Split `serials` into 2-5 randomly-composed batches (POOL-SPEC.md P5.6's
+/// restore-time rotation policy) — shuffled first, then dealt round-robin, so
+/// batch membership carries no value information (never sorted by denomination,
+/// which would leak structure the mixing exists to hide). A single serial (or
+/// fewer than two total) can't usefully split — returns one batch. Pure/sync: the
+/// caller (CLI) owns actually spacing the batches out in wall-clock time and
+/// getting the user's per-batch confirmation, since a library call has no business
+/// blocking on either.
+pub fn plan_restore_rotation(serials: Vec<Hash>) -> Vec<Vec<Hash>> {
+    if serials.is_empty() {
+        return vec![];
+    }
+    let mut serials = serials;
+    let mut rng = rand::thread_rng();
+    serials.shuffle(&mut rng);
+
+    let max_batches = serials.len().min(5);
+    let batch_count = if max_batches < 2 { 1 } else { rng.gen_range(2..=max_batches) };
+    let mut batches: Vec<Vec<Hash>> = vec![Vec::new(); batch_count];
+    for (i, sn) in serials.into_iter().enumerate() {
+        batches[i % batch_count].push(sn);
+    }
+    batches
+}
+
+/// Plaintext page header preceding a paper QR's encrypted payload (POOL-SPEC.md
+/// P5.6's "QR payload formats" — 13 bytes on the wire; readable without the paper
+/// export's password, so a multi-page restore can detect missing pages up front).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct QrPageHeader {
+    /// Random per export session — groups a multi-page backup's pages together.
+    pub backup_id: [u8; 8],
+    /// This page's 0-based index.
+    pub chunk_index: u16,
+    /// Total pages in this backup.
+    pub chunk_count: u16,
+    pub format_version: u8,
+}
+
+pub const QR_PAGE_FORMAT_VERSION: u8 = 1;
+/// ~40 `(serial, sk, d)` entries (65 bytes each) fit comfortably under a QR code's
+/// practical capacity at a scannable error-correction level once borsh-equivalent
+/// framing and XChaCha20Poly1305 overhead (24-byte nonce + 16-byte tag) are added
+/// (POOL-SPEC.md P5.6).
+pub const QR_CHUNK_MAX_ENTRIES: usize = 40;
+
+const QR_HEADER_LEN: usize = 8 + 2 + 2 + 1;
+
+impl QrPageHeader {
+    pub fn encode(&self) -> [u8; QR_HEADER_LEN] {
+        let mut bytes = [0u8; QR_HEADER_LEN];
+        bytes[0..8].copy_from_slice(&self.backup_id);
+        bytes[8..10].copy_from_slice(&self.chunk_index.to_le_bytes());
+        bytes[10..12].copy_from_slice(&self.chunk_count.to_le_bytes());
+        bytes[12] = self.format_version;
+        bytes
+    }
+
+    pub fn decode(bytes: &[u8]) -> Result<Self> {
+        if bytes.len() < QR_HEADER_LEN {
+            return Err(Error::Custom(format!("QR page header must be at least {QR_HEADER_LEN} bytes, got {}", bytes.len())));
+        }
+        let backup_id: [u8; 8] = bytes[0..8].try_into().unwrap();
+        let chunk_index = u16::from_le_bytes(bytes[8..10].try_into().unwrap());
+        let chunk_count = u16::from_le_bytes(bytes[10..12].try_into().unwrap());
+        let format_version = bytes[12];
+        if format_version != QR_PAGE_FORMAT_VERSION {
+            return Err(Error::Custom(format!("unsupported paper backup format version {format_version}")));
+        }
+        Ok(Self { backup_id, chunk_index, chunk_count, format_version })
+    }
+}
+
+/// One printable page: `QrPageHeader::encode()` `||` `encrypt_xchacha20poly1305(borsh-equivalent
+/// entry list, password)`. Whatever renders the QR (the CLI's existing `qrcode`
+/// usage from P7.3) takes this blob directly.
+pub fn paper_export_encode(entries: &[NoteKeyEntry], password: &Secret) -> Result<Vec<Vec<u8>>> {
+    let mut backup_id = [0u8; 8];
+    rand::thread_rng().fill_bytes(&mut backup_id);
+
+    let bearer_notes: Vec<BearerNote> = entries.iter().map(|e| BearerNote { sn: e.sn, sk: e.sk, d: e.d }).collect();
+    let chunks: Vec<&[BearerNote]> =
+        if bearer_notes.is_empty() { vec![&[]] } else { bearer_notes.chunks(QR_CHUNK_MAX_ENTRIES).collect() };
+    let chunk_count = chunks.len() as u16;
+
+    let mut pages = Vec::with_capacity(chunks.len());
+    for (i, chunk) in chunks.iter().enumerate() {
+        let header = QrPageHeader { backup_id, chunk_index: i as u16, chunk_count, format_version: QR_PAGE_FORMAT_VERSION };
+        let mut plaintext = Vec::with_capacity(2 + chunk.len() * 65);
+        plaintext.extend_from_slice(&(chunk.len() as u16).to_le_bytes());
+        for entry in *chunk {
+            plaintext.extend_from_slice(&entry.encode());
+        }
+        let ciphertext = crate::encryption::encrypt_xchacha20poly1305(&plaintext, password)?;
+
+        let mut page = header.encode().to_vec();
+        page.extend_from_slice(&ciphertext);
+        pages.push(page);
+    }
+    Ok(pages)
+}
+
+/// Peek a page's header without the password — enough to detect a missing page in
+/// a multi-page restore before ever asking for the password.
+pub fn paper_export_peek_header(page: &[u8]) -> Result<QrPageHeader> {
+    QrPageHeader::decode(page)
+}
+
+/// Decrypt one page, returning its header and the `(sn, sk, d)` entries it carries.
+pub fn paper_export_decode_page(page: &[u8], password: &Secret) -> Result<(QrPageHeader, Vec<BearerNote>)> {
+    let header = QrPageHeader::decode(page)?;
+    let ciphertext = &page[QR_HEADER_LEN..];
+    let plaintext = crate::encryption::decrypt_xchacha20poly1305(ciphertext, password)?;
+    let plaintext = plaintext.as_ref();
+    if plaintext.len() < 2 {
+        return Err(Error::Custom("paper backup page payload is too short".to_string()));
+    }
+    let count = u16::from_le_bytes(plaintext[0..2].try_into().unwrap()) as usize;
+    let mut entries = Vec::with_capacity(count);
+    let mut offset = 2;
+    for _ in 0..count {
+        if plaintext.len() < offset + 65 {
+            return Err(Error::Custom("paper backup page payload truncated mid-entry".to_string()));
+        }
+        entries.push(BearerNote::decode(&plaintext[offset..offset + 65])?);
+        offset += 65;
+    }
+    Ok((header, entries))
+}
+
+/// Given the headers seen so far (from [`paper_export_peek_header`] on every page
+/// in hand), report which 0-based page indices are still missing — works before
+/// the password is ever entered.
+pub fn paper_export_missing_pages(headers: &[QrPageHeader]) -> Vec<u16> {
+    let Some(chunk_count) = headers.first().map(|h| h.chunk_count) else {
+        return vec![];
+    };
+    let seen: std::collections::HashSet<u16> = headers.iter().map(|h| h.chunk_index).collect();
+    (0..chunk_count).filter(|i| !seen.contains(i)).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1174,5 +1480,81 @@ mod tests {
         assert_eq!(required_fee_quanta(0, 1.0), 1);
         assert_eq!(required_fee_quanta(9_009, 100.0), 1);
         assert_eq!(required_fee_quanta(10_001, 100.0), 2);
+    }
+
+    #[test]
+    fn restore_rotation_plan_covers_every_serial_in_two_to_five_batches() {
+        let serials: Vec<Hash> = (0..17u8).map(|i| Hash::from_bytes([i; 32])).collect();
+        let batches = plan_restore_rotation(serials.clone());
+        assert!((2..=5).contains(&batches.len()));
+        let mut covered: Vec<Hash> = batches.iter().flatten().copied().collect();
+        covered.sort_by_key(|h| h.as_bytes());
+        let mut expected = serials.clone();
+        expected.sort_by_key(|h| h.as_bytes());
+        assert_eq!(covered, expected, "every serial appears exactly once across all batches");
+        assert!(batches.iter().all(|batch| !batch.is_empty()), "no batch is left empty");
+    }
+
+    #[test]
+    fn restore_rotation_plan_handles_small_inputs() {
+        assert_eq!(plan_restore_rotation(vec![]), Vec::<Vec<Hash>>::new());
+        let one = plan_restore_rotation(vec![Hash::from_bytes([1u8; 32])]);
+        assert_eq!(one, vec![vec![Hash::from_bytes([1u8; 32])]]);
+    }
+
+    #[test]
+    fn qr_page_header_round_trips_and_rejects_bad_version() {
+        let header = QrPageHeader { backup_id: [0x11u8; 8], chunk_index: 2, chunk_count: 5, format_version: QR_PAGE_FORMAT_VERSION };
+        let bytes = header.encode();
+        assert_eq!(bytes.len(), 13);
+        assert_eq!(QrPageHeader::decode(&bytes).unwrap(), header);
+
+        let mut bad_version = bytes;
+        bad_version[12] = 99;
+        assert!(QrPageHeader::decode(&bad_version).is_err());
+        assert!(QrPageHeader::decode(&[0u8; 5]).is_err());
+    }
+
+    #[test]
+    fn paper_export_round_trips_and_chunks_correctly() {
+        let entries: Vec<NoteKeyEntry> = (0..90u8)
+            .map(|i| NoteKeyEntry::new(Hash::from_bytes([i; 32]), [i; 32], DenominationTag::D0_1, NoteProvenance::Cold))
+            .collect();
+        let password = Secret::from("paper-export-test-password");
+
+        let pages = paper_export_encode(&entries, &password).unwrap();
+        // 90 entries / 40 per page = 3 pages (40 + 40 + 10).
+        assert_eq!(pages.len(), 3);
+
+        let headers: Vec<QrPageHeader> = pages.iter().map(|p| paper_export_peek_header(p).unwrap()).collect();
+        assert!(headers.iter().all(|h| h.chunk_count == 3));
+        assert_eq!(headers.iter().map(|h| h.chunk_index).collect::<Vec<_>>(), vec![0, 1, 2]);
+        assert!(paper_export_missing_pages(&headers).is_empty());
+        // A page missing from the set is reported by index.
+        assert_eq!(paper_export_missing_pages(&headers[..2]), vec![2]);
+
+        let mut recovered: Vec<BearerNote> = vec![];
+        for page in &pages {
+            let (_, page_entries) = paper_export_decode_page(page, &password).unwrap();
+            recovered.extend(page_entries);
+        }
+        assert_eq!(recovered.len(), 90);
+        for entry in &entries {
+            assert!(recovered.contains(&BearerNote { sn: entry.sn, sk: entry.sk, d: entry.d }));
+        }
+
+        // Wrong password fails to decrypt rather than silently returning garbage.
+        let wrong = Secret::from("not-the-password");
+        assert!(paper_export_decode_page(&pages[0], &wrong).is_err());
+    }
+
+    #[test]
+    fn paper_export_handles_empty_entry_list() {
+        let password = Secret::from("paper-export-test-password");
+        let pages = paper_export_encode(&[], &password).unwrap();
+        assert_eq!(pages.len(), 1);
+        let (header, entries) = paper_export_decode_page(&pages[0], &password).unwrap();
+        assert_eq!(header.chunk_count, 1);
+        assert!(entries.is_empty());
     }
 }

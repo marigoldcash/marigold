@@ -51,33 +51,6 @@ impl Stream for PrvKeyDataInfoStream {
     }
 }
 
-pub struct NoteKeyInfoStream {
-    inner: StoreStreamInner,
-}
-
-impl NoteKeyInfoStream {
-    pub(crate) fn new(cache: Arc<RwLock<Cache>>) -> Self {
-        Self { inner: StoreStreamInner::new(cache) }
-    }
-}
-
-impl Stream for NoteKeyInfoStream {
-    type Item = Result<Arc<NoteKeyInfo>>;
-
-    fn poll_next(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let cache = self.inner.cache.clone();
-        let cache = cache.read().unwrap();
-        let vec = &cache.note_key_info.vec;
-        if self.inner.cursor < vec.len() {
-            let note_key_info = vec[self.inner.cursor].clone();
-            self.inner.cursor += 1;
-            Poll::Ready(Some(Ok(note_key_info)))
-        } else {
-            Poll::Ready(None)
-        }
-    }
-}
-
 pub struct AccountStream {
     inner: StoreStreamInner,
     filter: Option<PrvKeyDataId>,

@@ -13,6 +13,7 @@
 pub mod cache;
 pub mod collection;
 pub mod interface;
+pub mod notevault;
 pub mod payload;
 pub mod storage;
 pub mod streams;

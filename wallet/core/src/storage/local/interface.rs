@@ -11,6 +11,7 @@ use crate::storage::interface::{
 use crate::storage::local::Payload;
 use crate::storage::local::Storage;
 use crate::storage::local::cache::*;
+use crate::storage::local::notevault::NoteVault;
 use crate::storage::local::streams::*;
 use crate::storage::local::transaction::*;
 use crate::storage::local::wallet::WalletStorage;
@@ -18,6 +19,7 @@ use crate::storage::notekeys::NotesChangedApplyResult;
 use kaspa_consensus_core::Hash;
 use kaspa_consensus_core::notepool::DenominationTag;
 use kaspa_rpc_core::message::NotesChangedNotification;
+use rand::RngCore;
 use slugify_rs::slugify;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
@@ -58,6 +60,14 @@ pub(crate) struct LocalStoreInner {
     pub cache: Arc<RwLock<Cache>>,
     pub store: RwLock<Arc<Store>>,
     pub transactions: Arc<dyn TransactionRecordStore>,
+    /// Note key storage (FORK-PLAN P7.6): the file-per-note vault, replacing
+    /// P7.1's single-blob `note_key_data`/`note_key_info` cache fields (which the
+    /// `Cache`/`Payload` types still carry only for `PaymentRequestKey` storage —
+    /// per DECISIONS.md, explicitly not migrated). Constructed the same way as
+    /// `transactions` above (folder/filename convention), including for resident
+    /// wallets — see [`fsio::TransactionStore`]'s own precedent for why a
+    /// "resident" wallet still gets real file-backed storage for this data.
+    pub notevault: Arc<NoteVault>,
     pub is_modified: AtomicBool,
 }
 
@@ -87,8 +97,34 @@ impl LocalStoreInner {
         } else {
             Arc::new(indexdb::TransactionStore::new(&filename))
         };
+        let notevault = if is_resident {
+            // A "resident" wallet has no fixed identity — every instance shares the
+            // literal filename "resident" (above), which is harmless for `store()`
+            // (a no-op for `Store::Resident`) and for `transactions` (content-addressed
+            // by transaction ID, so concurrent resident wallets merely interleave
+            // harmlessly in the same folder). It is NOT harmless for the vault: two
+            // resident `Wallet`s in the same process — or two unrelated processes on
+            // the same machine, since `folder` defaults to `~/.marigold` even for
+            // resident wallets — would fight over one `vault.key` wrapped under
+            // whichever wallet's secret created it last. Give every resident instance
+            // its own random, ephemeral location instead (OS temp dir — matches
+            // "resident" meaning "nothing outlives this process" far better than a
+            // real, git-adjacent storage folder would).
+            let mut suffix = [0u8; 8];
+            rand::thread_rng().fill_bytes(&mut suffix);
+            let resident_folder = std::env::temp_dir().join(format!("kaspa-wallet-resident-{}", suffix.as_slice().to_hex()));
+            NoteVault::new(resident_folder, &filename)
+        } else {
+            NoteVault::new(folder, &filename)
+        };
+        // A fresh `try_create` may land on a folder/filename that hosted an older
+        // same-named wallet (`overwrite_wallet: true`) — that wallet's `vault.key`
+        // would be wrapped under a secret this new wallet knows nothing about, so
+        // any leftover vault state here must not survive into the new wallet.
+        notevault.reset().await?;
+        let notevault = Arc::new(notevault);
 
-        Ok(Self { cache, store: RwLock::new(Arc::new(store)), is_modified, transactions })
+        Ok(Self { cache, store: RwLock::new(Arc::new(store)), is_modified, transactions, notevault })
     }
 
     async fn try_load(wallet_secret: &Secret, folder: &str, args: OpenArgs) -> Result<Self> {
@@ -104,11 +140,13 @@ impl LocalStoreInner {
         } else {
             Arc::new(indexdb::TransactionStore::new(&filename))
         };
+        let notevault = Arc::new(NoteVault::new(folder, &filename));
 
-        Ok(Self { cache, store: RwLock::new(Arc::new(Store::Storage(storage))), is_modified, transactions })
+        Ok(Self { cache, store: RwLock::new(Arc::new(Store::Storage(storage))), is_modified, transactions, notevault })
     }
 
     async fn try_import(wallet_secret: &Secret, folder: &str, serialized_wallet_storage: &[u8]) -> Result<Self> {
+        // (see `try_create` above for the note vault reset rationale)
         let wallet = WalletStorage::try_from_slice(serialized_wallet_storage)?;
         // Try to decrypt the wallet payload with the provided
         // secret. This will block import if the secret is
@@ -129,8 +167,11 @@ impl LocalStoreInner {
         } else {
             Arc::new(indexdb::TransactionStore::new(&filename))
         };
+        let notevault = NoteVault::new(folder, &filename);
+        notevault.reset().await?;
+        let notevault = Arc::new(notevault);
 
-        Ok(Self { cache, store: RwLock::new(Arc::new(Store::Storage(storage))), is_modified, transactions })
+        Ok(Self { cache, store: RwLock::new(Arc::new(Store::Storage(storage))), is_modified, transactions, notevault })
     }
 
     async fn try_export(&self, wallet_secret: &Secret, _options: WalletExportOptions) -> Result<Vec<u8>> {
@@ -257,6 +298,26 @@ impl LocalStoreInner {
             Store::Resident => Ok(StorageDescriptor::Resident),
             Store::Storage(storage) => Ok(StorageDescriptor::Internal(storage.filename_as_string())),
         }
+    }
+
+    /// Auto-provision the note vault (24-word `K` ceremony) the first time any
+    /// note-storing call reaches it without one already existing on disk. This
+    /// keeps every pre-P7.6 flow (mint/receive/import — none of which know about
+    /// vault setup) working unmodified; a wallet that explicitly ran the vault
+    /// creation command first (FORK-PLAN P7.6/P7.9's `note vault create`) never
+    /// hits this path since `notevault.exists()` is already true by then. The
+    /// words are only `log_warn!`'d here as a stopgap — this is not a substitute
+    /// for the real interactive ceremony, which the CLI command surfaces properly.
+    async fn ensure_note_vault(&self, wallet_secret: &Secret) -> Result<()> {
+        if !self.notevault.exists().await? {
+            let words = self.notevault.create(wallet_secret).await?;
+            log_warn!(
+                "note vault: no vault existed yet for this wallet — auto-created one. \
+                 Run `note vault backup` soon to record these 24 recovery words properly; \
+                 they will not be shown again automatically: {words}"
+            );
+        }
+        Ok(())
     }
 }
 
@@ -538,60 +599,44 @@ impl PrvKeyDataStore for LocalStoreInner {
 #[async_trait]
 impl NoteKeyStore for LocalStoreInner {
     async fn is_empty(&self) -> Result<bool> {
-        Ok(self.cache.read().unwrap().note_key_info.is_empty())
+        self.notevault.is_empty().await
     }
 
     async fn iter(&self) -> Result<StorageStream<Arc<NoteKeyInfo>>> {
-        Ok(Box::pin(NoteKeyInfoStream::new(self.cache.clone())))
+        self.notevault.iter().await
     }
 
     async fn load_info(&self, sn: &Hash) -> Result<Option<Arc<NoteKeyInfo>>> {
-        Ok(self.cache.read().unwrap().note_key_info.map.get(sn).cloned())
+        self.notevault.load_info(sn).await
     }
 
     async fn load_key(&self, wallet_secret: &Secret, sn: &Hash) -> Result<Option<NoteKeyEntry>> {
-        let note_key_map: Decrypted<NoteKeyMap> = self.cache.read().unwrap().note_key_data.decrypt(wallet_secret)?;
-        Ok(note_key_map.get(sn).cloned())
+        self.notevault.load_key(wallet_secret, sn).await
     }
 
     async fn store(&self, wallet_secret: &Secret, entry: NoteKeyEntry) -> Result<()> {
-        let mut cache = self.cache.write().unwrap();
-        let encryption_kind = cache.encryption_kind;
-        let mut note_key_map: Decrypted<NoteKeyMap> = cache.note_key_data.decrypt(wallet_secret)?;
-        let note_key_info = Arc::new(NoteKeyInfo::try_from(&entry)?);
-        cache.note_key_info.insert(entry.sn, note_key_info)?;
-        note_key_map.insert(entry.sn, entry);
-        cache.note_key_data.replace(note_key_map.encrypt(wallet_secret, encryption_kind)?);
+        self.ensure_note_vault(wallet_secret).await?;
+        self.notevault.store(wallet_secret, entry).await?;
         self.set_modified(true);
         Ok(())
     }
 
     async fn remove(&self, wallet_secret: &Secret, sn: &Hash) -> Result<()> {
-        let mut cache = self.cache.write().unwrap();
-        let encryption_kind = cache.encryption_kind;
-        let mut note_key_map: Decrypted<NoteKeyMap> = cache.note_key_data.decrypt(wallet_secret)?;
-        note_key_map.remove(sn);
-        cache.note_key_data.replace(note_key_map.encrypt(wallet_secret, encryption_kind)?);
-        cache.note_key_info.remove(&[sn])?;
+        self.notevault.remove(wallet_secret, sn).await?;
         self.set_modified(true);
         Ok(())
     }
 
     async fn import_bearer_key(&self, wallet_secret: &Secret, sn: Hash, sk: [u8; 32], d: DenominationTag) -> Result<()> {
-        // A key crossing a wallet boundary is Hot by definition (POOL-SPEC.md P5.6) —
-        // this entry point never accepts a caller-supplied provenance.
-        let entry = NoteKeyEntry::new(sn, sk, d, NoteProvenance::Hot);
-        NoteKeyStore::store(self, wallet_secret, entry).await
+        self.ensure_note_vault(wallet_secret).await?;
+        self.notevault.import_bearer_key(wallet_secret, sn, sk, d).await?;
+        self.set_modified(true);
+        Ok(())
     }
 
     async fn mark_status(&self, sn: &Hash, status: NoteStatus) -> Result<()> {
-        let mut cache = self.cache.write().unwrap();
-        if let Some(info) = cache.note_key_info.map.get(sn).cloned() {
-            let mut updated = (*info).clone();
-            updated.status = status;
-            cache.note_key_info.insert(*sn, Arc::new(updated))?;
-            self.set_modified(true);
-        }
+        self.notevault.mark_status(sn, status).await?;
+        self.set_modified(true);
         Ok(())
     }
 
@@ -600,51 +645,27 @@ impl NoteKeyStore for LocalStoreInner {
         wallet_secret: Option<&Secret>,
         notification: &NotesChangedNotification,
     ) -> Result<NotesChangedApplyResult> {
-        let mut result = NotesChangedApplyResult::default();
-
-        let superseded: Vec<Hash> = {
-            let cache = self.cache.read().unwrap();
-            notification.removed.iter().map(|entry| entry.sn).filter(|sn| cache.note_key_info.map.contains_key(sn)).collect()
-        };
-        for sn in superseded {
-            self.mark_status(&sn, NoteStatus::Superseded).await?;
-            result.superseded.push(sn);
+        let result = self.notevault.apply_notes_changed(wallet_secret, notification).await?;
+        if !result.superseded.is_empty() || !result.added.is_empty() {
+            self.set_modified(true);
         }
-
-        // A new serial lands under a `pk` we already hold a key for iff some existing
-        // row's derived `pk` matches — that row is the source of the `sk`/provenance
-        // the new row inherits (POOL-SPEC.md P5.6's receive/rotation flow).
-        let candidates: Vec<(Hash, Hash, u8, NoteProvenance)> = {
-            let cache = self.cache.read().unwrap();
-            notification
-                .added
-                .iter()
-                .filter_map(|entry| {
-                    cache
-                        .note_key_info
-                        .vec
-                        .iter()
-                        .find(|info| info.pk == entry.pk)
-                        .map(|info| (entry.sn, info.sn, entry.denomination, info.provenance))
-                })
-                .collect()
-        };
-
-        for (new_sn, source_sn, denomination, provenance) in candidates {
-            let Some(secret) = wallet_secret else {
-                result.deferred.push(new_sn);
-                continue;
-            };
-            let d = DenominationTag::try_from(denomination)
-                .map_err(|_| Error::Custom(format!("NotesChanged: unknown denomination tag {denomination}")))?;
-            if let Some(source) = self.load_key(secret, &source_sn).await? {
-                let entry = NoteKeyEntry::new(new_sn, source.sk, d, provenance);
-                NoteKeyStore::store(self, secret, entry).await?;
-                result.added.push(new_sn);
-            }
-        }
-
         Ok(result)
+    }
+
+    async fn vault_exists(&self) -> Result<bool> {
+        self.notevault.exists().await
+    }
+
+    async fn vault_create(&self, wallet_secret: &Secret) -> Result<String> {
+        self.notevault.create(wallet_secret).await
+    }
+
+    async fn vault_restore_from_words(&self, words: &str, wallet_secret: &Secret) -> Result<()> {
+        self.notevault.restore_key_from_words(words, wallet_secret).await
+    }
+
+    async fn vault_folder(&self) -> Result<std::path::PathBuf> {
+        Ok(self.notevault.folder().to_path_buf())
     }
 
     async fn store_payment_request(&self, wallet_secret: &Secret, key: PaymentRequestKey) -> Result<PaymentRequestInfo> {

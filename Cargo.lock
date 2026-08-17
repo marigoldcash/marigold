@@ -4329,6 +4329,7 @@ dependencies = [
  "sha2",
  "slugify-rs",
  "sorted-insert",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "wasm-bindgen",

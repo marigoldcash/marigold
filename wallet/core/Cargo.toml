@@ -126,6 +126,7 @@ serde_repr.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 tokio.workspace = true
+tempfile.workspace = true
 
 [lints]
 workspace = true

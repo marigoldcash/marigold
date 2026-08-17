@@ -3,11 +3,32 @@ use kaspa_consensus_core::Hash;
 use kaspa_consensus_core::notepool::DENOMINATION_PETALS;
 use kaspa_wallet_core::account::notepool;
 use kaspa_wallet_core::account::notepool::{
-    BearerNote, PaymentRequest, RedeemSelection, await_payment_request, create_payment_request,
+    BearerNote, PaymentRequest, RedeemSelection, await_payment_request, create_payment_request, deep_verify, export_active_entries,
+    light_verify, light_verify_vault, paper_export_decode_page, paper_export_encode, paper_export_missing_pages,
+    paper_export_peek_header, plan_restore_rotation,
 };
+use kaspa_wallet_core::storage::local::notevault::NoteVault;
 use kaspa_wallet_core::storage::NoteStatus;
+use std::path::Path;
 use std::time::Duration;
 use workflow_core::abortable::Abortable;
+
+/// Recursively copy a directory tree (native fs — the CLI is native-only, unlike
+/// `wallet-core` which must also build for wasm32). Used for `note vault
+/// backup`/`restore`'s "copy the files" half of "24 words + the files".
+fn copy_dir_recursive(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let target = to.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir_recursive(&entry.path(), &target)?;
+        } else {
+            std::fs::copy(entry.path(), &target)?;
+        }
+    }
+    Ok(())
+}
 
 /// Render a payload as a terminal QR code (dense unicode half-blocks). Falls back to
 /// nothing (text-only) if the payload somehow exceeds QR capacity — the text form
@@ -40,6 +61,7 @@ impl Note {
             "pos" => self.pos(&ctx, argv).await,
             "balance" => self.balance(&ctx).await,
             "list" => self.list(&ctx).await,
+            "vault" => self.vault(&ctx, argv).await,
             v => {
                 tprintln!(ctx, "unknown command: '{v}'\r\n");
                 self.display_help(ctx, argv).await
@@ -331,6 +353,256 @@ impl Note {
         Ok(())
     }
 
+    /// `note vault <create|backup|verify|restore|export|import>` (FORK-PLAN P7.6).
+    async fn vault(&self, ctx: &Arc<KaspaCli>, mut argv: Vec<String>) -> Result<()> {
+        if argv.is_empty() {
+            return self.vault_help(ctx).await;
+        }
+        let sub = argv.remove(0);
+        match sub.as_str() {
+            "create" => self.vault_create(ctx).await,
+            "backup" => self.vault_backup(ctx, argv).await,
+            "verify" => self.vault_verify(ctx, argv).await,
+            "restore" => self.vault_restore(ctx, argv).await,
+            "export" => self.vault_export(ctx, argv).await,
+            "import" => self.vault_import(ctx, argv).await,
+            v => {
+                tprintln!(ctx, "unknown vault command: '{v}'\r\n");
+                self.vault_help(ctx).await
+            }
+        }
+    }
+
+    async fn vault_help(&self, ctx: &Arc<KaspaCli>) -> Result<()> {
+        ctx.term().help(
+            &[
+                ("vault create", "Run the vault's 24-word creation ceremony now (auto-runs on first note otherwise)"),
+                ("vault backup <dir>", "Copy the vault's files to <dir> (pair with the 24 words for a full recovery)"),
+                ("vault verify", "Light-verify this wallet's active notes against the live pool (no secret needed)"),
+                ("vault verify deep", "Deep-verify: decrypt and re-derive every active note's key"),
+                ("vault verify backup <dir>", "Light-verify a standalone backup directory without opening/restoring it"),
+                ("vault restore <dir> <24 words>", "Copy files from <dir>, recover K from the words, deep-verify, offer rotation"),
+                ("vault export <dir>", "Paper QR export: encrypted pages written to <dir>, password printed once"),
+                ("vault import <password> <page-file> ...", "Import notes from a paper export's decoded pages"),
+            ],
+            None,
+        )?;
+        Ok(())
+    }
+
+    async fn vault_create(&self, ctx: &Arc<KaspaCli>) -> Result<()> {
+        let account = ctx.wallet().account()?;
+        let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(Some(&account)).await?;
+        let store = ctx.wallet().store().as_note_key_store()?;
+        if store.vault_exists().await? {
+            tprintln!(ctx, "a note vault already exists for this wallet\r\n");
+            return Ok(());
+        }
+        let words = store.vault_create(&wallet_secret).await?;
+        tprintln!(ctx, "WRITE THESE 24 WORDS DOWN NOW - they are shown only this once:");
+        tprintln!(ctx, "{words}");
+        tprintln!(ctx, "recovery needs BOTH these words AND a copy of the vault files ('note vault backup <dir>')\r\n");
+        Ok(())
+    }
+
+    async fn vault_backup(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
+        if argv.is_empty() {
+            tprintln!(ctx, "usage: 'note vault backup <dir>'\r\n");
+            return Ok(());
+        }
+        let store = ctx.wallet().store().as_note_key_store()?;
+        let folder = store.vault_folder().await?;
+        let target = std::path::PathBuf::from(&argv[0]);
+        copy_dir_recursive(&folder, &target).map_err(|e| Error::Custom(format!("backup copy failed: {e}")))?;
+        tprintln!(ctx, "copied vault files to {}\r\n", target.display());
+        Ok(())
+    }
+
+    async fn vault_verify(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
+        if argv.first().map(String::as_str) == Some("backup") {
+            if argv.len() < 2 {
+                tprintln!(ctx, "usage: 'note vault verify backup <dir>'\r\n");
+                return Ok(());
+            }
+            let vault = NoteVault::at(&argv[1]);
+            let rpc = ctx.wallet().rpc_api();
+            let report = light_verify_vault(&vault, &rpc).await?;
+            tprintln!(
+                ctx,
+                "backup at {}: {} live, {} stale (already spent/rotated since this backup was made)\r\n",
+                argv[1],
+                report.live.len(),
+                report.stale.len()
+            );
+            return Ok(());
+        }
+        if argv.first().map(String::as_str) == Some("deep") {
+            let account = ctx.wallet().account()?;
+            let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(Some(&account)).await?;
+            let report = deep_verify(account, wallet_secret).await?;
+            tprintln!(
+                ctx,
+                "deep verify: {} live, {} stale, {} corrupted",
+                report.live.len(),
+                report.stale.len(),
+                report.corrupted.len()
+            );
+            if !report.corrupted.is_empty() {
+                tprintln!(ctx, "corrupted serial(s): {:?}", report.corrupted);
+            }
+            tprintln!(ctx, "");
+            return Ok(());
+        }
+        let account = ctx.wallet().account()?;
+        let report = light_verify(account).await?;
+        tprintln!(ctx, "light verify: {} live, {} stale\r\n", report.live.len(), report.stale.len());
+        Ok(())
+    }
+
+    async fn vault_restore(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
+        if argv.len() < 2 {
+            tprintln!(ctx, "usage: 'note vault restore <dir> <24 recovery words>'\r\n");
+            return Ok(());
+        }
+        let dir = argv[0].clone();
+        let words = argv[1..].join(" ");
+        let account = ctx.wallet().account()?;
+        let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(Some(&account)).await?;
+
+        let store = ctx.wallet().store().as_note_key_store()?;
+        let folder = store.vault_folder().await?;
+        copy_dir_recursive(Path::new(&dir), &folder).map_err(|e| Error::Custom(format!("restore copy failed: {e}")))?;
+        store.vault_restore_from_words(&words, &wallet_secret).await?;
+
+        tprintln!(ctx, "vault files copied in and key recovered from words - deep-verifying...");
+        let report = deep_verify(account.clone(), wallet_secret.clone()).await?;
+        tprintln!(
+            ctx,
+            "recovered {} live note(s); {} stale; {} corrupted",
+            report.live.len(),
+            report.stale.len(),
+            report.corrupted.len()
+        );
+        if report.live.is_empty() {
+            tprintln!(ctx, "");
+            return Ok(());
+        }
+
+        let batches = plan_restore_rotation(report.live.clone());
+        tprintln!(
+            ctx,
+            "restore-time rotation (default): {} note(s) in {} batch(es) - rotating invalidates every OLD backup copy of \
+             these notes, including any stolen one",
+            report.live.len(),
+            batches.len()
+        );
+        // A batch's own serials may already be gone by the time its turn comes up:
+        // an earlier batch's fee-stamp (P5.2's mechanism) freely draws on any other
+        // currently-Active note as its fee source, which rotates that note's value
+        // too (as the fee source's change) — a real, correct side effect ("rotation
+        // doubles as backup revocation", DECISIONS.md), not an error. Re-check
+        // liveness immediately before each batch and skip anything already handled.
+        for (i, batch) in batches.iter().enumerate() {
+            let mut still_active = Vec::with_capacity(batch.len());
+            for sn in batch {
+                if let Some(info) = store.load_info(sn).await?
+                    && info.status == NoteStatus::Active
+                {
+                    still_active.push(*sn);
+                }
+            }
+            if still_active.is_empty() {
+                tprintln!(ctx, "  batch {}/{}: already rotated as a side effect of an earlier batch's fee stamp - skipped", i + 1, batches.len());
+                continue;
+            }
+            let result = account.clone().rotate_notes(wallet_secret.clone(), still_active).await?;
+            tprintln!(
+                ctx,
+                "  batch {}/{}: {} note(s), tx {} (fee {} MAGLD)",
+                i + 1,
+                batches.len(),
+                result.own_notes.len(),
+                result.transaction_id,
+                sompi_to_kaspa_string(result.fee_petals)
+            );
+        }
+        tprintln!(ctx, "rotation complete - make a fresh backup now ('note vault backup <dir>'); every old copy is now invalid\r\n");
+        Ok(())
+    }
+
+    async fn vault_export(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
+        if argv.is_empty() {
+            tprintln!(ctx, "usage: 'note vault export <dir>'\r\n");
+            return Ok(());
+        }
+        let dir = std::path::PathBuf::from(&argv[0]);
+        std::fs::create_dir_all(&dir).map_err(|e| Error::Custom(format!("could not create {}: {e}", dir.display())))?;
+
+        let account = ctx.wallet().account()?;
+        let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(Some(&account)).await?;
+        let entries = export_active_entries(account, wallet_secret).await?;
+        if entries.is_empty() {
+            tprintln!(ctx, "no active notes to export\r\n");
+            return Ok(());
+        }
+
+        let mnemonic = kaspa_bip32::Mnemonic::random(kaspa_bip32::WordCount::Words12, kaspa_bip32::Language::English)
+            .map_err(|e| Error::Custom(format!("failed to generate paper export password: {e}")))?;
+        let password = Secret::from(mnemonic.phrase_string().as_str());
+        let pages = paper_export_encode(&entries, &password)?;
+
+        for (i, page) in pages.iter().enumerate() {
+            let path = dir.join(format!("page-{i}.txt"));
+            let hex_text = page.to_hex();
+            std::fs::write(&path, &hex_text).map_err(|e| Error::Custom(format!("could not write {}: {e}", path.display())))?;
+            if let Some(qr) = qr_string(&hex_text) {
+                tprintln!(ctx, "page {}/{}:", i + 1, pages.len());
+                tprintln!(ctx, "{}", qr);
+            }
+        }
+        tprintln!(ctx, "wrote {} page(s) to {}", pages.len(), dir.display());
+        tprintln!(ctx, "paper export password (write this on the printed pages): {}", mnemonic.phrase_string());
+        tprintln!(ctx, "");
+        Ok(())
+    }
+
+    async fn vault_import(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
+        if argv.len() < 2 {
+            tprintln!(ctx, "usage: 'note vault import <password> <page-file> [<page-file> ...]'\r\n");
+            return Ok(());
+        }
+        let password = Secret::from(argv[0].as_str());
+        let mut pages: Vec<Vec<u8>> = Vec::with_capacity(argv.len() - 1);
+        for path in &argv[1..] {
+            let hex_text = std::fs::read_to_string(path).map_err(|e| Error::Custom(format!("could not read {path}: {e}")))?;
+            let bytes = Vec::<u8>::from_hex(hex_text.trim()).map_err(|e| Error::Custom(format!("{path}: invalid hex: {e}")))?;
+            pages.push(bytes);
+        }
+
+        let mut headers = Vec::with_capacity(pages.len());
+        for page in &pages {
+            headers.push(paper_export_peek_header(page)?);
+        }
+        let missing = paper_export_missing_pages(&headers);
+        if !missing.is_empty() {
+            tprintln!(ctx, "missing page(s): {:?} - provide every page before importing\r\n", missing);
+            return Ok(());
+        }
+
+        let account = ctx.wallet().account()?;
+        let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(Some(&account)).await?;
+        let mut imported = 0usize;
+        for page in &pages {
+            let (_, entries) = paper_export_decode_page(page, &password)?;
+            for bearer in entries {
+                account.clone().bearer_import(wallet_secret.clone(), bearer).await?;
+                imported += 1;
+            }
+        }
+        tprintln!(ctx, "imported and rotated {imported} note(s) from the paper backup\r\n");
+        Ok(())
+    }
+
     async fn display_help(self: Arc<Self>, ctx: Arc<KaspaCli>, _argv: Vec<String>) -> Result<()> {
         ctx.term().help(
             &[
@@ -344,6 +616,7 @@ impl Note {
                 ("pos <amount>", "One POS checkout: fresh landing-pad pk, wait for payment, auto-sweep"),
                 ("balance", "Show note balance by denomination"),
                 ("list", "List every held note (serial, denomination, provenance, status)"),
+                ("vault <cmd>", "Note vault: create/backup/verify/restore/export/import (see 'note vault')"),
             ],
             None,
         )?;

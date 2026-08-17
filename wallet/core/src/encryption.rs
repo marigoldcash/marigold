@@ -251,6 +251,36 @@ pub fn decrypt_xchacha20poly1305(data: &[u8], secret: &Secret) -> Result<Secret>
     Ok(Secret::new(buffer))
 }
 
+/// Encrypts with `XChaCha20Poly1305` using `key` directly as the cipher key — no
+/// Argon2 stretching (FORK-PLAN P7.6, DECISIONS.md's "Note vault" entry). Argon2
+/// exists in [`encrypt_xchacha20poly1305`] to slow down brute-forcing a *human*
+/// password; it's pure waste (tens of ms per call, deliberately) when `key` is
+/// already 32 bytes of CSPRNG output, as the note vault's key `K` is — every
+/// per-note-file operation would otherwise pay a full Argon2 pass for no security
+/// benefit. Reserved for high-entropy keys only; never call this with password
+/// bytes directly.
+pub fn encrypt_xchacha20poly1305_raw_key(data: &[u8], key: &[u8; 32]) -> Result<Vec<u8>> {
+    let cipher = XChaCha20Poly1305::new(Key::from_slice(key));
+    let nonce = XChaCha20Poly1305::generate_nonce(&mut OsRng);
+    let mut buffer = data.to_vec();
+    buffer.reserve(16);
+    cipher.encrypt_in_place(&nonce, &[], &mut buffer)?;
+    buffer.splice(0..0, nonce.iter().cloned());
+    Ok(buffer)
+}
+
+/// Decrypts data produced by [`encrypt_xchacha20poly1305_raw_key`].
+pub fn decrypt_xchacha20poly1305_raw_key(data: &[u8], key: &[u8; 32]) -> Result<Zeroizing<Vec<u8>>> {
+    let cipher = XChaCha20Poly1305::new(Key::from_slice(key));
+    if data.len() < 24 {
+        return Err("ciphertext shorter than the nonce prefix".into());
+    }
+    let nonce = &data[0..24];
+    let mut buffer = data[24..].to_vec();
+    cipher.decrypt_in_place(nonce.into(), &[], &mut buffer)?;
+    Ok(Zeroizing::new(buffer))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

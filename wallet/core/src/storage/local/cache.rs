@@ -5,7 +5,6 @@
 use crate::imports::*;
 use crate::storage::local::wallet::WalletStorage;
 use crate::storage::local::*;
-use kaspa_consensus_core::Hash;
 use std::collections::HashMap;
 
 pub struct Cache {
@@ -17,25 +16,17 @@ pub struct Cache {
     pub accounts: Collection<AccountId, AccountStorage>,
     pub metadata: Collection<AccountId, AccountMetadata>,
     pub address_book: Vec<AddressBookEntry>,
-    /// Note key database (FORK-PLAN P7.1) — encrypted `sn -> NoteKeyEntry` map, same
-    /// re-encrypt-on-every-mutation-at-rest pattern `prv_key_data` uses.
-    pub note_key_data: Encrypted,
-    /// Plaintext index alongside `note_key_data`, mirroring `prv_key_data_info` — safe
-    /// because none of `NoteKeyInfo`'s fields are sensitive (see its doc comment).
-    pub note_key_info: Collection<Hash, NoteKeyInfo>,
+    // Note key storage lived here as an encrypted `note_key_data: Encrypted` map
+    // plus a plaintext `note_key_info: Collection<Hash, NoteKeyInfo>` index through
+    // P7.1-P7.5; P7.6 moved it out to `storage::local::notevault::NoteVault`
+    // (file-per-note, its own in-memory index) — `LocalStoreInner`'s `NoteKeyStore`
+    // impl now delegates there directly instead of touching this cache.
     /// Outstanding payment-request keys (FORK-PLAN P7.3) — encrypted `pk -> key` map.
     pub payment_request_data: Encrypted,
     /// Plaintext index alongside `payment_request_data` (the pk is the QR's own
     /// public content; the amount is invoice metadata). Plain Vec, not a
     /// `Collection` — requests are few and short-lived, linear scans are fine.
     pub payment_request_info: Vec<PaymentRequestInfo>,
-}
-
-fn note_key_map_and_info(note_key_data: Vec<NoteKeyEntry>) -> Result<(NoteKeyMap, Collection<Hash, NoteKeyInfo>)> {
-    let note_key_info: Collection<Hash, NoteKeyInfo> =
-        note_key_data.iter().map(NoteKeyInfo::try_from).collect::<Result<Vec<_>>>()?.try_into()?;
-    let note_key_map: NoteKeyMap = note_key_data.into_iter().map(|entry| (entry.sn, entry)).collect();
-    Ok((note_key_map, note_key_info))
 }
 
 fn payment_request_map_and_info(keys: Vec<PaymentRequestKey>) -> Result<(PaymentRequestMap, Vec<PaymentRequestInfo>)> {
@@ -66,8 +57,6 @@ impl Cache {
         let wallet_title = wallet.title;
         let address_book = payload.0.address_book.into_iter().collect();
 
-        let (note_key_map, note_key_info) = note_key_map_and_info(payload.0.note_key_data.clone())?;
-        let note_key_data = Decrypted::new(note_key_map).encrypt(secret, encryption_kind)?;
         let (payment_request_map, payment_request_info) = payment_request_map_and_info(payload.0.payment_request_keys.clone())?;
         let payment_request_data = Decrypted::new(payment_request_map).encrypt(secret, encryption_kind)?;
 
@@ -80,8 +69,6 @@ impl Cache {
             accounts,
             metadata,
             address_book,
-            note_key_data,
-            note_key_info,
             payment_request_data,
             payment_request_info,
         })
@@ -103,8 +90,6 @@ impl Cache {
         let metadata: Collection<AccountId, AccountMetadata> = Collection::default();
         let address_book = payload.address_book.into_iter().collect();
 
-        let (note_key_map, note_key_info) = note_key_map_and_info(payload.note_key_data)?;
-        let note_key_data = Decrypted::new(note_key_map).encrypt(secret, encryption_kind)?;
         let (payment_request_map, payment_request_info) = payment_request_map_and_info(payload.payment_request_keys)?;
         let payment_request_data = Decrypted::new(payment_request_map).encrypt(secret, encryption_kind)?;
 
@@ -117,8 +102,6 @@ impl Cache {
             accounts,
             metadata,
             address_book,
-            note_key_data,
-            note_key_info,
             payment_request_data,
             payment_request_info,
         })
@@ -134,12 +117,9 @@ impl Cache {
         let accounts: Vec<AccountStorage> = (&self.accounts).try_into()?;
         let metadata: Vec<AccountMetadata> = (&self.metadata).try_into()?;
         let address_book = self.address_book.clone();
-        let note_key_data: Decrypted<NoteKeyMap> = self.note_key_data.decrypt(secret)?;
-        let note_key_data = note_key_data.values().cloned().collect::<Vec<_>>();
         let payment_request_keys: Decrypted<PaymentRequestMap> = self.payment_request_data.decrypt(secret)?;
         let payment_request_keys = payment_request_keys.values().cloned().collect::<Vec<_>>();
         let mut payload = Payload::new(prv_key_data, accounts, address_book);
-        payload.note_key_data = note_key_data;
         payload.payment_request_keys = payment_request_keys;
         let payload = Decrypted::new(payload).encrypt(secret, self.encryption_kind)?;
 

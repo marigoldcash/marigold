@@ -4,8 +4,8 @@ Snapshot of everything decided and built so far, so any fresh coding session on 
 machine can continue from the repo alone. Read this together with [FORK-PLAN.md](../../FORK-PLAN.md).
 Update this file whenever off-repo state changes (domains, accounts, infra).
 
-Last updated: 2026-08-17 (P7.5 complete — POS landing-pad mode, live-verified;
-next: P7.6, note vault/backup/restore — scope already recorded, not yet built)
+Last updated: 2026-08-17 (P7.6 complete — note vault, backup, and restore, live-verified;
+next: P7.7, wallet UX & docs pass)
 
 ## What this project is
 
@@ -94,20 +94,40 @@ substitute for it.
 
 ## Where execution stands
 
-- **Next step: P7.6 — Note vault, backup, and restore.** Scope was expanded ahead
-  of execution (2026-08-17, coder) — "Paper backup" became "note vault,
-  backup, and restore": a file-per-note encrypted vault replacing P7.1's
-  single-blob store (bounds in-memory key exposure to the notes actually being
-  spent), a 24-word ceremony for the vault's encryption key K (explicitly not a
-  note-deriving seed), an optional plaintext manifest, and a restore-time
-  rotation policy that's default-on-but-overridable and batches into 2-5
-  randomized transactions instead of one all-at-once sweep. Full rationale in
-  DECISIONS.md's "Note vault, backup, and restore-rotation policy" entry; spec
-  text in POOL-SPEC.md P5.6 (search "Note vault"); FORK-PLAN.md's P7.6 entry
-  rewritten to match. Not yet built — first step needing real filesystem I/O
-  for the vault (one file per note) rather than the single encrypted blob P7.1
-  built; the 24-word ceremony, manifest, light/deep verify, and batched
-  restore-rotation all follow from that storage-layer change.
+- **Next step: P7.7 — Wallet UX & docs pass.** Consistent CLI command naming,
+  human-readable errors, and `docs/x-fork/WALLET.md` walking through every flow.
+- **P7.6 is done — note vault, backup, and restore, live-verified, the largest
+  single step of Phase 7.** File-per-note encrypted vault
+  (`storage::local::notevault::NoteVault`) replaces P7.1's single-blob store —
+  plaintext filename (value/serial), contents encrypted under a per-wallet
+  vault key K (raw-key XChaCha20Poly1305, no Argon2 stretch — K is already
+  CSPRNG entropy), status as a directory with atomic-rename transitions.
+  24-word ceremony for K via `kaspa_bip32::Mnemonic` (explicitly not a
+  note-deriving seed — recovery needs the words **and** the vault files);
+  auto-provisions silently on first use so every pre-P7.6 flow keeps working,
+  with `note vault create` as the proper explicit ceremony. `manifest.tsv`
+  deliberately does double duty as both the mandatory fast in-memory index and
+  DECISIONS.md's human-facing manifest (a recorded simplification, not a spec
+  violation). Two verify tiers (`account::notepool::light_verify`/`deep_verify`),
+  `light_verify_vault` for checking a standalone backup directory with no wallet
+  open at all, `plan_restore_rotation` for the default-on/overridable batched
+  restore-rotation (2-5 randomly-composed batches), and a paper QR export/import
+  codec reusing `BearerNote`'s exact wire format. CLI: `note vault
+  create/backup/verify/restore/export/import`. **Four real bugs found and fixed
+  by the live daemon test, none by unit tests**: (1) `try_create`/`try_import`
+  never wiped a stale `vault.key` from an earlier same-named wallet, breaking
+  every P7.1-P7.5 regression test the moment this step's wiring landed; (2)
+  resident wallets all shared one default vault location, harmless for the old
+  in-memory store but catastrophic for a secret-keyed one — fixed with a random
+  per-instance temp location; (3) `restore_key_from_words` didn't invalidate an
+  already-cached (e.g. empty) in-memory index, silently shadowing freshly
+  copied-in files forever; (4) `deep_verify` propagated a decrypt failure as a
+  hard error instead of classifying it `corrupted`. Also documented: naively
+  executing pre-planned restore-rotation batches in order can hit a real
+  node-level rejection, since an earlier batch's fee-sourcing can legitimately
+  consume a note a later batch was targeting — correct pool-op economics, not a
+  bug, but the orchestration loop must re-check liveness per batch. Full
+  writeup in NOTES.md's P7.6 entry.
 - **P7.5 is done — POS landing-pad mode, live-verified, smallest step of the
   five.** `pos_checkout()` (`account::notepool`) is three existing P7.3/P7.4
   calls chained (`create_payment_request` → `await_payment_request` →

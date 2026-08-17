@@ -3,7 +3,7 @@
 //!
 
 use crate::imports::*;
-use crate::storage::{AddressBookEntry, NoteKeyEntry, PaymentRequestKey, PrvKeyData, PrvKeyDataId};
+use crate::storage::{AddressBookEntry, PaymentRequestKey, PrvKeyData, PrvKeyDataId};
 use kaspa_bip32::Mnemonic;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
@@ -13,9 +13,15 @@ pub struct Payload {
     pub accounts: Vec<AccountStorage>,
     pub address_book: Vec<AddressBookEntry>,
     pub encrypt_transactions: Option<EncryptionKind>,
-    /// Note key database rows (FORK-PLAN P7.1, POOL-SPEC.md P5.6).
-    pub note_key_data: Vec<NoteKeyEntry>,
-    /// Outstanding payment-request keys (FORK-PLAN P7.3, POOL-SPEC.md P5.5b).
+    // Note key database rows lived here as `note_key_data: Vec<NoteKeyEntry>`
+    // through FORK-PLAN P7.1-P7.5; P7.6 moved them out into the file-per-note
+    // vault (`storage::local::notevault::NoteVault`) entirely — they no longer
+    // round-trip through this blob or through `wallet_export`/`wallet_import` at
+    // all. Note backup/restore is the vault's own mechanism (DECISIONS.md's
+    // "Note vault, backup, and restore-rotation policy").
+    /// Outstanding payment-request keys (FORK-PLAN P7.3, POOL-SPEC.md P5.5b) —
+    /// explicitly NOT migrated to the vault (still short-lived, unpaid-invoice
+    /// state rather than held bearer value); unchanged by P7.6.
     pub payment_request_keys: Vec<PaymentRequestKey>,
 }
 
@@ -24,14 +30,7 @@ impl Payload {
     const STORAGE_VERSION: u32 = 0;
 
     pub fn new(prv_key_data: Vec<PrvKeyData>, accounts: Vec<AccountStorage>, address_book: Vec<AddressBookEntry>) -> Self {
-        Self {
-            prv_key_data,
-            accounts,
-            address_book,
-            encrypt_transactions: None,
-            note_key_data: Vec::new(),
-            payment_request_keys: Vec::new(),
-        }
+        Self { prv_key_data, accounts, address_book, encrypt_transactions: None, payment_request_keys: Vec::new() }
     }
 }
 
@@ -40,7 +39,6 @@ impl ZeroizeOnDrop for Payload {}
 impl Zeroize for Payload {
     fn zeroize(&mut self) {
         self.prv_key_data.zeroize();
-        self.note_key_data.iter_mut().for_each(|entry| entry.zeroize());
         self.payment_request_keys.iter_mut().for_each(|key| key.zeroize());
     }
 }
@@ -74,7 +72,6 @@ impl BorshSerialize for Payload {
         BorshSerialize::serialize(&self.accounts, writer)?;
         BorshSerialize::serialize(&self.address_book, writer)?;
         BorshSerialize::serialize(&self.encrypt_transactions, writer)?;
-        BorshSerialize::serialize(&self.note_key_data, writer)?;
         BorshSerialize::serialize(&self.payment_request_keys, writer)?;
 
         Ok(())
@@ -89,10 +86,9 @@ impl BorshDeserialize for Payload {
         let accounts = BorshDeserialize::deserialize_reader(reader)?;
         let address_book = BorshDeserialize::deserialize_reader(reader)?;
         let encrypt_transactions = BorshDeserialize::deserialize_reader(reader)?;
-        let note_key_data = BorshDeserialize::deserialize_reader(reader)?;
         let payment_request_keys = BorshDeserialize::deserialize_reader(reader)?;
 
-        Ok(Self { prv_key_data, accounts, address_book, encrypt_transactions, note_key_data, payment_request_keys })
+        Ok(Self { prv_key_data, accounts, address_book, encrypt_transactions, payment_request_keys })
     }
 }
 
