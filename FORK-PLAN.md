@@ -1965,10 +1965,40 @@ wallet. WASM/mobile wallets are post-launch — CLI proves the protocol.*
   pos, vault); wallet-core 68 unit tests green (13 new: 7 `notevault`, 6
   `notepool` verify/restore/paper-export); workspace check + clippy clean.
 
-- [ ] **P7.7 — Wallet UX & docs pass.** Consistent CLI command naming, human-readable
-  errors for every rejection case, and `docs/x-fork/WALLET.md` walking through every flow
-  (mint, pay, receive, POS, bearer, backup, restore).
-  ✅ *Verify:* a reader can execute every WALLET.md flow on the local testnet verbatim.
+- [x] **P7.7 — Wallet UX & docs pass.** Audited `cli/src/modules/note.rs` against its own
+  internal conventions and the wider CLI's (`_template.rs`, `account.rs`, `wallet.rs`,
+  `send.rs`): fixed a real unit-mixing bug (`note redeem`'s fee printed in raw sompi while
+  every sibling line used `sompi_to_kaspa_string`), lowercased three success messages that
+  had drifted to Title Case against the module's own 9-message lowercase majority, moved
+  `note vault import`'s password from a plain CLI argument to an interactive masked prompt
+  (`ctx.term().ask(true, ...)`, matching how the wallet password itself is always
+  prompted — a gap explicitly flagged when P7.6 landed), wrapped its decrypt failure in a
+  human-readable "check the password" message instead of the raw AEAD error, and added a
+  real safety check: `note vault restore` now refuses (clear message, no data touched) if
+  the destination wallet already has its own vault, rather than silently overwriting its
+  `vault.key` and stranding any notes already stored under it. Wrote
+  [docs/x-fork/WALLET.md](docs/x-fork/WALLET.md) and validated it against a real interactive
+  `kaspa-cli` session (via `pexpect`, a Python pty-driving library already available in this
+  environment — `kaspa-cli` needs a genuine TTY, confirmed still true per NOTES.md's P0.3
+  entry; plain piped stdin doesn't work). **Found along the way**: devnet/testnet/mainnet all
+  set `pool_activation: ForkActivation::never()` — only simnet has it `always()` (and
+  `skip_proof_of_work: true`) — so every prior local-testnet doc (SMOKE.md, P4.1's script)
+  is devnet-based and *cannot* exercise the note wallet at all; WALLET.md is simnet-based
+  throughout, a first for this project's manual-testing docs. **Two more real bugs found
+  live, fixed on top of P7.6's four**: (1) `note vault restore`'s rotation loop aborted
+  entirely on a single batch's failure, leaving every later batch — including unrelated,
+  unconflicted ones — unexecuted; now reports the failure and keeps going. (2)
+  `deep_verify`'s `stale` findings weren't reconciled back into local note status, so
+  `rotate_notes`'s fee-source selection kept re-proposing the same chain-dead serial as a
+  spare on every subsequent batch, failing for the identical reason each time; `note vault
+  restore` now marks every `stale` serial `Superseded` locally right after `deep_verify`
+  reports it, before planning any rotation.
+  ✅ *Verify:* walked every WALLET.md flow against a real simnet node through the actual
+  interactive `kaspa-cli` — wallet creation wizard (exact prompt sequence confirmed), mint,
+  balance/list, vault create/backup/verify (all three forms)/export, redeem, and a full
+  restore into a second, independent wallet (24 words + files) that correctly excluded
+  notes the source wallet had since redeemed and, after mining confirmations, completed its
+  batched rotation with zero failed batches on a clean run. Workspace check + clippy clean.
 
 - [ ] **P7.8 — End-to-end smoke extension.** Extend `docs/x-fork/SMOKE.md` (P4.2) with the
   full note lifecycle across the 3-node local testnet, including a node restart mid-flow

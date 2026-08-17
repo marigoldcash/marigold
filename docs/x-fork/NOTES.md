@@ -3034,6 +3034,16 @@ watch-once-then-retire model), effectively an unbounded-lifetime request the fre
 primitives weren't shaped for. FORK-PLAN's own P7.5 verify criterion doesn't exercise
 it. Left as a named gap rather than silently dropped or half-built.
 
+✅ *Verify*: `wallet_notepool_pos_test` — a customer holding exactly one 0.1 note pays
+a 0.04 POS checkout (splitting into 4×0.01, exercising the payer-side covering planner
+inside a POS sale rather than a peer-to-peer payment); the instant it confirms, the
+merchant's `pos_checkout` sweeps to 3 fresh Cold notes under distinct keys (slack-mode
+fee — the merchant held no spare notes), none remaining on the checkout `pk`, no two
+sharing a key; landing-pad serials confirmed gone from the pool, swept serials
+confirmed live and not owned by the checkout `pk`. All 4 notepool live tests
+(mint/redeem, receive flows, spend flows, POS) green in one run; wallet-core suite 56
+green; full workspace check + clippy clean.
+
 ### P7.6 — Note vault, backup, and restore (2026-08-17)
 
 The largest single step of Phase 7 — expanded ahead of execution in a three-exchange
@@ -3194,12 +3204,116 @@ an interactive password prompt for `note vault import` (currently a plain CLI ar
 consistent with how `note pay`/`note import` already pass sensitive text, but the
 weakest link in this step's UX and worth revisiting in P7.7's polish pass).
 
-✅ *Verify*: `wallet_notepool_pos_test` — a customer holding exactly one 0.1 note pays
-a 0.04 POS checkout (splitting into 4×0.01, exercising the payer-side covering planner
-inside a POS sale rather than a peer-to-peer payment); the instant it confirms, the
-merchant's `pos_checkout` sweeps to 3 fresh Cold notes under distinct keys (slack-mode
-fee — the merchant held no spare notes), none remaining on the checkout `pk`, no two
-sharing a key; landing-pad serials confirmed gone from the pool, swept serials
-confirmed live and not owned by the checkout `pk`. All 4 notepool live tests
-(mint/redeem, receive flows, spend flows, POS) green in one run; wallet-core suite 56
-green; full workspace check + clippy clean.
+### P7.7 — Wallet UX & docs pass (2026-08-17)
+
+The first step in this phase to actually drive the real interactive `kaspa-cli`
+against a live daemon, rather than testing the wallet-core layer underneath it
+directly. That distinction mattered: it surfaced two genuine bugs neither the P7.1-P7.6
+unit tests nor daemon tests could have found, because those all called `account.*`
+Rust methods directly — never through the CLI's own argument parsing, password
+re-prompting, or (critically) its `note vault restore` orchestration loop.
+
+**Audit pass, before touching anything live.** Read `cli/src/modules/note.rs` in full
+against its own established conventions and the wider CLI's (`_template.rs`,
+`account.rs`, `wallet.rs`, `send.rs`, `error.rs`). Findings: (1) `note redeem` printed
+its fee in raw sompi (`fee {} sompi`) while every sibling line in the same module
+formats through `sompi_to_kaspa_string` — a real unit-mixing bug, not just a style nit,
+since a reader could easily misjudge the fee's actual size; fixed. (2) Three success
+messages (`mint`, `redeem`, `balance`) were Title Case against the module's own
+established majority (9 of 11 messages, added across P7.3-P7.6, are lowercase);
+lowercased for internal consistency — the wider codebase actually leans Title Case
+(`address.rs`, `network.rs`, `connect.rs`, ...), so this is a call to match `note.rs`'s
+own dominant convention rather than rewrite the whole inherited CLI, which is out of
+scope. (3) `note vault import`'s password was a plain CLI argument — explicitly flagged
+as the weakest link when P7.6 landed; moved to an interactive masked prompt
+(`ctx.term().ask(true, "Enter paper backup password: ")`, the exact primitive
+`ask_wallet_secret` already uses), and its decrypt-failure error rewrapped from the raw
+"Unable to decrypt" into "could not decrypt this paper backup - check the password and
+try again". (4) A real safety gap: `note vault restore` would silently `copy_dir_recursive`
+a backup's `vault.key` over the destination wallet's own, if it already had one —
+stranding any notes already stored under the old key with no warning. Added an explicit
+`vault_exists()` check before touching anything, refusing with a clear explanation
+instead.
+
+**Devnet cannot exercise the note wallet at all — a real, previously-unstated
+constraint.** Checked `DEVNET_PARAMS`/`TESTNET_PARAMS`/`MAINNET_PARAMS` while writing
+WALLET.md's setup section: all three set `pool_activation: ForkActivation::never()`.
+Only `SIMNET_PARAMS` sets it `always()` (alongside `skip_proof_of_work: true`, which is
+*why* every P7.2-P7.6 live test already used `simnet: true` in its `Args` — this was
+already the established pattern, just never stated as a hard requirement anywhere a
+human following a doc would see it first). This means [SMOKE.md](SMOKE.md) and the
+[P4.1 script](../../scripts/x-testnet-local.sh) — both devnet-based — structurally
+cannot run a single `note` command; WALLET.md is simnet-based throughout, the first
+manual-testing doc in this project to be. Also found live: the wRPC Borsh listener
+`kaspa-cli` connects over is not started by default on simnet (or any network) —
+`--rpclisten-borsh=<addr>` must be passed explicitly, unlike gRPC/P2P — `connect`
+otherwise fails with a plain "Connection refused" that doesn't say why.
+
+**`kaspa-cli` still cannot be driven by piped stdin (P0.3's finding holds), but *can*
+be driven by a real pty.** Confirmed by trying the obvious thing first (`echo "cmd" |
+kaspa-cli`) and getting nothing back — not even an error, just silence, because
+crossterm raw mode never receives the input as keystrokes. `pexpect` (a Python
+pty-driving library, already installed in this environment) solves this properly: it
+allocates a genuine pseudo-terminal, so the child process behaves exactly as it would
+under a real interactive terminal. One non-obvious detail cost real debugging time:
+crossterm raw mode does not do the newline translation a cooked TTY would, so
+`pexpect`'s default `sendline()` (which sends `\n`) does nothing visible at all —
+commands appeared to just echo and then silently timeout — while an explicit `\r`
+(the literal Enter keystroke) works immediately. Worth recording as precedent for any
+future automated CLI validation in this project, since P0.3 had left "cannot be
+scripted" as a flat statement without exploring whether a pty specifically would work.
+
+**Real bug #1 (found live): `note vault restore`'s rotation loop aborted entirely on
+the first batch's failure.** The loop called `account.clone().rotate_notes(...).await?`
+per batch — a single `?`. The very first live restore run hit a batch that failed for
+a legitimate reason (see below), and the `?` propagated straight out of the function,
+meaning every batch after it — including ones with no conflict at all — never even
+attempted. Fixed by matching on the `Result` per batch, reporting a failure inline, and
+continuing to the next one; confirmed live afterward that an unrelated, unconflicted
+batch completes normally even when an earlier one fails.
+
+**Real bug #2 (found live, same restore run, different root cause): a `deep_verify`-reported
+`stale` serial kept getting retried as a fee-source spare forever.** `deep_verify` is
+deliberately read-only — it reports which serials are `live`/`stale`/`corrupted`
+against the chain, but never mutates local state itself (the same contract
+`light_verify`/`light_verify_vault` have). `rotate_notes`'s own fee-source selection,
+though, reads the *local* note-key store's status directly (`note_key_store.iter()`
+filtered on `NoteStatus::Active`) — it has no way to know a serial `deep_verify` just
+found `stale` elsewhere in the same call chain, because nothing had told the local
+store yet. The practical effect: a note genuinely gone from the chain (already spent by
+the wallet the backup came from) still looked locally `Active`, so every batch needing
+a fee stamp kept proposing the same dead serial as a spare, failing for the identical
+reason every single time — not a one-off, a systematic repeat. Fixed by having `note
+vault restore` walk `report.stale` and call `store.mark_status(sn, Superseded)` for
+each one immediately after `deep_verify` returns, before `plan_restore_rotation` ever
+runs — the same reconciliation `apply_notes_changed` already does for live
+`NotesChanged` notifications, just applied once for a one-time deep-verify report
+instead of continuously for a subscription.
+
+**Both restore bugs surfaced through the same test artifact, worth naming explicitly
+since it looks alarming out of context**: validating restore meant taking a vault
+backup from a wallet, then *continuing to use that same wallet* (redeeming some of the
+same notes) before restoring the backup into a second wallet — a deliberately stale,
+concurrently-active backup, to prove the verify/reconciliation machinery actually works
+under exactly the condition it exists for. The resulting mempool conflicts
+(`already consumed by transaction ... in the mempool`, and once confirmed, `does not
+exist in the pool`) are POOL-SPEC.md's same-key-in-two-wallets hazard playing out
+exactly as designed, not a defect — but they're precisely the scenario that would have
+silently defeated the *old*, unfixed restore loop (bug #1 turns "one legitimate
+conflict" into "the entire restore silently does almost nothing"; bug #2 turns "a
+handful of conflicts" into "every batch fails forever, even ones that should succeed").
+Fixed, then re-validated clean: mining the source wallet's pending transactions and
+re-running `note vault restore` (idempotent) completed with zero failed batches.
+
+Full step-by-step walkthrough, gotchas, and verification narrative in
+[WALLET.md](WALLET.md) — written to be read and executed directly, not summarized
+twice.
+
+✅ *Verify*: every WALLET.md flow walked against a real simnet node via the actual
+interactive `kaspa-cli` (driven through a real pty, not a shortcut): wallet-creation
+wizard (exact prompt sequence), funding, mint, balance/list, vault create (explicit
+ceremony) → backup → verify (all three forms: light, deep, standalone-backup) →
+export, redeem, and a full second-wallet restore (24 words + files) that correctly
+excluded notes the source wallet had since redeemed and — after mining confirmations
+for the source wallet's in-flight transactions — completed its batched rotation with
+zero failed batches. Workspace check + clippy clean throughout.

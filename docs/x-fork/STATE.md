@@ -4,8 +4,9 @@ Snapshot of everything decided and built so far, so any fresh coding session on 
 machine can continue from the repo alone. Read this together with [FORK-PLAN.md](../../FORK-PLAN.md).
 Update this file whenever off-repo state changes (domains, accounts, infra).
 
-Last updated: 2026-08-17 (P7.6 complete — note vault, backup, and restore, live-verified;
-next: P7.7, wallet UX & docs pass)
+Last updated: 2026-08-17 (P7.7 complete — wallet UX & docs pass, WALLET.md written and
+validated against a real interactive kaspa-cli session; next: P7.8, end-to-end smoke
+extension)
 
 ## What this project is
 
@@ -94,8 +95,34 @@ substitute for it.
 
 ## Where execution stands
 
-- **Next step: P7.7 — Wallet UX & docs pass.** Consistent CLI command naming,
-  human-readable errors, and `docs/x-fork/WALLET.md` walking through every flow.
+- **Next step: P7.8 — End-to-end smoke extension.** Extend `docs/x-fork/SMOKE.md`
+  (P4.2) with the full note lifecycle across the 3-node local testnet, including
+  a node restart mid-flow and a wallet restore.
+- **P7.7 is done — wallet UX & docs pass, the first Phase 7 step to drive the
+  real interactive `kaspa-cli` against a live daemon** rather than testing
+  wallet-core directly. Audited `cli/src/modules/note.rs`: fixed a real
+  unit-mixing bug (`note redeem`'s fee printed in raw sompi against every
+  sibling's `sompi_to_kaspa_string`), lowercased 3 messages that had drifted to
+  Title Case against the module's own 9-message majority, moved `note vault
+  import`'s password from a plain CLI arg to an interactive masked prompt (a
+  gap flagged when P7.6 landed), and added a real safety check — `note vault
+  restore` now refuses if the destination wallet already has its own vault,
+  rather than silently overwriting its `vault.key`. Wrote
+  [WALLET.md](WALLET.md), validated via `pexpect` (a Python pty-driving
+  library) genuinely driving `kaspa-cli`'s interactive REPL — confirmed P0.3's
+  "can't be scripted" finding still holds for piped stdin, but a real pty
+  works fine, a new precedent for this project. **Found along the way**:
+  devnet/testnet/mainnet all set `pool_activation: ForkActivation::never()` —
+  only simnet has it `always()` — so SMOKE.md/P4.1's devnet-based testnet
+  structurally cannot run a single `note` command; WALLET.md is simnet-based
+  throughout. **Two more real bugs found live** (on top of P7.6's four): (1)
+  `note vault restore`'s rotation loop aborted entirely on one batch's
+  failure, leaving unrelated later batches unexecuted — now continues past a
+  failed batch. (2) `deep_verify`'s `stale` findings weren't reconciled to
+  local status, so `rotate_notes` kept re-proposing the same chain-dead serial
+  as a fee-source spare forever — `note vault restore` now marks every stale
+  serial `Superseded` locally right after `deep_verify` reports it. Full
+  writeup in NOTES.md's P7.7 entry.
 - **P7.6 is done — note vault, backup, and restore, live-verified, the largest
   single step of Phase 7.** File-per-note encrypted vault
   (`storage::local::notevault::NoteVault`) replaces P7.1's single-blob store —

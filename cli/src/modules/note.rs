@@ -257,7 +257,7 @@ impl Note {
 
         let result = account.mint(wallet_secret, payment_secret, amount_petals, None, &abortable).await?;
 
-        tprintln!(ctx, "Minted {} MAGLD into {} note(s):", sompi_to_kaspa_string(amount_petals), result.notes.len());
+        tprintln!(ctx, "minted {} MAGLD into {} note(s):", sompi_to_kaspa_string(amount_petals), result.notes.len());
         for entry in &result.notes {
             tprintln!(ctx, "  {} - {}", entry.sn, sompi_to_kaspa_string(DENOMINATION_PETALS[entry.d as usize]));
         }
@@ -295,10 +295,10 @@ impl Note {
 
         tprintln!(
             ctx,
-            "Redeemed {} note(s) worth {} MAGLD (fee {} sompi); transparent balance +{} MAGLD",
+            "redeemed {} note(s) worth {} MAGLD (fee {} MAGLD); transparent balance +{} MAGLD",
             result.serials.len(),
             sompi_to_kaspa_string(result.redeemed_value_petals),
-            result.fee_sompi,
+            sompi_to_kaspa_string(result.fee_sompi),
             sompi_to_kaspa_string(result.redeemed_value_petals.saturating_sub(result.fee_sompi)),
         );
         tprintln!(ctx, "tx: {}\r\n", result.transaction_id);
@@ -318,7 +318,7 @@ impl Note {
             }
         }
 
-        tprintln!(ctx, "Note balance: {} MAGLD", sompi_to_kaspa_string(total));
+        tprintln!(ctx, "note balance: {} MAGLD", sompi_to_kaspa_string(total));
         for (index, count) in counts.iter().enumerate() {
             if *count > 0 {
                 tprintln!(ctx, "  {} x {} MAGLD", count, sompi_to_kaspa_string(DENOMINATION_PETALS[index]));
@@ -383,7 +383,7 @@ impl Note {
                 ("vault verify backup <dir>", "Light-verify a standalone backup directory without opening/restoring it"),
                 ("vault restore <dir> <24 words>", "Copy files from <dir>, recover K from the words, deep-verify, offer rotation"),
                 ("vault export <dir>", "Paper QR export: encrypted pages written to <dir>, password printed once"),
-                ("vault import <password> <page-file> ...", "Import notes from a paper export's decoded pages"),
+                ("vault import <page-file> ...", "Import notes from a paper export's decoded pages (prompts for the password)"),
             ],
             None,
         )?;
@@ -466,10 +466,32 @@ impl Note {
         }
         let dir = argv[0].clone();
         let words = argv[1..].join(" ");
+        if words.split_whitespace().count() != 24 {
+            tprintln!(
+                ctx,
+                "expected exactly 24 recovery words, got {} - check the words and try again\r\n",
+                words.split_whitespace().count()
+            );
+            return Ok(());
+        }
         let account = ctx.wallet().account()?;
+        let store = ctx.wallet().store().as_note_key_store()?;
+
+        // A vault already existing here means this wallet already has its own K
+        // (and possibly its own notes under it). Copying a backup's `vault.key`
+        // over it would silently strand anything already stored under the old
+        // K - refuse rather than risk that, instead of just overwriting.
+        if store.vault_exists().await? {
+            tprintln!(
+                ctx,
+                "this wallet already has a note vault - restoring here would overwrite its vault.key and strand any notes \
+                 already stored under it. Restore into a fresh wallet instead.\r\n"
+            );
+            return Ok(());
+        }
+
         let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(Some(&account)).await?;
 
-        let store = ctx.wallet().store().as_note_key_store()?;
         let folder = store.vault_folder().await?;
         copy_dir_recursive(Path::new(&dir), &folder).map_err(|e| Error::Custom(format!("restore copy failed: {e}")))?;
         store.vault_restore_from_words(&words, &wallet_secret).await?;
@@ -483,6 +505,17 @@ impl Note {
             report.stale.len(),
             report.corrupted.len()
         );
+
+        // deep_verify is a read-only diagnostic - it doesn't touch local status
+        // itself. A serial it found stale (already spent elsewhere before this
+        // backup was made, or since) must be reconciled to Superseded here, or
+        // rotate_notes's fee-source selection will keep proposing it as a spare
+        // and repeatedly failing every batch that draws it, since locally it
+        // still looks Active.
+        for sn in &report.stale {
+            store.mark_status(sn, NoteStatus::Superseded).await?;
+        }
+
         if report.live.is_empty() {
             tprintln!(ctx, "");
             return Ok(());
@@ -515,16 +548,23 @@ impl Note {
                 tprintln!(ctx, "  batch {}/{}: already rotated as a side effect of an earlier batch's fee stamp - skipped", i + 1, batches.len());
                 continue;
             }
-            let result = account.clone().rotate_notes(wallet_secret.clone(), still_active).await?;
-            tprintln!(
-                ctx,
-                "  batch {}/{}: {} note(s), tx {} (fee {} MAGLD)",
-                i + 1,
-                batches.len(),
-                result.own_notes.len(),
-                result.transaction_id,
-                sompi_to_kaspa_string(result.fee_petals)
-            );
+            // One batch can genuinely conflict without the others being at fault —
+            // e.g. a note that's also still held (and mid-spend) in whatever wallet
+            // this backup was copied from, a real instance of POOL-SPEC.md's
+            // same-key-in-two-wallets hazard. Report it and keep going: the other
+            // batches' notes aren't affected and still deserve to be rotated.
+            match account.clone().rotate_notes(wallet_secret.clone(), still_active).await {
+                Ok(result) => tprintln!(
+                    ctx,
+                    "  batch {}/{}: {} note(s), tx {} (fee {} MAGLD)",
+                    i + 1,
+                    batches.len(),
+                    result.own_notes.len(),
+                    result.transaction_id,
+                    sompi_to_kaspa_string(result.fee_petals)
+                ),
+                Err(err) => tprintln!(ctx, "  batch {}/{}: failed - {err} (other batches still attempted)", i + 1, batches.len()),
+            }
         }
         tprintln!(ctx, "rotation complete - make a fresh backup now ('note vault backup <dir>'); every old copy is now invalid\r\n");
         Ok(())
@@ -567,13 +607,12 @@ impl Note {
     }
 
     async fn vault_import(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
-        if argv.len() < 2 {
-            tprintln!(ctx, "usage: 'note vault import <password> <page-file> [<page-file> ...]'\r\n");
+        if argv.is_empty() {
+            tprintln!(ctx, "usage: 'note vault import <page-file> [<page-file> ...]'\r\n");
             return Ok(());
         }
-        let password = Secret::from(argv[0].as_str());
-        let mut pages: Vec<Vec<u8>> = Vec::with_capacity(argv.len() - 1);
-        for path in &argv[1..] {
+        let mut pages: Vec<Vec<u8>> = Vec::with_capacity(argv.len());
+        for path in &argv {
             let hex_text = std::fs::read_to_string(path).map_err(|e| Error::Custom(format!("could not read {path}: {e}")))?;
             let bytes = Vec::<u8>::from_hex(hex_text.trim()).map_err(|e| Error::Custom(format!("{path}: invalid hex: {e}")))?;
             pages.push(bytes);
@@ -589,11 +628,13 @@ impl Note {
             return Ok(());
         }
 
+        let password = Secret::new(ctx.term().ask(true, "Enter paper backup password: ").await?.trim().as_bytes().to_vec());
         let account = ctx.wallet().account()?;
         let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(Some(&account)).await?;
         let mut imported = 0usize;
         for page in &pages {
-            let (_, entries) = paper_export_decode_page(page, &password)?;
+            let (_, entries) = paper_export_decode_page(page, &password)
+                .map_err(|_| Error::Custom("could not decrypt this paper backup - check the password and try again".to_string()))?;
             for bearer in entries {
                 account.clone().bearer_import(wallet_secret.clone(), bearer).await?;
                 imported += 1;

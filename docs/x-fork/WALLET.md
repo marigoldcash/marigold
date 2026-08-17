@@ -1,0 +1,333 @@
+# WALLET.md — Note wallet walkthrough
+
+A step-by-step manual walkthrough of every note-pool wallet flow (P7.1-P7.6) on a local
+testnet, using the real interactive `kaspa-cli`. Unlike [SMOKE.md](SMOKE.md) (which
+predates the wallet and works around `kaspa-cli`'s REPL-only nature with RPC-direct
+tools — see NOTES.md's P0.3 entry), every step below genuinely uses the wallet as a user
+would. Written for P7.7; verified line-by-line against a running local node (see
+"Verification" at the end).
+
+## Before you start
+
+Rebuild every binary you'll use — a stale one can silently misbehave (bit this project
+at P2.3 and again at P4.2):
+
+```bash
+cargo build --release --bin kaspad --bin kaspa-cli
+```
+
+`kaspa-miner` (the community `elichai/kaspa-miner` tool) must be installed separately —
+see NOTES.md's Environment section.
+
+**Use `simnet`, not `devnet`, for anything in this document.** This is not a style
+preference: `DEVNET_PARAMS`/`TESTNET_PARAMS`/`MAINNET_PARAMS` all set
+`pool_activation: ForkActivation::never()` — the note-pool subnetwork is consensus-gated
+off on every network shape except simnet (`pool_activation: ForkActivation::always()`),
+which is also the only network with `skip_proof_of_work: true`, letting mined blocks
+confirm instantly. Every `note` command in this walkthrough will be rejected at the
+consensus level on a devnet node — this isn't a wallet bug, it's the intended state of
+the fork before a real pool-activation point is chosen for the real network shapes.
+
+## 1. Launch a local simnet node
+
+The wRPC Borsh listener `kaspa-cli` connects over is **not started by default** —
+`--rpclisten-borsh` must be given explicitly (unlike gRPC/P2P, which are):
+
+```bash
+mkdir -p x-simnet-local-data
+target/release/kaspad --simnet --enable-unsynced-mining --unsaferpc --disable-upnp \
+  --utxoindex --rpclisten-borsh=127.0.0.1:27510 --appdir=x-simnet-local-data \
+  > x-simnet-local-data/node.log 2>&1 &
+```
+
+Confirms up once the log shows all three listeners:
+
+```
+GRPC Server starting on: 127.0.0.1:26510
+P2P Server starting on: 0.0.0.0:26511
+WRPC Server starting on: 127.0.0.1:27510
+```
+
+(Simnet's default ports: gRPC `26510`, P2P `26511`, wRPC Borsh `27510` — different from
+devnet's `266*0`/devnet's wRPC `27610` used in [SMOKE.md](SMOKE.md)/P4.1's script.)
+
+## 2. Start `kaspa-cli` and connect
+
+```bash
+target/release/kaspa-cli
+```
+
+At the `$` prompt:
+
+```
+network simnet
+server 127.0.0.1:27510
+connect
+```
+
+The prompt changes from `N/C $` (not connected) to showing sync state, then a live
+balance once synced — starting `SYNC $`/`SYNC ... $` briefly against a fresh node.
+
+## 3. Create a wallet
+
+```
+wallet create
+```
+
+Walks an interactive wizard, in this exact order:
+
+1. `Default account title:` — press enter to skip.
+2. A phishing-hint explainer paragraph, then `Create phishing hint (optional, press
+   <enter> to skip):` — press enter to skip.
+3. `Enter wallet encryption password:` (masked) and `Re-enter wallet encryption
+   password:` (masked) — must match.
+4. A bip39-passphrase explainer, then `Enter bip39 mnemonic passphrase (optional):`
+   (masked) — press enter to skip (this is a *second*, optional secret on top of the
+   wallet password; skip it unless you specifically want one).
+
+The wizard then prints the new BIP32 account's 12-word mnemonic (**a wallet-level
+recovery phrase for transparent funds and note-pool key generation — a completely
+different secret from the note vault's own 24-word K, covered in step 6**), the
+wallet's storage path, and its default receive address (`marigoldsim:...`). The wallet
+and default account are automatically opened and activated — no separate `wallet open`
+needed in the same session.
+
+## 4. Fund the wallet
+
+Every note-pool operation needs a transparent balance to mint from. Mine to the
+receive address printed in step 3, from a second terminal:
+
+```bash
+target/release/kaspa-miner --mining-address <your-marigoldsim-address> \
+  --kaspad-address 127.0.0.1 --port 26510 --threads 2 --mine-when-not-synced
+```
+
+Coinbase outputs need `coinbase_maturity * 2` confirmations before the wallet's own
+balance tracking treats them as spendable (the same rothschild/wallet-side rule
+SMOKE.md's P4.2 entry found — not a consensus rule). At simnet's 10 BPS,
+`coinbase_maturity = 1000`, so leave the miner running until you're comfortably past
+~2000 blocks, then stop it (`Ctrl-C`, or `pkill -x kaspa-miner`). Check progress with:
+
+```
+list
+```
+
+which shows every account's transparent balance (mature and pending) and address.
+Wait until the mature figure is nonzero before continuing.
+
+## 5. Mint, check balance, list notes
+
+```
+note mint 5
+```
+
+Prompts `Enter wallet password:` again — **every note-pool command that needs the
+wallet secret re-prompts for it individually; the CLI never caches a plaintext
+password across commands.** Mints 5 MAGLD, decomposed into the P1.6 denomination
+ladder (5×1 MAGLD here). The very first note-storing call also silently runs the
+vault's 24-word ceremony if one doesn't exist yet (see step 6) — the words are logged
+as a warning, easy to miss; run `note vault create` explicitly beforehand if you want
+to see them properly (below).
+
+```
+note balance
+note list
+```
+
+`note balance` shows totals by denomination; `note list` shows every held note's
+serial, denomination, provenance (`Cold`/`Hot`), and status (`Active`/`HandedOver`/
+`Superseded`).
+
+**A newly-submitted note-pool transaction needs a confirming block before it shows up
+in on-chain queries** (`note vault verify`, another wallet's `note import`, etc.) — on
+a real network this happens automatically as blocks keep arriving; on this local
+testnet, mine at least one more block after any note operation before checking its
+on-chain effects from elsewhere.
+
+## 6. The note vault: create, backup, verify, export
+
+The vault (FORK-PLAN P7.6) is the wallet's note key database — one encrypted file per
+note, backed by its own 24-word recovery key `K` (unrelated to the wallet's own BIP32
+mnemonic from step 3; see DECISIONS.md's "Note vault, backup, and restore-rotation
+policy" for the full design).
+
+```
+note vault create
+```
+
+Run this **before** your first mint if you want to see the 24 words with the proper
+one-time warning (an already-auto-provisioned vault, from having minted first, just
+says "a note vault already exists").
+
+```
+note vault backup <dir>
+```
+
+Copies the vault's files to `<dir>` — pair this with the 24 words (written down
+separately, never stored alongside) for a full recovery. Do this after every batch of
+new notes; a vault copy only protects notes it was taken after receiving.
+
+```
+note vault verify
+note vault verify deep
+note vault verify backup <dir>
+```
+
+Three checks: **light** (this wallet's own notes against the live pool, no secret
+needed), **deep** (decrypts and re-derives every note's key — the mandatory first step
+of an actual restore, and the only one that catches a corrupted vault file), and
+**backup `<dir>`** (light-verifies a standalone backup copy directly — no wallet open,
+no secret — "is this old backup still any good" without ever restoring it).
+
+```
+note vault export <dir>
+```
+
+Paper QR export: prints an encrypted QR (and writes the same page as hex text to
+`<dir>`) for every ~40 notes, plus a freshly-generated 12-word password printed once —
+write it on the printed page itself (its threat model is safe physical storage, not a
+secret kept apart from the vault — see DECISIONS.md). `note vault import <page-file>
+...` reads the pages back (prompts for the password interactively) and imports each
+note as a bearer key, immediately rotating it.
+
+## 7. Receive a payment (fresh-pk mode)
+
+In a **second** `kaspa-cli` session (a separate `wallet create` under a different
+storage location — pass `wallet create <name>` to keep multiple named wallets, or run
+from a second `$HOME`), the recipient runs:
+
+```
+note request 2
+```
+
+Shows a QR + text payload (`marigoldreq:...`), then waits (up to 120s, safely
+re-runnable/re-checkable via `note list` after a timeout — the request key stays
+stored either way). The payer, on their own wallet, pays it:
+
+```
+note pay marigoldreq:<...text from above...>
+```
+
+The moment the payment confirms (mine a block), the requester's `note request`
+returns showing the received notes.
+
+## 8. Hand a note to someone directly (bearer mode)
+
+```
+note export <serial>
+```
+
+Auto-isolates first if the note's key is shared (a POS landing-pad note, for
+instance) — waits for that isolation to confirm before showing the handover payload.
+Shows a QR + text (`marigoldnote:...`); both parties can technically spend the note
+until the receiver rotates it, so show this only to the intended recipient. They
+import it with:
+
+```
+note import marigoldnote:<...text from above...>
+```
+
+which stores it (always `Hot` provenance — POOL-SPEC.md's same-key-in-two-wallets
+rule) and immediately rotates it to a fresh key.
+
+## 9. Point-of-sale checkout
+
+```
+note pos 0.5
+```
+
+One landing-pad `pk` for exactly this sale: shows the request QR immediately, waits
+for the exact payment, and the instant it confirms, sweeps every note that landed on
+the shared key to its own fresh key — the shared-key exposure window is bounded to
+this one call.
+
+## 10. Redeem notes back to transparent balance
+
+```
+note redeem <serial> [<serial> ...]
+note redeem amount <amount>
+```
+
+Either redeem specific notes by serial, or let the wallet pick enough notes to cover
+at least `<amount>`. Reports the redeemed value, fee, and net transparent balance
+gain.
+
+## 11. Restore from a vault backup — "24 words + the files"
+
+Simulates recovering a wallet from nothing but a vault backup and its 24 words. In a
+**fresh** wallet (no prior vault):
+
+```
+note vault restore <backup-dir> <word1> <word2> ... <word24>
+```
+
+Copies the backup's files in, recovers `K` from the words, deep-verifies (reports
+live/stale/corrupted), then — by default — offers the restore-time rotation: 2-5
+randomly-composed batches, each its own transaction, rotating every recovered note to
+a fresh key (invalidating every old copy of this backup, including any that may have
+leaked). Each batch is attempted independently — one batch's failure doesn't stop the
+others.
+
+**Caveat found while validating this**: if the *source* wallet the backup came from is
+still active and mid-spend (e.g. you're testing restore against a backup you just took
+without pausing the original wallet), a rotation batch that happens to need a fee-stamp
+from a note the source wallet is simultaneously spending will fail with `already
+consumed by transaction ... in the mempool` (or, once that transaction confirms, `does
+not exist in the pool`) — a real instance of POOL-SPEC.md's same-key-in-two-wallets
+hazard, not a wallet defect. Mine a confirming block for the source wallet's pending
+transaction and re-run `note vault restore` (idempotent — it re-copies and re-verifies)
+to pick up wherever it left off.
+
+## Gotchas found while writing this (2026-08-17)
+
+- **`kaspa-cli` genuinely cannot be driven by piped stdin** (NOTES.md's P0.3 finding
+  still holds — it needs a real TTY, crossterm raw mode). This walkthrough was
+  validated with `pexpect` (a Python pty-driving library, already available in this
+  environment), which allocates a real pseudo-terminal and sends literal `\r` (not
+  `\n` — crossterm raw mode doesn't do the newline translation a cooked TTY would) for
+  Enter. Useful precedent for any future automated CLI validation.
+- **wRPC Borsh needs `--rpclisten-borsh` explicitly** — unlike gRPC and P2P, it isn't
+  started by default. `kaspa-cli`'s `connect` fails with "Connection refused" without
+  it, silently continuing to work for anything that doesn't need the network (like
+  `wallet create` itself, which is why the wizard "succeeding" isn't proof the wRPC
+  connection is up).
+- **Real bug found and fixed**: `note vault restore`'s rotation loop aborted entirely
+  on the first batch's failure, leaving every batch after it — including ones with no
+  conflict at all — unexecuted. Fixed to report a failed batch and continue with the
+  rest (`cli/src/modules/note.rs`).
+- **Real bug found and fixed**: `deep_verify`'s findings weren't reconciled back into
+  local note status. A serial it reported `stale` stayed `Active` in the local index,
+  so `rotate_notes`'s fee-source selection kept proposing the same dead serial as a
+  spare on every subsequent batch, failing repeatedly for the same reason. Fixed by
+  having `note vault restore` mark every `stale` serial `Superseded` locally right
+  after `deep_verify` reports it, before planning any rotation.
+- **`note vault import`'s password moved from a CLI argument to an interactive masked
+  prompt** during this pass (it was a known, explicitly-flagged gap from P7.6) —
+  matches how the wallet password itself is always prompted, never passed as text.
+
+## Verification (2026-08-17)
+
+Walked every step above against a real local simnet node (`kaspad --simnet
+--enable-unsynced-mining --unsaferpc --utxoindex --rpclisten-borsh=127.0.0.1:27510`),
+driving the real `kaspa-cli` binary interactively (via `pexpect`, allocating a genuine
+pty — see "Gotchas" above):
+
+- Created a wallet through the full interactive wizard exactly as documented; captured
+  its mnemonic and receive address from the real terminal output.
+- Funded it (2,350 mined blocks, past `coinbase_maturity * 2`); `list` showed a mature
+  transparent balance.
+- `note mint 5` → 5×1 MAGLD, auto-provisioning the vault (24 words logged); `note
+  balance`/`note list` matched exactly.
+- `note vault create` correctly refused a second ceremony ("already exists"); `note
+  vault backup`/`note vault verify backup <dir>` round-tripped cleanly (5 live, 0
+  stale); `note vault export` produced a real scannable QR + password.
+- `note redeem amount 2` redeemed 2 notes, correct fee and balance-gain math; `note
+  list` showed the right mix of `Superseded`/`Active` rows afterward.
+- Created a second, completely independent wallet and ran `note vault restore` against
+  the first wallet's backup + 24 words — recovered exactly the notes still live on
+  chain (correctly excluding ones the first wallet had since redeemed), and — after
+  mining confirmations for the first wallet's in-flight transactions — completed the
+  full batched restore-rotation with zero failed batches on a clean run.
+
+Every documented command matched its documented behavior exactly. Two real bugs (listed
+above) were found and fixed during this pass; full writeup in NOTES.md's P7.7 entry.
