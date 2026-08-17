@@ -1067,25 +1067,50 @@ KeyDbEntry {
 **State this loudly, as the plan requires**: losing the key database is losing the notes.
 There is no seed phrase to reconstruct it from, no derivation path, nothing but the raw
 private keys themselves — this is the direct consequence of "one key per note" instead of
-one master key deriving everything, and it is the entire reason paper backup (below) is
+one master key deriving everything, and it is the entire reason the note vault (below) is
 not an optional feature but core to the wallet being usable at all.
 
-### Paper backup
+### Note vault (primary backup) and paper export
 
-**Format**: serialize a chunk of `(serial, sk, denomination)` entries with `borsh`
-(consistent with every other wire format in this spec), encrypt with the wallet's
-existing password-based encryption — reused directly, not reinvented:
-`wallet/core/src/encryption.rs`'s `encrypt_xchacha20poly1305(data, secret)` already does
-exactly this (Argon2-derived key via `argon2_sha256iv_hash`, XChaCha20Poly1305 AEAD, a
-random 24-byte/192-bit nonce prepended to the ciphertext+16-byte auth tag) — this is the
-*same* function the existing wallet already uses to encrypt its own storage, not a
-new crypto primitive introduced for this feature.
+**Decided ahead of P7.6's execution, full rationale in DECISIONS.md's "Note vault,
+backup, and restore-rotation policy" entry** — summarized here as the spec text this
+implementation follows.
 
-**Chunking**: ~40 note entries fit per QR code (a `(serial: 32, sk: 32, d: 1)` entry is 65
-bytes; borsh-encoded + XChaCha20Poly1305 overhead (24-byte nonce + 16-byte tag) keeps a
-40-entry chunk comfortably under a QR code's practical capacity at a scannable error-
-correction level). Each QR carries a small plaintext header before the encrypted payload
-so multi-page restores can detect missing pages without needing the password first:
+**Storage format**: one file per `KeyDbEntry`, not one blob. A `notes/` directory with a
+status subdirectory per `NoteStatus` (`active/`, `handed-over/`, `superseded/` — a status
+change is an atomic rename); each file is named for its already-public metadata
+(denomination, serial) and its contents (`sk`, plus enough to reconstruct the row)
+encrypted under one per-wallet **vault key K**, XChaCha20Poly1305 with a per-file nonce —
+`wallet/core/src/encryption.rs`'s existing `encrypt_xchacha20poly1305(data, secret)`, the
+same primitive the wallet already uses elsewhere, not a new one. Balance and coin
+selection read filenames only; a spend decrypts exactly the notes it selects. This
+directly replaces the single-encrypted-map approach (P7.1's initial implementation,
+which decrypts-and-reencrypts the *entire* map on every single-note touch — every
+operation transiently held every key in memory, not just backup/restore) with a design
+whose in-memory exposure is bounded to "the notes currently being spent."
+
+**24-word vault key ceremony**: K — the *file* encryption key, explicitly not a
+BIP32/BIP39-style seed deriving note keys — is shown once at vault creation as 24 words
+(the familiar wallet-onboarding ceremony, reused for its UX shape only). For daily use K
+is additionally wallet-password-wrapped, like every other secret this wallet already
+protects that way. This does not contradict this section's opening line ("no 24-word
+seed tied to one master key") — note keys stay independently generated, one per note,
+undiscoverable from K alone. Recovery needs **both** the words and the vault files: an
+encrypted copy is safe on fully untrusted storage without the words; the words alone
+recover nothing.
+
+**Manifest**: an optional plaintext companion — `(serial, value, last-rotated-at)` per
+note — for human/tooling legibility, riding alongside the encrypted copy.
+
+**Paper export**: the paper QR remains available as one printable representation of the
+same vault entries (not a separate mechanism): serialize a chunk of `(serial, sk,
+denomination)` entries with `borsh`, encrypt with the same `encrypt_xchacha20poly1305`.
+~40 note entries fit per QR code (a `(serial: 32, sk: 32, d: 1)` entry is 65 bytes;
+borsh-encoded + XChaCha20Poly1305 overhead — 24-byte nonce + 16-byte tag — keeps a
+40-entry chunk comfortably under a QR code's practical capacity at a scannable
+error-correction level). Each QR carries a small plaintext header before the encrypted
+payload so multi-page restores can detect missing pages without needing the password
+first:
 
 ```
 QrPageHeader {
@@ -1096,51 +1121,84 @@ QrPageHeader {
 }                                    // 15 bytes, plaintext
 ```
 
-The password itself may be written on the printed page — this backup's threat model is
-safe physical storage (a drawer, a safe), not a password kept secret from whoever finds
-the paper; encryption still protects the far more likely real-world exposure (a stray
-phone photo of the page, a printer's spool file, a cloud-synced "Downloads" folder).
+The paper export's password may be written on the printed page itself — unlike the vault
+(recoverable only with K, kept separate), the paper form's threat model is safe physical
+storage (a drawer, a safe), not a password kept secret from whoever finds the page;
+encryption still protects the more likely real-world exposure (a stray phone photo, a
+printer's spool file, a cloud-synced "Downloads" folder).
 
 ### Restore flow — self-reconciling against the plaintext pool
 
 Because the pool is plaintext, a restored key doesn't need the wallet to have tracked
-anything continuously — it can ask the chain directly: **for each entry, look up the
-serial's current owner in `PoolState`**; if the current `pk` matches the printed
-key's derived public key, the note is still yours (rotate it immediately — see "backups
-go stale" below); if it doesn't match, someone else's transaction has already moved it on
-(spent since the backup was printed, or the backup is simply stale/superseded), discard
-that entry. No merkle-scanning, no trial-decryption, no synchronization protocol — one
-`PoolState` lookup per restored serial, exactly the passive read every other part of this
-spec already assumes the wallet can do freely (the pool being plaintext is precisely what
-makes this restore this simple).
+anything continuously — it can ask the chain directly, and it can do so at two
+independent strengths:
+
+- **Light verify** (needs no secrets at all): a serial's `(denomination, pk)` binding is
+  immutable for its life — rotation consumes a serial and mints a new one, never
+  re-pointing an existing one — so "serial still exists in `PoolState`" is exactly
+  equivalent to "note still unspent," and serials already sit in plaintext (filenames,
+  manifest). Checking every manifest serial against live pool state needs zero
+  decryption, zero secrets in memory, and no rotation — lets a backup's health be
+  confirmed without ever restoring.
+- **Deep verify** (the mandatory first step of an actual restore): decrypt each entry and
+  re-derive its `pk`, comparing against the current on-chain owner exactly as light
+  verify does, but additionally catching a corrupted ciphertext light verify cannot. For
+  each entry: if the derived `pk` matches the serial's current on-chain owner, the note is
+  still yours; if not, someone's transaction already moved it on (spent since backup, or
+  the backup is stale/superseded) — discard that entry. No merkle-scanning, no
+  trial-decryption, no synchronization protocol — one `PoolState` lookup per restored
+  serial, the same passive read this spec already assumes the wallet can do freely.
 
 **Recovery when `known_serials` is lost but keys survive** (stated explicitly per
-review 1, rather than left implied): the paper-backup format above stores `(serial, sk,
-d)` triples, so a normal restore never faces this — but a wallet that somehow retains
-private keys without their serial list (a key-only export, a partially corrupted DB) is
-still fully recoverable, because the pool is plaintext: enumerate every serial currently
-under each held key's `pk` and adopt that as the new explicit `known_serials` list. This
-is the **one sanctioned use of pk-enumeration to establish ownership** — it happens
-interactively at restore time and its *output* is a rebuilt explicit serial list; it is
-not an exception to the "ownership is tracked by serial, never inferred by pk" spending
-rule below, which governs ongoing spend/sweep selection, not one-time recovery. Keys
-restored this way are Hot by provenance (they crossed a wallet boundary), so the
-same-key-hazard rule below already forces immediate rotation of everything recovered —
-which also cleanly resolves any serials another wallet sharing the key might have
-contested.
+review 1, rather than left implied): the vault/paper-export formats above store
+`(serial, sk, d)` per note, so a normal restore never faces this — but a wallet that
+somehow retains private keys without their serial list (a key-only export, a partially
+corrupted DB) is still fully recoverable, because the pool is plaintext: enumerate every
+serial currently under each held key's `pk` and adopt that as the new explicit
+`known_serials` list. This is the **one sanctioned use of pk-enumeration to establish
+ownership** — it happens interactively at restore time and its *output* is a rebuilt
+explicit serial list; it is not an exception to the "ownership is tracked by serial,
+never inferred by pk" spending rule below, which governs ongoing spend/sweep selection,
+not one-time recovery. Keys restored this way are Hot by provenance (they crossed a
+wallet boundary), so the restore-rotation policy immediately below applies to them at
+its default strength.
+
+**Restore-time rotation: default on, explicitly overridable** — a deliberate exception to
+this section's general Hot-key rule ("rotate immediately, not lazily"), decided ahead of
+execution once the vault decoupled "backup leaked" from "password leaked" (full
+reasoning in DECISIONS.md; bearer *receive*, below, keeps rotating unconditionally — a
+different threat model, since a bearer handover's shared-key window is deliberately
+choice-driven by the receiver in the moment, not a recovery-time bulk operation). Flow,
+after deep verify reports which notes are still live: offer a **batched, randomly-spaced,
+randomly-composed rotation** (2-5 transactions, mixed denominations per batch — not
+sorted by value, which would leak structure the mixing exists to hide). The user may
+accept (default), defer, or decline; deferred notes remain fully spendable (Hot is an
+urgency flag, not a lock) with the wallet nagging until resolved; the moment rotation
+completes, prompt for a fresh backup copy, since the whole point was invalidating the
+old one. State both consequences plainly in the dialog: rotating invalidates every old
+backup copy including any stolen one; deferring keeps old backups valid including any
+stolen one. Batching reduces the "entire wealth rotated at one timestamp" fingerprint
+but does not eliminate linkage (each batch's own consumed-serials list is still an
+explicit on-chain link) — a genuine improvement over one all-at-once sweep, not a
+privacy guarantee. Implementation note: this is the existing full self-sweep (below),
+not new machinery — restore-time rotation is `sweep` with a confirmation dialog in
+front, which also gives the wallet a standalone "I think my backup leaked" panic button
+for free.
 
 Two properties worth stating explicitly, since they're easy to get backwards:
 
-- **Rotation doubles as backup revocation.** A leaked printout only endangers notes that
-  haven't been rotated since it was printed — the moment any note on the page is rotated
-  (by the legitimate owner, for any reason), that specific entry in *every* copy of that
-  printout, leaked or not, becomes worthless (its key no longer matches the note's current
-  `pk`). A full self-sweep (rotate everything) is therefore a deliberate, complete
-  invalidation of every prior backup at once — a real recovery action, not just hygiene.
-- **Backups go stale.** Notes *received* after a backup was printed are, by definition,
-  not on it. The wallet should prompt for periodic re-printing (e.g. after N new notes
-  received, or on a time interval) — this is a UX nudge, not a protocol requirement, since
-  nothing about the chain enforces backup freshness.
+- **Rotation doubles as backup revocation.** A leaked backup copy (vault or paper) only
+  endangers notes that haven't been rotated since it was made — the moment any note on it
+  is rotated (by the legitimate owner, for any reason), that specific entry in *every*
+  copy of that backup, leaked or not, becomes worthless (its key no longer matches the
+  note's current `pk`). A full self-sweep (rotate everything) is therefore a deliberate,
+  complete invalidation of every prior backup at once — a real recovery action, not just
+  hygiene, and exactly the mechanism restore-time rotation (above) reuses.
+- **Backups go stale.** Notes *received* after a backup was made are, by definition, not
+  on it. The wallet should prompt for a fresh backup copy periodically (e.g. after N new
+  notes received, or on a time interval) — for the vault this is cheap (copy the new
+  files; no re-encryption of anything already backed up) — this is a UX nudge, not a
+  protocol requirement, since nothing about the chain enforces backup freshness.
 
 ### Receive flow
 

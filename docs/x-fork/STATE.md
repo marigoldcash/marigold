@@ -95,6 +95,16 @@ substitute for it.
 
 ## Where execution stands
 
+- **P7.6's scope was expanded ahead of execution (2026-08-17, coder, not yet
+  built).** "Paper backup" became "note vault, backup, and restore" — a file-per-note
+  encrypted vault replacing P7.1's single-blob store (bounds in-memory key exposure
+  to the notes actually being spent), a 24-word ceremony for the vault's encryption
+  key K (explicitly not a note-deriving seed), an optional plaintext manifest, and a
+  restore-time rotation policy that's default-on-but-overridable and batches into
+  2-5 randomized transactions instead of one all-at-once sweep. Full rationale in
+  DECISIONS.md's "Note vault, backup, and restore-rotation policy" entry; spec text
+  in POOL-SPEC.md P5.6 (search "Note vault"); FORK-PLAN.md's P7.6 entry rewritten to
+  match. P7.5 stays next — the vault touches storage, not the POS flow.
 - **Next step: P7.5 — POS landing-pad mode.** Merchant generates fresh-pk
   `{pk, amount}` checkout QRs and auto-sweeps on confirmation (one multi-serial
   rotation to per-note fresh cold keys); payer scans/confirms/pays exact. Nearly

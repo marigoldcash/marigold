@@ -1874,11 +1874,28 @@ wallet. WASM/mobile wallets are post-launch — CLI proves the protocol.*
   ✅ *Verify:* scripted two-wallet POS demo passes; merchant wallet ends with
   one-note-one-key state within seconds of payment.
 
-- [ ] **P7.6 — Paper backup.** Print/export per P5.6: Argon2id + authenticated encryption,
-  chunked QRs with page headers, password optionally printed; restore = decrypt →
-  reconcile each serial against the pool → rotate all still-owned notes (hot keys).
-  ✅ *Verify:* backup → wipe wallet → restore on local testnet recovers exactly the
-  still-owned notes and rotates them; a missing page is detected and reported.
+- [ ] **P7.6 — Note vault, backup, and restore.** Scope expanded ahead of execution
+  (design decided 2026-08-17 by coder — see DECISIONS.md's "Note vault, backup,
+  and restore-rotation policy" entry and POOL-SPEC.md P5.6's corresponding rewrite):
+  migrate the P7.1 key store (and P7.3's payment-request keys) from a single encrypted
+  map to a **vault** — one file per note, plaintext filename (denomination/serial),
+  contents encrypted under a per-wallet vault key K; status (`Active`/`HandedOver`/
+  `Superseded`) as a directory, a status change is an atomic rename. 24-word ceremony
+  for K (explicitly not a note-deriving seed — recovery needs the words **and** the
+  vault files). Optional plaintext manifest (`serial, value, last-rotated-at`). Two
+  verify tiers: light (keyless, manifest serials vs. live `PoolState`) and deep
+  (decrypt + re-derive `pk`, the mandatory first restore step). Restore-time rotation
+  is the existing full self-sweep with a confirmation dialog in front — default on,
+  overridable, batched into 2-5 randomly-spaced/composed transactions rather than one
+  all-at-once sweep, nags while deferred, prompts a fresh backup the moment it
+  completes. Paper QR export (P5.6's original format) survives as one printable
+  representation of the same vault entries, not a separate mechanism.
+  ✅ *Verify:* backup → wipe wallet → light-verify the manifest without restoring →
+  restore → deep-verify recovers exactly the still-owned notes → accept batched
+  rotation → confirm every old backup copy (vault and any paper export) is now
+  invalidated (rotated notes no longer match) and a fresh backup is prompted; a
+  corrupted vault file is caught by deep verify but not light verify (both paths
+  exercised); a missing paper-export page is detected and reported.
 
 - [ ] **P7.7 — Wallet UX & docs pass.** Consistent CLI command naming, human-readable
   errors for every rejection case, and `docs/x-fork/WALLET.md` walking through every flow

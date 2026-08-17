@@ -355,3 +355,102 @@ specifically, not just the mechanism shape.
   cryptographic guarantee) and the sunset itself (bounding how long that trust is ever
   extended, not eliminating the need for it during the young-chain phase where it's
   genuinely the best available option per the plan's own rationale).
+
+### Note vault, backup, and restore-rotation policy (P7.6, decided ahead of execution, 2026-08-17)
+
+Design worked out with the user before P7.6's implementation, replacing P5.6's original
+"paper QR is the backup" framing with a **note vault** — the vault is the primary,
+day-to-day backup mechanism; the paper QR (P5.6, already specced) survives as one
+printable *export* of the same encrypted entries, not a separate design. Recorded here
+ahead of execution per this file's own convention (P1.2, P1.3, ...) — POOL-SPEC.md P5.6
+gets the corresponding spec-text update alongside this entry.
+
+**Storage format — one file per note, plaintext filename, encrypted contents.** A
+`notes/` directory with one status subdirectory per `NoteStatus` (`active/`,
+`handed-over/`, `superseded/`) — a status change is an atomic file rename, and the
+directory tree is self-describing without opening a single file. Each note's file is
+named for its public, already-on-chain-visible metadata (denomination/value; serial),
+and its *contents* — `sk`, plus enough to reconstruct the row — are encrypted under one
+per-wallet **vault key K** (XChaCha20Poly1305, per-file nonce; the same primitive the
+existing wallet encryption already uses, not a new one). This is a deliberate reversal
+of today's implementation (P7.1's single encrypted map, decrypted-and-reencrypted in
+full on every touch — a real weakness the user identified: every single-note operation
+today transiently holds *every* note key in memory, not just backup/restore). Balance
+and coin selection read filenames only, zero decryption; a spend decrypts exactly the
+selected files. The exposure window shrinks from "every key, every operation" to "only
+the notes being spent, only while spending" — it cannot reach zero (signing needs the
+plaintext `sk` momentarily and K must exist in memory for that moment), but this is the
+smallest that window gets without a hardware signer.
+
+**Accepted trade-off, stated openly**: plaintext filenames (value, and implicitly serial)
+leak local inventory metadata to anyone who can list the directory — more than today's
+single-blob format leaks (its size alone is a much coarser signal). Judged acceptable:
+a local observer that far in is usually local compromise regardless of file layout, and
+blinding filenames breaks the compute-without-decrypting property this format exists for.
+Primitive and legible beats clever here.
+
+**24-word vault key ceremony, explicitly not a derivation seed.** K itself — the file
+encryption key, not a BIP32/BIP39-style master key deriving note keys — is presented
+once, at vault creation, as 24 words (the classic wallet-onboarding shape users already
+recognize, reused for its ceremony familiarity, not its cryptographic properties). For
+daily use K is additionally stored wrapped under the ordinary wallet password, exactly
+like every other secret this wallet already protects that way; the 24 words exist purely
+as the out-of-band recovery path. This does not weaken P5.6's opening line ("no 24-word
+seed tied to one master key") — note keys remain independently generated, one per note,
+undiscoverable from K or the 24 words alone. Recovery therefore needs **both** the words
+*and* the files: an encrypted vault copy on fully untrusted storage (cloud, a found USB
+drive) is safe without the words; the words alone recover nothing, since bearer note keys
+aren't derivable. Stated as a strength, not just a caveat — but the wallet UX must say it
+loudly, since users trained on HD wallets will assume the words alone are sufficient.
+
+**Manifest**: an optional plaintext companion file — `(serial, value, last-rotated-at)`
+per note, nothing else — riding alongside the encrypted vault copy for human and tooling
+legibility. Requires a `last_rotated_at` field the current schema doesn't yet carry
+(small addition alongside P7.6's implementation, not a design change).
+
+**Two-tier verification, the light tier needing no secrets at all.** A serial's
+`(denomination, pk)` binding is immutable for its life — rotation consumes a serial and
+mints a new one, it never re-points an existing one — so "serial still exists in the
+pool" is exactly equivalent to "note still unspent," and serials sit in plaintext
+filenames/the manifest already. **Light verify**: check every manifest serial against
+live pool state (`get_notes_by_serial`, any node) — zero decryption, zero secrets in
+memory, no rotation, works even without the 24 words. Lets a user (or an automated
+watchdog they've deliberately pointed at a manifest, accepting the inventory-leak
+trade-off to that watchdog) confirm a backup's health without ever restoring. **Deep
+verify**: additionally decrypt and re-derive each `pk` to confirm ciphertext integrity —
+catches a corrupted file light verify can't — the mandatory first step of an actual
+restore, not something a passive health check needs.
+
+**Restore-time rotation: default on, explicitly overridable — reversing P5.6's original
+"always rotate immediately" rule for restore specifically** (bearer *receive* keeps
+rotating unconditionally — a different threat model, argued below). The original
+always-rotate rule was written against the paper-backup threat model, where the password
+may be printed on the same page — a leaked backup there *is* a leaked wallet, so
+immediate rotation is the only reasonable default. The vault breaks that coupling: an
+encrypted copy is safe on fully untrusted storage without the words, so "I restored from
+a backup I know never left my control" (migrating to a new machine, wiping an old device)
+no longer needs the same urgency. But device *loss* is the more common restore trigger,
+and a lost device carries the password-wrapped copy of K — exactly the case where prompt
+rotation still matters — so the default stays on. Flow: **deep-verify against live chain
+first (report: N notes still live, M already gone) → offer a batched, randomly-spaced,
+randomly-composed rotation (2-5 transactions, mixed denominations per batch — sorted-by-
+value batches would leak structure the mixing is meant to hide) → user may accept
+(default), defer, or decline → nag while deferred (notes remain fully spendable
+meanwhile — Hot is an urgency flag, not a lock) → prompt for a fresh backup copy the
+moment rotation completes**, since the whole point was invalidating the old one. The
+dialog states both sides plainly: rotating invalidates every old backup copy including
+any stolen one; deferring keeps old backups valid including any stolen one.
+
+**Accepted trade-off, stated openly**: batching/spacing *reduces* the "entire wealth
+rotated at one timestamp" fingerprint, it does not eliminate linkage — each batch's own
+consumed-serials list is still an explicit on-chain link, and a patient observer
+correlating rotation-shaped transactions across the spacing window can still cluster
+them. This is a genuine improvement over one all-at-once sweep, not a privacy guarantee;
+documented as such rather than oversold.
+
+**Implementation note — this is the existing full self-sweep, not new machinery.** P5.6
+already names "rotate everything" a deliberate full self-sweep ("a real recovery action,
+not just hygiene") for exactly this revocation purpose. Restore-time rotation should be
+built as that same `sweep` primitive with a confirmation dialog in front, giving the
+wallet a standalone panic button ("I think my backup leaked") for free alongside the
+restore flow, not a second implementation of the same idea.
