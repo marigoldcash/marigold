@@ -680,3 +680,146 @@ async fn wallet_notepool_spend_flows_test() {
     miner_client.disconnect().await.unwrap();
     kaspad.shutdown();
 }
+
+/// FORK-PLAN P7.5's verify criterion: "scripted two-wallet POS demo passes; merchant
+/// wallet ends with one-note-one-key state within seconds of payment." B is the
+/// merchant (`note pos`), A is the customer (`note pay`, requiring a split — the
+/// same "amount not a single denomination" shape as the other flows, exercising the
+/// covering planner on the payer's side of a POS sale). `pos_checkout` chains
+/// request -> await -> sweep in one call; the assertion that matters is that B's
+/// swept notes each land under a distinct, fresh key, none of them still on the
+/// checkout `pk`.
+///
+/// `cargo test --release --package kaspa-testing-integration --lib -- notepool_wallet_integration_tests::wallet_notepool_pos_test --ignored --nocapture`
+#[ignore]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn wallet_notepool_pos_test() {
+    use kaspa_wallet_core::account::notepool::PaymentRequest;
+    use kaspa_wallet_core::storage::NoteProvenance;
+    use std::collections::HashSet;
+
+    init_allocator_with_default_settings();
+    kaspa_core::log::try_init_logger("INFO,kaspa_testing_integration=trace");
+
+    let args =
+        Args { simnet: true, unsafe_rpc: true, enable_unsynced_mining: true, disable_upnp: true, utxoindex: true, ..Default::default() };
+    let total_fd_limit = 10;
+    let mut kaspad = Daemon::new_random_with_args(args, total_fd_limit);
+    let miner_client = kaspad.start().await;
+
+    let secret_a = Secret::from("customer-wallet-password");
+    let secret_b = Secret::from("merchant-wallet-password");
+    let (wallet_a, account_a) = connect_and_bootstrap_wallet(&kaspad, &secret_a).await;
+    let (_wallet_b, account_b) = connect_and_bootstrap_wallet(&kaspad, &secret_b).await;
+
+    let receive_a = account_a.receive_address().expect("customer receive address");
+    let throwaway = Address::new(kaspad.network.into(), Version::PubKey, &[7u8; 32]);
+    let mine = |n: usize, to: Address| {
+        let miner_client = miner_client.clone();
+        async move {
+            for _ in 0..n {
+                let template = miner_client.get_block_template(to.clone(), vec![]).await.unwrap();
+                miner_client.submit_block(template.block, false).await.unwrap();
+            }
+        }
+    };
+
+    // Fund the customer, then mint a 0.1 note -- the same "no exact representation
+    // for a smaller ask" shape P7.4's spend test used, now on the paying side of a
+    // POS sale rather than a peer-to-peer payment request.
+    let coinbase_maturity = SIMNET_PARAMS.coinbase_maturity();
+    mine(1, receive_a.clone()).await;
+    mine((coinbase_maturity + 20) as usize, throwaway.clone()).await;
+    let poll_account = account_a.clone();
+    wait_for(
+        200,
+        150,
+        move || {
+            let account = poll_account.clone();
+            Box::pin(async move { account.balance().map(|b| b.mature).unwrap_or(0) > 0 })
+        },
+        "customer wallet did not observe a mature transparent balance after mining",
+    )
+    .await;
+    let mint = account_a.clone().mint(secret_a.clone(), None, 10_000_000, None, &Abortable::default()).await.expect("mint failed");
+    assert_eq!(mint.notes.len(), 1);
+    mine(10, throwaway.clone()).await;
+
+    // ---------- the sale ----------
+    const CHECKOUT_PETALS: u64 = 4_000_000; // 0.04 -- no exact representation from one 0.1
+
+    // Merchant side: one call does request -> await -> sweep. Capture the request
+    // (via the on_request hook, exactly as the CLI does) so the customer side of
+    // this test can pay it, and run it concurrently with the payment below.
+    let (request_tx, request_rx) = tokio::sync::oneshot::channel::<PaymentRequest>();
+    let checkout = {
+        let account_b = account_b.clone();
+        let secret_b = secret_b.clone();
+        tokio::spawn(async move {
+            account_b
+                .pos_checkout(
+                    secret_b,
+                    CHECKOUT_PETALS,
+                    std::time::Duration::from_secs(90),
+                    Some(Box::new(move |request: &PaymentRequest| {
+                        let _ = request_tx.send(*request);
+                    })),
+                )
+                .await
+        })
+    };
+    let request = request_rx.await.expect("checkout must publish its request before waiting for payment");
+
+    let pay = account_a.clone().pay_payment_request(secret_a.clone(), request, None).await.expect("split-requiring pos pay failed");
+    assert_eq!(pay.external_serials.len(), 4, "0.04 pays as 4x0.01 to the checkout pk");
+
+    mine(10, throwaway.clone()).await;
+    let result = checkout.await.expect("checkout task panicked").expect("pos_checkout failed");
+
+    assert_eq!(result.claimed.total_petals, CHECKOUT_PETALS);
+    assert_eq!(result.claimed.notes.len(), 4);
+    // One-note-one-key: every swept note under its own fresh Cold key, no two
+    // sharing an sk, none of them the checkout pk.
+    let store_b = account_b.wallet().store().as_note_key_store().expect("merchant note key store");
+    let mut seen_pks = HashSet::new();
+    for note in &result.sweep.own_notes {
+        let info = store_b.load_info(&note.sn).await.unwrap().expect("swept row present");
+        assert_eq!(info.provenance, NoteProvenance::Cold);
+        assert_eq!(info.status, NoteStatus::Active);
+        assert_ne!(info.pk, result.request.pk, "a swept note must not remain on the landing-pad pk");
+        assert!(seen_pks.insert(info.pk), "no two swept notes may share a key");
+    }
+    // The claimed (pre-sweep) landing-pad rows are gone from the pool; the sweep's
+    // consumed set is exactly the claimed serials, one SignedGroup (spec-mandated:
+    // every claimed note shares the checkout key).
+    let claimed_serials: Vec<Hash> = result.claimed.notes.iter().map(|n| n.sn).collect();
+    assert_eq!(result.sweep.consumed_serials.iter().collect::<HashSet<_>>(), claimed_serials.iter().collect::<HashSet<_>>());
+    let landing_pad_gone = miner_client.get_notes_by_serial(claimed_serials).await.unwrap();
+    assert!(landing_pad_gone.is_empty(), "the landing-pad serials must be gone once swept");
+
+    mine(10, throwaway.clone()).await;
+    let swept: Vec<Hash> = result.sweep.own_notes.iter().map(|n| n.sn).collect();
+    let live = miner_client.get_notes_by_serial(swept.clone()).await.unwrap();
+    assert_eq!(live.len(), swept.len(), "every swept serial must be live in the pool");
+    assert!(live.iter().all(|entry| entry.pk != result.request.pk));
+
+    println!(
+        "POS sale: {} MAGLD paid as {} note(s) to the landing pad -> swept to {} note(s) under distinct fresh keys (fee {} petals), \
+         checkout tx {}, sweep tx {}",
+        sompi_to_kaspa_string(result.claimed.total_petals),
+        result.claimed.notes.len(),
+        result.sweep.own_notes.len(),
+        result.sweep.fee_petals,
+        pay.transaction_id,
+        result.sweep.transaction_id
+    );
+
+    if let Some(client) = wallet_a.try_wrpc_client() {
+        client.disconnect().await.ok();
+    }
+    if let Some(client) = account_b.wallet().try_wrpc_client() {
+        client.disconnect().await.ok();
+    }
+    miner_client.disconnect().await.unwrap();
+    kaspad.shutdown();
+}

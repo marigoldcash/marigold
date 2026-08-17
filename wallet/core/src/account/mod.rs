@@ -423,6 +423,19 @@ pub trait Account: AnySync + Send + Sync + 'static {
         notepool::bearer_export(self.as_dyn_arc(), wallet_secret, sn).await
     }
 
+    /// One POS checkout: request, await payment, immediately sweep off the shared
+    /// landing-pad key (FORK-PLAN P7.5). `on_request` fires as soon as the checkout
+    /// `pk` exists, before the (potentially long) wait for payment.
+    async fn pos_checkout(
+        self: Arc<Self>,
+        wallet_secret: Secret,
+        amount_petals: u64,
+        timeout: std::time::Duration,
+        on_request: Option<notepool::PosCheckoutRequestHook>,
+    ) -> Result<notepool::PosCheckoutResult> {
+        notepool::pos_checkout(self.as_dyn_arc(), wallet_secret, amount_petals, timeout, on_request).await
+    }
+
     async fn commit_reveal_manual(
         self: Arc<Self>,
         start_destination: PaymentDestination,

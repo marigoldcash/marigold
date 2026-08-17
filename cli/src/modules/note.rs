@@ -1,6 +1,7 @@
 use crate::imports::*;
 use kaspa_consensus_core::Hash;
 use kaspa_consensus_core::notepool::DENOMINATION_PETALS;
+use kaspa_wallet_core::account::notepool;
 use kaspa_wallet_core::account::notepool::{
     BearerNote, PaymentRequest, RedeemSelection, await_payment_request, create_payment_request,
 };
@@ -36,6 +37,7 @@ impl Note {
             "pay" => self.pay(&ctx, argv).await,
             "import" => self.import(&ctx, argv).await,
             "export" => self.export(&ctx, argv).await,
+            "pos" => self.pos(&ctx, argv).await,
             "balance" => self.balance(&ctx).await,
             "list" => self.list(&ctx).await,
             v => {
@@ -183,6 +185,42 @@ impl Note {
         Ok(())
     }
 
+    /// `note pos <amount>` — one POS checkout: fresh landing-pad `pk`, wait for
+    /// exact payment, sweep the instant it confirms.
+    async fn pos(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
+        if argv.is_empty() {
+            tprintln!(ctx, "usage: 'note pos <amount>'\r\n");
+            return Ok(());
+        }
+        let account = ctx.wallet().account()?;
+        let amount_petals = try_parse_required_nonzero_kaspa_as_sompi_u64(argv.first())?;
+        let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(Some(&account)).await?;
+
+        tprintln!(ctx, "checkout: {} MAGLD", sompi_to_kaspa_string(amount_petals));
+        let timeout = Duration::from_secs(120);
+        let ctx_for_qr = ctx.clone();
+        let on_request = Box::new(move |request: &notepool::PaymentRequest| {
+            let text = request.to_text();
+            if let Some(qr) = qr_string(&text) {
+                tprintln!(ctx_for_qr, "{}", qr);
+            }
+            tprintln!(ctx_for_qr, "{text}");
+        });
+        let result = account.pos_checkout(wallet_secret, amount_petals, timeout, Some(on_request)).await?;
+
+        tprintln!(
+            ctx,
+            "payment received: {} MAGLD in {} note(s); swept to {} fresh key(s) (fee {} MAGLD), tx {}",
+            sompi_to_kaspa_string(result.claimed.total_petals),
+            result.claimed.notes.len(),
+            result.sweep.own_notes.len(),
+            sompi_to_kaspa_string(result.sweep.fee_petals),
+            result.sweep.transaction_id
+        );
+        tprintln!(ctx, "one-note-one-key restored\r\n");
+        Ok(())
+    }
+
     async fn mint(&self, ctx: &Arc<KaspaCli>, mut argv: Vec<String>) -> Result<()> {
         if argv.is_empty() {
             tprintln!(ctx, "usage: 'note mint <amount>'\r\n");
@@ -303,6 +341,7 @@ impl Note {
                 ("pay <request-text> [<amount>]", "Pay a payment request from held notes"),
                 ("import <bearer-text>", "Import a bearer note and immediately rotate it to fresh keys"),
                 ("export <serial>", "Bearer-export a note (auto-isolates first if its key is shared)"),
+                ("pos <amount>", "One POS checkout: fresh landing-pad pk, wait for payment, auto-sweep"),
                 ("balance", "Show note balance by denomination"),
                 ("list", "List every held note (serial, denomination, provenance, status)"),
             ],

@@ -1011,6 +1011,64 @@ pub async fn await_payment_request(
     Ok(ClaimedPayment { notes, total_petals: total })
 }
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// POS landing-pad mode (FORK-PLAN P7.5, POOL-SPEC.md P5.6 "POS 'landing pad' flow").
+
+/// Callback type for [`pos_checkout`]'s `on_request` hook — pulled out as a named
+/// alias (rather than inlined in each signature) so the anonymous lifetime in
+/// `&PaymentRequest` resolves identically wherever the type is used, including
+/// across the `#[async_trait]`-generated `Account::pos_checkout` signature.
+pub type PosCheckoutRequestHook = Box<dyn FnOnce(&PaymentRequest) + Send>;
+
+pub struct PosCheckoutResult {
+    pub request: PaymentRequest,
+    pub claimed: ClaimedPayment,
+    /// The immediate sweep off the landing-pad `pk` — one `TransferOp`, one
+    /// `SignedGroup` (every claimed note shares the checkout key), landing each
+    /// output on its own fresh Cold key.
+    pub sweep: TransferResult,
+}
+
+/// One POS sale (FORK-PLAN P7.5's primary, spec-recommended mode — "fresh `pk` per
+/// checkout... gives free payment matching," POOL-SPEC.md P5.6): create a
+/// single-use payment request (fresh `pk`, matching one sale to one confirmed
+/// rotation), wait for the exact payment, and the instant it confirms, immediately
+/// sweep every landed note off the shared checkout `pk` onto its own fresh Cold key
+/// in the same call — "sweep per confirmation, not end-of-day" (P5.6): the
+/// shared-key exposure window is bounded to this function's own latency, not a
+/// business day. The static day-`pk` fallback for printed/no-register QR codes
+/// (P5.6, secondary — no live confirmation loop, no per-sale amount) is deliberately
+/// not built here; see NOTES.md's P7.5 entry for the scoping call.
+///
+/// Sweeps by *value*, not by strict per-note identity: the claimed notes' total is
+/// re-decomposed into the canonical denomination ladder (P7.3's `rotate_notes`),
+/// which may consolidate differently-denominated inputs into a different shape at
+/// the same total value — "every note lands under its own key" (P5.6's phrasing)
+/// is satisfied either way (nothing stays shared), and canonical reshaping also
+/// opportunistically consolidates a merchant's accumulating dust for free.
+///
+/// `on_request` fires the moment the checkout `pk` exists (before the wait begins)
+/// so a caller can display it — the request must be shown to the customer before
+/// anything can be paid, but `pos_checkout` only *returns* once the whole sale
+/// (payment + sweep) is done.
+pub async fn pos_checkout(
+    account: Arc<dyn Account>,
+    wallet_secret: Secret,
+    amount_petals: u64,
+    timeout: Duration,
+    on_request: Option<PosCheckoutRequestHook>,
+) -> Result<PosCheckoutResult> {
+    let wallet = account.wallet().clone();
+    let request = create_payment_request(&wallet, &wallet_secret, Some(amount_petals)).await?;
+    if let Some(on_request) = on_request {
+        on_request(&request);
+    }
+    let claimed = await_payment_request(&wallet, &wallet_secret, request.pk, timeout).await?;
+    let serials: Vec<Hash> = claimed.notes.iter().map(|n| n.sn).collect();
+    let sweep = rotate_notes(account, wallet_secret, serials).await?;
+    Ok(PosCheckoutResult { request, claimed, sweep })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

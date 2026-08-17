@@ -1867,12 +1867,36 @@ wallet. WASM/mobile wallets are post-launch — CLI proves the protocol.*
   smallest-first sweep, big-note preservation); all 3 notepool live tests green,
   wallet-core 56 green, workspace check + clippy clean.
 
-- [ ] **P7.5 — POS landing-pad mode.** Implement P5.6's flow: merchant side generates
+- [x] **P7.5 — POS landing-pad mode.** Implement P5.6's flow: merchant side generates
   `{pk, amount}` payment-request QRs (fresh pk per checkout) and auto-sweeps on
   confirmation (one multi-serial rotation to per-note fresh cold keys); payer side scans,
   displays amount for confirmation, pays exact.
   ✅ *Verify:* scripted two-wallet POS demo passes; merchant wallet ends with
   one-note-one-key state within seconds of payment.
+  **Executed (2026-08-17):** turned out to need almost no new transfer-construction
+  logic — every primitive already existed from P7.3/P7.4. `pos_checkout()`
+  (`account::notepool`) chains `create_payment_request` (fresh pk per checkout, the
+  spec's primary recommendation) → `await_payment_request` (claim, per P7.3) →
+  `rotate_notes` on every claimed serial in one call the *instant* confirmation
+  fires — since all claimed notes share the request's key, `submit_transfer`'s
+  existing per-key grouping produces exactly the spec's "one `SignedGroup`"
+  automatically. `on_request` callback hook lets a caller (the CLI) display the
+  QR before the (potentially long) payment wait, since `pos_checkout` only
+  *returns* once the whole sale is done. Design call, recorded: the sweep
+  re-decomposes by *value* (canonical ladder form) rather than a strict
+  1:1 per-note rekey — both satisfy "no note stays shared," and value-based
+  reshaping opportunistically consolidates a merchant's accumulating dust; full
+  reasoning in NOTES.md. Deliberately deferred: the static day-`pk` fallback for
+  printed/no-register QR codes (P5.6, explicitly secondary) — no live
+  confirmation loop, no per-sale amount, a genuinely different (repeat-watch)
+  shape than the fresh-pk flow this step's verify criterion actually tests.
+  CLI: `note pos <amount>`. Verified live
+  (`wallet_notepool_pos_test`): customer holds one 0.1 note, pays a 0.04 checkout
+  (splitting, 4×0.01) — the moment it confirms, the merchant sweeps to 3 fresh
+  Cold notes (slack-mode fee, merchant held no spares) each under a distinct key,
+  none remaining on the checkout pk, landing-pad serials confirmed gone from the
+  pool, swept serials confirmed live. All 4 notepool live tests green; wallet-core
+  56 green; workspace check + clippy clean.
 
 - [ ] **P7.6 — Note vault, backup, and restore.** Scope expanded ahead of execution
   (design decided 2026-08-17 by coder — see DECISIONS.md's "Note vault, backup,

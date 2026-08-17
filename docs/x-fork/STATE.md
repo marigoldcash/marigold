@@ -4,9 +4,8 @@ Snapshot of everything decided and built so far, so any fresh coding session on 
 machine can continue from the repo alone. Read this together with [FORK-PLAN.md](../../FORK-PLAN.md).
 Update this file whenever off-repo state changes (domains, accounts, infra).
 
-Last updated: 2026-08-17 (P7.4 complete — spend flows (split-planning payer +
-bearer export with solo-key isolation), live-verified; next: P7.5, POS
-landing-pad mode)
+Last updated: 2026-08-17 (P7.5 complete — POS landing-pad mode, live-verified;
+next: P7.6, note vault/backup/restore — scope already recorded, not yet built)
 
 ## What this project is
 
@@ -95,23 +94,38 @@ substitute for it.
 
 ## Where execution stands
 
-- **P7.6's scope was expanded ahead of execution (2026-08-17, coder, not yet
-  built).** "Paper backup" became "note vault, backup, and restore" — a file-per-note
-  encrypted vault replacing P7.1's single-blob store (bounds in-memory key exposure
-  to the notes actually being spent), a 24-word ceremony for the vault's encryption
-  key K (explicitly not a note-deriving seed), an optional plaintext manifest, and a
-  restore-time rotation policy that's default-on-but-overridable and batches into
-  2-5 randomized transactions instead of one all-at-once sweep. Full rationale in
-  DECISIONS.md's "Note vault, backup, and restore-rotation policy" entry; spec text
-  in POOL-SPEC.md P5.6 (search "Note vault"); FORK-PLAN.md's P7.6 entry rewritten to
-  match. P7.5 stays next — the vault touches storage, not the POS flow.
-- **Next step: P7.5 — POS landing-pad mode.** Merchant generates fresh-pk
-  `{pk, amount}` checkout QRs and auto-sweeps on confirmation (one multi-serial
-  rotation to per-note fresh cold keys); payer scans/confirms/pays exact. Nearly
-  every primitive exists: payment requests + await/claim (P7.3), exact/covering
-  payment (P7.4), multi-serial shared-key `SignedGroup` rotation (exercised in
-  P7.4's test) — P7.5 is mostly the merchant-side auto-sweep loop + a scripted
-  two-wallet demo.
+- **Next step: P7.6 — Note vault, backup, and restore.** Scope was expanded ahead
+  of execution (2026-08-17, coder) — "Paper backup" became "note vault,
+  backup, and restore": a file-per-note encrypted vault replacing P7.1's
+  single-blob store (bounds in-memory key exposure to the notes actually being
+  spent), a 24-word ceremony for the vault's encryption key K (explicitly not a
+  note-deriving seed), an optional plaintext manifest, and a restore-time
+  rotation policy that's default-on-but-overridable and batches into 2-5
+  randomized transactions instead of one all-at-once sweep. Full rationale in
+  DECISIONS.md's "Note vault, backup, and restore-rotation policy" entry; spec
+  text in POOL-SPEC.md P5.6 (search "Note vault"); FORK-PLAN.md's P7.6 entry
+  rewritten to match. Not yet built — first step needing real filesystem I/O
+  for the vault (one file per note) rather than the single encrypted blob P7.1
+  built; the 24-word ceremony, manifest, light/deep verify, and batched
+  restore-rotation all follow from that storage-layer change.
+- **P7.5 is done — POS landing-pad mode, live-verified, smallest step of the
+  five.** `pos_checkout()` (`account::notepool`) is three existing P7.3/P7.4
+  calls chained (`create_payment_request` → `await_payment_request` →
+  `rotate_notes` on the claimed serials) — the spec's "one `SignedGroup`" sweep
+  requirement falls out automatically since every claimed note already shares
+  the landing-pad key. New: an `on_request` callback so the CLI can show the QR
+  before the (long) payment wait, since `pos_checkout` only returns once the
+  whole sale is done. Design call: the sweep re-decomposes by value (canonical
+  ladder form), not a strict 1:1 per-note rekey — both satisfy "no note stays
+  shared," and value-based reshaping opportunistically consolidates a
+  merchant's dust. Deliberately deferred: the static day-`pk` fallback for
+  printed/no-register QR codes (P5.6's own secondary form; a genuinely
+  different repeat-watch shape, not exercised by FORK-PLAN's verify text).
+  CLI: `note pos <amount>`. Live test: customer holding one 0.1 note pays a
+  0.04 checkout (splitting), merchant sweeps to 3 fresh Cold notes under
+  distinct keys the instant it confirms, none remaining on the checkout pk.
+  All 4 notepool live tests green; wallet-core 56 green; workspace check +
+  clippy clean. Full writeup in NOTES.md's P7.5 entry.
 - **P7.4 is done — split spends + bearer export, live-verified.**
   `select_covering` (exact-first, else smallest-first sweep — organic dust
   consolidation via change), with payment/split/change/fee in ONE `TransferOp`;

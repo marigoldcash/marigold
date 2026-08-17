@@ -2983,3 +2983,63 @@ then A's import-rotation as the second on-chain tx of the note's journey —
 "demonstrably isolates first (two txs on-chain)" literally; a solo-note export
 asserted to skip isolation (handed over as-is, `HandedOver` in the books). All 3
 notepool live tests green, wallet-core 56 green, workspace check + clippy clean.
+
+### P7.5 — POS landing-pad mode (2026-08-17)
+
+The smallest of the five wallet phase steps by a wide margin — everything P7.5 needed
+was already sitting in `account::notepool` from P7.3/P7.4. Worth noting explicitly as
+a payoff of building `submit_transfer` as a single shared engine underneath
+`rotate_notes`/`pay_payment_request` back in P7.3: "sweep every note sharing one key
+to individual fresh keys" isn't a new capability, it's `rotate_notes` called with the
+right serial list at the right moment.
+
+**`pos_checkout` is three existing calls in sequence, not a new transaction shape.**
+`create_payment_request` (fresh `pk`) → `await_payment_request` (claim on
+confirmation) → `rotate_notes` on the claimed serials. The spec's "one `SignedGroup`"
+requirement for the sweep is automatic, not something P7.5 had to enforce: every
+claimed note shares the request's `sk` by construction (the landing pad *is* one
+shared key), so `submit_transfer`'s existing per-key grouping (`groups_by_sk`,
+written in P7.3 for the general multi-key case) collapses to exactly one group. The
+first genuinely new code in this step is a callback: `pos_checkout` only *returns*
+once the whole sale (request + wait + sweep) completes, but the CLI needs the request
+displayed *before* the wait begins — `on_request: Option<Box<dyn FnOnce(&PaymentRequest)
++ Send>>`, fired the instant the checkout `pk` exists. Pulled into a named type alias
+(`PosCheckoutRequestHook`) rather than inlined, because inlining it independently in
+the free function and the `#[async_trait]`-generated `Account::pos_checkout`
+signature produced two non-unifying anonymous lifetimes (a higher-ranked one from
+ordinary elision vs. a scoped one from the macro's own lifetime threading) — a real,
+slightly surprising `#[async_trait]` interaction, not a design issue; the named alias
+sidesteps it by resolving the elision once, consistently.
+
+**Design call: value-based sweep, not strict per-note rekey.** POOL-SPEC.md P5.6 says
+the sweep moves "every note... to its own freshly generated cold key," which reads as
+1:1 per-note rekeying at first pass. `rotate_notes` instead sums the claimed value and
+re-decomposes it canonically (largest-first over the ladder) — which can reshape the
+note count/denominations relative to what was received (e.g. a payer's 4×0.01 lands as
+3×0.01 once the sweep's own fee is withheld, seen directly in the live test's log
+line). Both readings satisfy the property that actually matters — "no note stays
+under a shared key" — and canonical reshaping is a genuine bonus: a busy merchant's
+accumulating small-denomination dust gets opportunistically consolidated for free on
+every sale, rather than compounding indefinitely. Reusing the existing primitive
+outweighed building a second, strictly-count-preserving sweep path for a spec phrase
+that's satisfied either way.
+
+**Deliberately deferred: the static day-`pk` fallback.** POOL-SPEC.md P5.6 names this
+explicitly as the secondary form ("falling back to one static day-`pk` only for
+printed/static QR codes"), and it's a genuinely different shape from everything else
+built this phase — no per-sale amount (the customer enters it), no single
+confirmation to wait for and retire on (a day-`pk` accumulates *multiple* independent
+sales, needs repeat-watch-and-sweep rather than `await_payment_request`'s current
+watch-once-then-retire model), effectively an unbounded-lifetime request the fresh-pk
+primitives weren't shaped for. FORK-PLAN's own P7.5 verify criterion doesn't exercise
+it. Left as a named gap rather than silently dropped or half-built.
+
+✅ *Verify*: `wallet_notepool_pos_test` — a customer holding exactly one 0.1 note pays
+a 0.04 POS checkout (splitting into 4×0.01, exercising the payer-side covering planner
+inside a POS sale rather than a peer-to-peer payment); the instant it confirms, the
+merchant's `pos_checkout` sweeps to 3 fresh Cold notes under distinct keys (slack-mode
+fee — the merchant held no spare notes), none remaining on the checkout `pk`, no two
+sharing a key; landing-pad serials confirmed gone from the pool, swept serials
+confirmed live and not owned by the checkout `pk`. All 4 notepool live tests
+(mint/redeem, receive flows, spend flows, POS) green in one run; wallet-core suite 56
+green; full workspace check + clippy clean.
