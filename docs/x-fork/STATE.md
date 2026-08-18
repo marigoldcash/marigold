@@ -73,6 +73,34 @@ substitute for it.
   Open items: `_dmarc` record on marigold.cash; create `security@` and `dmarc@` routes.
 - Open item: social handles (`marigoldcash` + `marigoldcoin` on X, Telegram, Discord,
   Reddit, YouTube, Docker Hub, npm). marigoldcash.io deliberately not registered (revisit P9).
+- **Planned public-testnet topology (agreed 2026-08-18, hardware in hand, not yet
+  provisioned)** — three machines on fixed IPv4s plus two kHeavyHash ASICs. Confirmed
+  prerequisites: PoW is unchanged kHeavyHash (ASICs mine Marigold natively), and the
+  in-repo `stratum-bridge` is both rebranded (bc43c3d4) and P6.5-aware — its hasher
+  mirrors the `pool_commitment` header field (dc32a708), without which every ASIC
+  share would hash wrong. `TESTNET_PARAMS` already has `pool_activation: always()` —
+  no consensus change needed to launch. Roles:
+  - **Big rig (96 cores / 256 GB)**: public seed node 1 (`--testnet --utxoindex
+    --archival` — the network's archival node from day one, doubling as the rehearsal
+    for the T360 partner's archival+Caddy setup below); stratum bridge #1 → ASIC #1;
+    build host (only machine with the toolchain — others get binaries); later: faucet,
+    status page, trustee-signer rehearsal, spare capacity for P8.4 drill nodes.
+  - **Medium rig (8 cores / 32 GB)**: public seed node 2; stratum bridge #2 → ASIC #2
+    (ASICs deliberately split across nodes: mining survives either machine dying, and
+    blocks genuinely propagate between independently-mining nodes — better soak data).
+  - **Small VM (2 cores / 2 GB)**: public seed node 3 with `--ram-scale` turned down —
+    a deliberate low-end viability probe (an OOM here is a P8 finding, not a failure);
+    real value is a third independent IP. Fallback role: faucet/status-page frontend.
+  - **DNS**: three DNS-only (NOT Cloudflare-proxied — proxying breaks P2P) A records,
+    `tn-seed1/2/3.marigold.cash`, pointing at the fixed IPs, committed into
+    `TESTNET_PARAMS.dns_seeders`. Static seed hostnames suffice at this scale; the
+    NS-delegated crawler `dnsseeder` software remains P9.2.
+  - **Sequence**: P7.8 (smoke extension) → TESTNET.md deployment runbook (systemd
+    units; firewall: P2P public, RPC localhost-only, `--unsaferpc` never on a public
+    node; bridge config; DNS records) → commit `dns_seeders` → provision → faucet
+    (the one genuinely new build item) → invite testers, start the P8.7 incident log.
+  - Two ASICs = ~100% of initial testnet hashrate — fine and expected for a testnet
+    the founder controls; the DAA ramps difficulty to whatever they output.
 - **Planned integration (agreed 2026-08-16, post-launch)**: a Time & Attendance SaaS
   provider (personal contact of the founder) will anchor monthly Merkle roots of
   customer PDF signatures on chain — one tiny transaction per month in his own
