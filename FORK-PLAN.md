@@ -1980,11 +1980,14 @@ wallet. WASM/mobile wallets are post-launch — CLI proves the protocol.*
   [docs/x-fork/WALLET.md](docs/x-fork/WALLET.md) and validated it against a real interactive
   `kaspa-cli` session (via `pexpect`, a Python pty-driving library already available in this
   environment — `kaspa-cli` needs a genuine TTY, confirmed still true per NOTES.md's P0.3
-  entry; plain piped stdin doesn't work). **Found along the way**: devnet/testnet/mainnet all
-  set `pool_activation: ForkActivation::never()` — only simnet has it `always()` (and
-  `skip_proof_of_work: true`) — so every prior local-testnet doc (SMOKE.md, P4.1's script)
-  is devnet-based and *cannot* exercise the note wallet at all; WALLET.md is simnet-based
-  throughout, a first for this project's manual-testing docs. **Two more real bugs found
+  entry; plain piped stdin doesn't work). **Found along the way**: devnet is the one
+  network shape with `pool_activation: ForkActivation::never()` (mainnet/testnet/simnet
+  are all `always()`, per P2.6/P6.5) — so every prior local-testnet doc (SMOKE.md, P4.1's
+  script) is devnet-based and *cannot* exercise the note wallet at all; WALLET.md is
+  simnet-based throughout (simnet additionally has `skip_proof_of_work: true`, so blocks
+  confirm instantly), a first for this project's manual-testing docs. *(This sentence
+  originally over-claimed testnet/mainnet as `never()` too — corrected 2026-08-18; see
+  NOTES.md's P7.7 correction note.)* **Two more real bugs found
   live, fixed on top of P7.6's four**: (1) `note vault restore`'s rotation loop aborted
   entirely on a single batch's failure, leaving every later batch — including unrelated,
   unconflicted ones — unexecuted; now reports the failure and keeps going. (2)

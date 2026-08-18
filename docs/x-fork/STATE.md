@@ -112,8 +112,10 @@ substitute for it.
   library) genuinely driving `kaspa-cli`'s interactive REPL — confirmed P0.3's
   "can't be scripted" finding still holds for piped stdin, but a real pty
   works fine, a new precedent for this project. **Found along the way**:
-  devnet/testnet/mainnet all set `pool_activation: ForkActivation::never()` —
-  only simnet has it `always()` — so SMOKE.md/P4.1's devnet-based testnet
+  devnet is the one network shape with `pool_activation:
+  ForkActivation::never()` (mainnet/testnet/simnet are all `always()`, per
+  P2.6/P6.5 — P7.7's docs originally over-claimed testnet/mainnet as `never()`
+  too; corrected 2026-08-18) — so SMOKE.md/P4.1's devnet-based testnet
   structurally cannot run a single `note` command; WALLET.md is simnet-based
   throughout. **Two more real bugs found live** (on top of P7.6's four): (1)
   `note vault restore`'s rotation loop aborted entirely on one batch's

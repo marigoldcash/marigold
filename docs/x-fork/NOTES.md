@@ -3236,18 +3236,26 @@ stranding any notes already stored under the old key with no warning. Added an e
 instead.
 
 **Devnet cannot exercise the note wallet at all — a real, previously-unstated
-constraint.** Checked `DEVNET_PARAMS`/`TESTNET_PARAMS`/`MAINNET_PARAMS` while writing
-WALLET.md's setup section: all three set `pool_activation: ForkActivation::never()`.
-Only `SIMNET_PARAMS` sets it `always()` (alongside `skip_proof_of_work: true`, which is
-*why* every P7.2-P7.6 live test already used `simnet: true` in its `Args` — this was
+constraint.** `DEVNET_PARAMS` sets `pool_activation: ForkActivation::never()` (and
+`toccata_activation: never()`), so every `note` command is consensus-rejected on a
+devnet node. Simnet has it `always()` — alongside `skip_proof_of_work: true`, which is
+*why* every P7.2-P7.6 live test already used `simnet: true` in its `Args`; that was
 already the established pattern, just never stated as a hard requirement anywhere a
-human following a doc would see it first). This means [SMOKE.md](SMOKE.md) and the
+human following a doc would see it first. This means [SMOKE.md](SMOKE.md) and the
 [P4.1 script](../../scripts/x-testnet-local.sh) — both devnet-based — structurally
 cannot run a single `note` command; WALLET.md is simnet-based throughout, the first
-manual-testing doc in this project to be. Also found live: the wRPC Borsh listener
-`kaspa-cli` connects over is not started by default on simnet (or any network) —
-`--rpclisten-borsh=<addr>` must be passed explicitly, unlike gRPC/P2P — `connect`
-otherwise fails with a plain "Connection refused" that doesn't say why.
+manual-testing doc in this project to be. **Correction (2026-08-18, next session)**:
+this entry (and P7.7's first FORK-PLAN/WALLET.md text) originally over-claimed that
+testnet/mainnet were *also* `never()` — they are not. `MAINNET_PARAMS`,
+`TESTNET_PARAMS`, and `SIMNET_PARAMS` all set `pool_activation: ForkActivation::always()`
+(P2.6's new-chain rule: all upgrades active from block 0; P6.5 recorded exactly this,
+"always() on mainnet/testnet/simnet, never() on devnet"). Devnet alone is the
+pool-inactive shape. The empirical findings stand unchanged (devnet rejects, simnet
+works — that's what was actually tested); only the generalization was wrong. Also found
+live: the wRPC Borsh listener `kaspa-cli` connects over is not started by default on
+simnet (or any network) — `--rpclisten-borsh=<addr>` must be passed explicitly, unlike
+gRPC/P2P — `connect` otherwise fails with a plain "Connection refused" that doesn't say
+why.
 
 **`kaspa-cli` still cannot be driven by piped stdin (P0.3's finding holds), but *can*
 be driven by a real pty.** Confirmed by trying the obvious thing first (`echo "cmd" |

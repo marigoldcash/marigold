@@ -20,13 +20,16 @@ cargo build --release --bin kaspad --bin kaspa-cli
 see NOTES.md's Environment section.
 
 **Use `simnet`, not `devnet`, for anything in this document.** This is not a style
-preference: `DEVNET_PARAMS`/`TESTNET_PARAMS`/`MAINNET_PARAMS` all set
-`pool_activation: ForkActivation::never()` — the note-pool subnetwork is consensus-gated
-off on every network shape except simnet (`pool_activation: ForkActivation::always()`),
-which is also the only network with `skip_proof_of_work: true`, letting mined blocks
-confirm instantly. Every `note` command in this walkthrough will be rejected at the
-consensus level on a devnet node — this isn't a wallet bug, it's the intended state of
-the fork before a real pool-activation point is chosen for the real network shapes.
+preference: `DEVNET_PARAMS` sets `pool_activation: ForkActivation::never()` (and
+`toccata_activation: never()` too) — the note-pool subnetwork is consensus-gated off on
+devnet specifically, so every `note` command in this walkthrough would be rejected at
+the consensus level on a devnet node. This isn't a wallet bug: devnet is the one
+network shape deliberately kept pool-inactive (useful for isolating pre-pool behavior;
+see FORK-PLAN P6.5's activation notes). Mainnet, testnet, and simnet all run with
+`pool_activation: ForkActivation::always()` — all upgrades active from block 0, per
+P2.6's new-chain rule. Simnet is the right choice *locally* because it's also the only
+network with `skip_proof_of_work: true`, letting mined blocks confirm instantly without
+a real miner grinding.
 
 ## 1. Launch a local simnet node
 
