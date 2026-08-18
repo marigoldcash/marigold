@@ -3325,3 +3325,86 @@ export, redeem, and a full second-wallet restore (24 words + files) that correct
 excluded notes the source wallet had since redeemed and — after mining confirmations
 for the source wallet's in-flight transactions — completed its batched rotation with
 zero failed batches. Workspace check + clippy clean throughout.
+
+### P7.8 — End-to-end smoke extension (2026-08-18)
+
+WALLET.md (P7.7) validated the full note-wallet flow against a single simnet node.
+This step's job was to prove the same flows hold across *multiple* nodes — propagation,
+a restart mid-flow, and a genuine cross-node restore — the way [SMOKE.md](SMOKE.md)
+(P4.2) already did for transparent transfers, but nothing had done yet for notes.
+
+**Script groundwork first.** Taught `scripts/x-testnet-local.sh`/`.ps1` a `NETWORK`
+env var (`devnet` default, unchanged; `simnet` new), computing each node's port block
+from the right base per WALLET.md's already-documented simnet defaults
+(gRPC `26510`/P2P `26511`/borsh-wRPC `27510`, `+10`/`+20` for node2/node3). Every node —
+not just the ones that happened to need it before — now also gets `--rpclisten-borsh`
+and `--unsaferpc` explicitly, both required for `kaspa-cli` to connect at all (P7.7's
+finding) and neither started by default. Verified both modes live: devnet mode still
+peers correctly (regression), simnet mode peers correctly and all three nodes show
+`WRPC Server starting on:` at the expected ports.
+
+**Live data-gathering, three independent `kaspa-cli` sessions (own `$HOME` each, via
+`pexpect`), against the 3-node simnet testnet.** Wallet A (node1) funded and minted.
+Wallet B (node2), created completely independently, ran `note request 1` and received
+the payment the moment wallet A's `note pay` (submitted against *node1*) confirmed —
+with no command run on wallet B's session beyond the request itself, confirming P6.9's
+`NotesChanged` subscription genuinely fires from node2's own view of the chain over P2P,
+not from anything pushed directly between wallet sessions. Killed and restarted node2
+mid-session (same `--appdir`, clean re-sync, no fresh-start log line) and confirmed
+`get_pool_stats()`/`get_block(sink).header.pool_commitment` still agreed exactly across
+all three nodes afterward — the same cross-node agreement check P6.10's
+`daemon_notepool_multi_node_agreement_test` makes at the consensus layer, now confirmed
+holding from the wallet side too, and re-confirmed once more at the very end of this
+step (after everything else below) with all three nodes reporting the identical pool
+stats, sink block, and `pool_commitment`.
+
+**Real bug found: `note vault restore`'s own documented idempotent-retry path didn't
+actually work.** Wallet C (node3), a fresh wallet, restored from wallet A's vault
+backup: 9 live notes recovered, a 5-batch rotation planned, batches 1-2 confirmed,
+batches 3-5 failed with `does not exist in the pool` — the exact same
+in-flight-source-wallet hazard WALLET.md's step 11 already documents (wallet A was
+still active). WALLET.md's own advice at that point is "mine a confirming block and
+re-run `note vault restore` — idempotent." Doing exactly that hit a wall: P7.7's
+`vault_exists()` safety check (added specifically to stop a *different* vault's backup
+from silently clobbering an existing one) fired here too, refusing with "this wallet
+already has a note vault... Restore into a fresh wallet instead" — even though these
+were the *same* words against the *same* partially-restored vault. Root cause:
+`note vault restore` copies the backup's files in and recovers `K` from the words
+*before* attempting any rotation, so a rotation-batch failure leaves a real, genuine
+vault in place — one `vault_exists()` alone cannot distinguish from an unrelated
+pre-existing vault, because it only checks presence, not identity.
+
+Fixed with `NoteVault::words_match_existing_key` (`wallet/core/src/storage/local/notevault.rs`):
+unlocks the vault already on disk using the wallet secret the caller already has, and
+compares the recovered `K` against what the given words decode to — returning `Ok(false)`
+(not an error) if the wrong secret can't unlock the vault at all, so an unrelated vault a
+caller has no business touching just reads as "doesn't match." Added the corresponding
+`NoteKeyStore::vault_words_match` trait method and `LocalStoreInner` delegation.
+`cli/src/modules/note.rs`'s `vault_restore` now asks for the wallet secret *before* the
+exists-check (needed to call the new method) and, when a vault already exists, resumes
+instead of refusing if the words match — printing "a vault from this same restore already
+exists here (recognized by these words) - resuming..." Confirmed live on the exact same
+wallet C, same command: refused on the pre-fix binary, resumed and completed two more
+rotation batches on the rebuilt one.
+
+One test-design wrinkle surfaced writing the unit test for this:
+`words_match_existing_key`'s wrong-secret assertion passed for the wrong reason at first,
+because `NoteVault::unlock()` caches the successfully-unlocked `K` in memory and returns
+the cached value on a later call regardless of what secret is passed — so reusing the
+same already-unlocked `vault` instance for the wrong-secret check never actually
+re-attempted decryption. Not a production concern (a real CLI session's wallet secret is
+constant for its lifetime), but the test needed a second, never-unlocked `NoteVault`
+handle pointed at the same directory to genuinely exercise that path — same pattern this
+test file already used elsewhere for "a fresh process re-opening the same vault."
+
+Full step-by-step walkthrough, gotchas, and verification narrative (including the exact
+pool-stats/pool_commitment figures from the final cross-node agreement check) in
+[SMOKE.md](SMOKE.md)'s new steps 9-14 and its 2026-08-18 Gotchas/Verification sections.
+
+✅ *Verify*: live 3-node simnet run covering every new SMOKE.md step — cross-node
+`NotesChanged` payment propagation, a mid-flow node restart with clean re-sync, and a
+cross-node vault restore including the pre-fix refusal reproduced and the post-fix
+resume confirmed on the identical command. Final cross-node check: all three nodes
+reported identical `get_pool_stats()`, sink block, and `pool_commitment` after all of
+the above. Full workspace test suite (`cargo test -p kaspa-wallet-core --lib`, 69
+passed) and `cargo clippy --workspace --all-targets` both clean.

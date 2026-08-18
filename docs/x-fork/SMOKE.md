@@ -98,6 +98,135 @@ Same `--appdir` as before — the node reloads its existing database rather than
 (no "Resyncing the utxoindex..." log line on restart, unlike a first-ever launch). Query both
 wallet A and wallet B's balances again — both must exactly match their pre-restart values.
 
+### 9. Launch the 3-node simnet testnet
+
+Steps 1-8 above (P4.2) predate the note-pool wallet and use devnet + RPC-direct tools.
+Everything from here on (P7.8) exercises the **full note lifecycle** — minting, cross-node
+propagation, a mid-flow restart, and vault backup/restore — using the real interactive
+`kaspa-cli` (see [WALLET.md](WALLET.md) for the single-node command-by-command reference;
+this section builds on it across 3 peered nodes) on **simnet**, not devnet:
+`DEVNET_PARAMS` sets `pool_activation: ForkActivation::never()`, so no `note` command
+would even be accepted there — see WALLET.md's "Before you start" note.
+
+```bash
+cargo build --release --bin kaspad --bin kaspa-cli
+NETWORK=simnet ./scripts/x-testnet-local.sh
+```
+
+(P7.8 taught the [P4.1 script](../../scripts/x-testnet-local.sh) a `NETWORK=simnet` mode;
+it now also starts `--rpclisten-borsh` and `--unsaferpc` on every node, both required for
+`kaspa-cli` to connect — neither was on by default before P7.7 found the gap.) Confirms 3
+peered simnet nodes: node1 on gRPC `26510`/P2P `26511`/borsh-wRPC `27510`, node2 and node3
+shifted by `+10`/`+20` on each port.
+
+**`kaspa-cli` cannot be driven by piped stdin** (NOTES.md's P0.3 finding) — every step
+below assumes a real TTY, or `pexpect` (a Python pty-driving library) sending literal `\r`
+for Enter, matching WALLET.md's own validation method.
+
+### 10. Create and fund a wallet on node 1
+
+In a `kaspa-cli` session pointed at node 1 (`server 127.0.0.1:27510`), run `wallet create`
+(WALLET.md step 3), then mine to its receive address:
+
+```bash
+kaspa-miner --mining-address <address> --kaspad-address 127.0.0.1 --port 26510 \
+  --threads 2 --mine-when-not-synced
+```
+
+Leave it running past `coinbase_maturity * 2 ≈ 2000` blocks (simnet's 10 BPS, same rule as
+WALLET.md step 4), then `list` to confirm a mature transparent balance, and:
+
+```
+note mint 5
+```
+
+### 11. Confirm cross-node pool-state agreement
+
+Every node independently derives the same note-pool state from the same blocks — mine one
+more block so the mint transaction confirms, then compare `get_pool_stats()` (per-denomination
+live-note counts) and `get_block(sink).header.pool_commitment` (the pool SMT root) across
+all three nodes' gRPC endpoints (`26510`/`26520`/`26530`). Both must match exactly on every
+node — this is the same agreement check P6.10's `daemon_notepool_multi_node_agreement_test`
+makes at the consensus layer; here it's confirmed from the wallet side outward.
+
+### 12. Cross-node payment: request on node 2, pay from node 1
+
+Open a **second** `kaspa-cli` session under a separate `$HOME` (so it gets its own wallet
+storage), pointed at node 2 (`server 127.0.0.1:27520`), and create a wallet there too. From
+that session:
+
+```
+note request 2
+```
+
+Copy the printed `marigoldreq:...` payload to the node-1 wallet session and pay it:
+
+```
+note pay marigoldreq:<...>
+```
+
+Mine a block (on either node — they're peered) so the payment confirms. The node-2 session's
+`note request` returns on its own, without any command run there — the confirming block
+propagates over P2P to node 2, node 2's consensus layer processes it, and the wallet's
+`NotesChanged` subscription (P6.9) fires locally in response to node 2's own view of the
+chain, not anything pushed from node 1's wallet directly.
+
+### 13. Restart a node mid-flow
+
+Kill node 2 (`kill <node2-pid>`) while its wallet session from step 12 is still open, then
+restart it with the same `--appdir` (same pattern as step 8, but simnet ports):
+
+```bash
+target/release/kaspad --simnet --enable-unsynced-mining --unsaferpc --utxoindex \
+  --listen=127.0.0.1:26521 --rpclisten=127.0.0.1:26520 --rpclisten-borsh=127.0.0.1:27520 \
+  --rpclisten-json=127.0.0.1:28520 --addpeer=127.0.0.1:26511 --appdir=<node2's appdir>
+```
+
+Confirms clean re-sync (no "Resyncing the utxoindex..." line — same appdir, no fresh start)
+and peers again with node 1. Re-run step 11's cross-node agreement check — `get_pool_stats()`
+and `pool_commitment` must still match across all three nodes once node 2 has caught back up.
+The wallet session connected to node 2 needs a fresh `connect` after the restart (the old
+wRPC socket is gone), but its local note index is unaffected — `note list` shows the same
+notes as before the restart once reconnected.
+
+### 14. Vault backup, and restore (with idempotent retry) from a third node
+
+From the node-1 wallet (which now holds several notes from steps 10-12):
+
+```
+note vault backup <dir>
+```
+
+In a **third**, fresh `kaspa-cli` session under its own `$HOME`, pointed at node 3
+(`server 127.0.0.1:27530`), create a new wallet and restore from that backup:
+
+```
+note vault restore <dir> <word1> ... <word24>
+```
+
+**This can legitimately fail partway through and need a retry — that's expected, not a
+bug.** The default restore-time rotation batches recovered notes into several transactions;
+if the *source* wallet (node 1's, from step 10-12) is still mid-spend, a batch whose
+fee-stamp lands on a note the source wallet is simultaneously consuming fails with `does
+not exist in the pool` (POOL-SPEC.md's same-key-in-two-wallets hazard — see WALLET.md
+step 11's caveat). Mine a confirming block for the source wallet's pending transactions and
+re-run the exact same `note vault restore <dir> <word1> ... <word24>` command:
+
+```
+a vault from this same restore already exists here (recognized by these words) - resuming...
+```
+
+rather than being refused. (**Real bug found and fixed this session**: the vault-exists
+safety check added in P7.7 couldn't originally distinguish "this is my own
+partially-completed restore, safe to resume" from "this is a genuinely different existing
+vault, refuse" — it refused *every* retry, even ones with the exact same words. Fixed by
+`NoteVault::words_match_existing_key` — unlocks the vault already on disk with the wallet
+secret at hand and compares the recovered `K` against what these words decode to, so the
+CLI can tell the two cases apart before deciding whether to proceed. See "Gotchas" below.)
+The remaining rotation batches complete on the retry; any batch still blocked by an
+in-flight source-wallet transaction fails again independently and can be picked up the
+same way once *that* transaction confirms too.
+
 ## Gotchas found while writing this (2026-08-15)
 
 - **`rothschild` needs rebuilding just like `kaspad`** — the exact same stale-binary trap
@@ -117,6 +246,42 @@ wallet A and wallet B's balances again — both must exactly match their pre-res
   ("1 MAGLD," ~7 blocks' worth at genesis — the same proportional margin Kaspa's original
   constant had relative to its own genesis-era reward). Own commit; see `rothschild/src/main.rs`.
 
+## Gotchas found while extending this (2026-08-18)
+
+- **Real bug found and fixed**: `note vault restore`'s idempotent-retry path (documented in
+  WALLET.md step 11 as "mine a confirming block and re-run — idempotent") was actually
+  blocked by P7.7's own safety check. `note vault restore` copies the backup's files in and
+  recovers `K` from the words *before* attempting any rotation, so a rotation-batch failure
+  (the same in-flight-source-wallet hazard step 14 above walks through) leaves a real vault
+  in place — but the P7.7 check that refuses to clobber "a vault that already exists" can't
+  tell that apart from a genuinely different, unrelated vault, and refused *every* retry,
+  even ones using the exact same words against the exact same partially-restored vault:
+
+  ```
+  this wallet already has a note vault - restoring here would overwrite its vault.key and
+  strand any notes already stored under it. Restore into a fresh wallet instead.
+  ```
+
+  Fixed by adding `NoteVault::words_match_existing_key` (unlocks the on-disk vault with the
+  wallet secret already at hand, then compares the recovered `K` against what the given
+  words decode to) and a corresponding `NoteKeyStore::vault_words_match` trait method;
+  `cli/src/modules/note.rs`'s `vault_restore` now asks the secret first and, if a vault
+  already exists, checks whether these words match it before deciding whether to refuse or
+  resume. Confirmed live: the same retry that used to print the message above now prints
+  `a vault from this same restore already exists here (recognized by these words) -
+  resuming...` and completes further rotation batches.
+
+- **The `words_match_existing_key` unit test needed a fresh `NoteVault` handle for its
+  wrong-secret assertion** — `unlock()` caches the successfully-unlocked `K` in memory and
+  returns the cached value on a later call regardless of what secret is passed, so testing
+  "wrong secret" against an instance that had *already* unlocked successfully with the
+  correct one never actually re-attempted decryption. Not a production concern (a real CLI
+  session's wallet secret is constant for its lifetime), but the test needed a second,
+  never-unlocked `NoteVault` pointed at the same directory to genuinely exercise the
+  wrong-secret path — same pattern this file already used elsewhere (`restore_from_words_
+  recovers_the_same_key_and_notes`'s `restored = make_vault(&dir)`, simulating a fresh
+  process re-opening the same vault).
+
 ## Verification (2026-08-15)
 
 Walked the full script above once, end to end, on the P4.1 local testnet:
@@ -129,3 +294,44 @@ Walked the full script above once, end to end, on the P4.1 local testnet:
 
 Every step passed. Full narrative log (including the two bugs found and fixed along the way)
 in [NOTES.md](NOTES.md)'s P4.2 entry.
+
+## Verification (2026-08-18)
+
+Walked steps 9-14 above against a real 3-node simnet testnet (`NETWORK=simnet
+./scripts/x-testnet-local.sh`, node1/2/3 on gRPC `26510`/`26520`/`26530`, borsh-wRPC
+`27510`/`27520`/`27530`), driving three separate real `kaspa-cli` sessions (each its own
+`$HOME`, via `pexpect` — see WALLET.md's "Gotchas"):
+
+- **Wallet A** (node1, port `27510`): created, funded past `coinbase_maturity * 2`, ran
+  `note mint 3` successfully.
+- **Wallet B** (node2, port `27520`): created independently, ran `note request 1`, and —
+  without any command run on wallet B's own session beyond the request itself — received
+  `payment received: 1 MAGLD in 1 note(s)` once wallet A's `note pay marigoldreq:...` (run
+  against node1) confirmed. Confirms cross-node `NotesChanged` propagation exactly as step
+  12 describes: node2 picked this up from its own view of the chain over P2P, not anything
+  pushed directly from wallet A's session.
+- **Cross-node pool-state agreement**, checked directly over gRPC against all three nodes at
+  once with the throwaway `simple_client` tool's `--pool-stats`/`--sink`/`--pool-commitment`
+  modes (same RPCs as P6.10's `daemon_notepool_multi_node_agreement_test`), after all of the
+  above plus the vault restore/retry below had run: **all three nodes agreed exactly** —
+  `pool stats: [7, 9, 2, 0, 0, 0, 0, 0]` on every node, same sink block
+  (`5521e9bd...9af4d`, virtual DAA score `2315`), and the identical `pool_commitment`
+  (`f38f293e...c8b2cdb`) for that block on every node. This is the strongest form of the
+  step 11/13 check: taken *after* a mid-session node2 restart and a multi-batch vault
+  restore/retry, not just after a clean run.
+- **Wallet C** (node3, port `27530`), restore from wallet A's vault backup: first attempt
+  (fresh wallet, no prior vault) recovered 9 live notes across a planned 5-batch rotation;
+  batches 1-2 confirmed, batches 3-5 failed with `does not exist in the pool` (the documented
+  in-flight-source-wallet hazard — wallet A was still active). A same-words retry at that
+  point was **refused** by the pre-fix binary (see "Gotchas" above) — reproducing the bug
+  exactly as described. After the fix and a rebuild, the identical retry command instead
+  printed `a vault from this same restore already exists here (recognized by these words) -
+  resuming...`, then completed 2 more batches (4 more notes rotated). The remaining 2
+  batches failed again on the same already-consumed-serial condition (the fee-stamp hazard
+  is per-batch, not resolved by the retry itself — mining a confirmation for wallet A's
+  specific in-flight transaction and retrying once more would pick up the rest, as step 14
+  describes). `note vault verify` afterward reported `light verify: 3 live, 4 stale`,
+  consistent with a partially-completed rotation.
+
+Every new step's documented behavior matched what actually happened, including reproducing
+the pre-fix bug and confirming the fix live. Full narrative in NOTES.md's P7.8 entry.

@@ -664,6 +664,10 @@ impl NoteKeyStore for LocalStoreInner {
         self.notevault.restore_key_from_words(words, wallet_secret).await
     }
 
+    async fn vault_words_match(&self, words: &str, wallet_secret: &Secret) -> Result<bool> {
+        self.notevault.words_match_existing_key(words, wallet_secret).await
+    }
+
     async fn vault_folder(&self) -> Result<std::path::PathBuf> {
         Ok(self.notevault.folder().to_path_buf())
     }

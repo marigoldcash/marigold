@@ -147,6 +147,15 @@ pub trait NoteKeyStore: Send + Sync {
     async fn vault_restore_from_words(&self, _words: &str, _wallet_secret: &Secret) -> Result<()> {
         Err(Error::NotImplemented)
     }
+    /// Whether `words` decode to the same `K` this vault is already wrapping under
+    /// `wallet_secret` — lets a caller distinguish "this is a safe idempotent
+    /// re-run of a restore that got partway through" from "this is an unrelated
+    /// existing vault, refuse" (P7.8 finding: a restore that copies the files and
+    /// recovers K but then hits a rotation-batch failure leaves a vault in place
+    /// that `vault_exists()` alone can't tell apart from someone else's).
+    async fn vault_words_match(&self, _words: &str, _wallet_secret: &Secret) -> Result<bool> {
+        Err(Error::NotImplemented)
+    }
     /// The vault's on-disk folder, for standalone copy-out (`note vault backup`)
     /// — the CLI does the actual file copy natively; this just says where from.
     async fn vault_folder(&self) -> Result<std::path::PathBuf> {

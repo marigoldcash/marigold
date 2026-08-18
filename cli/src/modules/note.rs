@@ -476,21 +476,29 @@ impl Note {
         }
         let account = ctx.wallet().account()?;
         let store = ctx.wallet().store().as_note_key_store()?;
-
-        // A vault already existing here means this wallet already has its own K
-        // (and possibly its own notes under it). Copying a backup's `vault.key`
-        // over it would silently strand anything already stored under the old
-        // K - refuse rather than risk that, instead of just overwriting.
-        if store.vault_exists().await? {
-            tprintln!(
-                ctx,
-                "this wallet already has a note vault - restoring here would overwrite its vault.key and strand any notes \
-                 already stored under it. Restore into a fresh wallet instead.\r\n"
-            );
-            return Ok(());
-        }
-
         let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(Some(&account)).await?;
+
+        // A vault already existing here usually means this wallet has its own K
+        // (and possibly its own notes under it) - copying a backup's `vault.key`
+        // over it would silently strand anything already stored under the old K.
+        // But it can also mean this is exactly the SAME restore run partway
+        // through: `note vault restore` copies the files and recovers K before
+        // attempting any rotation, so a rotation-batch failure (a real, expected
+        // possibility - see the batch-continuation note below) leaves a vault in
+        // place that looks identical to a genuine pre-existing one. Distinguish
+        // the two by checking whether these words unlock the vault that's already
+        // there: if so, this is a safe idempotent re-run, not a clobber.
+        if store.vault_exists().await? {
+            if !store.vault_words_match(&words, &wallet_secret).await? {
+                tprintln!(
+                    ctx,
+                    "this wallet already has a different note vault - restoring here would overwrite its vault.key and \
+                     strand any notes already stored under it. Restore into a fresh wallet instead.\r\n"
+                );
+                return Ok(());
+            }
+            tprintln!(ctx, "a vault from this same restore already exists here (recognized by these words) - resuming...");
+        }
 
         let folder = store.vault_folder().await?;
         copy_dir_recursive(Path::new(&dir), &folder).map_err(|e| Error::Custom(format!("restore copy failed: {e}")))?;

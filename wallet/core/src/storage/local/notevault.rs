@@ -305,6 +305,27 @@ impl NoteVault {
         Ok(())
     }
 
+    /// Whether `words` decode to the same `K` this vault is *already* wrapping
+    /// under `wallet_secret` — i.e. whether restoring with these words here would
+    /// be a genuine no-op re-run (a partially-completed `note vault restore` that
+    /// copied the files and recovered K, then hit a rotation-batch failure) rather
+    /// than clobbering an unrelated vault. Callers use this to distinguish "safe
+    /// to retry" from "refuse, this is someone else's vault" — see
+    /// `LocalStoreInner`'s doc comment on why `exists()` alone can't tell the two
+    /// apart. Returns `Ok(false)` (not an error) if `wallet_secret` can't unlock
+    /// the current `vault.key` at all — an unrelated vault a caller has no
+    /// business touching should read as "doesn't match", not abort the caller.
+    pub async fn words_match_existing_key(&self, words: &str, wallet_secret: &Secret) -> Result<bool> {
+        let mnemonic = Mnemonic::new(words, Language::English)?;
+        let entropy = mnemonic.entropy();
+        let from_words: [u8; 32] =
+            entropy.as_slice().try_into().map_err(|_| Error::Custom("recovery words must encode a 32-byte key (24 words)".to_string()))?;
+        match self.unlock(wallet_secret).await {
+            Ok(current) => Ok(current == from_words),
+            Err(_) => Ok(false),
+        }
+    }
+
     async fn ensure_loaded(&self) -> Result<()> {
         if *self.loaded.lock().await {
             return Ok(());
@@ -681,6 +702,45 @@ mod tests {
         let sn = Hash::from([0xaau8; 32]);
         let loaded = restored.load_key(&new_secret, &sn).await?.expect("note recovered via the words");
         assert_eq!(loaded.sk, [0xbbu8; 32]);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn words_match_existing_key_distinguishes_same_vault_from_unrelated_one() -> Result<()> {
+        // Reproduces the P7.8 finding: `note vault restore` copies the files and
+        // recovers K *before* attempting rotation, so a rotation-batch failure
+        // (a real, expected possibility) leaves a vault in place. A caller must be
+        // able to tell "this is my own partially-completed restore, safe to
+        // resume" from "this is someone else's vault, refuse" using only the
+        // words and the wallet secret already at hand — not by comparing on-disk
+        // state directly.
+        let dir = tempfile::tempdir().unwrap();
+        let secret = Secret::from("vault-test-secret");
+        let vault = make_vault(&dir);
+        let words = vault.create(&secret).await?;
+
+        assert!(vault.words_match_existing_key(&words, &secret).await?, "the vault's own words must match its own key");
+
+        let other_words = {
+            let other_dir = tempfile::tempdir().unwrap();
+            let other_vault = make_vault(&other_dir);
+            other_vault.create(&secret).await?
+        };
+        assert!(
+            !vault.words_match_existing_key(&other_words, &secret).await?,
+            "an unrelated vault's words must not match this vault's key"
+        );
+
+        // Wrong wallet secret can't unlock the existing vault.key at all - reads
+        // as "doesn't match" (Ok(false)), not an error the caller has to handle.
+        // Uses a fresh handle: `vault` already cached the correct K from the
+        // assertions above, and `unlock()` returns a cached key without
+        // re-checking the secret, so reusing `vault` here wouldn't actually
+        // exercise the wrong-secret path.
+        let wrong_secret = Secret::from("not-the-right-wallet-secret");
+        let fresh = make_vault(&dir);
+        assert!(!fresh.words_match_existing_key(&words, &wrong_secret).await?);
 
         Ok(())
     }

@@ -2003,10 +2003,31 @@ wallet. WASM/mobile wallets are post-launch — CLI proves the protocol.*
   notes the source wallet had since redeemed and, after mining confirmations, completed its
   batched rotation with zero failed batches on a clean run. Workspace check + clippy clean.
 
-- [ ] **P7.8 — End-to-end smoke extension.** Extend `docs/x-fork/SMOKE.md` (P4.2) with the
-  full note lifecycle across the 3-node local testnet, including a node restart mid-flow
-  and a wallet restore.
-  ✅ *Verify:* every SMOKE.md step passes from a clean checkout via the P4.1 script.
+- [x] **P7.8 — End-to-end smoke extension.** Taught `scripts/x-testnet-local.sh`/`.ps1` a
+  `NETWORK=simnet` mode (devnet stays the default) — every node now also gets
+  `--rpclisten-borsh` and `--unsaferpc` explicitly, neither started by default (P7.7's
+  finding), needed for `kaspa-cli` to connect at all. Extended
+  [docs/x-fork/SMOKE.md](docs/x-fork/SMOKE.md) (P4.2) with steps 9-14: launching the 3-node
+  simnet testnet, minting on node1, a cross-node payment (`note request` on node2, `note
+  pay` on node1, confirmed via node2's own `NotesChanged` subscription with nothing pushed
+  from node1's session), a mid-flow node2 restart with clean re-sync, and a vault
+  backup/restore onto a third, independent wallet on node3. **Real bug found and fixed**:
+  `note vault restore`'s idempotent-retry path (documented in WALLET.md as "mine a
+  confirmation and re-run") was actually blocked by P7.7's own vault-exists safety check —
+  it copies files and recovers `K` *before* attempting rotation, so a rotation-batch
+  failure (the same in-flight-source-wallet hazard WALLET.md already documents) leaves a
+  real vault in place that the check couldn't distinguish from a genuinely different one,
+  refusing every same-words retry. Fixed with `NoteVault::words_match_existing_key` (unlocks
+  the on-disk vault with the wallet secret already at hand and compares the recovered `K`
+  against what the given words decode to) plus a `NoteKeyStore::vault_words_match` trait
+  method; `cli/src/modules/note.rs`'s `vault_restore` now asks the wallet secret before the
+  exists-check and resumes instead of refusing when the words match.
+  ✅ *Verify:* live 3-node simnet run — cross-node `NotesChanged` propagation confirmed,
+  `get_pool_stats()`/`pool_commitment` agreement confirmed identical across all three nodes
+  after a mid-session node2 restart and a multi-batch vault restore, and the vault-restore
+  bug reproduced against the pre-fix binary and confirmed fixed against the rebuilt one
+  (same retry command: refused before, `... resuming...` and two more rotation batches
+  completed after). Full workspace test suite + clippy clean.
 
 ---
 

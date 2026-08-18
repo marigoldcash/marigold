@@ -123,9 +123,34 @@ substitute for it.
 
 ## Where execution stands
 
-- **Next step: P7.8 — End-to-end smoke extension.** Extend `docs/x-fork/SMOKE.md`
-  (P4.2) with the full note lifecycle across the 3-node local testnet, including
-  a node restart mid-flow and a wallet restore.
+- **Next step: Phase 8 (Hardening), starting with the TESTNET.md deployment
+  runbook** for the topology recorded under "Live infrastructure" below
+  (systemd units, firewall posture, bridge config, DNS `dns_seeders` commit) —
+  the logical next step after P7.8, though not yet formally started. Phase 8's
+  own items (P8.1-P8.7, including the calendar-time testnet soak) run partly in
+  parallel with this.
+- **P7.8 is done — and with it, all of Phase 7 (the full note-pool wallet).**
+  End-to-end smoke extension: taught `scripts/x-testnet-local.sh`/`.ps1` a
+  `NETWORK=simnet` mode (every node now also gets `--rpclisten-borsh` and
+  `--unsaferpc` explicitly — P7.7's finding, neither on by default), then
+  extended [SMOKE.md](SMOKE.md) with the full note lifecycle across a live
+  3-node simnet testnet: cross-node payment propagation (confirmed via node2's
+  own `NotesChanged` subscription, nothing pushed directly between wallet
+  sessions), a mid-flow node restart with clean re-sync, and a cross-node vault
+  restore. **Real bug found and fixed**: `note vault restore`'s own documented
+  idempotent-retry path ("mine a confirmation and re-run") was actually blocked
+  by P7.7's `vault_exists()` safety check — it copies files and recovers `K`
+  *before* attempting rotation, so a rotation-batch failure leaves a real vault
+  in place that the check couldn't distinguish from a genuinely different one,
+  refusing every same-words retry. Fixed with `NoteVault::words_match_existing_key`
+  (unlocks the on-disk vault with the wallet secret already at hand and compares
+  the recovered `K` against what the given words decode to) plus a
+  `NoteKeyStore::vault_words_match` trait method; the CLI now resumes instead of
+  refusing when the words match. Confirmed live on the identical retry command:
+  refused pre-fix, resumed and completed further rotation batches post-fix.
+  Final cross-node check (after everything above): all three nodes reported
+  identical `get_pool_stats()`, sink block, and `pool_commitment`. Full writeup
+  in NOTES.md's P7.8 entry.
 - **P7.7 is done — wallet UX & docs pass, the first Phase 7 step to drive the
   real interactive `kaspa-cli` against a live daemon** rather than testing
   wallet-core directly. Audited `cli/src/modules/note.rs`: fixed a real
