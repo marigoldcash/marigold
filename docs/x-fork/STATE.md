@@ -134,7 +134,21 @@ substitute for it.
 
 ## Where execution stands
 
-- **Next step: provision the real testnet hosts** using
+- **Open: pre-publication docs pass (repo is still private, overdue per ground
+  rule 5 — "public at P5.9/Phase 6 start at the latest," and Phase 7 is now
+  done).** The coder has said (2026-08-18) a pass over documents is needed on
+  several points before publishing. Known items so far — collect others as
+  they come up, don't publish until the user says go:
+  1. **Positioning/terminology sweep** per the new "Public positioning /
+     terminology" row in DECISIONS.md: replace "privacy coin" with
+     "transparent bearer-note chain" framing everywhere public-facing —
+     FORK-PLAN's opening description uses the phrase today, and
+     POOL-SPEC/README/website text should be checked for the same. (Internal
+     historical docs like NOTES.md entries can note the change rather than
+     rewrite history, per the established correction convention.)
+  2. Whatever else the user's "several points" turn out to be — not yet
+     enumerated; ask before assuming the list is complete.
+- **Next step (infrastructure track): provision the real testnet hosts** using
   [docs/x-fork/TESTNET.md](TESTNET.md) + [deploy/ansible/](../../deploy/ansible/)
   against the user's actual 3-machine topology (needs their real IPs/SSH
   access — not something done from this environment), then stand up the
