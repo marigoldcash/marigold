@@ -1,9 +1,21 @@
 ---
 # Usage: ansible-playbook -i inventory.ini playbook.yml
 #
-# Order matters: the build play must run first — it sets marigold_built_commit
-# as a fact on the build host, which the deploy plays read via hostvars to know
-# exactly which cached binaries to copy out. See docs/x-fork/TESTNET.md.
+# Order matters:
+# 1. bootstrap connects as each host's initial admin account (root, or
+#    whatever your provider's image ships with) and creates the "deploy"
+#    account every later play connects as. Safe to re-run; skip it entirely
+#    for a host that already has a working deploy account (just leave it out
+#    of the [bootstrap] group).
+# 2. build must run before the deploy plays — it sets marigold_built_commit as
+#    a fact on the build host, which the deploy plays read via hostvars to
+#    know exactly which cached binaries to copy out.
+# See docs/x-fork/TESTNET.md.
+
+- name: Bootstrap the deploy account on fresh machines
+  hosts: bootstrap
+  roles:
+    - bootstrap
 
 - name: Build Marigold binaries
   hosts: build

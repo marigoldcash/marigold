@@ -90,17 +90,36 @@ cp inventory.example.ini inventory.ini
 ```
 
 Edit `inventory.ini`: real IPs, SSH users, which group each host belongs to
-(`build` — exactly one host; `seed_nodes` — every kaspad host; `bridges` —
-only hosts with an ASIC attached), and per-host variables
-(`kaspad_archival`, `kaspad_external_ip`, `kaspad_addpeers`,
-`kaspad_ram_scale`, `bridge_stratum_port`, ...). `inventory.ini` is gitignored
-— it never lands in the repo. Then:
+(`bootstrap` — every fresh host, see below; `build` — exactly one host;
+`seed_nodes` — every kaspad host; `bridges` — only hosts with an ASIC
+attached), and per-host variables (`kaspad_archival`, `kaspad_external_ip`,
+`kaspad_addpeers`, `kaspad_ram_scale`, `bridge_stratum_port`, ...).
+`inventory.ini` is gitignored — it never lands in the repo.
+
+**If a machine is genuinely fresh** (only a root/default admin account, no
+`deploy` user yet), generate a deploy key and point `deploy_ssh_public_key_file`
+at it if you haven't already:
+
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/marigold_deploy
+```
+
+and set `ansible_user=root` (or whatever your provider's default account is —
+e.g. `ubuntu` on many cloud images) for that host in the `[bootstrap]` group
+only. Every *other* group keeps `ansible_user=deploy`. If a machine already has
+a working `deploy` account with sudo and your key installed, just leave it out
+of `[bootstrap]` entirely. Then:
 
 ```bash
 ansible-playbook playbook.yml
 ```
 
-This runs three plays in order: **build** (clone the pinned `marigold_ref` on
+This runs four plays in order: **bootstrap** (apt-installs the handful of base
+packages every later role assumes — `sudo`, `git`, `curl`, `ca-certificates` —
+creates the `deploy` user with sudo and your SSH key, and deliberately stops
+there: it does not touch `sshd_config`, so root/password SSH login stays
+exactly as your image's default set it; harden that yourself once you've
+confirmed `ssh deploy@<host>` works); **build** (clone the pinned `marigold_ref` on
 the build host, `cargo build --release --bin kaspad --bin stratum-bridge`,
 fetch the two binaries to your control machine, cached by commit hash so an
 unchanged commit never gets rebuilt or re-copied on a later run — the same

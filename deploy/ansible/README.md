@@ -6,6 +6,11 @@ mining bridges. Written for the Marigold public testnet, but nothing here is
 testnet-specific — set `marigold_network: mainnet` in your inventory and the same
 playbook stands up a mainnet node.
 
+Includes a `bootstrap` play for genuinely fresh machines (only a root/default
+admin account) that creates the `deploy` user everything else connects as —
+see the `[bootstrap]` group in `inventory.example.ini`. Skip it for hosts that
+already have a working `deploy` account.
+
 Full narrative, security posture, and DNS-seeder setup: see
 [docs/x-fork/TESTNET.md](../../docs/x-fork/TESTNET.md). Quick start:
 

@@ -2,6 +2,20 @@
 # Shared defaults — override any of these per-host in inventory.ini, or copy this
 # file's pattern into a group_vars/<groupname>.yml for a whole group at once.
 
+# Bootstrap (roles/bootstrap, [bootstrap] inventory group only): the SSH login
+# account every other play connects as. Must match the `ansible_user` you set
+# for this host in every OTHER group in inventory.ini — the bootstrap role
+# creates this account; it doesn't rename or reuse whatever ansible_user the
+# [bootstrap] group itself connects as (that one's just the initial admin
+# account your machine ships with — root, or a cloud image's default user —
+# and is never touched beyond being used to create this one).
+deploy_user: "deploy"
+deploy_passwordless_sudo: true
+# Path on the CONTROL machine to the public half of the key you'll SSH in
+# with afterward. Generate one if you don't already have it:
+#   ssh-keygen -t ed25519 -f ~/.ssh/marigold_deploy
+deploy_ssh_public_key_file: "~/.ssh/id_ed25519.pub"
+
 marigold_repo: "https://github.com/marigoldcash/marigold-node.git"
 marigold_ref: "x-fork"          # branch, tag, or commit to build and deploy
 marigold_network: "testnet"     # testnet | mainnet | devnet | simnet

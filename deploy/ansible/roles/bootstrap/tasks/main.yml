@@ -1,0 +1,64 @@
+---
+# Runs once per fresh machine, connected as whatever admin account the box
+# actually ships with (root on most bare metal/VMs; a pre-provisioned
+# sudo-enabled account like "ubuntu"/"admin" on many cloud images) — see the
+# `[bootstrap]` inventory group, which is the only place that account is
+# named. Every other role in this playbook connects as `deploy_user` instead.
+#
+# Assumes a Debian/Ubuntu target (apt, the "sudo" group) — this project's own
+# dev environment and the machines it was written against are both Debian-
+# family; extending to RHEL-family (dnf, "wheel") is straightforward if you
+# need it, but not done here since nothing in this topology currently needs it.
+# Also assumes Python 3 is already present (true of every current Debian/
+# Ubuntu cloud image) — Ansible needs it on the target to run almost anything,
+# including the very tasks below.
+
+- name: Refuse to run against a non-Debian-family host
+  ansible.builtin.fail:
+    msg: >-
+      This role only supports Debian/Ubuntu targets (uses apt and the "sudo"
+      group). {{ inventory_hostname }} reports {{ ansible_facts['os_family'] }}.
+  when: ansible_facts['os_family'] != 'Debian'
+
+- name: apt update
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Install base packages every later role assumes are present
+  ansible.builtin.apt:
+    name:
+      - sudo
+      - git
+      - curl
+      - ca-certificates
+    state: present
+
+- name: Create the deploy user
+  ansible.builtin.user:
+    name: "{{ deploy_user }}"
+    groups: sudo
+    append: true
+    shell: /bin/bash
+    create_home: true
+
+- name: Grant the deploy user passwordless sudo
+  ansible.builtin.copy:
+    content: "{{ deploy_user }} ALL=(ALL) NOPASSWD:ALL\n"
+    dest: "/etc/sudoers.d/{{ deploy_user }}"
+    owner: root
+    group: root
+    mode: "0440"
+    validate: "visudo -cf %s"
+  when: deploy_passwordless_sudo | bool
+
+- name: Install the deploy user's SSH public key
+  ansible.posix.authorized_key:
+    user: "{{ deploy_user }}"
+    key: "{{ lookup('file', deploy_ssh_public_key_file) }}"
+    state: present
+
+# Deliberately does not touch sshd_config (PermitRootLogin, PasswordAuthentication,
+# etc.) — decided against auto-hardening SSH here, since getting it wrong on a
+# remote box with no console access risks losing the box. Harden SSH yourself
+# once you've confirmed `ssh {{ deploy_user }}@<host>` actually works.
