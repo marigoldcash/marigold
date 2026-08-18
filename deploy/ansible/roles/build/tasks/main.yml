@@ -1,0 +1,66 @@
+---
+# Runs only on the `build` group's host (exactly one, per inventory.example.ini's
+# comment) — the only machine that needs the Rust toolchain. Every other host
+# just receives the two binaries this role produces, via the deploy role's fetch
+# step below. See docs/x-fork/STATE.md: "build host (only machine with the
+# toolchain — others get binaries)".
+
+- name: Check the Rust toolchain is present
+  ansible.builtin.command: cargo --version
+  register: cargo_version
+  changed_when: false
+  failed_when: cargo_version.rc != 0
+  # This role deliberately does not install Rust for you — rustup's own
+  # installer is the right tool for that and this project doesn't pin a
+  # toolchain choice beyond what rust-toolchain.toml already specifies in the
+  # checked-out repo. Install it once by hand (https://rustup.rs) and re-run.
+
+- name: Ensure the build checkout's parent directory exists
+  ansible.builtin.file:
+    path: "{{ marigold_build_checkout | dirname }}"
+    state: directory
+    mode: "0755"
+
+- name: Clone or update the marigold-node checkout
+  ansible.builtin.git:
+    repo: "{{ marigold_repo }}"
+    dest: "{{ marigold_build_checkout }}"
+    version: "{{ marigold_ref }}"
+    force: false
+  register: checkout
+
+- name: Resolve the exact commit that was checked out
+  ansible.builtin.command: git -C {{ marigold_build_checkout }} rev-parse HEAD
+  register: checkout_commit
+  changed_when: false
+
+- name: Check whether this commit's binaries are already cached on the control machine
+  become: false
+  delegate_to: localhost
+  ansible.builtin.stat:
+    path: "{{ marigold_fetch_cache }}/{{ checkout_commit.stdout }}/kaspad"
+  register: cache_stat
+
+- name: Build kaspad and stratum-bridge in release mode
+  ansible.builtin.command: cargo build --release --bin kaspad --bin stratum-bridge
+  args:
+    chdir: "{{ marigold_build_checkout }}"
+  # Rebuild whenever the checkout actually changed, or when this exact commit's
+  # binaries aren't already cached on the control machine — never skip a build
+  # just because a same-named binary happened to exist before, the exact
+  # stale-binary trap this project has hit twice already (P2.3, P4.2).
+  when: checkout.changed or not cache_stat.stat.exists
+
+- name: Fetch built binaries to the control machine's per-commit cache
+  ansible.builtin.fetch:
+    src: "{{ marigold_build_checkout }}/target/release/{{ item }}"
+    dest: "{{ marigold_fetch_cache }}/{{ checkout_commit.stdout }}/{{ item }}"
+    flat: true
+  loop:
+    - kaspad
+    - stratum-bridge
+  when: not cache_stat.stat.exists
+
+- name: Record the resolved commit for the deploy play
+  ansible.builtin.set_fact:
+    marigold_built_commit: "{{ checkout_commit.stdout }}"

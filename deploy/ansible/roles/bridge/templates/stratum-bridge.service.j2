@@ -1,0 +1,30 @@
+# Managed by Ansible (deploy/ansible/roles/bridge) — local edits will be overwritten.
+[Unit]
+Description=Marigold stratum-bridge ({{ marigold_network }})
+After=network-online.target marigold-kaspad.service
+Wants=network-online.target
+Requires=marigold-kaspad.service
+
+[Service]
+Type=simple
+User={{ marigold_user }}
+Group={{ marigold_user }}
+WorkingDirectory={{ marigold_config_root }}
+# --node-mode external is the load-bearing flag here: stratum-bridge defaults to
+# spawning its OWN embedded kaspad (--node-mode inprocess) if you don't pass
+# this, which would start a second, separate node process competing for this
+# same host's P2P/data — not what we want when kaspad already runs as its own
+# systemd unit. external mode just connects to config.yaml's kaspad_address.
+ExecStart={{ marigold_install_root }}/bin/stratum-bridge \
+  --config {{ marigold_config_root }}/bridge-config.yaml \
+  --node-mode external
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

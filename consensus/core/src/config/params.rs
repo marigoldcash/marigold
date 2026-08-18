@@ -849,8 +849,11 @@ pub const MAINNET_PARAMS: Params = Params {
 };
 
 pub const TESTNET_PARAMS: Params = Params {
-    // Kaspa's DNS seeders removed (P2.4) — same rationale as MAINNET_PARAMS above.
-    dns_seeders: &[],
+    // Three static seed hostnames (P8, "Live infrastructure" in STATE.md) — DNS-only
+    // (not Cloudflare-proxied; proxying breaks P2P) A records at fixed IPs, provisioned
+    // via deploy/ansible/. Sufficient at this scale; the NS-delegated `dnsseeder` crawler
+    // remains P9.2, deferred until mainnet needs more than 3 fixed seeds.
+    dns_seeders: &["tn-seed1.marigold.cash", "tn-seed2.marigold.cash", "tn-seed3.marigold.cash"],
     net: NetworkId::with_suffix(NetworkType::Testnet, 10),
     genesis: TESTNET_GENESIS,
     timestamp_deviation_tolerance: TIMESTAMP_DEVIATION_TOLERANCE,

@@ -1,0 +1,38 @@
+---
+- name: Create the marigold service user
+  ansible.builtin.user:
+    name: "{{ marigold_user }}"
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+
+- name: Create install/data/config directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ marigold_user }}"
+    group: "{{ marigold_user }}"
+    mode: "0750"
+  loop:
+    - "{{ marigold_install_root }}/bin"
+    - "{{ marigold_data_root }}"
+    - "{{ marigold_config_root }}"
+
+# Firewall is opt-in (ufw_manage) and, when on, the SSH rule is the very first
+# thing applied — before any `ufw enable` — so a run never has a window where
+# the box is reachable only by a rule that hasn't landed yet. Confirm your real
+# SSH port here if it isn't 22; getting this wrong on a remote box with no
+# console access means losing the box, not just re-running the play.
+- name: "Firewall: allow SSH (must land before ufw is ever enabled)"
+  community.general.ufw:
+    rule: allow
+    port: "{{ ssh_port | default('22') }}"
+    proto: tcp
+  when: ufw_manage | bool
+
+- name: "Firewall: enable (default-deny incoming, default-allow outgoing)"
+  community.general.ufw:
+    state: enabled
+    policy: deny
+    direction: incoming
+  when: ufw_manage | bool

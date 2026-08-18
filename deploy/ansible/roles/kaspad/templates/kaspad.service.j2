@@ -1,0 +1,53 @@
+# Managed by Ansible (deploy/ansible/roles/kaspad) — local edits will be overwritten.
+[Unit]
+Description=Marigold kaspad ({{ marigold_network }})
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ marigold_user }}
+Group={{ marigold_user }}
+ExecStart={{ marigold_install_root }}/bin/kaspad \
+{%- if marigold_network == 'testnet' %}
+  --testnet \
+{%- elif marigold_network == 'devnet' %}
+  --devnet \
+{%- elif marigold_network == 'simnet' %}
+  --simnet \
+{%- endif %}
+  --utxoindex \
+  --disable-upnp \
+  --appdir={{ marigold_data_root }}/kaspad-{{ marigold_network }} \
+{%- if kaspad_external_ip is defined and kaspad_external_ip %}
+  --externalip={{ kaspad_external_ip }} \
+{%- endif %}
+{%- if kaspad_archival | default(false) | bool %}
+  --archival \
+{%- endif %}
+{%- if kaspad_ram_scale is defined %}
+  --ram-scale={{ kaspad_ram_scale }} \
+{%- endif %}
+{%- for peer in (kaspad_addpeers | default('')).split(',') if peer | trim != '' %}
+  --addpeer={{ peer | trim }} \
+{%- endfor %}
+{%- if kaspad_extra_args | default('') != '' %}
+  {{ kaspad_extra_args }} \
+{%- endif %}
+  --loglevel=info
+# Deliberately no --rpclisten / --rpclisten-borsh / --rpclisten-json / --unsaferpc:
+# gRPC then defaults to loopback-only and wRPC doesn't start at all. A local
+# stratum-bridge instance still reaches this node fine over
+# 127.0.0.1:{{ marigold_grpc_ports[marigold_network] }} — see docs/x-fork/TESTNET.md.
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+
+# Sandboxing — kaspad only ever needs to write inside its own appdir.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths={{ marigold_data_root }}/kaspad-{{ marigold_network }}
+
+[Install]
+WantedBy=multi-user.target

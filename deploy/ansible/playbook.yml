@@ -1,0 +1,22 @@
+---
+# Usage: ansible-playbook -i inventory.ini playbook.yml
+#
+# Order matters: the build play must run first — it sets marigold_built_commit
+# as a fact on the build host, which the deploy plays read via hostvars to know
+# exactly which cached binaries to copy out. See docs/x-fork/TESTNET.md.
+
+- name: Build Marigold binaries
+  hosts: build
+  roles:
+    - build
+
+- name: Deploy kaspad seed nodes
+  hosts: seed_nodes
+  roles:
+    - common
+    - kaspad
+
+- name: Deploy stratum bridges
+  hosts: bridges
+  roles:
+    - bridge

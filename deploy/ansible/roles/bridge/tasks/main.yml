@@ -1,0 +1,44 @@
+---
+- name: Copy the stratum-bridge binary built on the build host
+  ansible.builtin.copy:
+    src: "{{ marigold_fetch_cache }}/{{ hostvars[groups['build'][0]].marigold_built_commit }}/stratum-bridge"
+    dest: "{{ marigold_install_root }}/bin/stratum-bridge"
+    owner: "{{ marigold_user }}"
+    group: "{{ marigold_user }}"
+    mode: "0755"
+  notify: restart marigold-bridge
+
+- name: Install the bridge config
+  ansible.builtin.template:
+    src: bridge-config.yaml.j2
+    dest: "{{ marigold_config_root }}/bridge-config.yaml"
+    owner: "{{ marigold_user }}"
+    group: "{{ marigold_user }}"
+    mode: "0640"
+  notify: restart marigold-bridge
+
+- name: Install the stratum-bridge systemd unit
+  ansible.builtin.template:
+    src: stratum-bridge.service.j2
+    dest: /etc/systemd/system/marigold-bridge.service
+    mode: "0644"
+  notify:
+    - reload systemd
+    - restart marigold-bridge
+
+# Only the stratum port is public — the miner-facing side. Everything else in
+# the bridge config (prom/health/web-dashboard) stays bound to 127.0.0.1 and is
+# never opened here.
+- name: "Firewall: allow the stratum port"
+  community.general.ufw:
+    rule: allow
+    port: "{{ bridge_stratum_port }}"
+    proto: tcp
+  when: ufw_manage | bool
+
+- name: Enable and start stratum-bridge
+  ansible.builtin.systemd:
+    name: marigold-bridge
+    enabled: true
+    state: started
+    daemon_reload: true

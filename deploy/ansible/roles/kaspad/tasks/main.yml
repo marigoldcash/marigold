@@ -1,0 +1,44 @@
+---
+- name: Copy the kaspad binary built on the build host
+  ansible.builtin.copy:
+    src: "{{ marigold_fetch_cache }}/{{ hostvars[groups['build'][0]].marigold_built_commit }}/kaspad"
+    dest: "{{ marigold_install_root }}/bin/kaspad"
+    owner: "{{ marigold_user }}"
+    group: "{{ marigold_user }}"
+    mode: "0755"
+  notify: restart marigold-kaspad
+
+- name: Create kaspad's appdir
+  ansible.builtin.file:
+    path: "{{ marigold_data_root }}/kaspad-{{ marigold_network }}"
+    state: directory
+    owner: "{{ marigold_user }}"
+    group: "{{ marigold_user }}"
+    mode: "0750"
+
+- name: Install the kaspad systemd unit
+  ansible.builtin.template:
+    src: kaspad.service.j2
+    dest: /etc/systemd/system/marigold-kaspad.service
+    mode: "0644"
+  notify:
+    - reload systemd
+    - restart marigold-kaspad
+
+# P2P must be reachable from the internet for this to function as a seed node;
+# gRPC/wRPC are never opened here — they stay loopback-only by construction
+# (see group_vars/all.yml's comment: kaspad simply never receives
+# --rpclisten/--rpclisten-borsh/--rpclisten-json/--unsaferpc on a public host).
+- name: "Firewall: allow the P2P port"
+  community.general.ufw:
+    rule: allow
+    port: "{{ marigold_p2p_ports[marigold_network] }}"
+    proto: tcp
+  when: ufw_manage | bool
+
+- name: Enable and start kaspad
+  ansible.builtin.systemd:
+    name: marigold-kaspad
+    enabled: true
+    state: started
+    daemon_reload: true

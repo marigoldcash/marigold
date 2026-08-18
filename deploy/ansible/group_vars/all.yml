@@ -1,0 +1,63 @@
+---
+# Shared defaults — override any of these per-host in inventory.ini, or copy this
+# file's pattern into a group_vars/<groupname>.yml for a whole group at once.
+
+marigold_repo: "https://github.com/marigoldcash/marigold-node.git"
+marigold_ref: "x-fork"          # branch, tag, or commit to build and deploy
+marigold_network: "testnet"     # testnet | mainnet | devnet | simnet
+
+# P2P port kaspad actually listens on for each network — must match
+# consensus/core/src/network.rs's default_p2p_port() exactly, since this is what
+# the firewall role opens. Testnet's is suffix-dependent; TESTNET_PARAMS in
+# consensus/core/src/config/params.rs uses suffix 10.
+marigold_p2p_ports:
+  mainnet: 26111
+  testnet: 26211
+  simnet: 26511
+  devnet: 26611
+
+# gRPC port per network — never opened in the firewall (kaspad's gRPC listener
+# defaults to loopback-only whenever --rpclisten is omitted). Recorded here only
+# so the systemd unit comment and the bridge's kaspad_address can point at the
+# right local port without hardcoding it twice.
+marigold_grpc_ports:
+  mainnet: 26110
+  testnet: 26210
+  simnet: 26510
+  devnet: 26610
+
+marigold_user: "marigold"
+marigold_install_root: "/opt/marigold"
+marigold_data_root: "/var/lib/marigold"
+marigold_config_root: "/etc/marigold"
+
+# Where the build host checks out and builds the repo, and where the control
+# machine caches fetched binaries between runs (keyed by commit, so re-running
+# the playbook against an unchanged commit never re-copies anything — see the
+# build role for why this matters: a stale binary has silently caused wrong
+# behavior in this project more than once, see docs/x-fork/NOTES.md's P2.3 and
+# P4.2 entries).
+marigold_build_checkout: "/opt/marigold-build/marigold-node"
+marigold_fetch_cache: "{{ playbook_dir }}/.fetched"
+
+# kaspad defaults — a public seed node deliberately passes NONE of
+# --rpclisten/--rpclisten-borsh/--rpclisten-json/--unsaferpc: gRPC then defaults to
+# loopback-only and wRPC doesn't start at all (see docs/x-fork/WALLET.md's and
+# SMOKE.md's P7.7/P7.8 findings) — the safest possible posture is simply never
+# passing those flags on a host reachable from the internet.
+kaspad_archival: false
+kaspad_addpeers: ""            # comma-separated "ip:port" list, or empty
+kaspad_extra_args: ""          # escape hatch for anything not modeled below
+
+# Bridge defaults (only applied to hosts in the `bridges` group)
+bridge_stratum_port: 5555
+bridge_min_share_diff: 64
+bridge_prom_port: 2114
+bridge_health_port: 8080
+
+# Firewall is opt-in per host (see roles/kaspad and roles/bridge) — set
+# ufw_manage: true in inventory.ini only after confirming your SSH access rule
+# survives (see TESTNET.md's firewall section). Never enabled by this playbook
+# without that explicit flag: getting it wrong on a remote box with no console
+# access means losing the box.
+ufw_manage: false

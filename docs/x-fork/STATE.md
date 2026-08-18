@@ -92,13 +92,24 @@ substitute for it.
     a deliberate low-end viability probe (an OOM here is a P8 finding, not a failure);
     real value is a third independent IP. Fallback role: faucet/status-page frontend.
   - **DNS**: three DNS-only (NOT Cloudflare-proxied — proxying breaks P2P) A records,
-    `tn-seed1/2/3.marigold.cash`, pointing at the fixed IPs, committed into
-    `TESTNET_PARAMS.dns_seeders`. Static seed hostnames suffice at this scale; the
-    NS-delegated crawler `dnsseeder` software remains P9.2.
-  - **Sequence**: P7.8 (smoke extension) → TESTNET.md deployment runbook (systemd
-    units; firewall: P2P public, RPC localhost-only, `--unsaferpc` never on a public
-    node; bridge config; DNS records) → commit `dns_seeders` → provision → faucet
-    (the one genuinely new build item) → invite testers, start the P8.7 incident log.
+    `tn-seed1/2/3.marigold.cash`, pointing at the fixed IPs — **hostnames committed
+    into `TESTNET_PARAMS.dns_seeders`** (2026-08-18); the actual DNS `A` records
+    still need creating in Cloudflare once the real IPs are provisioned (a
+    hostname with no matching record just fails its DNS lookup harmlessly — every
+    node still has `--addpeer` and the other seeders as fallbacks). Static seed
+    hostnames suffice at this scale; the NS-delegated crawler `dnsseeder` software
+    remains P9.2.
+  - **Sequence**: P7.8 (smoke extension, done) → TESTNET.md deployment runbook
+    (done, 2026-08-18: [docs/x-fork/TESTNET.md](TESTNET.md) +
+    [deploy/ansible/](../../deploy/ansible/), a reusable Ansible playbook — build
+    once on a designated toolchain host, deploy `kaspad`+`stratum-bridge` as
+    systemd services anywhere; firewall opt-in and SSH-safe-by-construction;
+    RPC never opened, matching WALLET.md/SMOKE.md's P7.7/P7.8 finding that gRPC
+    defaults to loopback and wRPC doesn't start at all unless asked) → commit
+    `dns_seeders` (done, same date) → **provision the real hosts (not yet
+    started — needs the user's actual hardware/SSH access)** → faucet (the one
+    genuinely new build item, not started) → invite testers, start the P8.7
+    incident log.
   - Two ASICs = ~100% of initial testnet hashrate — fine and expected for a testnet
     the founder controls; the DAA ramps difficulty to whatever they output.
 - **Planned integration (agreed 2026-08-16, post-launch)**: a Time & Attendance SaaS
@@ -123,12 +134,43 @@ substitute for it.
 
 ## Where execution stands
 
-- **Next step: Phase 8 (Hardening), starting with the TESTNET.md deployment
-  runbook** for the topology recorded under "Live infrastructure" below
-  (systemd units, firewall posture, bridge config, DNS `dns_seeders` commit) —
-  the logical next step after P7.8, though not yet formally started. Phase 8's
-  own items (P8.1-P8.7, including the calendar-time testnet soak) run partly in
-  parallel with this.
+- **Next step: provision the real testnet hosts** using
+  [docs/x-fork/TESTNET.md](TESTNET.md) + [deploy/ansible/](../../deploy/ansible/)
+  against the user's actual 3-machine topology (needs their real IPs/SSH
+  access — not something done from this environment), then stand up the
+  faucet, invite outside testers, and start the P8.7 incident log. The
+  deployment tooling itself is done (see below); what remains is running it
+  against real hardware. Phase 8's other items (P8.1-P8.6, P8.8) run partly in
+  parallel with the testnet soak.
+- **TESTNET.md deployment runbook is done (2026-08-18).** Wrote
+  [docs/x-fork/TESTNET.md](TESTNET.md) and a reusable Ansible playbook under
+  [deploy/ansible/](../../deploy/ansible/) — chosen over a plain SSH/shell
+  script specifically so it stays useful to others from the repo (the user's
+  stated reason for picking Ansible), not just this one testnet. Structure:
+  a `build` play (one designated toolchain host builds `kaspad` +
+  `stratum-bridge`, fetched to the control machine cached by commit hash —
+  the same stale-binary trap this project has hit twice before, P2.3/P4.2,
+  is exactly what the cache key prevents), then `kaspad`/`bridge` deploy plays
+  that template systemd units and copy binaries onto any number of hosts.
+  Security posture: RPC is never opened on a public host — the unit simply
+  never passes `--rpclisten`/`--rpclisten-borsh`/`--rpclisten-json`/
+  `--unsaferpc` at all (gRPC then defaults to loopback, wRPC doesn't start,
+  per WALLET.md/SMOKE.md's P7.7/P7.8 finding) — and firewall management is
+  opt-in, with the SSH-allow rule always applied before `ufw enable` ever
+  runs, never the reverse. The bridge role sets `--node-mode external`
+  deliberately: `stratum-bridge` defaults to spawning its *own* embedded
+  kaspad otherwise, which would silently run a second competing node.
+  Also committed: `TESTNET_PARAMS.dns_seeders` now lists the three planned
+  seed hostnames (`consensus/core/src/config/params.rs`) — the actual `A`
+  records still need creating once real IPs exist. **Two real template bugs
+  caught by rendering the Jinja templates standalone before ever handing them
+  to a real host** (Jinja2 has no list-comprehension syntax, unlike Python;
+  and Jinja's default block whitespace leaves blank lines that silently break
+  systemd's backslash line-continuation, turning later flags into invalid
+  bare directives with no `=` — fixed with explicit `{%- -%}` trim control
+  and verified by checking every backslash-continued line is actually
+  followed by content, not blank, for every archival/ram-scale/addpeer/
+  mainnet-vs-testnet combination).
 - **P7.8 is done — and with it, all of Phase 7 (the full note-pool wallet).**
   End-to-end smoke extension: taught `scripts/x-testnet-local.sh`/`.ps1` a
   `NETWORK=simnet` mode (every node now also gets `--rpclisten-borsh` and
