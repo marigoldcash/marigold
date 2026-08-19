@@ -154,12 +154,12 @@ substitute for it.
      Marigold README before publication: what the project is (per the
      positioning decision), build instructions that match this repo, links
      to FORK-PLAN/docs.
-  3. **AI-assistance references — decision pending (2026-08-19)**: the user
-     asked whether to scrub AI-assistance references before publication or
-     feature them ("first AI-programmed coin"); recommendation given was
-     neither — keep the record as-is, matter-of-fact, no marketing banner
-     (see session discussion; record the outcome in DECISIONS.md once the
-     user decides).
+  3. **AI-assistance references — DECIDED (2026-08-19, user-ratified)**: keep
+     the development record exactly as-is (no history scrub, no "AI-programmed
+     coin" marketing; disclosure is one matter-of-fact sentence that lands with 
+     the README rewrite (item 2). Full decision + rationale in DECISIONS.md's 
+     "AI-assistance disclosure" row. Nothing further to do in this repo for this 
+     item — it resolves as "leave everything alone."
   4. Whatever else the user's "several points" turn out to be — not yet
      enumerated; ask before assuming the list is complete.
 - **Next step (infrastructure track): provision the real testnet hosts** using
