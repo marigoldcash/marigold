@@ -139,14 +139,28 @@ substitute for it.
   done).** The coder has said (2026-08-18) a pass over documents is needed on
   several points before publishing. Known items so far — collect others as
   they come up, don't publish until the user says go:
-  1. **Positioning/terminology sweep** per the new "Public positioning /
-     terminology" row in DECISIONS.md: replace "privacy coin" with
-     "transparent bearer-note chain" framing everywhere public-facing —
-     FORK-PLAN's opening description uses the phrase today, and
-     POOL-SPEC/README/website text should be checked for the same. (Internal
-     historical docs like NOTES.md entries can note the change rather than
-     rewrite history, per the established correction convention.)
-  2. Whatever else the user's "several points" turn out to be — not yet
+  1. **Positioning/terminology sweep** per the "Public positioning /
+     terminology" row in DECISIONS.md — **done for this repo (2026-08-19)**:
+     FORK-PLAN's opening self-description (the only real one; STATE.md and
+     POOL-SPEC were already on-message) now reads "transparent bearer-note
+     coin". Remaining "privacy coin" occurrences are deliberate: the decision
+     text itself, factual category references (Monero delistings, AMLR), and
+     recorded historical rationale (kept per the don't-rewrite-history
+     convention). **Still open: the website repo**
+     (marigoldcash/marigoldcash.github.io) needs the same check.
+  2. **Root README.md is still the inherited rusty-kaspa README** ("Kaspa on
+     Rust", Kaspa-network language, DeepWiki badge pointing at
+     kaspanet/rusty-kaspa) — discovered during the sweep. Needs a real
+     Marigold README before publication: what the project is (per the
+     positioning decision), build instructions that match this repo, links
+     to FORK-PLAN/docs.
+  3. **AI-assistance references — decision pending (2026-08-19)**: the user
+     asked whether to scrub AI-assistance references before publication or
+     feature them ("first AI-programmed coin"); recommendation given was
+     neither — keep the record as-is, matter-of-fact, no marketing banner
+     (see session discussion; record the outcome in DECISIONS.md once the
+     user decides).
+  4. Whatever else the user's "several points" turn out to be — not yet
      enumerated; ask before assuming the list is complete.
 - **Next step (infrastructure track): provision the real testnet hosts** using
   [docs/x-fork/TESTNET.md](TESTNET.md) + [deploy/ansible/](../../deploy/ansible/)
