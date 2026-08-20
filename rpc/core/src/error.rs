@@ -24,6 +24,11 @@ pub enum RpcError {
     #[error("Hex parsing error: {0}")]
     HexParsingError(#[from] faster_hex::Error),
 
+    #[error(
+        "missing pool_commitment header field — Marigold adds a pool_commitment field to the block header (and to the proof-of-work pre-image), so mining software built for vanilla Kaspa cannot mine this chain unmodified; see docs/x-fork/MINING-COMPAT.md in the marigold-node repository for the required (small) client-side patch"
+    )]
+    MissingPoolCommitment,
+
     #[error("Blue work parsing error {0}")]
     RpcBlueWorkTypeParseError(std::num::ParseIntError),
 

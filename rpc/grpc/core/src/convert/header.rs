@@ -52,6 +52,19 @@ from!(item: &[RpcHash], protowire::RpcBlockLevelParents, { Self { parent_hashes:
 // protowire to rpc_core
 // ----------------------------------------------------------------------------
 
+/// An empty pool_commitment almost always means the sender's protobuf schema predates
+/// this fork's header field (proto3 silently drops unknown fields on a template
+/// round-trip), i.e. unpatched vanilla-Kaspa mining software. Surface that as an
+/// actionable error instead of the bare hex-length failure it would otherwise produce
+/// ("Hex parsing error: Invalid input length 64" cost a real debugging session before
+/// this existed — see docs/x-fork/MINING-COMPAT.md).
+fn parse_pool_commitment(pool_commitment: &str) -> RpcResult<RpcHash> {
+    if pool_commitment.is_empty() {
+        return Err(RpcError::MissingPoolCommitment);
+    }
+    Ok(RpcHash::from_str(pool_commitment)?)
+}
+
 try_from!(item: &protowire::RpcBlockHeader, kaspa_rpc_core::RpcHeader, {
     // We re-hash the block to remain as most trustless as possible
     let header = Header::new_finalized(
@@ -60,7 +73,7 @@ try_from!(item: &protowire::RpcBlockHeader, kaspa_rpc_core::RpcHeader, {
         RpcHash::from_str(&item.hash_merkle_root)?,
         RpcHash::from_str(&item.accepted_id_merkle_root)?,
         RpcHash::from_str(&item.utxo_commitment)?,
-        RpcHash::from_str(&item.pool_commitment)?,
+        parse_pool_commitment(&item.pool_commitment)?,
         item.timestamp.try_into()?,
         item.bits,
         item.nonce,
@@ -80,7 +93,7 @@ try_from!(item: &protowire::RpcBlockHeader, kaspa_rpc_core::RpcRawHeader, {
         hash_merkle_root: RpcHash::from_str(&item.hash_merkle_root)?,
         accepted_id_merkle_root: RpcHash::from_str(&item.accepted_id_merkle_root)?,
         utxo_commitment: RpcHash::from_str(&item.utxo_commitment)?,
-        pool_commitment: RpcHash::from_str(&item.pool_commitment)?,
+        pool_commitment: parse_pool_commitment(&item.pool_commitment)?,
         timestamp: item.timestamp.try_into()?,
         bits: item.bits,
         nonce: item.nonce,
@@ -99,7 +112,7 @@ try_from!(item: &protowire::RpcBlockHeader, kaspa_rpc_core::RpcOptionalHeader, {
         RpcHash::from_str(&item.hash_merkle_root)?,
         RpcHash::from_str(&item.accepted_id_merkle_root)?,
         RpcHash::from_str(&item.utxo_commitment)?,
-        RpcHash::from_str(&item.pool_commitment)?,
+        parse_pool_commitment(&item.pool_commitment)?,
         item.timestamp.try_into()?,
         item.bits,
         item.nonce,
@@ -248,5 +261,48 @@ mod tests {
 
         assert_eq!(consensus_block.hash(), consensus_block_reconverted.hash());
         assert_eq!(proto_block, proto_block_reconverted);
+    }
+
+    /// A vanilla-Kaspa client whose protobuf schema predates pool_commitment
+    /// round-trips a template with the field silently dropped (proto3 behavior) and
+    /// submits it back empty. The conversion must reject that with the actionable
+    /// MissingPoolCommitment error, not a bare hex-length failure — the bare failure
+    /// ("Hex parsing error: Invalid input length 64") cost a real debugging session
+    /// once (2026-08-20, docker compose testing) and would cost every future
+    /// integrator the same.
+    #[test]
+    fn test_missing_pool_commitment_actionable_error() {
+        let header = Header::new_finalized(
+            0,
+            vec![vec![new_unique()]].try_into().unwrap(),
+            new_unique(),
+            new_unique(),
+            new_unique(),
+            new_unique(),
+            123,
+            12345,
+            98765,
+            120055,
+            459912.into(),
+            1928374,
+            new_unique(),
+        );
+        let rpc_header = RpcHeader::from(header);
+        let mut proto_header: protowire::RpcBlockHeader = (&rpc_header).into();
+        proto_header.pool_commitment = String::new();
+
+        for description in [
+            TryInto::<kaspa_rpc_core::RpcHeader>::try_into(&proto_header).map(|_| ()).unwrap_err().to_string(),
+            TryInto::<kaspa_rpc_core::RpcRawHeader>::try_into(&proto_header).map(|_| ()).unwrap_err().to_string(),
+            TryInto::<kaspa_rpc_core::RpcOptionalHeader>::try_into(&proto_header).map(|_| ()).unwrap_err().to_string(),
+        ] {
+            assert!(description.contains("pool_commitment"), "error should name the missing field: {description}");
+            assert!(description.contains("MINING-COMPAT"), "error should point at the compat doc: {description}");
+        }
+
+        // A present-but-garbage value must still fail as a plain hex error, unchanged.
+        proto_header.pool_commitment = "zz".into();
+        let description = TryInto::<kaspa_rpc_core::RpcHeader>::try_into(&proto_header).map(|_| ()).unwrap_err().to_string();
+        assert!(description.contains("Hex parsing error"), "non-empty garbage keeps the hex error: {description}");
     }
 }
