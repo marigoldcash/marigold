@@ -83,12 +83,14 @@ unrelated to the two bugs above:
 
 - `--devfund` is opt-in and off by default (`Option<String>`, `None` unless you pass
   it) — no silent diversion of mined blocks.
-- **`--port` defaults to real Kaspa's ports** (16110 mainnet / 16210 testnet), not
-  Marigold's (26110/26210), and **`-s`/`--kaspad-address` only accepts a bare IP**
-  unless the value already starts with `grpc://`, in which case it's used verbatim and
-  `--port` is ignored. The compose file uses `-s grpc://node-testnet-1:26210` for
-  exactly this reason — it's the only form that both resolves Compose's service-name
-  DNS and carries the right port.
+- **Stock `kaspa-miner`'s `--port` defaults to real Kaspa's ports** (16110 mainnet /
+  16210 testnet) — the marigold-miner fork fixes this to 26110/26210 (its commit
+  `0b6d73d`), so only ports of stock builds bite. Independent of that,
+  **`-s`/`--kaspad-address` only accepts a bare IP** unless the value already starts
+  with `grpc://`, in which case it's used verbatim and `--port` is ignored. The
+  compose file uses `-s grpc://node-testnet-1:26210` for exactly this reason — it's
+  the only form that resolves Compose's service-name DNS, and it carries the port
+  inline since the grpc:// form ignores defaults.
 
 To mine to an address you actually control instead of the compose file's built-in
 throwaway one, set `CPU_MINER_ADDRESS` before starting:

@@ -40,7 +40,7 @@
 FROM rust:1.91-alpine3.23 AS builder
 RUN apk --no-cache add musl-dev g++ clang21-dev linux-headers protoc git
 
-ARG MARIGOLD_MINER_REF=6b832c8f004a19ae906a4d4fb9dcd3f4b110184e
+ARG MARIGOLD_MINER_REF=0b6d73d0727a36a1d3259b77609fb5f03681b2c8
 WORKDIR /work
 RUN --mount=type=secret,id=github_token \
     git clone https://$(cat /run/secrets/github_token)@github.com/marigoldcash/marigold-miner.git . \

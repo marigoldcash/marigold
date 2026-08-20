@@ -161,10 +161,11 @@ services:
     # paired with node-testnet-1's --enable-unsynced-mining; Dockerfile.cpu-
     # miner is what makes its submissions actually succeed (patched proto —
     # see that file's header comment). -s must use the grpc:// form for
-    # Compose's service-name DNS to resolve at connect time, and it must
-    # carry Marigold's real testnet gRPC port (26210) explicitly, since
-    # kaspa-miner's own --port default (16210) is real Kaspa's port, not
-    # this fork's — see README.md.
+    # Compose's service-name DNS to resolve at connect time (bare hostnames
+    # aren't accepted); the port is spelled out inline because the grpc://
+    # form ignores --port defaults entirely. (marigold-miner defaults to the
+    # right Marigold ports since its 0b6d73d anyway — stock kaspa-miner
+    # defaults to Kaspa's 16110/16210, see README.md.)
     command:
       - --testnet
       - -s
