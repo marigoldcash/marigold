@@ -46,7 +46,9 @@ Proposed outline:
 9. **Related work** — physical cash, Chaumian e-cash (the intellectual ancestor — same bearer idea, but ours needs no issuing mint), Monero/Zcash, plain transparent chains.
 10. **Future** — note-weighted governance (the Future-work section's Route C).
 
-Practicalities: 8–12 pages; Typst or LaTeX → PDF, plus an HTML rendering on the site; lives in the repo (`whitepaper/`) so it's versioned and citable; published **before or with the first broad announcement** (the announcement links to it — it's the artifact that makes the project legible). 🧑‍⚖️ Decide: external review of the paper by the P5.9 reviewers before publishing (recommended — cheap, they know the spec, and "reviewed by the same cryptographers who reviewed the spec" strengthens it). I can produce a full draft from POOL-SPEC/DECISIONS as a next task.
+Practicalities: 8–12 pages; Typst or LaTeX → PDF, plus an HTML rendering on the site; lives in the repo (`whitepaper/`) so it's versioned and citable; published **before or with the first broad announcement** (the announcement links to it — it's the artifact that makes the project legible). 🧑‍⚖️ Decide: external review of the paper by the P5.9 reviewers before publishing (recommended — cheap, they know the spec, and "reviewed by the same cryptographers who reviewed the spec" strengthens it).
+
+**Status 2026-08-20: draft v0.1 written — [`whitepaper/marigold-whitepaper.md`](../../whitepaper/marigold-whitepaper.md)** (11 sections per the outline above; markdown master, renders on GitHub and feeds the website). Next: founder read-through; author-line decision (currently "The Marigold Project"); external-review decision; PDF toolchain (no typst/pandoc/LaTeX on the dev machine yet — install one, or typeset at publication time).
 
 ### 3.2 Website
 
