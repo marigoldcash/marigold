@@ -117,13 +117,13 @@ pub fn validate_args(args: &Args) -> ConfigResult<()> {
 }
 
 fn request_database_deletion_approval(approve: bool) -> bool {
-    let msg = "Node database is from a different Kaspad *DB* version and needs to be fully deleted, do you confirm the delete? (y/n)";
+    let msg = "Node database is from a different marigoldd *DB* version and needs to be fully deleted, do you confirm the delete? (y/n)";
     request_database_deletion_approval_with_message(msg, approve)
 }
 
 fn request_database_deletion_approval_with_message(message: &str, approve: bool) -> bool {
     get_user_approval_or_exit(message, approve);
-    info!("Deleting databases due to incompatible Kaspad DB version");
+    info!("Deleting databases due to incompatible marigoldd DB version");
     true // Approval was granted; rejection exits the process above.
 }
 
@@ -447,7 +447,7 @@ do you confirm? (answer y/n or pass --yes to the Kaspad command line to confirm 
 
         if version > LATEST_DB_VERSION {
             let msg = format!(
-                "Node database is from a newer Kaspad DB version ({version}) than this node supports ({LATEST_DB_VERSION}). Downgrading requires deleting the database, do you confirm the delete? (y/n)"
+                "Node database is from a newer marigoldd DB version ({version}) than this node supports ({LATEST_DB_VERSION}). Downgrading requires deleting the database, do you confirm the delete? (y/n)"
             );
             is_db_reset_needed = request_database_deletion_approval_with_message(&msg, args.yes);
             continue 'db_upgrade;

@@ -40,7 +40,7 @@ impl TryFrom<CpuMinerConfig> for Vec<String> {
         let mut argv = Vec::new();
 
         if args.path.is_none() {
-            return Err(Error::Custom("no kaspad path is specified".to_string()));
+            return Err(Error::Custom("no cpu miner path is specified".to_string()));
         }
 
         if args.network.is_none() {

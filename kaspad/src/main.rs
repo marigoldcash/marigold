@@ -28,14 +28,14 @@ pub fn main() {
         Ok(limit) => {
             if limit < MINIMUM_DAEMON_SOFT_FD_LIMIT {
                 println!("Current OS file descriptor limit (soft FD limit) is set to {limit}");
-                println!("The kaspad node requires a setting of at least {DESIRED_DAEMON_SOFT_FD_LIMIT} to operate properly.");
+                println!("The marigoldd node requires a setting of at least {DESIRED_DAEMON_SOFT_FD_LIMIT} to operate properly.");
                 println!("Please increase the limits using the following command:");
                 println!("ulimit -n {DESIRED_DAEMON_SOFT_FD_LIMIT}");
             }
         }
         Err(err) => {
             println!("Unable to initialize the necessary OS file descriptor limit (soft FD limit) to: {}", err);
-            println!("The kaspad node requires a setting of at least {DESIRED_DAEMON_SOFT_FD_LIMIT} to operate properly.");
+            println!("The marigoldd node requires a setting of at least {DESIRED_DAEMON_SOFT_FD_LIMIT} to operate properly.");
         }
     }
 
@@ -46,5 +46,5 @@ pub fn main() {
     Arc::new(Signals::new(&core)).init();
 
     core.run();
-    info!("Kaspad has stopped...");
+    info!("marigoldd has stopped...");
 }

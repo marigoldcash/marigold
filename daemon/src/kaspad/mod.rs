@@ -212,7 +212,7 @@ impl Kaspad {
         if let Some(process) = process
             && process.is_running()
         {
-            return Err(Error::Custom("Kaspa node is already running.".to_string()));
+            return Err(Error::Custom("Marigold node is already running.".to_string()));
         }
 
         let argv = self.try_argv()?;
@@ -304,7 +304,7 @@ impl Kaspad {
         if let Some(path) = path {
             Ok(version(path.as_str()).await?.to_string())
         } else {
-            Ok("Kaspad binary is not configured. Please use 'node select' command.".to_string())
+            Ok("marigoldd binary is not configured. Please use 'node select' command.".to_string())
         }
     }
 }

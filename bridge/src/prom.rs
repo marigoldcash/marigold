@@ -132,7 +132,7 @@ pub fn init_metrics() {
     BLOCK_ACCEPTED_COUNTER.get_or_init(|| {
         register_counter_vec!(
             "ks_blocks_accepted_by_node",
-            "Number of blocks accepted by the connected Kaspa node (may later be red)",
+            "Number of blocks accepted by the connected Marigold node (may later be red)",
             WORKER_LABELS
         )
         .unwrap()
@@ -206,7 +206,7 @@ pub fn init_metrics() {
         INTERNAL_CPU_BLOCKS_ACCEPTED_TOTAL.get_or_init(|| {
             register_counter!(
                 "ks_internal_cpu_blocks_accepted_total",
-                "Total blocks accepted by the connected Kaspa node from the internal CPU miner since process start"
+                "Total blocks accepted by the connected Marigold node from the internal CPU miner since process start"
             )
             .unwrap()
         });

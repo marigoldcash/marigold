@@ -599,7 +599,7 @@ impl ShareHandler {
             debug!("[SUBMIT]   - pow_value: {:x} ({} bytes)", pow_value, pow_value_bytes.len());
             debug!("[SUBMIT]   - network_target: {:x} ({} bytes)", network_target, network_target_bytes.len());
             debug!("[SUBMIT]   - meets_network_target(BigUint): {}", meets_network_target);
-            debug!("[SUBMIT]   - check_passed(kaspa_pow): {}", check_passed);
+            debug!("[SUBMIT]   - check_passed(pow): {}", check_passed);
 
             debug!(
                 "[SUBMIT] PoW check result: passed={}, pow_value={:x}, network_target={:x}, header.bits={}",
@@ -709,7 +709,7 @@ impl ShareHandler {
                     "{} {} {}",
                     LogColors::block("[BLOCK]"),
                     LogColors::label("Header Verification:"),
-                    "Using REAL header from Kaspa node block template"
+                    "Using REAL header from Marigold node block template"
                 );
                 debug!("{} {} {}", LogColors::block("[BLOCK]"), LogColors::label("  - Header Version:"), header_version);
                 debug!(
@@ -787,7 +787,7 @@ impl ShareHandler {
                     format!("{}:{}", ctx.remote_addr(), ctx.remote_port())
                 );
                 debug!("{} {} {}", LogColors::block("[BLOCK]"), LogColors::label("Block Hash:"), block_hash);
-                debug!("{} {}", LogColors::block("[BLOCK]"), "Calling kaspa_api.submit_block()...");
+                debug!("{} {}", LogColors::block("[BLOCK]"), "Calling the node RPC submit_block()...");
 
                 // Submit block to node
                 let block_submit_result = kaspa_api.submit_block(block.clone()).await;

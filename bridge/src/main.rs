@@ -249,11 +249,11 @@ async fn main() -> Result<(), anyhow::Error> {
             node_args.push("--appdir".to_string());
             node_args.push(appdir_to_use.to_string_lossy().to_string());
         } else {
-            assert!(cli.appdir.is_none(), "appdir should not be specified both in bridge args and kaspad args");
+            assert!(cli.appdir.is_none(), "appdir should not be specified both in bridge args and marigoldd args");
         }
 
         let mut argv: Vec<OsString> = Vec::with_capacity(node_args.len() + 1);
-        argv.push(OsString::from("kaspad"));
+        argv.push(OsString::from("marigoldd"));
         argv.extend(node_args.iter().map(OsString::from));
         let args = kaspad_args::Args::parse(argv).map_err(|e| anyhow::anyhow!("{}", e))?;
         inprocess_node = Some(InProcessNode::start_from_args(args)?);
@@ -283,7 +283,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let kaspa_api =
         KaspaApi::new(config.global.kaspad_address.clone(), config.global.coinbase_tag_suffix.clone(), shutdown_rx.clone())
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to create Kaspa API client: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to create Marigold node API client: {}", e))?;
 
     if !config.global.web_dashboard_port.is_empty() {
         let web_dashboard_port = config.global.web_dashboard_port.clone();
@@ -309,7 +309,7 @@ async fn main() -> Result<(), anyhow::Error> {
             let mining_address = cli
                 .internal_cpu_miner_address
                 .clone()
-                .ok_or_else(|| anyhow::anyhow!("--internal-cpu-miner requires --internal-cpu-miner-address <kaspa:...>"))?;
+                .ok_or_else(|| anyhow::anyhow!("--internal-cpu-miner requires --internal-cpu-miner-address <marigold:...>"))?;
 
             let threads = cli.internal_cpu_miner_threads.unwrap_or(1);
             let throttle = cli.internal_cpu_miner_throttle_ms.map(Duration::from_millis);

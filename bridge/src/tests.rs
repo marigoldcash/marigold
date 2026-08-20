@@ -145,7 +145,7 @@ print_stats: true
     assert_eq!(config.instances.len(), 1, "Should create one instance in single-instance mode");
     assert_eq!(config.instances[0].stratum_port, ":5555", "Stratum port should be parsed correctly");
     assert_eq!(config.instances[0].min_share_diff, 8192, "Min share diff should be parsed correctly");
-    assert_eq!(config.global.kaspad_address, "127.0.0.1:16110", "Kaspad address should be stored in global config");
+    assert_eq!(config.global.kaspad_address, "127.0.0.1:16110", "marigoldd address should be stored in global config");
 }
 
 #[cfg(test)]
@@ -1106,7 +1106,7 @@ mod integration {
         // with a locally running node.
         let rpc_address = format!("127.0.0.1:{}", free_port());
         let argv: Vec<OsString> = vec![
-            "kaspad".into(),
+            "marigoldd".into(),
             "--devnet".into(),
             "--appdir".into(),
             temp_dir.to_string_lossy().to_string().into(),
@@ -1179,7 +1179,7 @@ mod integration {
         let rpc_port = free_port();
         let rpc_address = format!("127.0.0.1:{}", rpc_port);
         let argv: Vec<OsString> = vec![
-            "kaspad".into(),
+            "marigoldd".into(),
             "--devnet".into(),
             "--appdir".into(),
             temp_dir.to_string_lossy().to_string().into(),
@@ -2535,7 +2535,7 @@ mod comprehensive_tests {
         // Verify event was created with proper prefix before calling handle_authorize
         assert_eq!(event1.params.len(), 1);
         let addr1 = event1.params[0].as_str().unwrap();
-        assert!(addr1.starts_with("marigold:"), "Address should have kaspa: prefix");
+        assert!(addr1.starts_with("marigold:"), "Address should have marigold: prefix");
         let _result1: Result<(), _> = handle_authorize(ctx.clone(), event1, None, None).await;
         // Note: This will fail with invalid address, but we're testing the cleaning logic
         // In real scenario, valid addresses would work
@@ -2549,7 +2549,7 @@ mod comprehensive_tests {
         );
         assert_eq!(event2.params.len(), 1);
         let addr2 = event2.params[0].as_str().unwrap();
-        assert!(addr2.starts_with("marigoldtest:"), "Address should have kaspatest: prefix");
+        assert!(addr2.starts_with("marigoldtest:"), "Address should have marigoldtest: prefix");
         let _result2: Result<(), _> = handle_authorize(ctx2.clone(), event2, None, None).await;
 
         // Test kaspadev: prefix
@@ -2561,7 +2561,7 @@ mod comprehensive_tests {
         );
         assert_eq!(event3.params.len(), 1);
         let addr3 = event3.params[0].as_str().unwrap();
-        assert!(addr3.starts_with("marigolddev:"), "Address should have kaspadev: prefix");
+        assert!(addr3.starts_with("marigolddev:"), "Address should have marigolddev: prefix");
         let _result3: Result<(), _> = handle_authorize(ctx3.clone(), event3, None, None).await;
     }
 
@@ -2608,7 +2608,7 @@ mod comprehensive_tests {
         let event = JsonRpcEvent::new(
             Some("1".to_string()),
             "mining.authorize",
-            vec![json!("  kaspa:qr8example123456789012345678901234567890123456789012345678901234567890  ")],
+            vec![json!("  marigold:qr8example123456789012345678901234567890123456789012345678901234567890  ")],
         );
         // Verify event was created with whitespace (before calling handle_authorize)
         assert_eq!(event.params.len(), 1);

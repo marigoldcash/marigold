@@ -144,14 +144,14 @@ impl KaspaApi {
         coinbase_tag_suffix: Option<String>,
         mut shutdown_rx: watch::Receiver<bool>,
     ) -> Result<Arc<Self>> {
-        info!("Connecting to Kaspa node at {}", address);
+        info!("Connecting to Marigold node at {}", address);
 
         // GrpcClient requires explicit "grpc://" prefix for connection
         // Always add it if not present (avoids unnecessary connection failure)
         let grpc_address = if address.starts_with("grpc://") { address.clone() } else { format!("grpc://{}", address) };
 
         // Log connection attempt (detailed logs moved to debug)
-        debug!("{} {}", LogColors::api("[API]"), LogColors::label("Establishing RPC connection to Kaspa node:"));
+        debug!("{} {}", LogColors::api("[API]"), LogColors::label("Establishing RPC connection to Marigold node:"));
         debug!("{} {} {}", LogColors::api("[API]"), LogColors::label("  - Address:"), &grpc_address);
         debug!("{} {} {}", LogColors::api("[API]"), LogColors::label("  - Protocol:"), "gRPC (via RPC client wrapper)");
 
@@ -183,7 +183,7 @@ impl KaspaApi {
                 Err(e) => {
                     let backoff = Duration::from_millis(backoff_ms);
                     warn!(
-                        "failed to connect to kaspa node at {} (attempt {}): {}, retrying in {:.2}s",
+                        "failed to connect to the marigold node at {} (attempt {}): {}, retrying in {:.2}s",
                         grpc_address,
                         attempt,
                         e,
@@ -296,7 +296,7 @@ impl KaspaApi {
             let dag_response = match self.client.get_block_dag_info_call(None, GetBlockDagInfoRequest {}).await {
                 Ok(r) => r,
                 Err(e) => {
-                    warn!("failed to get network hashrate from kaspa, prom stats will be out of date: {}", e);
+                    warn!("failed to get network hashrate from the marigold node, prom stats will be out of date: {}", e);
                     continue;
                 }
             };
@@ -321,7 +321,7 @@ impl KaspaApi {
             {
                 Ok(r) => r,
                 Err(e) => {
-                    warn!("failed to get network hashrate from kaspa, prom stats will be out of date: {}", e);
+                    warn!("failed to get network hashrate from the marigold node, prom stats will be out of date: {}", e);
                     continue;
                 }
             };
@@ -463,7 +463,7 @@ impl KaspaApi {
                 info!(
                     "{} {}",
                     LogColors::api("[API]"),
-                    LogColors::block(&format!("===== BLOCK ACCEPTED BY KASPA NODE ===== Hash: {}", block_hash))
+                    LogColors::block(&format!("===== BLOCK ACCEPTED BY MARIGOLD NODE ===== Hash: {}", block_hash))
                 );
                 // Detailed acceptance logs moved to debug
                 debug!(
@@ -600,7 +600,7 @@ impl KaspaApi {
     }
 
     pub async fn wait_for_sync_with_shutdown(&self, mut shutdown_rx: watch::Receiver<bool>) -> Result<()> {
-        debug!("checking kaspad sync state");
+        debug!("checking marigoldd sync state");
 
         loop {
             let sync_fut = self.client.get_sync_status();
@@ -614,7 +614,7 @@ impl KaspaApi {
             match sync_res {
                 Ok(is_synced) => {
                     if is_synced {
-                        debug!("kaspad synced, starting server");
+                        debug!("marigoldd synced, starting server");
                         break;
                     }
                 }
@@ -623,7 +623,7 @@ impl KaspaApi {
                 }
             }
 
-            warn!("Kaspa is not synced, waiting for sync before starting bridge");
+            warn!("Marigold node is not synced, waiting for sync before starting bridge");
 
             tokio::select! {
                 _ = shutdown_rx.wait_for(|v| *v) => {
@@ -720,7 +720,7 @@ impl KaspaApi {
                     // If the error contains "Odd number of digits", provide more context
                     if error_str.contains("Odd number of digits") {
                         return Err(anyhow::anyhow!(
-                            "Failed to convert RPC block to Block after {} attempts: {} - This usually indicates a malformed hash field in the block template from the Kaspa node. The block may have a hash with an odd-length hex string.",
+                            "Failed to convert RPC block to Block after {} attempts: {} - This usually indicates a malformed hash field in the block template from the marigold node. The block may have a hash with an odd-length hex string.",
                             max_retries,
                             error_str
                         ));
@@ -790,7 +790,7 @@ impl KaspaApi {
             loop {
                 // Check sync state and reconnect if needed
                 if let Err(e) = api_clone.wait_for_sync().await {
-                    error!("error checking kaspad sync state, attempting reconnect: {}", e);
+                    error!("error checking marigoldd sync state, attempting reconnect: {}", e);
                     // Note: gRPC client handles reconnection automatically, but we log it
                     // In Go, reconnect() is called explicitly, but Rust gRPC handles it
                     tokio::time::sleep(Duration::from_secs(5)).await;
@@ -867,7 +867,7 @@ impl KaspaApi {
                 }
 
                 if let Err(e) = api_clone.wait_for_sync().await {
-                    error!("error checking kaspad sync state, attempting reconnect: {}", e);
+                    error!("error checking marigoldd sync state, attempting reconnect: {}", e);
                     tokio::time::sleep(Duration::from_secs(5)).await;
                     restart_channel = true;
                 }

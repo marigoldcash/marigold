@@ -548,11 +548,11 @@ impl ClientHandler {
                     Err(e) => {
                         if e.to_string().contains("Could not decode address") {
                             record_worker_error(&instance_id, &wallet_addr, crate::errors::ErrorShortCode::InvalidAddressFmt.as_str());
-                            error!("failed fetching new block template from kaspa, malformed address: {}", e);
+                            error!("failed fetching new block template from the marigold node, malformed address: {}", e);
                             client_clone.disconnect();
                         } else {
                             record_worker_error(&instance_id, &wallet_addr, crate::errors::ErrorShortCode::FailedBlockFetch.as_str());
-                            error!("failed fetching new block template from kaspa: {}", e);
+                            error!("failed fetching new block template from the marigold node: {}", e);
                         }
                         return;
                     }
@@ -772,7 +772,7 @@ impl ClientHandler {
                             crate::prom::record_balances(&instance_id, &balances);
                         }
                         Err(e) => {
-                            warn!("failed to get balances from kaspa, prom stats will be out of date: {}", e);
+                            warn!("failed to get balances from the marigold node, prom stats will be out of date: {}", e);
                         }
                     }
                 });
