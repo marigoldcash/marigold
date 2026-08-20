@@ -7,13 +7,16 @@
 # proves on bare metal), a mainnet node running alongside them (proves two
 # networks can coexist without port/appdir collisions — each container gets
 # its own network namespace, so this is actually easier here than on a shared
-# host), a stratum bridge, and the external kaspa-miner CPU miner
-# (kaspanet/cpuminer on Docker Hub — see README.md in this directory for why
-# that image works unmodified against this fork).
+# host), a stratum bridge (with its own internal CPU miner, for bootstrap-
+# independent ongoing mining), and a standalone CPU miner built from our own
+# patched fork of kaspa-miner (marigoldcash/marigold-miner — see README.md
+# in this directory for why an unpatched kaspa-miner cannot mine this chain
+# at all, and why this one needs a GitHub token to build while that fork is
+# private).
 #
 # Quick start:
 #   cd docker
-#   docker compose up --build
+#   GITHUB_TOKEN=$(gh auth token) docker compose up --build
 #
 # All published ports are bound to 127.0.0.1 only, on purpose — this compose
 # file is for local testing, not for exposing anything to the network. See
@@ -101,20 +104,20 @@ services:
       context: ..
       dockerfile: docker/Dockerfile.stratum-bridge
     container_name: marigold-bridge-testnet
-    # --internal-cpu-miner, not the external kaspanet/cpuminer image: verified
-    # empirically (2026-08-20) that a raw external miner can find blocks but
-    # can never submit them against this fork. kaspa-miner's own vendored
-    # proto (github.com/elichai/kaspa-miner/proto/rpc.proto) has no field 11
-    # on RpcBlockHeader -- that's exactly where this fork's P6.5 addition,
-    # pool_commitment, lives (rpc/grpc/core/src/convert/header.rs). An
-    # unaware client submits it as an empty string, and the server-side
+    # --internal-cpu-miner: this bridge is a first-party tool built against
+    # this fork's real schema, so it never needed patching the way an
+    # external tool does -- verified empirically (2026-08-20) that a raw,
+    # unmodified kaspa-miner can find blocks but can never submit them
+    # against this fork. kaspa-miner's own vendored proto
+    # (github.com/elichai/kaspa-miner/proto/rpc.proto) has no field 16 on
+    # RpcBlockHeader -- that's exactly where this fork's P6.5 addition,
+    # pool_commitment, lives (rpc/grpc/core/proto/rpc.proto). An unaware
+    # client submits it as an empty string, and the server-side
     # RpcHash::from_str(&item.pool_commitment)? hard-fails the whole
-    # SubmitBlock call ("Hex parsing error: Invalid input length 64") before
-    # anything else is even looked at. The bridge doesn't have this problem
-    # because it's a first-party tool built against this fork's real schema
-    # -- see docker/README.md for the full writeup, and
-    # docs/x-fork/NOTES.md for why this matters beyond just this compose file
-    # (any external solo miner bypassing the bridge hits the same wall).
+    # SubmitBlock call before anything else is even looked at -- see
+    # docker/README.md and marigoldcash/marigold-miner's own commits for the
+    # full writeup (that's two patches, not one: the wire-format field, and
+    # separately the PoW pre-image hash, which also has to include it).
     command:
       - /app/stratum-bridge
       - --node-mode
