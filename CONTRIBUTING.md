@@ -35,6 +35,7 @@ If you can meaningfully review a pull request, please do so even if you have not
 ## Pull request guidelines
 
 ### Before making a Pull Request:
+
 - Run `./check` (or `./check.ps1` on windows) to make sure your code adheres to coding standards
 - Run `./test` (or `cargo nextest run --release` on windows) and make sure you all tests still pass
 
@@ -70,4 +71,3 @@ Be respectful and constructive in discussions. We expect contributors to follow 
 ## Thank You
 
 Thanks for helping make Kaspa better. If you have questions, reach out to the channels described at the top of this document
-

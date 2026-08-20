@@ -1,10 +1,6 @@
 # Design decisions
 
-Every parameter Phase 1+ code will encode, recorded here before it's implemented. One
-row per decision, added when the step that owns it (P1.2, P1.3, ...) executes — this
-file doesn't get filled in ahead of that. Read together with
-[FORK-PLAN.md](../../FORK-PLAN.md), which is the authority on *why* each decision is
-needed; this file is the authority on *what was chosen* and *when*.
+Every parameter Phase 1+ code will encode, recorded here before it's implemented. One row per decision, added when the step that owns it (P1.2, P1.3, ...) executes — this file doesn't get filled in ahead of that. Read together with [FORK-PLAN.md](../../FORK-PLAN.md), which is the authority on *why* each decision is needed; this file is the authority on *what was chosen* and *when*.
 
 | Decision | Choice | Rationale | Date |
 |---|---|---|---|
@@ -36,8 +32,7 @@ needed; this file is the authority on *what was chosen* and *when*.
 
 | Public positioning / terminology | **Never market Marigold as a "privacy coin."** Official positioning: a **transparent bearer-note chain** ("digital cash with a fully auditable ledger"). The three claims that carry the pitch, all mechanically verifiable: (1) every unit of supply is publicly accountable at every block (consensus-enforced `Σ pool + transparent == emitted`); (2) nothing on the chain is encrypted or obfuscated — the pool is plaintext, there are no ring signatures, stealth addresses, confidential amounts or mixers, and the only cryptography is signatures authorizing spends (wallet-vault encryption is local key storage, not chain data); (3) exchanges and auditors only ever touch the transparent tier, and every entry/exit to the note pool is a visible, value-conserving public event. Equally binding in the other direction: never deny or downplay the unlinkability either — the denomination ladder and rotation are essential for fungibility like cash, and claiming the property is accidental would be false. The honest sentence is: *"nothing is hidden — the ledger is complete about value by construction, like physical cash."* | User-initiated (2026-08-18), refined in discussion. Rationale: "privacy coin" is a regulatory/exchange classification magnet (Monero delistings, EU AMLR 2027 — see P1.9's recorded posture) and misdescribes the mechanism used by Marigold — Monero-class coins *hide recorded data* cryptographically; Marigold *never records* identity linkage in the first place. Positioning by what it verifiably is, beats positioning by category. Requires a terminology pass over all public-facing docs before the repo goes public. | 2026-08-18 |
 
-| AI-assistance disclosure | **Keep the development record exactly as it is — no scrub, no banner.** The repo publishes with its FORK-PLAN's session-sized step structure and model-capability flags, NOTES.md/STATE.md session handoffs — all as-is. Disclosure is matter-of-fact: one honest sentence in the README/FAQ (lands with the pre-publication README rewrite) — *developed by a human founder using AI-assisted engineering, with all consensus-critical work externally reviewed: spec review by external cryptographers (P5.9, `docs/x-fork/reviews/`), full security audit before mainnet (P8.8), months of public testnet soak (P8.7)*.
-. The security argument always points at review/audit/soak, never at authorship in either direction. | User-ratified 2026-08-19, with the founder's own stated reason on record: the assistance was real and material ("could not have done it without it, at least not in this timeframe"), so the record stands because it's true. Options considered: (a) scrub — rejected as disqualifying, not merely risky: requires rewriting the entire git history plus the development docs whose organizing principle is session-sized AI-executable steps, directly contradicts the project's own documented don't-rewrite-history convention and the "nothing is hidden" brand, and creates a fiction that must be maintained forever; decided that the scrub window closes permanently at publication. (b) Marketing banner — rejected: "first AI-programmed coin" is neither true nor verifiable, sits on the rugpull-token shelf, misdirects attention from the actual design to the tooling, and promotional use of a trademark invites a cease-and-desist. (c) Matter-of-fact (chosen): in 2026 the stigma attaches to *unreviewed* AI code; this repo's visible discipline (phase gates, live verification, recorded corrections, external reviews) is the differentiator, and for a consensus system trust should rest on tests/review/audit/soak regardless of who typed the code. | 2026-08-19 |
+| AI-assistance disclosure | **Keep the development record exactly as it is — no scrub, no banner.** The repo publishes with its FORK-PLAN's session-sized step structure and model-capability flags, NOTES.md/STATE.md session handoffs — all as-is. Disclosure is matter-of-fact: one honest sentence in the README/FAQ (lands with the pre-publication README rewrite) — *developed by a human founder using AI-assisted engineering, with all consensus-critical work externally reviewed: spec review by external cryptographers (P5.9, `docs/x-fork/reviews/`), full security audit before mainnet (P8.8), months of public testnet soak (P8.7)*. . The security argument always points at review/audit/soak, never at authorship in either direction. | User-ratified 2026-08-19, with the founder's own stated reason on record: the assistance was real and material ("could not have done it without it, at least not in this timeframe"), so the record stands because it's true. Options considered: (a) scrub — rejected as disqualifying, not merely risky: requires rewriting the entire git history plus the development docs whose organizing principle is session-sized AI-executable steps, directly contradicts the project's own documented don't-rewrite-history convention and the "nothing is hidden" brand, and creates a fiction that must be maintained forever; decided that the scrub window closes permanently at publication. (b) Marketing banner — rejected: "first AI-programmed coin" is neither true nor verifiable, sits on the rugpull-token shelf, misdirects attention from the actual design to the tooling, and promotional use of a trademark invites a cease-and-desist. (c) Matter-of-fact (chosen): in 2026 the stigma attaches to *unreviewed* AI code; this repo's visible discipline (phase gates, live verification, recorded corrections, external reviews) is the differentiator, and for a consensus system trust should rest on tests/review/audit/soak regardless of who typed the code. | 2026-08-19 |
 
 | Nomenclature: note / ledger / chain | **Fixed-denomination units are "notes"; the arbitrary-amount transparent side (the inherited Kaspa UTXO tier) is "the ledger"; the whole replicated data structure is "the chain."** The public tagline is amended accordingly: **"digital cash with a fully auditable chain"** (supersedes the tagline wording inside the 2026-08-18 positioning row, which stays above as recorded), and the honest sentence becomes *"nothing is hidden — the chain is complete about value by construction, like physical cash."* POOL-SPEC.md keeps its spec-internal "transparent" vocabulary unchanged — it is frozen, externally reviewed text (v1.1), and "transparent inputs/outputs" there names concrete Kaspa transaction fields; the mapping is simply: spec "transparent tier/value/balance" = user-facing "the ledger." Sweep applied 2026-08-19 to README.md, WALLET.md instructional text, and FORK-PLAN's living self-description; executed step text and session/validation records keep their original wording per the don't-rewrite-history convention. | User-decided 2026-08-19. "Transparent tier" is engineer-speak; "ledger" matches how a consumer thinks of the account-like side ("the ledger holds…", "taken from the ledger"). The bare word "ledger" collided with the ratified tagline's "fully auditable ledger", which meant the *whole chain* — the strongest claim, covering the pool too; resolved by re-pointing the tagline at "chain" rather than diluting the claim or forcing a two-word term ("open ledger") into all running text. | 2026-08-19 |
 
@@ -51,417 +46,110 @@ needed; this file is the authority on *what was chosen* and *when*.
 
 Checked on CoinGecko and CoinMarketCap, per the plan's instruction, before locking in.
 
-- **MGLD** (the original pre-decision, dated 2026-08-13): CoinGecko shows 0 results
-  (clean) and there's no verified CoinMarketCap listing, but an obscure, essentially
-  dead BSC token called "Metallurgy" trades under MGLD on unverified DEX-scan pairs
-  (PancakeSwap v2, Biswap v2 — ~$21-22/24h combined volume, no market cap). Flagged to
-  the user as a weak but non-zero collision.
-- Two clean alternates identified as backups: **MRGD**, **MRGL** (both 0 results on
-  CoinGecko).
-- User additionally asked to check **MAGLD**, **MAR**, **MARI**, **MARIG**, **MAG**.
-  All came back with no *exact*-ticker match on CoinGecko. MAR, MARI, and MAG sit in
-  crowded naming neighborhoods (MarsCoin/Dogelon Mars; Marinade/Marina Protocol/Marie
-  Rose AI; MAGA-adjacent tokens respectively) even without an exact collision. MAGLD
-  and MARIG were the two fully clean, unambiguous options.
-- User then proposed **MCASH** as a further alternative: 0 results on CoinGecko, but
-  CoinMarketCap has two prior (both dead/untracked, zero volume) projects on that
-  ticker — **Mcashchain** (2019, BEP2; described itself as "a foundation for instant,
-  feeless transactions... privacy, governance" — thematically close enough to
-  Marigold's own pitch to be worth avoiding) and the unrelated **MMScash**. Flagged as
-  a thematic near-miss even though technically inactive.
-- **Final choice: MAGLD** — zero collisions of any kind (name or ticker, active or
-  dead) found on either CoinGecko or CoinMarketCap.
+- **MGLD** (the original pre-decision, dated 2026-08-13): CoinGecko shows 0 results (clean) and there's no verified CoinMarketCap listing, but an obscure, essentially dead BSC token called "Metallurgy" trades under MGLD on unverified DEX-scan pairs (PancakeSwap v2, Biswap v2 — ~$21-22/24h combined volume, no market cap). Flagged to the user as a weak but non-zero collision.
+- Two clean alternates identified as backups: **MRGD**, **MRGL** (both 0 results on CoinGecko).
+- User additionally asked to check **MAGLD**, **MAR**, **MARI**, **MARIG**, **MAG**. All came back with no *exact*-ticker match on CoinGecko. MAR, MARI, and MAG sit in crowded naming neighborhoods (MarsCoin/Dogelon Mars; Marinade/Marina Protocol/Marie Rose AI; MAGA-adjacent tokens respectively) even without an exact collision. MAGLD and MARIG were the two fully clean, unambiguous options.
+- User then proposed **MCASH** as a further alternative: 0 results on CoinGecko, but CoinMarketCap has two prior (both dead/untracked, zero volume) projects on that ticker — **Mcashchain** (2019, BEP2; described itself as "a foundation for instant, feeless transactions... privacy, governance" — thematically close enough to Marigold's own pitch to be worth avoiding) and the unrelated **MMScash**. Flagged as a thematic near-miss even though technically inactive.
+- **Final choice: MAGLD** — zero collisions of any kind (name or ticker, active or dead) found on either CoinGecko or CoinMarketCap.
 
 ### P1.4 — Emission math & the security endgame
 
-The working formula (P3.2 implements this exactly): with initial rate `R` MAGLD/sec,
-monthly decay factor `r = 2^(−1/36)` (halving every 36 months), and
-`S = 2,629,800` seconds per month (365.25-day year), total emission is the convergent
-geometric series `R·S/(1−r) ≈ R × 137.9M`. Solving for the 210M cap gives
-`R ≈ 1.5228 MAGLD/sec`. Front-loading: year 1 mines `1 − 2^(−1/3) ≈ 20.6%`,
-10 years ≈ 90.1%. The per-block reward (R/10 at 10 BPS) falls below 1 petal (10⁻⁸)
-around year 72, which is where emission effectively ends — a quantization fade-out,
-not a cliff, and the hard cap holds throughout because the series converges.
+The working formula (P3.2 implements this exactly): with initial rate `R` MAGLD/sec, monthly decay factor `r = 2^(−1/36)` (halving every 36 months), and `S = 2,629,800` seconds per month (365.25-day year), total emission is the convergent geometric series `R·S/(1−r) ≈ R × 137.9M`. Solving for the 210M cap gives `R ≈ 1.5228 MAGLD/sec`. Front-loading: year 1 mines `1 − 2^(−1/3) ≈ 20.6%`, 10 years ≈ 90.1%. The per-block reward (R/10 at 10 BPS) falls below 1 petal (10⁻⁸) around year 72, which is where emission effectively ends — a quantization fade-out, not a cliff, and the hard cap holds throughout because the series converges.
 
 Alternatives considered and rejected:
-- **Tail emission (Dogecoin-style)** — guarantees a perpetual security floor and
-  replaces lost bearer notes, but forfeits the hard-cap credibility line at launch.
-  Held in reserve: adding a tail later via explicit hard fork remains possible if
-  circulation fees demonstrably fail; the reverse (launching with a tail, later
-  claiming scarcity) is not. Lost-note deflation is accepted as cash-like (physical
-  cash economies lose notes too).
-- **Kaspa's 1-year halving shape** — would mine ~50% of supply in year 1 into a tiny
-  launch hashrate (stealth-premine optics) and leave only ~22 years of runway.
 
-**⚠️ Flag for P5.2/P5.3 (spec phase):** the P5.2 sketch says rotate/split/merge ops
-"touch no transparent value" — but the endgame posture above depends on pool ops
-actually *paying fees*. The spec must define the fee-payment mechanism for pool ops.
-Resolved to a recommended default under P1.8 below — see that section for the
-mechanism.
+- **Tail emission (Dogecoin-style)** — guarantees a perpetual security floor and replaces lost bearer notes, but forfeits the hard-cap credibility line at launch. Held in reserve: adding a tail later via explicit hard fork remains possible if circulation fees demonstrably fail; the reverse (launching with a tail, later claiming scarcity) is not. Lost-note deflation is accepted as cash-like (physical cash economies lose notes too).
+- **Kaspa's 1-year halving shape** — would mine ~50% of supply in year 1 into a tiny launch hashrate (stealth-premine optics) and leave only ~22 years of runway.
+
+**⚠️ Flag for P5.2/P5.3 (spec phase):** the P5.2 sketch says rotate/split/merge ops "touch no transparent value" — but the endgame posture above depends on pool ops actually *paying fees*. The spec must define the fee-payment mechanism for pool ops. Resolved to a recommended default under P1.8 below — see that section for the mechanism.
 
 ### P3.2 — Subsidy table implementation (clarifies P1.4)
 
-Implemented P1.4's formula by replacing Kaspa's `SUBSIDY_BY_MONTH_TABLE` (426 entries,
-1-year halving) with Marigold's own (1016 entries, 3-year/36-month halving),
-preserving the existing table-driven `CoinbaseManager` architecture rather than
-switching to a closed-form runtime calculation (the option flagged as open at P3.1) —
-simpler diff, keeps the exact-zero-tail behavior "for free." The generator bisects
-for the largest base subsidy whose *discrete, rounded* table sums to ≤ cap (not the
-continuous closed-form estimate, which overshoots slightly once you round each
-month) — see the table row above for the exact final numbers.
+Implemented P1.4's formula by replacing Kaspa's `SUBSIDY_BY_MONTH_TABLE` (426 entries, 1-year halving) with Marigold's own (1016 entries, 3-year/36-month halving), preserving the existing table-driven `CoinbaseManager` architecture rather than switching to a closed-form runtime calculation (the option flagged as open at P3.1) — simpler diff, keeps the exact-zero-tail behavior "for free." The generator bisects for the largest base subsidy whose *discrete, rounded* table sums to ≤ cap (not the continuous closed-form estimate, which overshoots slightly once you round each month) — see the table row above for the exact final numbers.
 
-**One clarification to P1.4's "no pre-deflationary phase" language**: that's true for
-mainnet, testnet, and devnet (`deflationary_phase_daa_score: 0`, unchanged from
-P2.6), but **not** for simnet, which keeps a real flat pre-deflationary phase
-(`TenBps::deflationary_phase_daa_score()`, a real-Kaspa-derived value, unchanged from
-before P2.6 too). This was checked, not assumed: setting simnet's
-`deflationary_phase_daa_score` to 0 "for consistency" was tried first and broke a
-real, passing test
-(`testing/integration/src/daemon_integration_tests.rs::daemon_utxos_propagation_test`,
-plus a sibling assertion), which mines `coinbase_maturity` blocks and asserts the
-resulting balance as `initial_blocks * SIMNET_PARAMS.pre_deflationary_phase_base_subsidy`
-— i.e. it deliberately relies on simnet paying a flat, predictable subsidy for its
-initial mining run rather than the decaying table. Simnet is a PoW-skipped internal
-benchmark/test harness (per its own existing params comment, built for "mempool
-benchmarks out of the box"), never a real user-facing network, so P1.4/P1.5's
-fair-launch commitment was never meant to bind it — reverted to keep that test
-correct rather than force uniformity where it isn't the actual decision.
+**One clarification to P1.4's "no pre-deflationary phase" language**: that's true for mainnet, testnet, and devnet (`deflationary_phase_daa_score: 0`, unchanged from P2.6), but **not** for simnet, which keeps a real flat pre-deflationary phase (`TenBps::deflationary_phase_daa_score()`, a real-Kaspa-derived value, unchanged from before P2.6 too). This was checked, not assumed: setting simnet's `deflationary_phase_daa_score` to 0 "for consistency" was tried first and broke a real, passing test (`testing/integration/src/daemon_integration_tests.rs::daemon_utxos_propagation_test`, plus a sibling assertion), which mines `coinbase_maturity` blocks and asserts the resulting balance as `initial_blocks * SIMNET_PARAMS.pre_deflationary_phase_base_subsidy` — i.e. it deliberately relies on simnet paying a flat, predictable subsidy for its initial mining run rather than the decaying table. Simnet is a PoW-skipped internal benchmark/test harness (per its own existing params comment, built for "mempool benchmarks out of the box"), never a real user-facing network, so P1.4/P1.5's fair-launch commitment was never meant to bind it — reverted to keep that test correct rather than force uniformity where it isn't the actual decision.
 
-**Three more real bugs found via full-workspace + ignored-test verification, each
-its own commit**: (1) `body_validation_in_context.rs`'s `validate_body_in_context_test`
-had a hardcoded expected-subsidy literal (`4400000000`, Kaspa's real month-0 value)
-that needed updating to ours (`15228085`). (2) `verify_crescendo_emission_schedule`
-(an `#[ignore]`d, ~15-20-minute test at our table's scale) cross-checks
-`calc_block_subsidy` against `legacy_calc_block_subsidy`, which assumes a 1-BPS
-reference rate; this assumption silently broke back at P2.2 (which deliberately made
-`pre_crescendo_target_time_per_block` match the real 10 BPS rate instead of a fake
-historical 1 BPS), but went uncaught until now because the test is `#[ignore]`d and
-was never actually run this session before P3.2 — fixed the comparison to convert
-blocks→seconds and scale the legacy result by the real pre-crescendo BPS, rather
-than assuming 1:1. (3) Five `goref_*` integration tests
-(`testing/integration/src/consensus_integration_tests.rs`) replay real, literal
-historical Kaspa mainnet block data with real historical coinbase subsidies baked
-into the recorded fixtures — permanently incompatible with a from-scratch chain's
-own economics, not a bug to fix. Marked `#[ignore]` with an explanatory reason
-rather than deleted, so the fixtures/test code stay available for reference.
+**Three more real bugs found via full-workspace + ignored-test verification, each its own commit**: (1) `body_validation_in_context.rs`'s `validate_body_in_context_test` had a hardcoded expected-subsidy literal (`4400000000`, Kaspa's real month-0 value) that needed updating to ours (`15228085`). (2) `verify_crescendo_emission_schedule` (an `#[ignore]`d, ~15-20-minute test at our table's scale) cross-checks `calc_block_subsidy` against `legacy_calc_block_subsidy`, which assumes a 1-BPS reference rate; this assumption silently broke back at P2.2 (which deliberately made `pre_crescendo_target_time_per_block` match the real 10 BPS rate instead of a fake historical 1 BPS), but went uncaught until now because the test is `#[ignore]`d and was never actually run this session before P3.2 — fixed the comparison to convert blocks→seconds and scale the legacy result by the real pre-crescendo BPS, rather than assuming 1:1. (3) Five `goref_*` integration tests (`testing/integration/src/consensus_integration_tests.rs`) replay real, literal historical Kaspa mainnet block data with real historical coinbase subsidies baked into the recorded fixtures — permanently incompatible with a from-scratch chain's own economics, not a bug to fix. Marked `#[ignore]` with an explanatory reason rather than deleted, so the fixtures/test code stay available for reference.
 
 ### P1.8 — Pool-op fee mechanism (revised: fee stamps)
 
-Direct question from the user: pool ops touch no transparent value, so *which
-denomination pays their fee*? First answer (same day) was a wallet-held transparent
-"fee reserve" — **rejected by the user as violating the non-negotiable core
-principle** that the wallet is a pure key manager holding nothing but note keys: no
-transparent balance, no address, no second thing to back up. Revised to the mechanism
-below, which formalizes the user's own proposals (wallet splits bills to fee-payable
-size / sender adds a small fee coin on top so the receiver's note arrives intact).
+Direct question from the user: pool ops touch no transparent value, so *which denomination pays their fee*? First answer (same day) was a wallet-held transparent "fee reserve" — **rejected by the user as violating the non-negotiable core principle** that the wallet is a pure key manager holding nothing but note keys: no transparent balance, no address, no second thing to back up. Revised to the mechanism below, which formalizes the user's own proposals (wallet splits bills to fee-payable size / sender adds a small fee coin on top so the receiver's note arrives intact).
 
-**Constraint (unchanged):** the fee cannot be shaved off a note. Notes are fixed
-denominations by design — every note of size X must be indistinguishable from every
-other — so an off-denomination 99.999-note can never exist. Fees must therefore be
-paid in *whole* small notes.
+**Constraint (unchanged):** the fee cannot be shaved off a note. Notes are fixed denominations by design — every note of size X must be indistinguishable from every other — so an off-denomination 99.999-note can never exist. Fees must therefore be paid in *whole* small notes.
 
-**Mechanism — fee stamps.** A pool-op transaction consumes one or more whole
-small-denomination notes ("stamps") via an embedded **redeem with no transparent
-output**: the stamp is destroyed and its value automatically becomes the miner's fee
-through Kaspa's native `fee = value-in − value-out` accounting. No transparent
-address appears anywhere; the payer never holds transparent value; miners need no new
-payment machinery. This yields one conservation rule unifying all five ops (the shape
-the P6.6 value-conservation test already anticipates):
+**Mechanism — fee stamps.** A pool-op transaction consumes one or more whole small-denomination notes ("stamps") via an embedded **redeem with no transparent output**: the stamp is destroyed and its value automatically becomes the miner's fee through Kaspa's native `fee = value-in − value-out` accounting. No transparent address appears anywhere; the payer never holds transparent value; miners need no new payment machinery. This yields one conservation rule unifying all five ops (the shape the P6.6 value-conservation test already anticipates):
 
 > Σ(note inputs) + Σ(transparent inputs) = Σ(note outputs) + Σ(transparent outputs) + fee
 
-Congestion pricing works natively: attaching more/larger stamps raises the tx's
-fee-per-mass in the existing mempool ordering — a denomination-quantized fee market,
-no protocol-fixed fee needed.
+Congestion pricing works natively: attaching more/larger stamps raises the tx's fee-per-mass in the existing mempool ordering — a denomination-quantized fee market, no protocol-fixed fee needed.
 
-**Fee-inclusive vs fee-additive is wallet UX, not protocol.** "Receiver gets 99.99 in
-valid change denominations" (fee taken from the amount) and "sender attaches a stamp
-on top, receiver gets the intact 100" (fee added) are the same chain mechanism; the
-wallet exposes the toggle, like cash registers vs stamped envelopes.
+**Fee-inclusive vs fee-additive is wallet UX, not protocol.** "Receiver gets 99.99 in valid change denominations" (fee taken from the amount) and "sender attaches a stamp on top, receiver gets the intact 100" (fee added) are the same chain mechanism; the wallet exposes the toggle, like cash registers vs stamped envelopes.
 
-**Bootstrap (first stamp problem):** a fresh receiver holding one bearer note needs a
-stamp to rotate it. Three composing answers, for P5.2/P5.6 to formalize:
-1. **Value-touching ops self-fund** — any op that changes the denomination multiset
-   can pay its fee from the value passing through, e.g. deep-split
-   100 → 9×10 + 9×1 + 9×0.1 + 9×0.01 (= 99.99) + 0.01 fee. One split yields stamps
-   forever; only the pure rotate requires a pre-existing stamp.
-2. **Handovers include a stamp** — the paper/QR bearer bundle carries the note key
-   plus a stamp key (cash etiquette: the stamped return envelope).
-3. **Mint produces stamps** — wallets mint a strip of stamps alongside big notes by
-   default.
+**Bootstrap (first stamp problem):** a fresh receiver holding one bearer note needs a stamp to rotate it. Three composing answers, for P5.2/P5.6 to formalize:
 
-**Stamp sizing (deliberately open until P6.6/P8.3 fee calibration):** with inherited
-relay params (~100 base-units/gram, small-tx mass) a pool op's fee lands around
-0.001–0.003 MAGLD, so either the 0.01 note is the standard stamp (clears comfortably)
-or the ladder gains a 0.001 tier. Relay-fee constants are ours to tune in the fork, so
-this is a calibration decision, not a design decision — the P1.6 set stands unchanged
-until then, with the 0.001 fee tier recorded as a live option.
+1. **Value-touching ops self-fund** — any op that changes the denomination multiset can pay its fee from the value passing through, e.g. deep-split 100 → 9×10 + 9×1 + 9×0.1 + 9×0.01 (= 99.99) + 0.01 fee. One split yields stamps forever; only the pure rotate requires a pre-existing stamp.
+2. **Handovers include a stamp** — the paper/QR bearer bundle carries the note key plus a stamp key (cash etiquette: the stamped return envelope).
+3. **Mint produces stamps** — wallets mint a strip of stamps alongside big notes by default.
 
-**True to principle (strictly better than the rejected fee-reserve).** No transparent 
-address attaches to any pool op — mint and redeem return to being the only transparent
-touchpoints, exactly as the architecture originally claimed. What remains: a stamp's
-lineage is public like any note's, so ops sharing stamp ancestry are linkable within
-the note graph. That is the same class of visibility as the already-disclosed
-rotate/split/merge graph structure (not a new category of leak), but P5.7 should name
-it explicitly, and P5.6 wallet hygiene can mitigate (don't pay for unrelated ops from
-one linkable stamp strip).
+**Stamp sizing (deliberately open until P6.6/P8.3 fee calibration):** with inherited relay params (~100 base-units/gram, small-tx mass) a pool op's fee lands around 0.001–0.003 MAGLD, so either the 0.01 note is the standard stamp (clears comfortably) or the ladder gains a 0.001 tier. Relay-fee constants are ours to tune in the fork, so this is a calibration decision, not a design decision — the P1.6 set stands unchanged until then, with the 0.001 fee tier recorded as a live option.
 
-**Destination (decided, see "Fee destination" row):** the stamp's value is never
-burned — "no transparent output" means none *inside the op transaction*; the value
-re-materializes in the including miner's coinbase through Kaspa's standard
-fee-collection path and returns to circulation. Per-block collection at 10 BPS is
-statistically hashrate-proportional with low variance (small miners collect fees
-continuously — a quiet virtue of GHOSTDAG's block frequency), so no fee-splitting
-machinery is needed. A fee-funded dev fund (even a capped, quota-then-miners one) was
-explicitly rejected — see the row's rationale.
+**True to principle (strictly better than the rejected fee-reserve).** No transparent address attaches to any pool op — mint and redeem return to being the only transparent touchpoints, exactly as the architecture originally claimed. What remains: a stamp's lineage is public like any note's, so ops sharing stamp ancestry are linkable within the note graph. That is the same class of visibility as the already-disclosed rotate/split/merge graph structure (not a new category of leak), but P5.7 should name it explicitly, and P5.6 wallet hygiene can mitigate (don't pay for unrelated ops from one linkable stamp strip).
+
+**Destination (decided, see "Fee destination" row):** the stamp's value is never burned — "no transparent output" means none *inside the op transaction*; the value re-materializes in the including miner's coinbase through Kaspa's standard fee-collection path and returns to circulation. Per-block collection at 10 BPS is statistically hashrate-proportional with low variance (small miners collect fees continuously — a quiet virtue of GHOSTDAG's block frequency), so no fee-splitting machinery is needed. A fee-funded dev fund (even a capped, quota-then-miners one) was explicitly rejected — see the row's rationale.
 
 ### P1.9 — Regulatory posture
 
-**Not legal advice — a recorded, eyes-open position. Real counsel required before
-mainnet (P9.6).**
+**Not legal advice — a recorded, eyes-open position. Real counsel required before mainnet (P9.6).**
 
-Marigold is published as open-source software by an individual/informal group, with
-no legal entity at this stage. This isn't a placeholder oversight: P1.5 (fair launch,
-no premine) and P1.8 (no dev fund, fees go to miners, never to a project-controlled
-address) mean there is no revenue, no treasury, and no commercial activity for an
-entity to hold — the "just published the code" posture is a factual description, not
-a legal fiction wrapped around a business. A Swiss-style nonprofit foundation
-(Ethereum Foundation's model) is the leading candidate *if* an entity becomes
-necessary later — e.g. to hold the domains/trademark, or organize the P9.1 finality-
-anchor trustee ceremony — but jurisdiction and structure are deliberately deferred,
-not decided now.
+Marigold is published as open-source software by an individual/informal group, with no legal entity at this stage. This isn't a placeholder oversight: P1.5 (fair launch, no premine) and P1.8 (no dev fund, fees go to miners, never to a project-controlled address) mean there is no revenue, no treasury, and no commercial activity for an entity to hold — the "just published the code" posture is a factual description, not a legal fiction wrapped around a business. A Swiss-style nonprofit foundation (Ethereum Foundation's model) is the leading candidate *if* an entity becomes necessary later — e.g. to hold the domains/trademark, or organize the P9.1 finality- anchor trustee ceremony — but jurisdiction and structure are deliberately deferred, not decided now.
 
-The project understands that the crypto landscape is changing and some coins 
-face a hostile regulated-exchange environment and it is expected to worsen on a known 
-timeline. Monero was delisted by Binance in February 2024, and by Kraken for EEA
-users in late 2024 (citing MiCA); OKX, Huobi, and Bitstamp took similar action;
-73 platforms delisted coins in 2024 alone. The EU's Anti-Money Laundering Regulation 
-(Regulation (EU) 2024/1624, "AMLR") takes full effect **10 July 2027** and will bar 
-regulated crypto-asset service providers (CASPs) from listing, storing, or
-processing certain coins and anonymous accounts, enforced by a new authority (AMLA).
-Notably, the AMLR targets *regulated intermediaries*, not individual self-custody or
-peer-to-peer use — there is no mechanism to ban a wallet or a DEX trade between two
-people, which is the activity Marigold is actually built around. Consistent with
-that reality (and consistent with the plan's original transparent-tier design),
-**distribution is expected to depend on CEXs willingness to accept the coin, DEXs and 
-peer-to-peer channels**. This posture will need real legal review before mainnet, 
-particularly once P1.5/P1.8 are cross-checked against P9.1's trustee-ceremony 
-organizing (which may itself imply some jurisdictional footprint even without a 
-formal entity).
+The project understands that the crypto landscape is changing and some coins face a hostile regulated-exchange environment and it is expected to worsen on a known timeline. Monero was delisted by Binance in February 2024, and by Kraken for EEA users in late 2024 (citing MiCA); OKX, Huobi, and Bitstamp took similar action; 73 platforms delisted coins in 2024 alone. The EU's Anti-Money Laundering Regulation (Regulation (EU) 2024/1624, "AMLR") takes full effect **10 July 2027** and will bar regulated crypto-asset service providers (CASPs) from listing, storing, or processing certain coins and anonymous accounts, enforced by a new authority (AMLA). Notably, the AMLR targets *regulated intermediaries*, not individual self-custody or peer-to-peer use — there is no mechanism to ban a wallet or a DEX trade between two people, which is the activity Marigold is actually built around. Consistent with that reality (and consistent with the plan's original transparent-tier design), **distribution is expected to depend on CEXs willingness to accept the coin, DEXs and peer-to-peer channels**. This posture will need real legal review before mainnet, particularly once P1.5/P1.8 are cross-checked against P9.1's trustee-ceremony organizing (which may itself imply some jurisdictional footprint even without a formal entity).
 
 ### P5.2 — Transaction format decisions
 
-Several smaller, genuine design choices bundled into one spec section
-([POOL-SPEC.md](POOL-SPEC.md)'s P5.2), recorded together since they're tightly coupled:
+Several smaller, genuine design choices bundled into one spec section ([POOL-SPEC.md](POOL-SPEC.md)'s P5.2), recorded together since they're tightly coupled:
 
-**Subnetwork mechanism**: a dedicated user-lane namespace
-(`SubnetworkId::from_namespace`), not the reserved `RegistrySubnetwork` path. Checked
-directly (grep) that `SUBNETWORK_ID_REGISTRY` has no active registration/dispatch
-mechanism anywhere in the codebase today — only test-fixture usages — while
-`from_namespace` user lanes are the real, already-implemented mechanism backing
-Toccata's "non-native/non-coinbase subnetworks" feature. Using the mechanism that's
-actually load-bearing today, not the one that merely sounds more official.
+**Subnetwork mechanism**: a dedicated user-lane namespace (`SubnetworkId::from_namespace`), not the reserved `RegistrySubnetwork` path. Checked directly (grep) that `SUBNETWORK_ID_REGISTRY` has no active registration/dispatch mechanism anywhere in the codebase today — only test-fixture usages — while `from_namespace` user lanes are the real, already-implemented mechanism backing Toccata's "non-native/non-coinbase subnetworks" feature. Using the mechanism that's actually load-bearing today, not the one that merely sounds more official.
 
-**Unifying rotate/split/merge into one `TransferOp`**: the plan's own text already
-frames split/merge as "a transfer with a different multiset in vs. out" — taking that
-literally collapses three near-identical wire shapes into one (consumed notes,
-produced notes, one conservation check), with "rotate"/"split"/"merge" surviving only
-as descriptive labels for what a given `Transfer`'s multiset happened to do. Simpler
-spec, simpler future implementation, and it lets one transaction freely mix e.g.
-split-and-partial-rotate without a fourth wire shape ever being needed.
+**Unifying rotate/split/merge into one `TransferOp`**: the plan's own text already frames split/merge as "a transfer with a different multiset in vs. out" — taking that literally collapses three near-identical wire shapes into one (consumed notes, produced notes, one conservation check), with "rotate"/"split"/"merge" surviving only as descriptive labels for what a given `Transfer`'s multiset happened to do. Simpler spec, simpler future implementation, and it lets one transaction freely mix e.g. split-and-partial-rotate without a fourth wire shape ever being needed.
 
-**Freshness window: 36,000 DAA-score units (≈1 hour at 10 BPS)**, the anti-replay
-anchor every pool-op signature covers. Chosen, not left as a placeholder: long enough
-that no realistic in-person or remote payment flow (which settle in seconds at 10 BPS)
-risks the signature expiring mid-transaction; short enough that a leaked or abandoned
-signed op — a stale invoice, a bearer QR handed over late — stops being a live
-liability within the same session it was created. Same category as P1.8's stamp-sizing
-note: a concrete recommended default subject to real-world calibration at Phase 6/P6.6,
-not a first-principles-derived constant.
+**Freshness window: 36,000 DAA-score units (≈1 hour at 10 BPS)**, the anti-replay anchor every pool-op signature covers. Chosen, not left as a placeholder: long enough that no realistic in-person or remote payment flow (which settle in seconds at 10 BPS) risks the signature expiring mid-transaction; short enough that a leaked or abandoned signed op — a stale invoice, a bearer QR handed over late — stops being a live liability within the same session it was created. Same category as P1.8's stamp-sizing note: a concrete recommended default subject to real-world calibration at Phase 6/P6.6, not a first-principles-derived constant.
 
-**No new "fee stamp" data type**: fee stamps (P1.8) turned out to need zero new wire
-format once `Transfer`'s conservation rule existed — a stamp is simply a consumed
-serial with no matching produced note, and the resulting value gap is fee, by the same
-rule that makes self-funding split/merge work. Discovered while writing the spec, not
-planned in advance; recorded here because it simplifies P1.8's mechanism further than
-that decision's own text anticipated (no "embedded redeem" sub-structure needed — it's
-the same conservation check already required for every other reason).
+**No new "fee stamp" data type**: fee stamps (P1.8) turned out to need zero new wire format once `Transfer`'s conservation rule existed — a stamp is simply a consumed serial with no matching produced note, and the resulting value gap is fee, by the same rule that makes self-funding split/merge work. Discovered while writing the spec, not planned in advance; recorded here because it simplifies P1.8's mechanism further than that decision's own text anticipated (no "embedded redeem" sub-structure needed — it's the same conservation check already required for every other reason).
 
-**Real consensus-rule gap found, not assumed away**: `check_transaction_inputs_count`
-(`consensus/src/processes/transaction_validator/tx_validation_in_isolation.rs:78-80`)
-currently rejects any non-coinbase transaction with zero inputs. A pure
-`Transfer`/`Redeem` has zero transparent inputs by design, so this needs an explicit
-exception before Phase 6 implementation — checked directly against the real validation
-code rather than assuming "touches no transparent value" already worked under existing
-rules. Flagged for P5.3 to formalize as a consensus rule change.
+**Real consensus-rule gap found, not assumed away**: `check_transaction_inputs_count` (`consensus/src/processes/transaction_validator/tx_validation_in_isolation.rs:78-80`) currently rejects any non-coinbase transaction with zero inputs. A pure `Transfer`/`Redeem` has zero transparent inputs by design, so this needs an explicit exception before Phase 6 implementation — checked directly against the real validation code rather than assuming "touches no transparent value" already worked under existing rules. Flagged for P5.3 to formalize as a consensus rule change.
 
 ### P5.6 — Key-algorithm-deprecation mechanism
 
-New design, not transcribed from anywhere: the plan asks P5.6 to "include the
-network-signaled key-rotation upgrade story from the architecture paragraph," but no such
-paragraph exists anywhere else in this repo (checked via grep before writing anything).
-Designed one from scratch, reusing only mechanisms already specified elsewhere rather
-than inventing new ones: a future key-algorithm deprecation is a `ForkActivation`-gated
-consensus rule (the identical mechanism `crescendo_activation`/`toccata_activation`
-already use) that blocks *new* notes from using a deprecated key format while leaving
-existing deprecated-format notes fully spendable via ordinary rotation — mirroring how
-Kaspa addresses already support multiple coexisting key formats via a `Version` field.
-Wallets learn of the schedule via software updates or RPC query, then proactively
-self-sweep using the exact same rotate mechanism already specified for the
-same-key-in-two-wallets hazard. Deliberately did not design a second key format to
-support today — P5.1 fixes exactly one (secp256k1 Schnorr) at launch; this section specs
-only the *mechanism* a migration would use when one is eventually needed.
+New design, not transcribed from anywhere: the plan asks P5.6 to "include the network-signaled key-rotation upgrade story from the architecture paragraph," but no such paragraph exists anywhere else in this repo (checked via grep before writing anything). Designed one from scratch, reusing only mechanisms already specified elsewhere rather than inventing new ones: a future key-algorithm deprecation is a `ForkActivation`-gated consensus rule (the identical mechanism `crescendo_activation`/`toccata_activation` already use) that blocks *new* notes from using a deprecated key format while leaving existing deprecated-format notes fully spendable via ordinary rotation — mirroring how Kaspa addresses already support multiple coexisting key formats via a `Version` field. Wallets learn of the schedule via software updates or RPC query, then proactively self-sweep using the exact same rotate mechanism already specified for the same-key-in-two-wallets hazard. Deliberately did not design a second key format to support today — P5.1 fixes exactly one (secp256k1 Schnorr) at launch; this section specs only the *mechanism* a migration would use when one is eventually needed.
 
 ### P5.8 — Finality anchor parameters (k, n, cadence, depth, T, M, K, sunset schedule)
 
-The plan's own text decided the *mechanism* (federated finality guard, sunsetting) and
-recommended some values; this session chose the exact numbers, each with reasoning
-recorded here since they're genuinely consequential (real chain security parameters, not
-formatting choices) and P5.9's external cryptography review will need to evaluate them
-specifically, not just the mechanism shape.
+The plan's own text decided the *mechanism* (federated finality guard, sunsetting) and recommended some values; this session chose the exact numbers, each with reasoning recorded here since they're genuinely consequential (real chain security parameters, not formatting choices) and P5.9's external cryptography review will need to evaluate them specifically, not just the mechanism shape.
 
-- **3-of-5 trustees**: adopted the plan's own recommendation as-is — tolerates 2
-  simultaneous unavailable/uncooperative trustees, requires majority collusion/compromise
-  for any misbehavior, small enough that "independent orgs/geos" stays a checkable
-  property rather than diffuse to meaninglessness.
-- **30-second launch cadence, 600-DAA-score (~1 minute) anchor depth**: the tight end of
-  the plan's own 30-60s range, chosen deliberately — the chain is most vulnerable exactly
-  at launch (smallest honest hashrate, largest relative size of any external ASIC fleet
-  that could be redirected against it), so the strongest protection belongs there; it
-  eases via the staged decay schedule as real security arrives, not by starting loose.
-- **T = 10⁶ × genesis difficulty target, not a fraction of Kaspa mainnet's difficulty.**
-  This is a genuine refinement over the plan's own literal framing ("any sliver of
-  Kaspa's ASIC fleet" suggested comparing to Kaspa's real difficulty), caught while
-  writing the spec: a threshold referencing another chain's difficulty isn't on-chain
-  data Marigold's own consensus can deterministically verify, which would directly
-  violate the plan's own "exact deterministic function of on-chain data" requirement (a
-  fuzzy/external definition is explicitly called out as a chain-split bug). Redefined
-  purely against Marigold's own genesis difficulty instead — fully self-contained,
-  no oracle, no off-chain input, and a million-fold sustained hashrate increase from a
-  cold launch is still a strong organic-adoption signal in its own right. The mechanism
-  (a fixed multiplier of genesis difficulty) is the durable part; the exact `10⁶`
-  multiplier is a calibration point, same treatment as P1.8's stamp sizing and P2.5's
-  genesis timestamp.
-- **M = 6 months, K = 5 years**: M balances catching a fleeting difficulty spike (needs
-  to be long enough that sustaining it is a real, expensive commitment) against not
-  delaying legitimate easing once real security has arrived; K is an independent time
-  floor long enough that any attacker patiently mining honestly toward the T threshold
-  has sunk years of real resources with no guaranteed payoff, short enough not to
-  indefinitely extend the trust period for a chain that's clearly already succeeded.
-  Both are the plan's named parameters with this session's chosen concrete values.
-- **5-stage cadence decay (30s → 1h → 1d → 1wk → advisory-only) and a 20-year hard
-  maximum DAA score (6,311,520,000) for unconditional trustee-key expiry**: the plan's
-  own example shape (30s → hourly → daily → weekly → never), given concrete triggers —
-  Stage 1 on the difficulty condition alone (an early, partial signal), Stage 2 on the
-  full T+M+K retirement trigger, Stage 3 two years after that, Stage 4 at a fixed
-  20-year mark regardless of any network condition, per the plan's explicit "trust must
-  end even if growth disappoints" requirement. 20 years was chosen as a multiple of the
-  K=5-year floor with real margin (allows the full staged decay to play out even for a
-  chain that only just barely clears retirement near the K floor) while still being a
-  genuinely finite, non-indefinite commitment.
-- **Honesty about the limits of a k-of-n federation**: recorded explicitly in the spec,
-  not glossed over — a genuinely compromised 3-of-5 majority *can* sign a false anchor
-  endorsing an attacker's chain. This is the same trust model every k-of-n federation
-  carries; the mitigation is trustee independence (a practical barrier, not a
-  cryptographic guarantee) and the sunset itself (bounding how long that trust is ever
-  extended, not eliminating the need for it during the young-chain phase where it's
-  genuinely the best available option per the plan's own rationale).
+- **3-of-5 trustees**: adopted the plan's own recommendation as-is — tolerates 2 simultaneous unavailable/uncooperative trustees, requires majority collusion/compromise for any misbehavior, small enough that "independent orgs/geos" stays a checkable property rather than diffuse to meaninglessness.
+- **30-second launch cadence, 600-DAA-score (~1 minute) anchor depth**: the tight end of the plan's own 30-60s range, chosen deliberately — the chain is most vulnerable exactly at launch (smallest honest hashrate, largest relative size of any external ASIC fleet that could be redirected against it), so the strongest protection belongs there; it eases via the staged decay schedule as real security arrives, not by starting loose.
+- **T = 10⁶ × genesis difficulty target, not a fraction of Kaspa mainnet's difficulty.** This is a genuine refinement over the plan's own literal framing ("any sliver of Kaspa's ASIC fleet" suggested comparing to Kaspa's real difficulty), caught while writing the spec: a threshold referencing another chain's difficulty isn't on-chain data Marigold's own consensus can deterministically verify, which would directly violate the plan's own "exact deterministic function of on-chain data" requirement (a fuzzy/external definition is explicitly called out as a chain-split bug). Redefined purely against Marigold's own genesis difficulty instead — fully self-contained, no oracle, no off-chain input, and a million-fold sustained hashrate increase from a cold launch is still a strong organic-adoption signal in its own right. The mechanism (a fixed multiplier of genesis difficulty) is the durable part; the exact `10⁶` multiplier is a calibration point, same treatment as P1.8's stamp sizing and P2.5's genesis timestamp.
+- **M = 6 months, K = 5 years**: M balances catching a fleeting difficulty spike (needs to be long enough that sustaining it is a real, expensive commitment) against not delaying legitimate easing once real security has arrived; K is an independent time floor long enough that any attacker patiently mining honestly toward the T threshold has sunk years of real resources with no guaranteed payoff, short enough not to indefinitely extend the trust period for a chain that's clearly already succeeded. Both are the plan's named parameters with this session's chosen concrete values.
+- **5-stage cadence decay (30s → 1h → 1d → 1wk → advisory-only) and a 20-year hard maximum DAA score (6,311,520,000) for unconditional trustee-key expiry**: the plan's own example shape (30s → hourly → daily → weekly → never), given concrete triggers — Stage 1 on the difficulty condition alone (an early, partial signal), Stage 2 on the full T+M+K retirement trigger, Stage 3 two years after that, Stage 4 at a fixed 20-year mark regardless of any network condition, per the plan's explicit "trust must end even if growth disappoints" requirement. 20 years was chosen as a multiple of the K=5-year floor with real margin (allows the full staged decay to play out even for a chain that only just barely clears retirement near the K floor) while still being a genuinely finite, non-indefinite commitment.
+- **Honesty about the limits of a k-of-n federation**: recorded explicitly in the spec, not glossed over — a genuinely compromised 3-of-5 majority *can* sign a false anchor endorsing an attacker's chain. This is the same trust model every k-of-n federation carries; the mitigation is trustee independence (a practical barrier, not a cryptographic guarantee) and the sunset itself (bounding how long that trust is ever extended, not eliminating the need for it during the young-chain phase where it's genuinely the best available option per the plan's own rationale).
 
 ### Note vault, backup, and restore-rotation policy (P7.6, decided ahead of execution, 2026-08-17)
 
-Design worked out with the user before P7.6's implementation, replacing P5.6's original
-"paper QR is the backup" framing with a **note vault** — the vault is the primary,
-day-to-day backup mechanism; the paper QR (P5.6, already specced) survives as one
-printable *export* of the same encrypted entries, not a separate design. Recorded here
-ahead of execution per this file's own convention (P1.2, P1.3, ...) — POOL-SPEC.md P5.6
-gets the corresponding spec-text update alongside this entry.
+Design worked out with the user before P7.6's implementation, replacing P5.6's original "paper QR is the backup" framing with a **note vault** — the vault is the primary, day-to-day backup mechanism; the paper QR (P5.6, already specced) survives as one printable *export* of the same encrypted entries, not a separate design. Recorded here ahead of execution per this file's own convention (P1.2, P1.3, ...) — POOL-SPEC.md P5.6 gets the corresponding spec-text update alongside this entry.
 
-**Storage format — one file per note, plaintext filename, encrypted contents.** A
-`notes/` directory with one status subdirectory per `NoteStatus` (`active/`,
-`handed-over/`, `superseded/`) — a status change is an atomic file rename, and the
-directory tree is self-describing without opening a single file. Each note's file is
-named for its public, already-on-chain-visible metadata (denomination/value; serial),
-and its *contents* — `sk`, plus enough to reconstruct the row — are encrypted under one
-per-wallet **vault key K** (XChaCha20Poly1305, per-file nonce; the same primitive the
-existing wallet encryption already uses, not a new one). This is a deliberate reversal
-of today's implementation (P7.1's single encrypted map, decrypted-and-reencrypted in
-full on every touch — a real weakness the user identified: every single-note operation
-today transiently holds *every* note key in memory, not just backup/restore). Balance
-and coin selection read filenames only, zero decryption; a spend decrypts exactly the
-selected files. The exposure window shrinks from "every key, every operation" to "only
-the notes being spent, only while spending" — it cannot reach zero (signing needs the
-plaintext `sk` momentarily and K must exist in memory for that moment), but this is the
-smallest that window gets without a hardware signer.
+**Storage format — one file per note, plaintext filename, encrypted contents.** A `notes/` directory with one status subdirectory per `NoteStatus` (`active/`, `handed-over/`, `superseded/`) — a status change is an atomic file rename, and the directory tree is self-describing without opening a single file. Each note's file is named for its public, already-on-chain-visible metadata (denomination/value; serial), and its *contents* — `sk`, plus enough to reconstruct the row — are encrypted under one per-wallet **vault key K** (XChaCha20Poly1305, per-file nonce; the same primitive the existing wallet encryption already uses, not a new one). This is a deliberate reversal of today's implementation (P7.1's single encrypted map, decrypted-and-reencrypted in full on every touch — a real weakness the user identified: every single-note operation today transiently holds *every* note key in memory, not just backup/restore). Balance and coin selection read filenames only, zero decryption; a spend decrypts exactly the selected files. The exposure window shrinks from "every key, every operation" to "only the notes being spent, only while spending" — it cannot reach zero (signing needs the plaintext `sk` momentarily and K must exist in memory for that moment), but this is the smallest that window gets without a hardware signer.
 
-**Accepted trade-off, stated openly**: plaintext filenames (value, and implicitly serial)
-leak local inventory metadata to anyone who can list the directory — more than today's
-single-blob format leaks (its size alone is a much coarser signal). Judged acceptable:
-a local observer that far in is usually local compromise regardless of file layout, and
-blinding filenames breaks the compute-without-decrypting property this format exists for.
-Primitive and legible beats clever here.
+**Accepted trade-off, stated openly**: plaintext filenames (value, and implicitly serial) leak local inventory metadata to anyone who can list the directory — more than today's single-blob format leaks (its size alone is a much coarser signal). Judged acceptable: a local observer that far in is usually local compromise regardless of file layout, and blinding filenames breaks the compute-without-decrypting property this format exists for. Primitive and legible beats clever here.
 
-**24-word vault key ceremony, explicitly not a derivation seed.** K itself — the file
-encryption key, not a BIP32/BIP39-style master key deriving note keys — is presented
-once, at vault creation, as 24 words (the classic wallet-onboarding shape users already
-recognize, reused for its ceremony familiarity, not its cryptographic properties). For
-daily use K is additionally stored wrapped under the ordinary wallet password, exactly
-like every other secret this wallet already protects that way; the 24 words exist purely
-as the out-of-band recovery path. This does not weaken P5.6's opening line ("no 24-word
-seed tied to one master key") — note keys remain independently generated, one per note,
-undiscoverable from K or the 24 words alone. Recovery therefore needs **both** the words
-*and* the files: an encrypted vault copy on fully untrusted storage (cloud, a found USB
-drive) is safe without the words; the words alone recover nothing, since bearer note keys
-aren't derivable. Stated as a strength, not just a caveat — but the wallet UX must say it
-loudly, since users trained on HD wallets will assume the words alone are sufficient.
+**24-word vault key ceremony, explicitly not a derivation seed.** K itself — the file encryption key, not a BIP32/BIP39-style master key deriving note keys — is presented once, at vault creation, as 24 words (the classic wallet-onboarding shape users already recognize, reused for its ceremony familiarity, not its cryptographic properties). For daily use K is additionally stored wrapped under the ordinary wallet password, exactly like every other secret this wallet already protects that way; the 24 words exist purely as the out-of-band recovery path. This does not weaken P5.6's opening line ("no 24-word seed tied to one master key") — note keys remain independently generated, one per note, undiscoverable from K or the 24 words alone. Recovery therefore needs **both** the words *and* the files: an encrypted vault copy on fully untrusted storage (cloud, a found USB drive) is safe without the words; the words alone recover nothing, since bearer note keys aren't derivable. Stated as a strength, not just a caveat — but the wallet UX must say it loudly, since users trained on HD wallets will assume the words alone are sufficient.
 
-**Manifest**: an optional plaintext companion file — `(serial, value, last-rotated-at)`
-per note, nothing else — riding alongside the encrypted vault copy for human and tooling
-legibility. Requires a `last_rotated_at` field the current schema doesn't yet carry
-(small addition alongside P7.6's implementation, not a design change).
+**Manifest**: an optional plaintext companion file — `(serial, value, last-rotated-at)` per note, nothing else — riding alongside the encrypted vault copy for human and tooling legibility. Requires a `last_rotated_at` field the current schema doesn't yet carry (small addition alongside P7.6's implementation, not a design change).
 
-**Two-tier verification, the light tier needing no secrets at all.** A serial's
-`(denomination, pk)` binding is immutable for its life — rotation consumes a serial and
-mints a new one, it never re-points an existing one — so "serial still exists in the
-pool" is exactly equivalent to "note still unspent," and serials sit in plaintext
-filenames/the manifest already. **Light verify**: check every manifest serial against
-live pool state (`get_notes_by_serial`, any node) — zero decryption, zero secrets in
-memory, no rotation, works even without the 24 words. Lets a user (or an automated
-watchdog they've deliberately pointed at a manifest, accepting the inventory-leak
-trade-off to that watchdog) confirm a backup's health without ever restoring. **Deep
-verify**: additionally decrypt and re-derive each `pk` to confirm ciphertext integrity —
-catches a corrupted file light verify can't — the mandatory first step of an actual
-restore, not something a passive health check needs.
+**Two-tier verification, the light tier needing no secrets at all.** A serial's `(denomination, pk)` binding is immutable for its life — rotation consumes a serial and mints a new one, it never re-points an existing one — so "serial still exists in the pool" is exactly equivalent to "note still unspent," and serials sit in plaintext filenames/the manifest already. **Light verify**: check every manifest serial against live pool state (`get_notes_by_serial`, any node) — zero decryption, zero secrets in memory, no rotation, works even without the 24 words. Lets a user (or an automated watchdog they've deliberately pointed at a manifest, accepting the inventory-leak trade-off to that watchdog) confirm a backup's health without ever restoring. **Deep verify**: additionally decrypt and re-derive each `pk` to confirm ciphertext integrity — catches a corrupted file light verify can't — the mandatory first step of an actual restore, not something a passive health check needs.
 
-**Restore-time rotation: default on, explicitly overridable — reversing P5.6's original
-"always rotate immediately" rule for restore specifically** (bearer *receive* keeps
-rotating unconditionally — a different threat model, argued below). The original
-always-rotate rule was written against the paper-backup threat model, where the password
-may be printed on the same page — a leaked backup there *is* a leaked wallet, so
-immediate rotation is the only reasonable default. The vault breaks that coupling: an
-encrypted copy is safe on fully untrusted storage without the words, so "I restored from
-a backup I know never left my control" (migrating to a new machine, wiping an old device)
-no longer needs the same urgency. But device *loss* is the more common restore trigger,
-and a lost device carries the password-wrapped copy of K — exactly the case where prompt
-rotation still matters — so the default stays on. Flow: **deep-verify against live chain
-first (report: N notes still live, M already gone) → offer a batched, randomly-spaced,
-randomly-composed rotation (2-5 transactions, mixed denominations per batch — sorted-by-
-value batches would leak structure the mixing is meant to hide) → user may accept
-(default), defer, or decline → nag while deferred (notes remain fully spendable
-meanwhile — Hot is an urgency flag, not a lock) → prompt for a fresh backup copy the
-moment rotation completes**, since the whole point was invalidating the old one. The
-dialog states both sides plainly: rotating invalidates every old backup copy including
-any stolen one; deferring keeps old backups valid including any stolen one.
+**Restore-time rotation: default on, explicitly overridable — reversing P5.6's original "always rotate immediately" rule for restore specifically** (bearer *receive* keeps rotating unconditionally — a different threat model, argued below). The original always-rotate rule was written against the paper-backup threat model, where the password may be printed on the same page — a leaked backup there *is* a leaked wallet, so immediate rotation is the only reasonable default. The vault breaks that coupling: an encrypted copy is safe on fully untrusted storage without the words, so "I restored from a backup I know never left my control" (migrating to a new machine, wiping an old device) no longer needs the same urgency. But device *loss* is the more common restore trigger, and a lost device carries the password-wrapped copy of K — exactly the case where prompt rotation still matters — so the default stays on. Flow: **deep-verify against live chain first (report: N notes still live, M already gone) → offer a batched, randomly-spaced, randomly-composed rotation (2-5 transactions, mixed denominations per batch — sorted-by- value batches would leak structure the mixing is meant to hide) → user may accept (default), defer, or decline → nag while deferred (notes remain fully spendable meanwhile — Hot is an urgency flag, not a lock) → prompt for a fresh backup copy the moment rotation completes**, since the whole point was invalidating the old one. The dialog states both sides plainly: rotating invalidates every old backup copy including any stolen one; deferring keeps old backups valid including any stolen one.
 
-**Accepted trade-off, stated openly**: batching/spacing *reduces* the "entire wealth
-rotated at one timestamp" fingerprint, it does not eliminate linkage — each batch's own
-consumed-serials list is still an explicit on-chain link, and a patient observer
-correlating rotation-shaped transactions across the spacing window can still cluster
-them. This is a genuine improvement over one all-at-once sweep, not a privacy guarantee;
-documented as such rather than oversold.
+**Accepted trade-off, stated openly**: batching/spacing *reduces* the "entire wealth rotated at one timestamp" fingerprint, it does not eliminate linkage — each batch's own consumed-serials list is still an explicit on-chain link, and a patient observer correlating rotation-shaped transactions across the spacing window can still cluster them. This is a genuine improvement over one all-at-once sweep, not a privacy guarantee; documented as such rather than oversold.
 
-**Implementation note — this is the existing full self-sweep, not new machinery.** P5.6
-already names "rotate everything" a deliberate full self-sweep ("a real recovery action,
-not just hygiene") for exactly this revocation purpose. Restore-time rotation should be
-built as that same `sweep` primitive with a confirmation dialog in front, giving the
-wallet a standalone panic button ("I think my backup leaked") for free alongside the
-restore flow, not a second implementation of the same idea.
+**Implementation note — this is the existing full self-sweep, not new machinery.** P5.6 already names "rotate everything" a deliberate full self-sweep ("a real recovery action, not just hygiene") for exactly this revocation purpose. Restore-time rotation should be built as that same `sweep` primitive with a confirmation dialog in front, giving the wallet a standalone panic button ("I think my backup leaked") for free alongside the restore flow, not a second implementation of the same idea.
