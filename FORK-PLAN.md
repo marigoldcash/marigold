@@ -33,7 +33,7 @@ required for the algorythm and old standards are no longer good enough.
 ---
 
 Below follows a tick-offable plan for a **non-shielded, very simplistic fixed-denomination 
-transparent bearer-note coin** — "digital cash with a fully auditable ledger" build step by step 
+transparent bearer-note coin** — "digital cash with a fully auditable chain" build step by step 
 as a fork of rusty-kaspa. Written so that each step is small enough to be executed correctly
 by a less capable coder in a single coding session.
 
@@ -2036,6 +2036,19 @@ wallet. WASM/mobile wallets are post-launch — CLI proves the protocol.*
 *Goal: the code survives adversaries, crashes, spam, and time. Runs partly in parallel
 with late Phase 7. The testnet soak (P8.7) is calendar time — start it as early as it can
 stand.*
+
+- [ ] **P8.0 — Single recovery secret: vault-wrapped account mnemonic.** Per
+  DECISIONS.md "Single recovery secret" (2026-08-19): store the BIP32 account mnemonic
+  as a K-encrypted entry in the note vault; move the vault's 24-word ceremony to wallet
+  creation; stop presenting the 12-word account mnemonic in the wizard; extend `note
+  vault restore` to also restore the ledger account. End state: one daily password, one
+  24-word recovery secret; recovery is always files + key, for both tiers. Existing
+  wallets/accounts stay importable. Update WALLET.md sections 3, 6, and 11 in the same
+  step.
+  ✅ *Verify:* fresh-wallet wizard shows exactly one recovery ceremony (the 24 words);
+  on a blank wallet, `note vault restore <backup-dir> <24 words>` recovers both the
+  notes and the ledger account (extend the section-11 pexpect test to assert the
+  ledger balance reappears).
 
 - [ ] **P8.1 — Fuzz the op parser.** `cargo fuzz` targets for the P6.3 stateless parser
   and the paper-backup/QR decoders; run to coverage plateau; fix every panic/OOM.

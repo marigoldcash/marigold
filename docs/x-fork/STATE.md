@@ -4,9 +4,9 @@ Snapshot of everything decided and built so far, so any fresh coding session on 
 machine can continue from the repo alone. Read this together with [FORK-PLAN.md](../../FORK-PLAN.md).
 Update this file whenever off-repo state changes (domains, accounts, infra).
 
-Last updated: 2026-08-17 (P7.7 complete — wallet UX & docs pass, WALLET.md written and
-validated against a real interactive kaspa-cli session; next: P7.8, end-to-end smoke
-extension)
+Last updated: 2026-08-19 (Phase 7 complete; pre-publication docs pass in progress —
+README drafted, nomenclature ruling recorded and swept, single-recovery-secret decision
+recorded as new step P8.0; next: provision testnet hosts / start Phase 8)
 
 ## What this project is
 
@@ -148,12 +148,25 @@ substitute for it.
      recorded historical rationale (kept per the don't-rewrite-history
      convention). **Still open: the website repo**
      (marigoldcash/marigoldcash.github.io) needs the same check.
+     **Extended 2026-08-19 by the "Nomenclature: note / ledger / chain" ruling**
+     (DECISIONS.md): fixed denominations = "notes", the arbitrary-amount transparent
+     side = "the ledger", the whole structure = "the chain"; tagline is now "digital
+     cash with a fully auditable chain". Swept same day (README, WALLET.md
+     instructional text, FORK-PLAN self-description; POOL-SPEC deliberately unchanged —
+     frozen reviewed text, mapping recorded in the decision row). The website repo
+     needs this sweep too.
   2. **Root README.md is still the inherited rusty-kaspa README** ("Kaspa on
      Rust", Kaspa-network language, DeepWiki badge pointing at
      kaspanet/rusty-kaspa) — discovered during the sweep. Needs a real
      Marigold README before publication: what the project is (per the
      positioning decision), build instructions that match this repo, links
-     to FORK-PLAN/docs.
+     to FORK-PLAN/docs. **Drafted 2026-08-19** (positioning claims, pre-mainnet
+     scam warning, parameters table, Kaspa relationship, AI-disclosure sentence,
+     build/run/mining/wallet sections) — awaiting the user's final read before
+     this item closes. Related open question from the same session: renaming
+     the `kaspad` binary to `marigoldd` (user leaning yes; Cargo `[[bin]]`
+     rename + sweep of Ansible/docs/scripts; crate names stay `kaspa-*` per
+     ground rule 1).
   3. **AI-assistance references — DECIDED (2026-08-19, user-ratified)**: keep
      the development record exactly as-is (no history scrub, no "AI-programmed
      coin" marketing; disclosure is one matter-of-fact sentence that lands with 

@@ -97,7 +97,7 @@ needed in the same session.
 
 ## 4. Fund the wallet
 
-Every note-pool operation needs a transparent balance to mint from. Mine to the
+Every note-pool operation needs a ledger balance to mint from. Mine to the
 receive address printed in step 3, from a second terminal:
 
 ```bash
@@ -115,7 +115,7 @@ SMOKE.md's P4.2 entry found — not a consensus rule). At simnet's 10 BPS,
 list
 ```
 
-which shows every account's transparent balance (mature and pending) and address.
+which shows every account's ledger balance (mature and pending) and address.
 Wait until the mature figure is nonzero before continuing.
 
 ## 5. Mint, check balance, list notes
@@ -244,7 +244,7 @@ for the exact payment, and the instant it confirms, sweeps every note that lande
 the shared key to its own fresh key — the shared-key exposure window is bounded to
 this one call.
 
-## 10. Redeem notes back to transparent balance
+## 10. Redeem notes back to the ledger
 
 ```
 note redeem <serial> [<serial> ...]
@@ -252,7 +252,7 @@ note redeem amount <amount>
 ```
 
 Either redeem specific notes by serial, or let the wallet pick enough notes to cover
-at least `<amount>`. Reports the redeemed value, fee, and net transparent balance
+at least `<amount>`. Reports the redeemed value, fee, and net ledger balance
 gain.
 
 ## 11. Restore from a vault backup — "24 words + the files"
