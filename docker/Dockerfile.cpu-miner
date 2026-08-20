@@ -1,0 +1,59 @@
+# kaspa-miner, built from marigoldcash/marigold-miner -- our own patched fork
+# of elichai/kaspa-miner (https://github.com/marigoldcash/marigold-miner),
+# not upstream directly.
+#
+# `main` on that fork tracks elichai/kaspa-miner unmodified, so upstream
+# merges stay easy; the `marigold` branch built here carries exactly one
+# patch: proto/rpc.proto's RpcBlockHeader is missing field 16
+# (poolCommitment), this fork's P6.5 addition for the note pool (see
+# rpc/grpc/core/proto/rpc.proto, POOL-SPEC.md). Without it, an unmodified
+# kaspa-miner can find blocks (kHeavyHash itself is unchanged) but every
+# submission is rejected server-side -- verified directly, 2026-08-20:
+# `RpcHash::from_str(&item.pool_commitment)?` in
+# rpc/grpc/core/src/convert/header.rs hard-fails on the empty string an
+# unaware client sends, with "Hex parsing error: Invalid input length 64".
+# Full writeup, including why this matters for any real external solo miner
+# joining the public testnet (not just this Docker image): docker/README.md
+# and marigold-miner's own commit message on the `marigold` branch.
+#
+# marigold-miner is PRIVATE for now (public planned) -- the clone below needs
+# a GitHub token with read access, passed as a BuildKit secret so it's never
+# written to an image layer or the build cache, only used transiently for
+# this one RUN:
+#   docker build --secret id=github_token,env=GITHUB_TOKEN -f Dockerfile.cpu-miner ..
+# (docker compose build reads the same secret via docker-compose.yml's
+# top-level `secrets:` block -- see that file). Once marigold-miner goes
+# public, drop the --secret/token entirely and this still works unmodified
+# (an unauthenticated https:// clone of a public repo doesn't care about a
+# stray token in the URL; simplest to remove it at that point regardless).
+#
+# MARIGOLD_MINER_REF pins the exact commit -- and, just as importantly,
+# busts Docker's layer cache when it changes. A bare `git clone && git
+# checkout <branch>` RUN instruction caches on its own literal text, not on
+# what's actually at the tip of that branch, so a second patch pushed to
+# `marigold` silently built from the stale first-patch clone the first time
+# this bit us (2026-08-20) -- `docker build --no-cache` recovered it that
+# time, but the real fix is making the ref part of the cache key, same
+# principle as this project's own build role keying its binary cache by
+# commit hash (docs/x-fork/NOTES.md's P2.3/P4.2 stale-binary lesson).
+
+FROM rust:1.91-alpine3.23 AS builder
+RUN apk --no-cache add musl-dev g++ clang21-dev linux-headers protoc git
+
+ARG MARIGOLD_MINER_REF=6b832c8f004a19ae906a4d4fb9dcd3f4b110184e
+WORKDIR /work
+RUN --mount=type=secret,id=github_token \
+    git clone https://$(cat /run/secrets/github_token)@github.com/marigoldcash/marigold-miner.git . \
+    && git checkout ${MARIGOLD_MINER_REF}
+
+RUN cargo build --release
+
+FROM alpine AS runtime
+RUN apk --no-cache add libgcc libstdc++ tini ca-certificates \
+    && addgroup -S kaspa \
+    && adduser -S -G kaspa -h /home/kaspa -s /sbin/nologin kaspa
+COPY --from=builder --chown=kaspa:kaspa /work/target/release/kaspa-miner /usr/local/bin/kaspa-miner
+
+ENV HOME=/home/kaspa
+USER kaspa
+ENTRYPOINT [ "/sbin/tini", "--", "kaspa-miner" ]

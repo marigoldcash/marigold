@@ -45,8 +45,13 @@ RUN apk --no-cache add \
   ca-certificates \
   && addgroup -S kaspa \
   && adduser -S -G kaspa -h /home/kaspa -s /sbin/nologin kaspa \
-  && mkdir -p /home/kaspa /app \
-  && chown -R kaspa:kaspa /home/kaspa /app
+  && mkdir -p /home/kaspa /app /data \
+  && chown -R kaspa:kaspa /home/kaspa /app /data
+# /data pre-created and chowned here (not just at runtime) so that when a
+# named volume is first mounted at /data, Docker seeds the new volume from
+# this image layer's ownership -- a volume mounted at a path the image never
+# touched is created root-owned, which the non-root `kaspa` user below can't
+# write to (this bit local docker-compose testing before it was caught).
 
 COPY --from=builder --chown=kaspa:kaspa /app/marigoldd .
 

@@ -1,0 +1,190 @@
+# Local multi-container test harness — NOT a production deployment.
+#
+# Brings up a small Marigold topology on one machine so every component can be
+# verified talking to every other component before any of it touches real
+# infrastructure: two testnet nodes peered over P2P (proves block propagation
+# across containers, the same thing docs/x-fork/NOTES.md's P2.9 smoke test
+# proves on bare metal), a mainnet node running alongside them (proves two
+# networks can coexist without port/appdir collisions — each container gets
+# its own network namespace, so this is actually easier here than on a shared
+# host), a stratum bridge, and the external kaspa-miner CPU miner
+# (kaspanet/cpuminer on Docker Hub — see README.md in this directory for why
+# that image works unmodified against this fork).
+#
+# Quick start:
+#   cd docker
+#   docker compose up --build
+#
+# All published ports are bound to 127.0.0.1 only, on purpose — this compose
+# file is for local testing, not for exposing anything to the network. See
+# README.md before changing that.
+
+services:
+  node-testnet-1:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.marigoldd
+    container_name: marigold-node-testnet-1
+    command:
+      - /app/marigoldd
+      - --testnet
+      - --utxoindex
+      - --disable-upnp
+      - --appdir=/data
+      - --rpclisten=0.0.0.0:26210
+      - --rpclisten-borsh=0.0.0.0:27210
+      # This node has no real peers (isolated compose network, DNS seeders
+      # unreachable from inside Docker) so it never considers itself synced
+      # by default and refuses to produce block templates — the same
+      # scenario docs/x-fork/NOTES.md's P0.4 devnet entry already solved.
+      # node-testnet-2 doesn't need this: it syncs for real, via P2P, from
+      # this node.
+      - --enable-unsynced-mining
+    volumes:
+      - node-testnet-1-data:/data
+    ports:
+      # gRPC/wRPC published to localhost only, for a host-side kaspa-cli or
+      # RPC client to connect to during testing — never do this on a real
+      # public host (see docs/x-fork/TESTNET.md's security section).
+      - "127.0.0.1:26210:26210"
+      - "127.0.0.1:27210:27210"
+    networks:
+      marigold:
+        # Static IP because marigoldd's --addpeer (unlike gRPC/wRPC) validates
+        # strictly as an IP address at the CLI level — it doesn't accept a
+        # Compose service-name hostname the way gRPC connections do. Verified
+        # directly: `--addpeer=node-testnet-1:26211` fails with "invalid IP
+        # address syntax" before the process even starts.
+        ipv4_address: 172.28.0.10
+
+  node-testnet-2:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.marigoldd
+    container_name: marigold-node-testnet-2
+    command:
+      - /app/marigoldd
+      - --testnet
+      - --utxoindex
+      - --disable-upnp
+      - --appdir=/data
+      - --rpclisten=0.0.0.0:26210
+      - --addpeer=172.28.0.10:26211
+    volumes:
+      - node-testnet-2-data:/data
+    depends_on:
+      - node-testnet-1
+    networks:
+      - marigold
+
+  node-mainnet:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.marigoldd
+    container_name: marigold-node-mainnet
+    # Mainnet hasn't launched — this proves the mainnet code path starts up
+    # and coexists cleanly alongside the testnet nodes above, nothing more.
+    # No addpeer: there's no real mainnet network to join yet.
+    command:
+      - /app/marigoldd
+      - --utxoindex
+      - --disable-upnp
+      - --appdir=/data
+      - --rpclisten=0.0.0.0:26110
+    volumes:
+      - node-mainnet-data:/data
+    networks:
+      - marigold
+
+  bridge-testnet:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.stratum-bridge
+    container_name: marigold-bridge-testnet
+    # --internal-cpu-miner, not the external kaspanet/cpuminer image: verified
+    # empirically (2026-08-20) that a raw external miner can find blocks but
+    # can never submit them against this fork. kaspa-miner's own vendored
+    # proto (github.com/elichai/kaspa-miner/proto/rpc.proto) has no field 11
+    # on RpcBlockHeader -- that's exactly where this fork's P6.5 addition,
+    # pool_commitment, lives (rpc/grpc/core/src/convert/header.rs). An
+    # unaware client submits it as an empty string, and the server-side
+    # RpcHash::from_str(&item.pool_commitment)? hard-fails the whole
+    # SubmitBlock call ("Hex parsing error: Invalid input length 64") before
+    # anything else is even looked at. The bridge doesn't have this problem
+    # because it's a first-party tool built against this fork's real schema
+    # -- see docker/README.md for the full writeup, and
+    # docs/x-fork/NOTES.md for why this matters beyond just this compose file
+    # (any external solo miner bypassing the bridge hits the same wall).
+    command:
+      - /app/stratum-bridge
+      - --node-mode
+      - external
+      - --kaspad-address
+      - node-testnet-1:26210
+      - --instance
+      - "port=:5555,diff=64"
+      - --internal-cpu-miner
+      - --internal-cpu-miner-address
+      - "${CPU_MINER_ADDRESS:-marigoldtest:qqqqzqsrqszsvpcgpy9qkrqdpc83qygjzv2p29shrqv35xcur50p73g09jnlj}"
+      - --internal-cpu-miner-threads
+      - "2"
+    depends_on:
+      - node-testnet-1
+    ports:
+      - "127.0.0.1:5555:5555"
+    networks:
+      - marigold
+
+  cpu-miner-testnet-1:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.cpu-miner
+      # marigoldcash/marigold-miner is private for now -- see that
+      # Dockerfile's header comment. Requires GITHUB_TOKEN set in your shell
+      # (a PAT with read access to marigoldcash/marigold-miner) before
+      # `docker compose up --build`; drop this whole secrets block once the
+      # fork goes public.
+      secrets:
+        - github_token
+    container_name: marigold-cpu-miner-testnet-1
+    restart: unless-stopped
+    cpus: 0.5 # local testing default — raise or drop this line to use more cores
+    # Bootstraps the very first block: a genuinely isolated fresh-genesis
+    # network never becomes "synced" (is_synced needs a *recent* sink, and
+    # there's no real block yet) until something lands one, and the bridge's
+    # own internal-cpu-miner above waits for that same is_synced before it
+    # will even try — this service is what breaks the chicken-and-egg.
+    # --mine-when-not-synced is kaspa-miner's own client-side override,
+    # paired with node-testnet-1's --enable-unsynced-mining; Dockerfile.cpu-
+    # miner is what makes its submissions actually succeed (patched proto —
+    # see that file's header comment). -s must use the grpc:// form for
+    # Compose's service-name DNS to resolve at connect time, and it must
+    # carry Marigold's real testnet gRPC port (26210) explicitly, since
+    # kaspa-miner's own --port default (16210) is real Kaspa's port, not
+    # this fork's — see README.md.
+    command:
+      - --testnet
+      - -s
+      - grpc://node-testnet-1:26210
+      - -a
+      - "${CPU_MINER_ADDRESS:-marigoldtest:qqqqzqsrqszsvpcgpy9qkrqdpc83qygjzv2p29shrqv35xcur50p73g09jnlj}"
+      - --mine-when-not-synced
+    depends_on:
+      - node-testnet-1
+    networks:
+      - marigold
+
+networks:
+  marigold:
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24
+
+volumes:
+  node-testnet-1-data:
+  node-testnet-2-data:
+  node-mainnet-data:
+
+secrets:
+  github_token:
+    environment: GITHUB_TOKEN
