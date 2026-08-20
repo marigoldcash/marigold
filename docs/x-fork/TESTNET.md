@@ -1,7 +1,7 @@
 # TESTNET.md — Public testnet deployment runbook
 
 Deployment runbook for the topology recorded in [STATE.md](STATE.md)'s "Live
-infrastructure" section: a small number of fixed-IP machines running `kaspad` as
+infrastructure" section: a small number of fixed-IP machines running `marigoldd` as
 public seed nodes, some of them also bridging an ASIC via `stratum-bridge`. This
 is infrastructure work in support of FORK-PLAN's **P8.7 — Public testnet soak**;
 it is not itself a numbered FORK-PLAN step, and running it does not close P8.7
@@ -20,7 +20,7 @@ it is hardcoded to exactly three hosts or to this testnet's IPs.
 - At least one of them with the Rust toolchain installed
   ([rustup.rs](https://rustup.rs/), matching the root [README.md](../../README.md)'s
   own build instructions) — this is the sole **build host**; every other host
-  only receives the two binaries it produces (`kaspad`, `stratum-bridge`). This
+  only receives the two binaries it produces (`marigoldd`, `stratum-bridge`). This
   mirrors STATE.md's recorded plan: "build host (only machine with the
   toolchain — others get binaries)."
 - Ansible on your own control machine (wherever you run `ansible-playbook`
@@ -35,7 +35,7 @@ it is hardcoded to exactly three hosts or to this testnet's IPs.
 ## 2. Security posture (read this before running anything)
 
 - **A public seed node's RPC never needs to be reachable from the internet,
-  and this runbook never opens it.** `kaspad`'s gRPC listener defaults to
+  and this runbook never opens it.** `marigoldd`'s gRPC listener defaults to
   loopback-only (`127.0.0.1`) whenever `--rpclisten` isn't passed, and its wRPC
   listeners (Borsh/JSON) don't start *at all* unless `--rpclisten-borsh` /
   `--rpclisten-json` is passed explicitly (the P7.7/P7.8 finding documented in
@@ -79,7 +79,7 @@ port (no port encoding in DNS; see `dns_seed_single` in
    to change if you add/remove a *hostname*, not if a hostname's IP moves.
 3. Verify with `dig +short tn-seed1.marigold.cash` from an unrelated network
    before relying on it — DNS propagation delay is a real, common cause of
-   "new node can't find any peers" that has nothing to do with kaspad itself.
+   "new node can't find any peers" that has nothing to do with marigoldd itself.
 
 ## 4. Deploy
 
@@ -91,7 +91,7 @@ cp inventory.example.ini inventory.ini
 
 Edit `inventory.ini`: real IPs, SSH users, which group each host belongs to
 (`bootstrap` — every fresh host, see below; `build` — exactly one host;
-`seed_nodes` — every kaspad host; `bridges` — only hosts with an ASIC
+`seed_nodes` — every marigoldd host; `bridges` — only hosts with an ASIC
 attached), and per-host variables (`kaspad_archival`, `kaspad_external_ip`,
 `kaspad_addpeers`, `kaspad_ram_scale`, `bridge_stratum_port`, ...).
 `inventory.ini` is gitignored — it never lands in the repo.
@@ -120,19 +120,19 @@ creates the `deploy` user with sudo and your SSH key, and deliberately stops
 there: it does not touch `sshd_config`, so root/password SSH login stays
 exactly as your image's default set it; harden that yourself once you've
 confirmed `ssh deploy@<host>` works); **build** (clone the pinned `marigold_ref` on
-the build host, `cargo build --release --bin kaspad --bin stratum-bridge`,
+the build host, `cargo build --release --bin marigoldd --bin stratum-bridge`,
 fetch the two binaries to your control machine, cached by commit hash so an
 unchanged commit never gets rebuilt or re-copied on a later run — the same
 stale-binary trap this project has hit twice before, see NOTES.md's P2.3 and
 P4.2 entries, is exactly what the per-commit cache key is there to prevent);
-**deploy kaspad** (copy the binary, template the systemd unit from each
+**deploy marigoldd** (copy the binary, template the systemd unit from each
 host's variables, open the P2P port if `ufw_manage` is set, enable and start
-`marigold-kaspad.service`); **deploy bridges** (same pattern for
+`marigoldd.service`); **deploy bridges** (same pattern for
 `stratum-bridge`, only on hosts in the `bridges` group).
 
 The bridge is started with `--node-mode external`, pointed at
 `127.0.0.1:<grpc-port>` — **this matters**: `stratum-bridge` defaults to
-spawning its *own* embedded kaspad (`--node-mode inprocess`) if you don't
+spawning its *own* embedded marigoldd (`--node-mode inprocess`) if you don't
 override it, which would start a second, separate node competing with the
 one this same playbook just installed as its own systemd service. External
 mode just connects to the already-running node over loopback gRPC.
@@ -142,15 +142,15 @@ mode just connects to the already-running node over loopback gRPC.
 On each seed node:
 
 ```bash
-sudo systemctl status marigold-kaspad
-sudo journalctl -u marigold-kaspad -f
+sudo systemctl status marigoldd
+sudo journalctl -u marigoldd -f
 ```
 
 Look for `P2P Server starting on: 0.0.0.0:<port>` and, within a few minutes,
 peer-connection log lines. Confirm gRPC really did stay loopback-only:
 
 ```bash
-ss -tlnp | grep kaspad
+ss -tlnp | grep marigoldd
 ```
 
 should show the gRPC port bound to `127.0.0.1`, not `0.0.0.0`, and no wRPC
@@ -179,5 +179,5 @@ Per STATE.md's recorded sequence, provisioning is one step in a longer chain:
 **this runbook → provision the real hosts → stand up a faucet (the one
 genuinely new build item, not yet started) → invite outside testers → begin
 the P8.7 incident log.** The faucet, tester outreach, and incident log are
-separate, not-yet-started pieces of work — this document only gets kaspad and
+separate, not-yet-started pieces of work — this document only gets marigoldd and
 stratum-bridge running and reachable.

@@ -14,7 +14,7 @@ chain without a working interactive wallet.
 wrong behavior (bit the project once at P2.3, and again at P4.2 itself — see "Gotchas" below):
 
 ```bash
-cargo build --release --bin kaspad --bin rothschild
+cargo build --release --bin marigoldd --bin rothschild
 ```
 
 `kaspa-miner` (the community `elichai/kaspa-miner` tool) must be installed separately at
@@ -91,7 +91,7 @@ tx typically returns to the sender as change, half goes to the recipient).
 
 ```bash
 kill <node1-pid>          # or Ctrl-C if run in foreground
-target/release/kaspad --devnet --enable-unsynced-mining --utxoindex --appdir=<node1's appdir>
+target/release/marigoldd --devnet --enable-unsynced-mining --utxoindex --appdir=<node1's appdir>
 ```
 
 Same `--appdir` as before — the node reloads its existing database rather than starting fresh
@@ -109,7 +109,7 @@ this section builds on it across 3 peered nodes) on **simnet**, not devnet:
 would even be accepted there — see WALLET.md's "Before you start" note.
 
 ```bash
-cargo build --release --bin kaspad --bin kaspa-cli
+cargo build --release --bin marigoldd --bin kaspa-cli
 NETWORK=simnet ./scripts/x-testnet-local.sh
 ```
 
@@ -177,7 +177,7 @@ Kill node 2 (`kill <node2-pid>`) while its wallet session from step 12 is still 
 restart it with the same `--appdir` (same pattern as step 8, but simnet ports):
 
 ```bash
-target/release/kaspad --simnet --enable-unsynced-mining --unsaferpc --utxoindex \
+target/release/marigoldd --simnet --enable-unsynced-mining --unsaferpc --utxoindex \
   --listen=127.0.0.1:26521 --rpclisten=127.0.0.1:26520 --rpclisten-borsh=127.0.0.1:27520 \
   --rpclisten-json=127.0.0.1:28520 --addpeer=127.0.0.1:26511 --appdir=<node2's appdir>
 ```

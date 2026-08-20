@@ -21,7 +21,7 @@
 # loopback-only local test infrastructure; a real public node must NOT pass -unsaferpc --
 # see the P9 launch runbook).
 #
-# Stop all three nodes with: Get-Process kaspad | Stop-Process
+# Stop all three nodes with: Get-Process marigoldd | Stop-Process
 
 param(
     [string]$DataDir,
@@ -33,7 +33,7 @@ $ErrorActionPreference = "Stop"
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 if (-not $DataDir) { $DataDir = Join-Path $RepoRoot "x-testnet-local-data" }
-$Kaspad = Join-Path $RepoRoot "target\release\kaspad.exe"
+$Kaspad = Join-Path $RepoRoot "target\release\marigoldd.exe"
 
 if ($Network -eq "simnet") {
     $GrpcBase = 26510; $P2pBase = 26511; $BorshBase = 27510; $JsonBase = 28510
@@ -44,13 +44,13 @@ if ($Network -eq "simnet") {
 New-Item -ItemType Directory -Force -Path $DataDir | Out-Null
 
 if (-not (Test-Path $Kaspad)) {
-    Write-Output "kaspad release binary not found -- building it now (this can take a few minutes)..."
+    Write-Output "marigoldd release binary not found -- building it now (this can take a few minutes)..."
     Push-Location $RepoRoot
-    cargo build --release --bin kaspad
+    cargo build --release --bin marigoldd
     Pop-Location
 }
 
-Write-Output "kaspad: $Kaspad"
+Write-Output "marigoldd: $Kaspad"
 Write-Output "Network: $Network"
 Write-Output "Data dir: $DataDir"
 Write-Output ""
@@ -127,4 +127,4 @@ Write-Output "       kaspa-miner --mining-address <address> --kaspad-address 127
 Write-Output ""
 Write-Output "Blocks mined against node1 should appear on node2 and node3 within a few seconds (check their logs for `"via relay`")."
 Write-Output ""
-Write-Output "To stop all three nodes: Get-Process kaspad | Stop-Process"
+Write-Output "To stop all three nodes: Get-Process marigoldd | Stop-Process"

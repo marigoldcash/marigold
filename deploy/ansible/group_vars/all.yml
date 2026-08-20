@@ -20,7 +20,7 @@ marigold_repo: "https://github.com/marigoldcash/marigold-node.git"
 marigold_ref: "x-fork"          # branch, tag, or commit to build and deploy
 marigold_network: "testnet"     # testnet | mainnet | devnet | simnet
 
-# P2P port kaspad actually listens on for each network — must match
+# P2P port marigoldd actually listens on for each network — must match
 # consensus/core/src/network.rs's default_p2p_port() exactly, since this is what
 # the firewall role opens. Testnet's is suffix-dependent; TESTNET_PARAMS in
 # consensus/core/src/config/params.rs uses suffix 10.
@@ -30,7 +30,7 @@ marigold_p2p_ports:
   simnet: 26511
   devnet: 26611
 
-# gRPC port per network — never opened in the firewall (kaspad's gRPC listener
+# gRPC port per network — never opened in the firewall (marigoldd's gRPC listener
 # defaults to loopback-only whenever --rpclisten is omitted). Recorded here only
 # so the systemd unit comment and the bridge's kaspad_address can point at the
 # right local port without hardcoding it twice.
@@ -54,7 +54,7 @@ marigold_config_root: "/etc/marigold"
 marigold_build_checkout: "/opt/marigold-build/marigold-node"
 marigold_fetch_cache: "{{ playbook_dir }}/.fetched"
 
-# kaspad defaults — a public seed node deliberately passes NONE of
+# marigoldd defaults — a public seed node deliberately passes NONE of
 # --rpclisten/--rpclisten-borsh/--rpclisten-json/--unsaferpc: gRPC then defaults to
 # loopback-only and wRPC doesn't start at all (see docs/x-fork/WALLET.md's and
 # SMOKE.md's P7.7/P7.8 findings) — the safest possible posture is simply never
@@ -69,7 +69,7 @@ bridge_min_share_diff: 64
 bridge_prom_port: 2114
 bridge_health_port: 8080
 
-# Firewall is opt-in per host (see roles/kaspad and roles/bridge) — set
+# Firewall is opt-in per host (see roles/marigoldd and roles/bridge) — set
 # ufw_manage: true in inventory.ini only after confirming your SSH access rule
 # survives (see TESTNET.md's firewall section). Never enabled by this playbook
 # without that explicit flag: getting it wrong on a remote box with no console

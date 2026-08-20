@@ -330,8 +330,10 @@ pub fn create_core_with_runtime(runtime: &Runtime, args: &Args, fd_total_budget:
     let app_dir = get_app_dir_from_args(args);
     let db_dir = app_dir.join(network.to_prefixed()).join(DEFAULT_DATA_DIR);
 
-    // Print package name and version
-    info!("{} v{}", env!("CARGO_PKG_NAME"), git::with_short_hash(version()));
+    // Print binary name and version (package name stays `kaspad` for upstream
+    // mergeability — see DECISIONS.md "Node binary name: marigoldd" — but the
+    // startup log should say what operators actually run)
+    info!("marigoldd v{}", git::with_short_hash(version()));
 
     assert!(!db_dir.to_str().unwrap().is_empty());
     info!("Application directory: {}", app_dir.display());

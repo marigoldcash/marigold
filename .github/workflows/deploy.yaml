@@ -52,13 +52,13 @@ jobs:
           cd $GITHUB_WORKSPACE
           
           # Build non-bridge binaries first
-          cargo --verbose build --bin kaspad --bin rothschild --bin kaspa-wallet --release --target x86_64-unknown-linux-musl
+          cargo --verbose build --bin marigoldd --bin rothschild --bin kaspa-wallet --release --target x86_64-unknown-linux-musl
           # Build bridge with allow-multiple-definition to resolve mimalloc/libstdc++ symbol collisions.
           # musl-toolchain/build.sh sets RUSTFLAGS directly, so we append this flag here explicitly.
           export RUSTFLAGS="$RUSTFLAGS -C link-arg=-Wl,--allow-multiple-definition"
           cargo --verbose build --bin stratum-bridge --release --target x86_64-unknown-linux-musl
           mkdir bin || true
-          cp target/x86_64-unknown-linux-musl/release/kaspad bin/
+          cp target/x86_64-unknown-linux-musl/release/marigoldd bin/
           cp target/x86_64-unknown-linux-musl/release/rothschild bin/
           cp target/x86_64-unknown-linux-musl/release/kaspa-wallet bin/
           cp target/x86_64-unknown-linux-musl/release/stratum-bridge bin/
@@ -70,12 +70,12 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          cargo build --bin kaspad --release
+          cargo build --bin marigoldd --release
           cargo build --bin rothschild --release
           cargo build --bin kaspa-wallet --release
           cargo build --bin stratum-bridge --release
           mkdir bin || true
-          cp target/release/kaspad.exe bin/
+          cp target/release/marigoldd.exe bin/
           cp target/release/rothschild.exe bin/
           cp target/release/kaspa-wallet.exe bin/
           cp target/release/stratum-bridge.exe bin/
@@ -86,12 +86,12 @@ jobs:
       - name: Build on MacOS
         if: runner.os == 'macOS'
         run: |
-          cargo build --bin kaspad --release
+          cargo build --bin marigoldd --release
           cargo build --bin rothschild --release
           cargo build --bin kaspa-wallet --release
           cargo build --bin stratum-bridge --release
           mkdir bin || true
-          cp target/release/kaspad bin/
+          cp target/release/marigoldd bin/
           cp target/release/rothschild bin/
           cp target/release/kaspa-wallet bin/
           cp target/release/stratum-bridge bin/

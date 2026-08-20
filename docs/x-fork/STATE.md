@@ -163,10 +163,12 @@ substitute for it.
      to FORK-PLAN/docs. **Drafted 2026-08-19** (positioning claims, pre-mainnet
      scam warning, parameters table, Kaspa relationship, AI-disclosure sentence,
      build/run/mining/wallet sections) — awaiting the user's final read before
-     this item closes. Related open question from the same session: renaming
-     the `kaspad` binary to `marigoldd` (user leaning yes; Cargo `[[bin]]`
-     rename + sweep of Ansible/docs/scripts; crate names stay `kaspa-*` per
-     ground rule 1).
+     this item closes. The `kaspad` → `marigoldd` binary rename from the same
+     session is **executed** (2026-08-19; DECISIONS.md "Node binary name" row):
+     Cargo `[[bin]]` target plus sweep of Ansible (unit is now
+     `marigoldd.service`), CI/docker, local-testnet scripts, and instructional
+     docs; crate names and internal identifiers stay `kaspa*` per ground
+     rule 1.
   3. **AI-assistance references — DECIDED (2026-08-19, user-ratified)**: keep
      the development record exactly as-is (no history scrub, no "AI-programmed
      coin" marketing; disclosure is one matter-of-fact sentence that lands with 

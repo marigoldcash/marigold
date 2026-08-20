@@ -13,7 +13,7 @@ Rebuild every binary you'll use — a stale one can silently misbehave (bit this
 at P2.3 and again at P4.2):
 
 ```bash
-cargo build --release --bin kaspad --bin kaspa-cli
+cargo build --release --bin marigoldd --bin kaspa-cli
 ```
 
 `kaspa-miner` (the community `elichai/kaspa-miner` tool) must be installed separately —
@@ -38,7 +38,7 @@ The wRPC Borsh listener `kaspa-cli` connects over is **not started by default** 
 
 ```bash
 mkdir -p x-simnet-local-data
-target/release/kaspad --simnet --enable-unsynced-mining --unsaferpc --disable-upnp \
+target/release/marigoldd --simnet --enable-unsynced-mining --unsaferpc --disable-upnp \
   --utxoindex --rpclisten-borsh=127.0.0.1:27510 --appdir=x-simnet-local-data \
   > x-simnet-local-data/node.log 2>&1 &
 ```

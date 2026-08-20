@@ -1,7 +1,7 @@
 # Managed by Ansible (deploy/ansible/roles/bridge) — local edits will be overwritten.
 #
 # Single-instance config: this node's own ASIC connects to bridge_stratum_port,
-# submitted shares get PoW-checked against this same host's local kaspad over
+# submitted shares get PoW-checked against this same host's local marigoldd over
 # gRPC (loopback only — see kaspad_address below).
 kaspad_address: "127.0.0.1:{{ marigold_grpc_ports[marigold_network] }}"
 block_wait_time: 1000

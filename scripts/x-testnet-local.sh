@@ -23,14 +23,14 @@
 # script is loopback-only local test infrastructure; a real public node must NOT
 # pass --unsaferpc — see the P9 launch runbook).
 #
-# Stop all three nodes with: pkill -x kaspad
+# Stop all three nodes with: pkill -x marigoldd
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 DATA_DIR="${1:-$REPO_ROOT/x-testnet-local-data}"
-KASPAD="$REPO_ROOT/target/release/kaspad"
+KASPAD="$REPO_ROOT/target/release/marigoldd"
 NETWORK="${NETWORK:-devnet}"
 
 case "$NETWORK" in
@@ -46,11 +46,11 @@ esac
 mkdir -p "$DATA_DIR"
 
 if [ ! -x "$KASPAD" ]; then
-  echo "kaspad release binary not found — building it now (this can take a few minutes)..."
-  (cd "$REPO_ROOT" && cargo build --release --bin kaspad)
+  echo "marigoldd release binary not found — building it now (this can take a few minutes)..."
+  (cd "$REPO_ROOT" && cargo build --release --bin marigoldd)
 fi
 
-echo "kaspad: $KASPAD"
+echo "marigoldd: $KASPAD"
 echo "Network: $NETWORK"
 echo "Data dir: $DATA_DIR"
 echo
@@ -129,5 +129,5 @@ To mine (uses the community kaspa-miner tool, or rothschild to get a funded addr
 Blocks mined against node1 should appear on node2 and node3 within a few seconds (check their
 logs for "via relay").
 
-To stop all three nodes: pkill -x kaspad
+To stop all three nodes: pkill -x marigoldd
 EOF

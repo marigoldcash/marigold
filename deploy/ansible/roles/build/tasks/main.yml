@@ -38,11 +38,11 @@
   become: false
   delegate_to: localhost
   ansible.builtin.stat:
-    path: "{{ marigold_fetch_cache }}/{{ checkout_commit.stdout }}/kaspad"
+    path: "{{ marigold_fetch_cache }}/{{ checkout_commit.stdout }}/marigoldd"
   register: cache_stat
 
-- name: Build kaspad and stratum-bridge in release mode
-  ansible.builtin.command: cargo build --release --bin kaspad --bin stratum-bridge
+- name: Build marigoldd and stratum-bridge in release mode
+  ansible.builtin.command: cargo build --release --bin marigoldd --bin stratum-bridge
   args:
     chdir: "{{ marigold_build_checkout }}"
   # Rebuild whenever the checkout actually changed, or when this exact commit's
@@ -57,7 +57,7 @@
     dest: "{{ marigold_fetch_cache }}/{{ checkout_commit.stdout }}/{{ item }}"
     flat: true
   loop:
-    - kaspad
+    - marigoldd
     - stratum-bridge
   when: not cache_stat.stat.exists
 

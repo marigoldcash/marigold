@@ -22,7 +22,7 @@
   roles:
     - build
 
-- name: Deploy kaspad seed nodes
+- name: Deploy marigoldd seed nodes
   hosts: seed_nodes
   roles:
     - common

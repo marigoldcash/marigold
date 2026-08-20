@@ -1,6 +1,6 @@
 <h1>Marigold</h1>
 
-**Marigold (MAGLD)** is a transparent, fixed-denomination bearer-note chain — digital
+**Marigold (MAGLD)** is a transparent, fixed-denomination bearer-note coin — digital
 cash with a fully auditable chain — built as a fork of
 [rusty-kaspa](https://github.com/kaspanet/rusty-kaspa), the Rust implementation of the
 Kaspa full node.
@@ -80,8 +80,8 @@ host.
 This repository tracks upstream
 [kaspanet/rusty-kaspa](https://github.com/kaspanet/rusty-kaspa) and intends to keep
 merging its fixes for years. For that reason the internal crate and module names remain
-`kaspa-*` and the node binary remains `kaspad` — only user-facing identity (network
-name, ticker, prefixes, ports, genesis, emission) is changed. This is a deliberate,
+`kaspa-*` — only user-facing identity (the `marigoldd` binary name, network name,
+ticker, prefixes, ports, genesis, emission) is changed. This is a deliberate,
 permanent choice, not an unfinished rebrand. Marigold is not affiliated with or
 endorsed by the Kaspa project; we are grateful to its developers, whose work this chain
 builds on.
@@ -131,7 +131,7 @@ builds on.
 7. Build the node
 
     ```bash
-    cargo build --release --bin kaspad
+    cargo build --release --bin marigoldd
     ```
 
 </details>
@@ -143,7 +143,7 @@ The toolchain requirements (protoc, LLVM/clang, Rust) are identical to upstream
 rusty-kaspa, including the Windows LLVM `AR.exe` copy trick and the macOS
 Homebrew-LLVM setup for WASM targets. Follow the platform sections of the
 [upstream README](https://github.com/kaspanet/rusty-kaspa#installation), cloning this
-repository instead, then `cargo build --release --bin kaspad`.
+repository instead, then `cargo build --release --bin marigoldd`.
 
 </details>
 
@@ -152,7 +152,7 @@ repository instead, then `cargo build --release --bin kaspad`.
 Mainnet has not launched; the network to join today is the **testnet**:
 
 ```bash
-cargo run --release --bin kaspad -- --testnet --utxoindex
+cargo run --release --bin marigoldd -- --testnet --utxoindex
 ```
 
 `--utxoindex` is needed if you plan to use a wallet against the node. RPC listens on
@@ -165,7 +165,7 @@ file is supported via `-C /path/to/configfile.toml`.
 For local experimentation, a private devnet works exactly as in upstream:
 
 ```bash
-cargo run --release --bin kaspad -- --devnet --enable-unsynced-mining --rpclisten-borsh=127.0.0.1 --utxoindex
+cargo run --release --bin marigoldd -- --devnet --enable-unsynced-mining --rpclisten-borsh=127.0.0.1 --utxoindex
 ```
 
 ## Mining

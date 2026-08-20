@@ -1,9 +1,9 @@
 # Managed by Ansible (deploy/ansible/roles/bridge) — local edits will be overwritten.
 [Unit]
 Description=Marigold stratum-bridge ({{ marigold_network }})
-After=network-online.target marigold-kaspad.service
+After=network-online.target marigoldd.service
 Wants=network-online.target
-Requires=marigold-kaspad.service
+Requires=marigoldd.service
 
 [Service]
 Type=simple

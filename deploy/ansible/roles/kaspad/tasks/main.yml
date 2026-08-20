@@ -1,33 +1,33 @@
 ---
-- name: Copy the kaspad binary built on the build host
+- name: Copy the marigoldd binary built on the build host
   ansible.builtin.copy:
-    src: "{{ marigold_fetch_cache }}/{{ hostvars[groups['build'][0]].marigold_built_commit }}/kaspad"
-    dest: "{{ marigold_install_root }}/bin/kaspad"
+    src: "{{ marigold_fetch_cache }}/{{ hostvars[groups['build'][0]].marigold_built_commit }}/marigoldd"
+    dest: "{{ marigold_install_root }}/bin/marigoldd"
     owner: "{{ marigold_user }}"
     group: "{{ marigold_user }}"
     mode: "0755"
-  notify: restart marigold-kaspad
+  notify: restart marigoldd
 
-- name: Create kaspad's appdir
+- name: Create marigoldd's appdir
   ansible.builtin.file:
-    path: "{{ marigold_data_root }}/kaspad-{{ marigold_network }}"
+    path: "{{ marigold_data_root }}/marigoldd-{{ marigold_network }}"
     state: directory
     owner: "{{ marigold_user }}"
     group: "{{ marigold_user }}"
     mode: "0750"
 
-- name: Install the kaspad systemd unit
+- name: Install the marigoldd systemd unit
   ansible.builtin.template:
-    src: kaspad.service.j2
-    dest: /etc/systemd/system/marigold-kaspad.service
+    src: marigoldd.service.j2
+    dest: /etc/systemd/system/marigoldd.service
     mode: "0644"
   notify:
     - reload systemd
-    - restart marigold-kaspad
+    - restart marigoldd
 
 # P2P must be reachable from the internet for this to function as a seed node;
 # gRPC/wRPC are never opened here — they stay loopback-only by construction
-# (see group_vars/all.yml's comment: kaspad simply never receives
+# (see group_vars/all.yml's comment: marigoldd simply never receives
 # --rpclisten/--rpclisten-borsh/--rpclisten-json/--unsaferpc on a public host).
 - name: "Firewall: allow the P2P port"
   community.general.ufw:
@@ -36,9 +36,9 @@
     proto: tcp
   when: ufw_manage | bool
 
-- name: Enable and start kaspad
+- name: Enable and start marigoldd
   ansible.builtin.systemd:
-    name: marigold-kaspad
+    name: marigoldd
     enabled: true
     state: started
     daemon_reload: true

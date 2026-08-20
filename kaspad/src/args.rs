@@ -218,7 +218,7 @@ pub fn cli() -> Command {
     let defaults: Args = Default::default();
 
     #[allow(clippy::let_and_return)]
-    let cmd = Command::new("kaspad")
+    let cmd = Command::new("marigoldd")
         .about(format!("{} (marigold-node) v{}", env!("CARGO_PKG_DESCRIPTION"), version()))
         .version(env!("CARGO_PKG_VERSION"))
         .arg(arg!(-C --configfile <CONFIG_FILE> "Path of config file.").env("KASPAD_CONFIGFILE"))
