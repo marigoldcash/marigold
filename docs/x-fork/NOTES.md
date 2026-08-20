@@ -157,7 +157,7 @@ Mainnet motto: *"Hell is other people's monetary policy. — Sartre"* (user's pi
 
 **Fix (2026-08-14, same session)**: removed the whole `if network_type == Mainnet { ... } else { ... }` branch — Marigold's mainnet genesis is `daa_score: 0` like every other network now (P2.5), so there's no analogous pre-genesis history to splice in; the function just always does what the old `else` branch did. Also removed the now-unused `network::NetworkType` import. `cargo build -p kaspa-consensus` clean, zero warnings; `cargo test -p kaspa-consensus` 72/72 green. Grepped for other `NetworkType::Mainnet` special-cases and leftover references to the removed checkpoint data — none found; this was the only instance.
 
-### ⚠️ Open regression — P2.1 broke 22 tests in `kaspa-wallet-core` (found 2026-08-14, not yet fixed)
+### ⚠️ Regression — P2.1 broke 22 tests in `kaspa-wallet-core` (found 2026-08-14, fixed same day at P2.8 — see below)
 
 While grepping around the checkpoint-timestamp bug above (searching all `NetworkType::Mainnet` usages workspace-wide, looking for similar patterns), found this by running `cargo test -p kaspa-wallet-core` directly — it currently fails **22 of 49 tests**, all traceable to P2.1's address-prefix rebrand: `"kaspa:..."`-prefixed strings hardcoded as test fixtures now fail to parse (`InvalidPrefix`) since `"kaspa"` is no longer a registered prefix.
 
@@ -188,7 +188,7 @@ tx::generator::test::test_generator_sweep_two_utxos_with_priority_fees_rejection
 utxo::test::test_utxo_generator_empty_utxo_noop
 ```
 
-**Not fixed yet — needs real attention, not a blind find-replace.** Two different risk levels hide in this list:
+**Not fixed yet as of this writing — needs real attention, not a blind find-replace** (it was fixed the same day, at P2.8 below — this paragraph is left as originally written, describing the risk assessment at time of discovery). Two different risk levels hide in this list:
 
 - Most `tx::generator::test::*` and `utxo::test::*` failures likely use arbitrary placeholder `"kaspa:..."` addresses (like P2.1's own `cases()` vectors) — probably safe to fix with the same recompute-from-test-failure technique used in P2.1/P2.5.
 - `compat::gen1::test::import_golang_*` and `account::tests::gen0_prv_keys` sound like **legacy wallet-format compatibility tests** — these may hardcode addresses that are meaningful to a specific historical wallet-file format/version, not arbitrary. Swapping their prefix without understanding what's actually being tested could silently defeat the point of the test. Read what each one actually asserts before touching it.
