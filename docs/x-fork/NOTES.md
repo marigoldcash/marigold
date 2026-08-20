@@ -5,9 +5,11 @@ Start here. This file has two parts: a **quick-start** block below with the exac
 ## Environment
 
 - Platform: Linux (Debian/LMDE). Windows was abandoned (MSVC Build Tools installer failures) — this fork is developed on Linux.
-- Toolchain: Rust 1.97.1 (≥1.91 required), protoc 3.21.12, clang 19. Prereqs installed via:   ```
+- Toolchain: Rust 1.97.1 (≥1.91 required), protoc 3.21.12, clang 19. Prereqs installed via:
+  ```
   sudo apt install -y curl git build-essential libssl-dev pkg-config protobuf-compiler libprotobuf-dev clang libclang-dev
-  ``` then rustup (stable). No Windows AR.exe/LIBCLANG quirks apply here.
+  ``` 
+  then rustup (stable). No Windows AR.exe/LIBCLANG quirks apply here.
 - CPU miner: `kaspa-miner` (elichai/kaspa-miner) installed separately at `~/.cargo/bin/kaspa-miner` — not part of this workspace's `cargo build`.
 
 ## Quick start (copy-paste, in order)
@@ -64,7 +66,8 @@ target/release/rothschild --network devnet --private-key <hex> --to-addr <addr> 
 
 ### P0.3 — Devnet node (2026-08-14)
 
-Command from the plan: ```
+Command from the plan: 
+```
 cargo run --release --bin kaspad -- --devnet --enable-unsynced-mining --rpclisten-borsh=127.0.0.1 --utxoindex
 ```
 
@@ -81,7 +84,8 @@ cargo run --release --bin kaspad -- --devnet --enable-unsynced-mining --rpcliste
 Used the installed `kaspa-miner` (elichai/kaspa-miner, at `~/.cargo/bin/kaspa-miner`) against a P0.3-style devnet node, rather than `simpa`.
 
 - **Mining address**: `kaspa-cli` can't produce one non-interactively (P0.3's REPL finding), and no wallet exists yet (P0.5 territory). Generated a syntactically valid address directly with the `kaspa-addresses` crate (`Address::new(Prefix::Devnet, Version::PubKey, &payload)` with an arbitrary 32-byte payload — no real keypair needed, since nothing will ever spend from it) via a throwaway `cargo run --example`, deleted immediately after. Result used for this run: `kaspadev:qqxkanesj8e98dq4wmtn3x06tw7p6lklgzssyc7yykrwwj9fpf4uc9j5wmw8s` (no known private key — coinbase-only sink address, don't reuse it as a real wallet address).
-- **Miner invocation**: `kaspa-miner` has no devnet-specific port default (only mainnet=16110/testnet=16210), so pass `--port 16610` explicitly (devnet's GRPC port, per P0.3). Also needs `--mine-when-not-synced` on the miner side to pair with the node's `--enable-unsynced-mining`:   ```
+- **Miner invocation**: `kaspa-miner` has no devnet-specific port default (only mainnet=16110/testnet=16210), so pass `--port 16610` explicitly (devnet's GRPC port, per P0.3). Also needs `--mine-when-not-synced` on the miner side to pair with the node's `--enable-unsynced-mining`:   
+  ```
   kaspa-miner --mining-address <addr> --kaspad-address 127.0.0.1 --port 16610 --threads 4 --mine-when-not-synced
   ```
 - **Result**: miner found 221 blocks in well under a minute (devnet's genesis difficulty is trivial by design); node log showed matching `Accepted N blocks ... via submit block` lines throughout. Cross-checked via RPC (same gRPC example client as P0.3): block count 221, header count 221, virtual DAA score 221, `is_synced: true`.
@@ -157,13 +161,14 @@ Mainnet motto: *"Hell is other people's monetary policy. — Sartre"* (user's pi
 
 **Fix (2026-08-14, same session)**: removed the whole `if network_type == Mainnet { ... } else { ... }` branch — Marigold's mainnet genesis is `daa_score: 0` like every other network now (P2.5), so there's no analogous pre-genesis history to splice in; the function just always does what the old `else` branch did. Also removed the now-unused `network::NetworkType` import. `cargo build -p kaspa-consensus` clean, zero warnings; `cargo test -p kaspa-consensus` 72/72 green. Grepped for other `NetworkType::Mainnet` special-cases and leftover references to the removed checkpoint data — none found; this was the only instance.
 
-### ⚠️ Regression — P2.1 broke 22 tests in `kaspa-wallet-core` (found 2026-08-14, fixed same day at P2.8 — see below)
+#### Regression — P2.1 broke 22 tests in `kaspa-wallet-core` (found 2026-08-14, fixed same day at P2.8 — see below)
 
 While grepping around the checkpoint-timestamp bug above (searching all `NetworkType::Mainnet` usages workspace-wide, looking for similar patterns), found this by running `cargo test -p kaspa-wallet-core` directly — it currently fails **22 of 49 tests**, all traceable to P2.1's address-prefix rebrand: `"kaspa:..."`-prefixed strings hardcoded as test fixtures now fail to parse (`InvalidPrefix`) since `"kaspa"` is no longer a registered prefix.
 
 **Why this wasn't caught at P2.1 time**: P2.1's own verify step is explicitly scoped to `cargo test -p kaspa-addresses` (per the plan text), which only covers the crate where the prefix strings are *defined* — not every downstream crate that happens to hardcode a `"kaspa:"` address string as a test fixture. No P2.x step since has run a full-workspace `cargo test`. **Lesson: periodically run a full-workspace test pass during Phase 2, not just the crate a step names** — targeted verify commands only prove the step's own crate compiles/passes; they say nothing about who else depends on the string you just changed.
 
-Failing tests as of this writing (`cargo test -p kaspa-wallet-core` output): ```
+Failing tests as of this writing (`cargo test -p kaspa-wallet-core` output): 
+```
 account::tests::gen0_prv_keys
 compat::gen1::test::import_golang_single_wallet_test
 compat::gen1::test::import_golang_multisig_v1_wallet_test

@@ -175,14 +175,16 @@ struct TransferOp {
 struct MintOp {
     new_notes: Vec<NewNote>,
 }
-``` The transaction's ordinary transparent **inputs** (standard signed UTXO spends, verified by the existing txscript engine exactly as any transparent transaction) must sum to at least `Σ(new_notes' petal values)`; any excess is an ordinary transparent change output or the transaction fee, both completely standard Kaspa mechanics — mint needs no note-level signature at all, since nothing pre-existing in the pool is being touched. This is the "self-funding" value-touching op the P1.8 flag asks P5.2 to spec: mint pays its fee the same way any transparent Kaspa transaction always has, no fee stamp required, because it already holds transparent value to pay from.
+``` 
+The transaction's ordinary transparent **inputs** (standard signed UTXO spends, verified by the existing txscript engine exactly as any transparent transaction) must sum to at least `Σ(new_notes' petal values)`; any excess is an ordinary transparent change output or the transaction fee, both completely standard Kaspa mechanics — mint needs no note-level signature at all, since nothing pre-existing in the pool is being touched. This is the "self-funding" value-touching op the P1.8 flag asks P5.2 to spec: mint pays its fee the same way any transparent Kaspa transaction always has, no fee stamp required, because it already holds transparent value to pay from.
 
 ```rust
 struct RedeemOp {
     consumed:  Vec<SignedGroup>,
     freshness: FreshnessAnchor,
 }
-``` The transaction's ordinary transparent **outputs** hold what the redeemed notes become; valid iff `Σ(consumed note values) ≥ Σ(transparent outputs) + fee` — the transparent-side mirror of `Transfer`'s conservation rule, and, like mint, self-funding: redeem already produces transparent value, so it pays its fee from that, no stamp required. Redeem is structurally `Mint` read backwards (transparent-in → notes-out vs. notes-in → transparent-out), matching the plan's own five-op description exactly.
+``` 
+The transaction's ordinary transparent **outputs** hold what the redeemed notes become; valid iff `Σ(consumed note values) ≥ Σ(transparent outputs) + fee` — the transparent-side mirror of `Transfer`'s conservation rule, and, like mint, self-funding: redeem already produces transparent value, so it pays its fee from that, no stamp required. Redeem is structurally `Mint` read backwards (transparent-in → notes-out vs. notes-in → transparent-out), matching the plan's own five-op description exactly.
 
 ### Signature scheme and the freshness anchor
 
@@ -586,7 +588,8 @@ struct FinalityAnchor {
     signer_bitmap: u8,             // which of the 5 trustee keys signed (bit i = trustee i)
     signatures: Vec<[u8; 64]>,      // BIP340 Schnorr signatures, one per bit set in signer_bitmap, same order
 }
-``` Trustee public keys are **hardcoded in software** (shipped with each release, the same trust model the genesis block and DNS seeders already use — no on-chain registration mechanism, since the whole point is these keys predate and bootstrap trust in the chain, not the other way around). Verification: recover the ≥3 signing trustee `XOnlyPublicKey`s from `signer_bitmap` against the hardcoded set, verify each signature over `H("FinalityAnchor" || anchored_block || anchored_daa_score)` (a new domain-separated hash, same macro convention as every other purpose-specific hash in this spec), and require `signatures.len() >= 3` with no repeated signer.
+``` 
+Trustee public keys are **hardcoded in software** (shipped with each release, the same trust model the genesis block and DNS seeders already use — no on-chain registration mechanism, since the whole point is these keys predate and bootstrap trust in the chain, not the other way around). Verification: recover the ≥3 signing trustee `XOnlyPublicKey`s from `signer_bitmap` against the hardcoded set, verify each signature over `H("FinalityAnchor" || anchored_block || anchored_daa_score)` (a new domain-separated hash, same macro convention as every other purpose-specific hash in this spec), and require `signatures.len() >= 3` with no repeated signer.
 
 ### Fail-open liveness
 

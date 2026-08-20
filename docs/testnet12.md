@@ -48,8 +48,15 @@ If you want to transmit transactions, first create a Rothschild wallet
      ```
      2023-06-25 18:00:58.677+00:00 [INFO ] Connected to RPC
      2023-06-25 18:00:58.677+00:00 [INFO ] Generated private key aa1c554386218eb28c4bsf6a02e5943799cf951dac7301324d88dec2d0119fce and address kaspatest:qzlpwt49f0useql6w0tzpnf8k2symdv5tu2x2pe9r9nvngw8mvx57q0tt9lr5. Send some funds to this address and rerun rothschild with `--private-key aa1c554386218eb28c4bsf6a02e5943799cf951dac7301324d88dec2d0119fce`
-      ```
-     Here, the private key is ```aa1c554386218eb28c4bsf6a02e5943799cf951dac7301324d88dec2d0119fce``` and the address is ```kaspatest:qzlpwt49f0useql6w0tzpnf8k2symdv5tu2x2pe9r9nvngw8mvx57q0tt9lr5```
+     ```
+     Here, the private key is
+     ```
+     aa1c554386218eb28c4bsf6a02e5943799cf951dac7301324d88dec2d0119fce
+     ``` 
+     and the address is 
+     ```
+     kaspatest:qzlpwt49f0useql6w0tzpnf8k2symdv5tu2x2pe9r9nvngw8mvx57q0tt9lr5
+     ```
 3. Put some money into the wallet. This could be done by either mining to that wallet (see below) or asking other participants to send money to your public address in the \#testnet Discord channel.
 4. Once the wallet has been funded, run Rothschild with the private key:
    ```
