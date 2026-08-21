@@ -104,7 +104,7 @@ The regulatory posture follows from the mechanism, not from marketing: exchanges
 
 ## 8. Economics
 
-**Supply.** Hard cap of **210,000,000 MAGLD**, no tail emission, no premine, no development fund, no allocation of any kind: every coin enters circulation through mining from block zero (a fair launch, announced publicly in advance with binaries available to all). The base unit is the **petal**, 10⁻⁸ MAGLD.
+**Supply.** Hard cap of **210,000,000 MAGLD**, no tail emission, no premine, no development fund, no allocation of any kind: every coin enters circulation through mining from block zero (a fair launch, announced publicly in advance with binaries available to all). The base unit is the **petal**: 1 MAGLD = 10⁸ petals.
 
 **Emission.** Smooth geometric decay from genesis: the block reward declines in monthly steps of factor 2^(−1/36) — a halving every three years with no cliff moments — from an initial ≈1.5228 MAGLD per second. Roughly 20.6% of supply is emitted in year one and ~90% by year ten; the per-block reward quantizes to its 1-petal floor around year 72, and the emission table's total is verified against the cap by a permanent consensus test.
 
