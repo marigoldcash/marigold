@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<!--
+  One-page A4 "letterhead" frame for the litepaper brochure: full-bleed cream
+  sheet + the marigold·litepaper microprint strip in the top margin. Stamped
+  UNDER every content page by build-litepaper-pdf.sh — Chromium cannot paint
+  @page margin areas from within a document (fixed elements are clipped to the
+  page content box), so the margins come from this underlay instead. The
+  brochure's full-bleed dark pages are opaque and simply cover it.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400&display=swap" rel="stylesheet">
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  @page{size:A4;margin:0}
+  html,body{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .sheet{width:210mm;height:296.5mm;background:#efe7d3;position:relative}
+  .strip{
+    position:absolute;top:5mm;left:18mm;right:18mm;
+    font-family:"IBM Plex Mono",monospace;font-size:6px;letter-spacing:.35em;
+    white-space:nowrap;overflow:hidden;color:rgba(201,118,31,.55);text-transform:uppercase;
+  }
+</style>
+</head>
+<body>
+<div class="sheet">
+  <div class="strip">marigold · litepaper · marigold · litepaper · marigold · litepaper · marigold · litepaper · marigold · litepaper · marigold · litepaper · marigold · litepaper</div>
+</div>
+</body>
+</html>
