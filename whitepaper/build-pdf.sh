@@ -19,8 +19,8 @@ cd "$(dirname "$0")"
 
 SRC=marigold-whitepaper.md
 BYLINE=$(grep -m1 '^\*\*The Marigold Project\*\*' "$SRC" | sed 's/\*\*//g')
-AUTHOR=$(printf '%s\n' "$BYLINE" | awk -F' · ' '{print $1 " · " $2}')
-DATE=$(printf '%s\n' "$BYLINE" | awk -F' · ' '{print $3}')
+AUTHOR=$(printf '%s\n' "$BYLINE" | awk -F' · ' '{print $1 " · " $2 " · " $3}')
+DATE=$(printf '%s\n' "$BYLINE" | awk -F' · ' '{print $4}')
 
 grep -v '^\*\*The Marigold Project\*\*' "$SRC" > .build-src.md
 trap 'rm -f .build-src.md' EXIT
