@@ -38,11 +38,13 @@
   become: false
   delegate_to: localhost
   ansible.builtin.stat:
-    path: "{{ marigold_fetch_cache }}/{{ checkout_commit.stdout }}/marigoldd"
+    # Stat the newest-added binary, so a cache written by an older playbook
+    # version (before marigold-faucet existed) still triggers a rebuild.
+    path: "{{ marigold_fetch_cache }}/{{ checkout_commit.stdout }}/marigold-faucet"
   register: cache_stat
 
 - name: Build marigoldd and stratum-bridge in release mode
-  ansible.builtin.command: cargo build --release --bin marigoldd --bin stratum-bridge
+  ansible.builtin.command: cargo build --release --bin marigoldd --bin stratum-bridge --bin marigold-faucet
   args:
     chdir: "{{ marigold_build_checkout }}"
   # Rebuild whenever the checkout actually changed, or when this exact commit's
@@ -59,6 +61,7 @@
   loop:
     - marigoldd
     - stratum-bridge
+    - marigold-faucet
   when: not cache_stat.stat.exists
 
 - name: Record the resolved commit for the deploy play

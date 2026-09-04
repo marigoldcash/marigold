@@ -1,0 +1,55 @@
+---
+# Runs on the [faucet] host. Deploys the binary, a generated-on-host wallet
+# secret, and the systemd unit. TWO MANUAL STEPS remain by design:
+#   1. one-time `marigold-faucet init` as the marigold user (prints the wallet
+#      mnemonic — it should land in the founder's records, not ansible logs),
+#      then fund the printed address;
+#   2. the nginx vhost + certbot cert on the hand-managed nginx of the host.
+# See docs/marigold/TESTNET.md's faucet section.
+
+- name: Copy the marigold-faucet binary built on the build host
+  ansible.builtin.copy:
+    src: "{{ marigold_fetch_cache }}/{{ hostvars[groups['build'][0]].marigold_built_commit }}/marigold-faucet"
+    dest: "{{ marigold_install_root }}/bin/marigold-faucet"
+    owner: "{{ marigold_user }}"
+    group: "{{ marigold_user }}"
+    mode: "0755"
+  notify: restart marigold-faucet
+
+- name: Create the faucet's state directory (its $HOME — wallet storage lives here)
+  ansible.builtin.file:
+    path: "{{ marigold_data_root }}/faucet"
+    state: directory
+    owner: "{{ marigold_user }}"
+    group: "{{ marigold_user }}"
+    mode: "0750"
+
+- name: Generate the faucet wallet secret once (kept on the host only)
+  ansible.builtin.shell: |
+    umask 077
+    printf 'FAUCET_WALLET_SECRET=%s\n' "$(openssl rand -base64 24)" > /etc/marigold/faucet.env
+  args:
+    creates: /etc/marigold/faucet.env
+
+- name: Restrict the secret file to the service user
+  ansible.builtin.file:
+    path: /etc/marigold/faucet.env
+    owner: root
+    group: "{{ marigold_user }}"
+    mode: "0640"
+
+- name: Install the marigold-faucet systemd unit
+  ansible.builtin.template:
+    src: marigold-faucet.service.j2
+    dest: /etc/systemd/system/marigold-faucet.service
+    mode: "0644"
+  notify:
+    - reload systemd
+    - restart marigold-faucet
+
+- name: Enable and start marigold-faucet
+  ansible.builtin.systemd:
+    name: marigold-faucet
+    enabled: true
+    state: started
+    daemon_reload: true

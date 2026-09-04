@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Marigold Testnet Faucet</title>
+<style>
+  :root{
+    --ink:#141f19; --note:#18291f; --note-edge:#0f1813; --gold:#e4a33d;
+    --amber:#c9761f; --petal:#f3cf82; --cream:#efe7d3; --moss:#9aa894;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:var(--cream);color:var(--ink);font:16px/1.6 Georgia,'Times New Roman',serif;min-height:100vh}
+  .wrap{max-width:680px;margin:0 auto;padding:48px 20px}
+  h1{font-size:2rem;font-weight:600;margin-bottom:4px}
+  .kicker{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.72rem;letter-spacing:.28em;text-transform:uppercase;color:var(--amber);margin-bottom:16px}
+  p.lede{color:#3d4a42;margin-bottom:28px}
+  button{background:var(--note);color:var(--petal);border:1px solid var(--note-edge);border-radius:10px;padding:14px 28px;font:inherit;font-size:1.05rem;cursor:pointer}
+  button:hover{background:#213627}
+  button:disabled{opacity:.5;cursor:wait}
+  .error{background:#f6dcd2;border:1px solid var(--amber);border-radius:10px;padding:12px 16px;margin-top:20px;display:none}
+  .warn{background:var(--petal);border:1px solid var(--amber);border-radius:10px;padding:12px 16px;margin:24px 0;font-size:.95rem;display:none}
+  .notes{display:none}
+  .note-card{background:#fff;border:1px solid #d8cfb8;border-radius:14px;padding:20px;margin-top:16px}
+  .note-card h3{font-size:1.05rem;margin-bottom:10px}
+  .note-card svg{display:block;margin:0 auto}
+  .payload{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.72rem;word-break:break-all;background:var(--cream);border-radius:8px;padding:10px;margin-top:12px}
+  .copy{margin-top:8px;padding:6px 14px;font-size:.85rem;border-radius:8px}
+  .how{margin-top:36px;border-top:1px solid #d8cfb8;padding-top:20px;font-size:.95rem;color:#3d4a42}
+  .how code{font-family:ui-monospace,Menlo,Consolas,monospace;background:#e5dcc4;border-radius:4px;padding:1px 6px;font-size:.85rem}
+  .status{margin-top:14px;font-size:.8rem;color:var(--moss)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="kicker">marigold · testnet faucet</div>
+  <h1>Take a note.</h1>
+  <p class="lede">This faucet hands out real Marigold bearer notes — digital cash, not an account credit. One claim gives you a 1&nbsp;MAGLD note plus two 0.01&nbsp;MAGLD notes for fees. Testnet money: worthless by design, real in every other way.</p>
+
+  <button id="claim">Claim a note bundle</button>
+  <div class="error" id="error"></div>
+
+  <div class="warn" id="warn"><strong>These are bearer notes.</strong> Whoever holds these codes owns the money — import them into your wallet immediately, then treat the page as spent paper.</div>
+  <div class="notes" id="notes"></div>
+
+  <div class="how">
+    <p><strong>To use them:</strong> in the wallet CLI, connect to a testnet node, open your wallet, and run <code>note import &lt;code&gt;</code> for each note (scan the QR or paste the <code>marigoldnote:</code> text). Your wallet verifies the note on-chain and immediately rotates its lock — from that moment the note is irrevocably yours.</p>
+    <p style="margin-top:10px">New here? Grab the node + wallet from the repo and join the testnet first.</p>
+  </div>
+  <div class="status" id="status"></div>
+</div>
+<script>
+const btn = document.getElementById('claim');
+const errBox = document.getElementById('error');
+const warn = document.getElementById('warn');
+const notes = document.getElementById('notes');
+
+btn.addEventListener('click', async () => {
+  btn.disabled = true; btn.textContent = 'Minting…';
+  errBox.style.display = 'none';
+  try {
+    const res = await fetch('/api/claim', { method: 'POST' });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || ('HTTP ' + res.status));
+    notes.innerHTML = '';
+    for (const n of body.notes) {
+      const card = document.createElement('div');
+      card.className = 'note-card';
+      card.innerHTML = '<h3>' + n.denomination_magld + ' MAGLD</h3>' + n.qr_svg +
+        '<div class="payload"></div><button class="copy">Copy code</button>';
+      card.querySelector('.payload').textContent = n.payload;
+      card.querySelector('.copy').addEventListener('click', (e) => {
+        navigator.clipboard.writeText(n.payload);
+        e.target.textContent = 'Copied';
+      });
+      notes.appendChild(card);
+    }
+    warn.style.display = 'block';
+    notes.style.display = 'block';
+    btn.textContent = 'Claimed — import your notes';
+  } catch (e) {
+    errBox.textContent = e.message;
+    errBox.style.display = 'block';
+    btn.disabled = false; btn.textContent = 'Claim a note bundle';
+  }
+});
+
+fetch('/api/status').then(r => r.json()).then(s => {
+  document.getElementById('status').textContent =
+    s.ready_bundles + ' bundles ready · ' + s.claims_served + ' claims served since restart';
+}).catch(() => {});
+</script>
+</body>
+</html>

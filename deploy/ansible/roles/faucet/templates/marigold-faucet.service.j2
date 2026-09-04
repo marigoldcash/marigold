@@ -1,0 +1,34 @@
+# Managed by Ansible (deploy/ansible/roles/faucet) — local edits will be overwritten.
+[Unit]
+Description=Marigold testnet faucet ({{ faucet_network }})
+After=network-online.target marigoldd.service
+Wants=network-online.target
+Requires=marigoldd.service
+
+[Service]
+Type=simple
+User={{ marigold_user }}
+Group={{ marigold_user }}
+# The marigold system user has no real home (create_home: false); the wallet
+# library resolves its storage under $HOME, so point it at the faucet's own
+# state directory.
+Environment=HOME={{ marigold_data_root }}/faucet
+EnvironmentFile=/etc/marigold/faucet.env
+ExecStart={{ marigold_install_root }}/bin/marigold-faucet \
+  --network {{ faucet_network }} \
+  --wrpc-url {{ faucet_wrpc_url }} \
+  serve \
+  --listen {{ faucet_listen }} \
+  --buffer-bundles {{ faucet_buffer_bundles }} \
+  --per-ip-cooldown-secs {{ faucet_per_ip_cooldown_secs }} \
+  --daily-cap {{ faucet_daily_cap }}
+Restart=on-failure
+RestartSec=10
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths={{ marigold_data_root }}/faucet
+
+[Install]
+WantedBy=multi-user.target

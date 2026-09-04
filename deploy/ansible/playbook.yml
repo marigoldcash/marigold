@@ -42,3 +42,8 @@
   hosts: monitoring
   roles:
     - monitoring-server
+
+- name: Deploy the faucet
+  hosts: faucet
+  roles:
+    - faucet

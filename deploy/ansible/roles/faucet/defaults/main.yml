@@ -1,0 +1,12 @@
+---
+# Loopback only — nginx (hand-managed on the faucet host) terminates TLS for
+# faucet.<domain> and proxies here, passing X-Real-IP for the rate limiter.
+faucet_listen: "127.0.0.1:8590"
+faucet_buffer_bundles: 10
+faucet_per_ip_cooldown_secs: 3600
+faucet_daily_cap: 500
+# The local node's wRPC-borsh URL. The faucet host's marigoldd needs
+# kaspad_extra_args to include --rpclisten-borsh=127.0.0.1:<port> (borsh is
+# not started by default; loopback binding keeps the locked-down posture).
+faucet_wrpc_url: "ws://127.0.0.1:27210"
+faucet_network: "testnet-10"

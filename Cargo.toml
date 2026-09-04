@@ -4,6 +4,7 @@ members = [
     "daemon",
     "cli",
     "core",
+    "faucet",
     "wallet/macros",
     "wallet/core",
     "wallet/native",

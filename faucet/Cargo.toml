@@ -1,0 +1,38 @@
+[package]
+name = "marigold-faucet"
+description = "Marigold testnet faucet — dispenses real bearer notes"
+publish = false
+rust-version.workspace = true
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+include.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "marigold-faucet"
+path = "src/main.rs"
+
+[dependencies]
+kaspa-wallet-core.workspace = true
+kaspa-wrpc-client.workspace = true
+kaspa-rpc-core.workspace = true
+kaspa-consensus-core.workspace = true
+kaspa-hashes.workspace = true
+workflow-core.workspace = true
+kaspa-core.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "time", "signal"] }
+futures.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+clap.workspace = true
+log.workspace = true
+qrcode = { workspace = true, features = ["svg"] }
+# Not workspace dependencies — the faucet is the only axum HTTP server in the
+# tree (the node's RPC stacks are tonic/workflow-rpc), and the only crate that
+# wants anyhow (the rest use per-crate thiserror enums).
+# =0.8.1: later 0.8.x patches raised their tokio floor past the workspace's
+# pinned 1.42; 0.8.1 accepts it.
+axum = "=0.8.1"
+anyhow = "1"
