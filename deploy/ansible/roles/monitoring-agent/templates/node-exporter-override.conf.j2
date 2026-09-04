@@ -1,0 +1,12 @@
+# Managed by Ansible (deploy/ansible/roles/monitoring-agent).
+# node_exporter binds the tailnet IP (monitoring_bind_ip); at boot that bind
+# races tailscaled bringing the interface up. The Debian unit's default restart
+# policy retries so fast it exhausts the start limit and gives up permanently —
+# found the hard way by LAUNCH-PLAN T2's reboot-survival test (seed2, 2026-09-04).
+[Unit]
+After=tailscaled.service
+StartLimitIntervalSec=0
+
+[Service]
+Restart=always
+RestartSec=5

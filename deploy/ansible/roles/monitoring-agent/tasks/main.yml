@@ -15,6 +15,21 @@
     mode: "0644"
   notify: restart node exporter
 
+- name: Install the node exporter boot-race override (tailnet bind vs tailscaled)
+  ansible.builtin.file:
+    path: /etc/systemd/system/prometheus-node-exporter.service.d
+    state: directory
+    mode: "0755"
+
+- name: Install the node exporter override drop-in
+  ansible.builtin.template:
+    src: node-exporter-override.conf.j2
+    dest: /etc/systemd/system/prometheus-node-exporter.service.d/override.conf
+    mode: "0644"
+  notify:
+    - reload systemd
+    - restart node exporter
+
 - name: Ensure the textfile collector directory exists
   ansible.builtin.file:
     path: "{{ monitoring_textfile_dir }}"
