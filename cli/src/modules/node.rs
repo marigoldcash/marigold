@@ -20,7 +20,7 @@ impl DefaultSettings for KaspadSettings {
         let mut settings = vec![(Self::Mute, to_value(true).unwrap())];
 
         let root = nw_sys::app::folder();
-        if let Ok(binaries) = kaspa_daemon::locate_binaries(&root, "kaspad").await
+        if let Ok(binaries) = kaspa_daemon::locate_binaries(&root, "marigoldd").await
             && let Some(path) = binaries.first()
         {
             settings.push((Self::Location, to_value(path.to_string_lossy().to_string()).unwrap()));
@@ -53,7 +53,7 @@ impl Handler for Node {
     }
 
     fn help(&self, _ctx: &Arc<dyn Context>) -> &'static str {
-        "Manage the local Kaspa node instance"
+        "Manage the local Marigold node instance"
     }
 
     async fn start(self: Arc<Self>, _ctx: &Arc<dyn Context>) -> cli::Result<()> {
@@ -97,9 +97,9 @@ impl Node {
             "start" => {
                 let mute = self.mute.load(Ordering::SeqCst);
                 if mute {
-                    tprintln!(ctx, "starting kaspa node... {}", style("(logs are muted, use 'node mute' to toggle)").dim());
+                    tprintln!(ctx, "starting marigold node... {}", style("(logs are muted, use 'node mute' to toggle)").dim());
                 } else {
-                    tprintln!(ctx, "starting kaspa node... {}", style("(use 'node mute' to mute logging)").dim());
+                    tprintln!(ctx, "starting marigold node... {}", style("(use 'node mute' to mute logging)").dim());
                 }
 
                 let wrpc_client = ctx.wallet().try_wrpc_client().ok_or(Error::custom("Unable to start node with non-wRPC client"))?;
@@ -181,13 +181,13 @@ impl Node {
     async fn display_help(self: Arc<Self>, ctx: Arc<KaspaCli>, _argv: Vec<String>) -> Result<()> {
         ctx.term().help(
             &[
-                ("select", "Select Kaspad executable (binary) location"),
-                ("version", "Display Kaspad executable version"),
-                ("start", "Start the local Kaspa node instance"),
-                ("stop", "Stop the local Kaspa node instance"),
-                ("restart", "Restart the local Kaspa node instance"),
-                ("kill", "Kill the local Kaspa node instance"),
-                ("status", "Get the status of the local Kaspa node instance"),
+                ("select", "Select marigoldd executable (binary) location"),
+                ("version", "Display marigoldd executable version"),
+                ("start", "Start the local Marigold node instance"),
+                ("stop", "Stop the local Marigold node instance"),
+                ("restart", "Restart the local Marigold node instance"),
+                ("kill", "Kill the local Marigold node instance"),
+                ("status", "Get the status of the local Marigold node instance"),
                 ("mute", "Toggle log output"),
             ],
             None,
@@ -201,13 +201,13 @@ impl Node {
 
         match path {
             None => {
-                let binaries = kaspa_daemon::locate_binaries(root.as_str(), "kaspad").await?;
+                let binaries = kaspa_daemon::locate_binaries(root.as_str(), "marigoldd").await?;
 
                 if binaries.is_empty() {
-                    tprintln!(ctx, "No kaspad binaries found");
+                    tprintln!(ctx, "No marigoldd binaries found");
                 } else {
                     let binaries = binaries.iter().map(|p| p.display().to_string()).collect::<Vec<_>>();
-                    if let Some(selection) = ctx.term().select("Please select a kaspad binary", &binaries).await? {
+                    if let Some(selection) = ctx.term().select("Please select a marigoldd binary", &binaries).await? {
                         tprintln!(ctx, "selecting: {}", selection);
                         self.settings.set(KaspadSettings::Location, selection.as_str()).await?;
                     } else {
@@ -223,7 +223,7 @@ impl Node {
                     self.settings.set(KaspadSettings::Location, path.as_str()).await?;
                 } else {
                     twarnln!(ctx, "destination binary not found, please specify full path including the binary name");
-                    twarnln!(ctx, "example: 'node select /home/user/testnet/kaspad'");
+                    twarnln!(ctx, "example: 'node select /home/user/testnet/marigoldd'");
                     tprintln!(ctx, "no selection is made");
                 }
             }
@@ -241,12 +241,12 @@ impl Node {
                 term.refresh_prompt();
             }
             Event::Exit(_code) => {
-                tprintln!(ctx, "Kaspad has exited");
+                tprintln!(ctx, "marigoldd has exited");
                 self.is_running.store(false, Ordering::SeqCst);
                 term.refresh_prompt();
             }
             Event::Error(error) => {
-                tprintln!(ctx, "{}", style(format!("Kaspad error: {error}")).red());
+                tprintln!(ctx, "{}", style(format!("marigoldd error: {error}")).red());
                 self.is_running.store(false, Ordering::SeqCst);
                 term.refresh_prompt();
             }

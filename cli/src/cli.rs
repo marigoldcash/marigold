@@ -309,7 +309,7 @@ impl KaspaCli {
                                     this.term().refresh_prompt();
                                 },
                                 Events::UtxoIndexNotEnabled { .. } => {
-                                    tprintln!(this, "Error: Kaspa node UTXO index is not enabled...")
+                                    tprintln!(this, "Error: Marigold node UTXO index is not enabled...")
                                 },
                                 Events::SyncState { sync_state } => {
 
@@ -331,16 +331,16 @@ impl KaspaCli {
                                     ..
                                 } => {
 
-                                    tprintln!(this, "Connected to Kaspa node version {server_version} at {}", url.unwrap_or("N/A".to_string()));
+                                    tprintln!(this, "Connected to Marigold node version {server_version} at {}", url.unwrap_or("N/A".to_string()));
 
                                     let is_open = this.wallet.is_open();
 
                                     if !is_synced {
                                         if is_open {
-                                            terrorln!(this, "Unable to update the wallet state - Kaspa node is currently syncing with the network...");
+                                            terrorln!(this, "Unable to update the wallet state - Marigold node is currently syncing with the network...");
 
                                         } else {
-                                            terrorln!(this, "Kaspa node is currently syncing with the network, please wait for the sync to complete...");
+                                            terrorln!(this, "Marigold node is currently syncing with the network, please wait for the sync to complete...");
                                         }
                                     }
 
@@ -987,7 +987,7 @@ pub async fn kaspa_cli(terminal_options: TerminalOptions, banner: Option<String>
     let cli = KaspaCli::try_new_arc(options).await?;
 
     let banner =
-        banner.unwrap_or_else(|| format!("Kaspa Cli Wallet v{} (type 'help' for list of commands)", env!("CARGO_PKG_VERSION")));
+        banner.unwrap_or_else(|| format!("Marigold Cli Wallet v{} (type 'help' for list of commands)", env!("CARGO_PKG_VERSION")));
     cli.term().writeln(banner);
 
     // redirect the global log output to terminal

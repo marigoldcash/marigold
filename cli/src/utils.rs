@@ -21,7 +21,7 @@ pub fn try_parse_required_nonzero_kaspa_as_sompi_u64<S: ToString + Display>(kasp
             }
         }
     } else {
-        Err(Error::custom("Missing Kaspa amount"))
+        Err(Error::custom("Missing Marigold amount"))
     }
 }
 
@@ -38,7 +38,7 @@ pub fn try_parse_required_kaspa_as_sompi_u64<S: ToString + Display>(kaspa_amount
             Ok(sompi_amount as u64)
         }
     } else {
-        Err(Error::custom("Missing Kaspa amount"))
+        Err(Error::custom("Missing Marigold amount"))
     }
 }
 
