@@ -2,7 +2,7 @@
 
 Documented manual smoke test for P4.2. Walks a full "user journey" end to end on the [P4.1 local testnet](../../scripts/x-testnet-local.sh): create a wallet, mine to it, wait for maturity, send to a second wallet, restart a node, confirm balances persist.
 
-`kaspa-cli` is REPL-only and cannot be scripted (see NOTES.md's P0.3 entry) — every step below uses RPC-direct commands (`rothschild` for keypair generation and sending, `kaspa-miner` for mining, a small throwaway gRPC client for balance/DAG queries) instead. This mirrors every prior live check in this project (P0.5, P2.9, P3.3, P4.1) and is the supported way to exercise the chain without a working interactive wallet.
+`marigold-cli` is REPL-only and cannot be scripted (see NOTES.md's P0.3 entry) — every step below uses RPC-direct commands (`rothschild` for keypair generation and sending, `kaspa-miner` for mining, a small throwaway gRPC client for balance/DAG queries) instead. This mirrors every prior live check in this project (P0.5, P2.9, P3.3, P4.1) and is the supported way to exercise the chain without a working interactive wallet.
 
 **Before you start**, rebuild every binary you'll use — a stale binary can silently pass with wrong behavior (bit the project once at P2.3, and again at P4.2 itself — see "Gotchas" below):
 
@@ -80,20 +80,20 @@ Same `--appdir` as before — the node reloads its existing database rather than
 
 ### 9. Launch the 3-node simnet testnet
 
-Steps 1-8 above (P4.2) predate the note-pool wallet and use devnet + RPC-direct tools. Everything from here on (P7.8) exercises the **full note lifecycle** — minting, cross-node propagation, a mid-flow restart, and vault backup/restore — using the real interactive `kaspa-cli` (see [WALLET.md](WALLET.md) for the single-node command-by-command reference; this section builds on it across 3 peered nodes) on **simnet**, not devnet: `DEVNET_PARAMS` sets `pool_activation: ForkActivation::never()`, so no `note` command would even be accepted there — see WALLET.md's "Before you start" note.
+Steps 1-8 above (P4.2) predate the note-pool wallet and use devnet + RPC-direct tools. Everything from here on (P7.8) exercises the **full note lifecycle** — minting, cross-node propagation, a mid-flow restart, and vault backup/restore — using the real interactive `marigold-cli` (see [WALLET.md](WALLET.md) for the single-node command-by-command reference; this section builds on it across 3 peered nodes) on **simnet**, not devnet: `DEVNET_PARAMS` sets `pool_activation: ForkActivation::never()`, so no `note` command would even be accepted there — see WALLET.md's "Before you start" note.
 
 ```bash
-cargo build --release --bin marigoldd --bin kaspa-cli
+cargo build --release --bin marigoldd --bin marigold-cli
 NETWORK=simnet ./scripts/x-testnet-local.sh
 ```
 
-(P7.8 taught the [P4.1 script](../../scripts/x-testnet-local.sh) a `NETWORK=simnet` mode; it now also starts `--rpclisten-borsh` and `--unsaferpc` on every node, both required for `kaspa-cli` to connect — neither was on by default before P7.7 found the gap.) Confirms 3 peered simnet nodes: node1 on gRPC `26510`/P2P `26511`/borsh-wRPC `27510`, node2 and node3 shifted by `+10`/`+20` on each port.
+(P7.8 taught the [P4.1 script](../../scripts/x-testnet-local.sh) a `NETWORK=simnet` mode; it now also starts `--rpclisten-borsh` and `--unsaferpc` on every node, both required for `marigold-cli` to connect — neither was on by default before P7.7 found the gap.) Confirms 3 peered simnet nodes: node1 on gRPC `26510`/P2P `26511`/borsh-wRPC `27510`, node2 and node3 shifted by `+10`/`+20` on each port.
 
-**`kaspa-cli` cannot be driven by piped stdin** (NOTES.md's P0.3 finding) — every step below assumes a real TTY, or `pexpect` (a Python pty-driving library) sending literal `\r` for Enter, matching WALLET.md's own validation method.
+**`marigold-cli` cannot be driven by piped stdin** (NOTES.md's P0.3 finding) — every step below assumes a real TTY, or `pexpect` (a Python pty-driving library) sending literal `\r` for Enter, matching WALLET.md's own validation method.
 
 ### 10. Create and fund a wallet on node 1
 
-In a `kaspa-cli` session pointed at node 1 (`server 127.0.0.1:27510`), run `wallet create` (WALLET.md step 3), then mine to its receive address:
+In a `marigold-cli` session pointed at node 1 (`server 127.0.0.1:27510`), run `wallet create` (WALLET.md step 3), then mine to its receive address:
 
 ```bash
 kaspa-miner --mining-address <address> --kaspad-address 127.0.0.1 --port 26510 \
@@ -112,7 +112,7 @@ Every node independently derives the same note-pool state from the same blocks �
 
 ### 12. Cross-node payment: request on node 2, pay from node 1
 
-Open a **second** `kaspa-cli` session under a separate `$HOME` (so it gets its own wallet storage), pointed at node 2 (`server 127.0.0.1:27520`), and create a wallet there too. From that session:
+Open a **second** `marigold-cli` session under a separate `$HOME` (so it gets its own wallet storage), pointed at node 2 (`server 127.0.0.1:27520`), and create a wallet there too. From that session:
 
 ```
 note request 2
@@ -146,7 +146,7 @@ From the node-1 wallet (which now holds several notes from steps 10-12):
 note vault backup <dir>
 ```
 
-In a **third**, fresh `kaspa-cli` session under its own `$HOME`, pointed at node 3 (`server 127.0.0.1:27530`), create a new wallet and restore from that backup:
+In a **third**, fresh `marigold-cli` session under its own `$HOME`, pointed at node 3 (`server 127.0.0.1:27530`), create a new wallet and restore from that backup:
 
 ```
 note vault restore <dir> <word1> ... <word24>
@@ -191,7 +191,7 @@ Every step passed. Full narrative log (including the two bugs found and fixed al
 
 ## Verification (2026-08-18)
 
-Walked steps 9-14 above against a real 3-node simnet testnet (`NETWORK=simnet ./scripts/x-testnet-local.sh`, node1/2/3 on gRPC `26510`/`26520`/`26530`, borsh-wRPC `27510`/`27520`/`27530`), driving three separate real `kaspa-cli` sessions (each its own `$HOME`, via `pexpect` — see WALLET.md's "Gotchas"):
+Walked steps 9-14 above against a real 3-node simnet testnet (`NETWORK=simnet ./scripts/x-testnet-local.sh`, node1/2/3 on gRPC `26510`/`26520`/`26530`, borsh-wRPC `27510`/`27520`/`27530`), driving three separate real `marigold-cli` sessions (each its own `$HOME`, via `pexpect` — see WALLET.md's "Gotchas"):
 
 - **Wallet A** (node1, port `27510`): created, funded past `coinbase_maturity * 2`, ran `note mint 3` successfully.
 - **Wallet B** (node2, port `27520`): created independently, ran `note request 1`, and — without any command run on wallet B's own session beyond the request itself — received `payment received: 1 MAGLD in 1 note(s)` once wallet A's `note pay marigoldreq:...` (run against node1) confirmed. Confirms cross-node `NotesChanged` propagation exactly as step 12 describes: node2 picked this up from its own view of the chain over P2P, not anything pushed directly from wallet A's session.

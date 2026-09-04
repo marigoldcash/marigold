@@ -46,7 +46,7 @@ services:
     volumes:
       - node-testnet-1-data:/data
     ports:
-      # gRPC/wRPC published to localhost only, for a host-side kaspa-cli or
+      # gRPC/wRPC published to localhost only, for a host-side marigold-cli or
       # RPC client to connect to during testing — never do this on a real
       # public host (see docs/x-fork/TESTNET.md's security section).
       - "127.0.0.1:26210:26210"

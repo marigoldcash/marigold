@@ -19,6 +19,10 @@ include = [
 [features]
 default = []
 
+[[bin]]
+name = "marigold-cli"
+path = "src/main.rs"
+
 [lib]
 name = "kaspa_cli_lib"
 crate-type = ["cdylib", "lib"]

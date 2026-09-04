@@ -95,7 +95,7 @@ Cadence — two distinct announcement moments, deliberately different in volume:
 - **P5.8 sunset-threshold model (P9.5 hard gate)** — the quantitative T-model review 2 demanded; needs real testnet difficulty data, which the soak produces.
 - **Legal counsel (P9.6)** — engage once the whitepaper draft exists (counsel reviews public claims; give them the actual claims).
 - **Exchange posture** — per P1.9, nothing to *do* pre-launch except not promising anything; distribution at launch is mining + P2P, stated honestly everywhere.
-- **Wallet UX gap (flagged, not scheduled)** — kaspa-cli's REPL is fine for testers, but the "granny at a market" story eventually needs a GUI wallet (QR flows exist in the CLI already). Post-launch roadmap item / community bounty; the P8.0 single-secret change lands before any of that.
+- **Wallet UX gap (flagged, not scheduled)** — marigold-cli's REPL is fine for testers, but the "granny at a market" story eventually needs a GUI wallet (QR flows exist in the CLI already). Post-launch roadmap item / community bounty; the P8.0 single-secret change lands before any of that.
 
 ## Part 4 — Sequence at a glance
 

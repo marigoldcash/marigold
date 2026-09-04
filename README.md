@@ -177,11 +177,11 @@ from this repository, not an external one.
 
 ## Wallet and CLI
 
-The `kaspa-cli` binary provides the interactive wallet, including the Marigold note
+The `marigold-cli` binary provides the interactive wallet, including the Marigold note
 commands (mint, redeem, send/receive bearer notes, split/merge, vault backup):
 
 ```bash
-cargo run --release -p kaspa-cli
+cargo run --release --bin marigold-cli
 ```
 
 Usage is documented in [docs/x-fork/WALLET.md](docs/x-fork/WALLET.md).

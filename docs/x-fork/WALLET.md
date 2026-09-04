@@ -1,13 +1,13 @@
 # WALLET.md — Note wallet walkthrough
 
-A step-by-step manual walkthrough of every note-pool wallet flow (P7.1-P7.6) on a local testnet, using the real interactive `kaspa-cli`. Unlike [SMOKE.md](SMOKE.md) (which predates the wallet and works around `kaspa-cli`'s REPL-only nature with RPC-direct tools — see NOTES.md's P0.3 entry), every step below genuinely uses the wallet as a user would. Written for P7.7; verified line-by-line against a running local node (see "Verification" at the end).
+A step-by-step manual walkthrough of every note-pool wallet flow (P7.1-P7.6) on a local testnet, using the real interactive `marigold-cli`. Unlike [SMOKE.md](SMOKE.md) (which predates the wallet and works around `marigold-cli`'s REPL-only nature with RPC-direct tools — see NOTES.md's P0.3 entry), every step below genuinely uses the wallet as a user would. Written for P7.7; verified line-by-line against a running local node (see "Verification" at the end).
 
 ## Before you start
 
 Rebuild every binary you'll use — a stale one can silently misbehave (bit this project at P2.3 and again at P4.2):
 
 ```bash
-cargo build --release --bin marigoldd --bin kaspa-cli
+cargo build --release --bin marigoldd --bin marigold-cli
 ```
 
 `kaspa-miner` (the community `elichai/kaspa-miner` tool) must be installed separately — see NOTES.md's Environment section.
@@ -16,7 +16,7 @@ cargo build --release --bin marigoldd --bin kaspa-cli
 
 ## 1. Launch a local simnet node
 
-The wRPC Borsh listener `kaspa-cli` connects over is **not started by default** — `--rpclisten-borsh` must be given explicitly (unlike gRPC/P2P, which are):
+The wRPC Borsh listener `marigold-cli` connects over is **not started by default** — `--rpclisten-borsh` must be given explicitly (unlike gRPC/P2P, which are):
 
 ```bash
 mkdir -p x-simnet-local-data
@@ -35,10 +35,10 @@ WRPC Server starting on: 127.0.0.1:27510
 
 (Simnet's default ports: gRPC `26510`, P2P `26511`, wRPC Borsh `27510` — different from devnet's `266*0`/devnet's wRPC `27610` used in [SMOKE.md](SMOKE.md)/P4.1's script.)
 
-## 2. Start `kaspa-cli` and connect
+## 2. Start `marigold-cli` and connect
 
 ```bash
-target/release/kaspa-cli
+target/release/marigold-cli
 ```
 
 At the `$` prompt:
@@ -132,7 +132,7 @@ Paper QR export: prints an encrypted QR (and writes the same page as hex text to
 
 ## 7. Receive a payment (fresh-pk mode)
 
-In a **second** `kaspa-cli` session (a separate `wallet create` under a different storage location — pass `wallet create <name>` to keep multiple named wallets, or run from a second `$HOME`), the recipient runs:
+In a **second** `marigold-cli` session (a separate `wallet create` under a different storage location — pass `wallet create <name>` to keep multiple named wallets, or run from a second `$HOME`), the recipient runs:
 
 ```
 note request 2
@@ -191,15 +191,15 @@ Copies the backup's files in, recovers `K` from the words, deep-verifies (report
 
 ## Gotchas found while writing this (2026-08-17)
 
-- **`kaspa-cli` genuinely cannot be driven by piped stdin** (NOTES.md's P0.3 finding still holds — it needs a real TTY, crossterm raw mode). This walkthrough was validated with `pexpect` (a Python pty-driving library, already available in this environment), which allocates a real pseudo-terminal and sends literal `\r` (not `\n` — crossterm raw mode doesn't do the newline translation a cooked TTY would) for Enter. Useful precedent for any future automated CLI validation.
-- **wRPC Borsh needs `--rpclisten-borsh` explicitly** — unlike gRPC and P2P, it isn't started by default. `kaspa-cli`'s `connect` fails with "Connection refused" without it, silently continuing to work for anything that doesn't need the network (like `wallet create` itself, which is why the wizard "succeeding" isn't proof the wRPC connection is up).
+- **`marigold-cli` genuinely cannot be driven by piped stdin** (NOTES.md's P0.3 finding still holds — it needs a real TTY, crossterm raw mode). This walkthrough was validated with `pexpect` (a Python pty-driving library, already available in this environment), which allocates a real pseudo-terminal and sends literal `\r` (not `\n` — crossterm raw mode doesn't do the newline translation a cooked TTY would) for Enter. Useful precedent for any future automated CLI validation.
+- **wRPC Borsh needs `--rpclisten-borsh` explicitly** — unlike gRPC and P2P, it isn't started by default. `marigold-cli`'s `connect` fails with "Connection refused" without it, silently continuing to work for anything that doesn't need the network (like `wallet create` itself, which is why the wizard "succeeding" isn't proof the wRPC connection is up).
 - **Real bug found and fixed**: `note vault restore`'s rotation loop aborted entirely on the first batch's failure, leaving every batch after it — including ones with no conflict at all — unexecuted. Fixed to report a failed batch and continue with the rest (`cli/src/modules/note.rs`).
 - **Real bug found and fixed**: `deep_verify`'s findings weren't reconciled back into local note status. A serial it reported `stale` stayed `Active` in the local index, so `rotate_notes`'s fee-source selection kept proposing the same dead serial as a spare on every subsequent batch, failing repeatedly for the same reason. Fixed by having `note vault restore` mark every `stale` serial `Superseded` locally right after `deep_verify` reports it, before planning any rotation.
 - **`note vault import`'s password moved from a CLI argument to an interactive masked prompt** during this pass (it was a known, explicitly-flagged gap from P7.6) — matches how the wallet password itself is always prompted, never passed as text.
 
 ## Verification (2026-08-17)
 
-Walked every step above against a real local simnet node (`kaspad --simnet --enable-unsynced-mining --unsaferpc --utxoindex --rpclisten-borsh=127.0.0.1:27510`), driving the real `kaspa-cli` binary interactively (via `pexpect`, allocating a genuine pty — see "Gotchas" above):
+Walked every step above against a real local simnet node (`kaspad --simnet --enable-unsynced-mining --unsaferpc --utxoindex --rpclisten-borsh=127.0.0.1:27510`), driving the real `marigold-cli` binary interactively (via `pexpect`, allocating a genuine pty — see "Gotchas" above):
 
 - Created a wallet through the full interactive wizard exactly as documented; captured its mnemonic and receive address from the real terminal output.
 - Funded it (2,350 mined blocks, past `coinbase_maturity * 2`); `list` showed a mature transparent balance.
