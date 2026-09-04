@@ -178,7 +178,7 @@ pub const SUBNETWORK_ID_COINBASE: SubnetworkId = CoinbaseSubnetwork::SUBNETWORK_
 pub const SUBNETWORK_ID_REGISTRY: SubnetworkId = RegistrySubnetwork::SUBNETWORK_ID;
 
 /// The user-lane subnetwork ID for Marigold note-pool operations (mint/transfer/redeem
-/// — see `docs/x-fork/POOL-SPEC.md` P5.2). Namespace bytes spell "POOL" in ASCII,
+/// — see `docs/marigold/POOL-SPEC.md` P5.2). Namespace bytes spell "POOL" in ASCII,
 /// chosen only for memorability — any unclaimed namespace is equally valid.
 pub const SUBNETWORK_ID_NOTE_POOL: SubnetworkId = SubnetworkId::from_namespace([0x50, 0x4f, 0x4f, 0x4c]);
 

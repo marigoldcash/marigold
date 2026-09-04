@@ -1328,7 +1328,7 @@ impl Wallet {
     // `import_legacy_keydata`/KDX, `import_gen1_keydata`) were removed in FORK-PLAN
     // P7.0: on a fair-launch chain they could never find funds — their only possible
     // real-world effect was inviting users to expose real Kaspa keys inside Marigold
-    // software (key-reuse hazard). See docs/x-fork/DECISIONS.md.
+    // software (key-reuse hazard). See docs/marigold/DECISIONS.md.
 
     pub async fn import_with_mnemonic(
         self: &Arc<Wallet>,

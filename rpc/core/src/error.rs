@@ -25,7 +25,7 @@ pub enum RpcError {
     HexParsingError(#[from] faster_hex::Error),
 
     #[error(
-        "missing pool_commitment header field — Marigold adds a pool_commitment field to the block header (and to the proof-of-work pre-image), so mining software built for vanilla Kaspa cannot mine this chain unmodified; see docs/x-fork/MINING-COMPAT.md in the marigold-node repository for the required (small) client-side patch"
+        "missing pool_commitment header field — Marigold adds a pool_commitment field to the block header (and to the proof-of-work pre-image), so mining software built for vanilla Kaspa cannot mine this chain unmodified; see docs/marigold/MINING-COMPAT.md in the marigold-node repository for the required (small) client-side patch"
     )]
     MissingPoolCommitment,
 

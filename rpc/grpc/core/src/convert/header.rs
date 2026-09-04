@@ -57,7 +57,7 @@ from!(item: &[RpcHash], protowire::RpcBlockLevelParents, { Self { parent_hashes:
 /// round-trip), i.e. unpatched vanilla-Kaspa mining software. Surface that as an
 /// actionable error instead of the bare hex-length failure it would otherwise produce
 /// ("Hex parsing error: Invalid input length 64" cost a real debugging session before
-/// this existed — see docs/x-fork/MINING-COMPAT.md).
+/// this existed — see docs/marigold/MINING-COMPAT.md).
 fn parse_pool_commitment(pool_commitment: &str) -> RpcResult<RpcHash> {
     if pool_commitment.is_empty() {
         return Err(RpcError::MissingPoolCommitment);

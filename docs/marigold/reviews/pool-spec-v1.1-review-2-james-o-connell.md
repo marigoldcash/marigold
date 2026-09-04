@@ -1,6 +1,6 @@
 # Technical Review: POOL-SPEC P5.1–P5.8
 
-**Scope.** Technical review of the requested `POOL-SPEC.md` sections P5.1–P5.8 and the corresponding P5.1–P5.8 rationale in `docs/x-fork/DECISIONS.md`.
+**Scope.** Technical review of the requested `POOL-SPEC.md` sections P5.1–P5.8 and the corresponding P5.1–P5.8 rationale in `docs/marigold/DECISIONS.md`.
 
 **Status.** Pre-implementation review.
 
@@ -259,7 +259,7 @@ The following references identify the intended source locations; they are sectio
 - `POOL-SPEC.md`, P5.6 — wallet state, encrypted backups, recovery and stale-backup rotation.
 - `POOL-SPEC.md`, P5.7 — public observability, anonymity limits, fee-stamp linkage, non-shielded positioning.
 - `POOL-SPEC.md`, P5.8 — trustee anchors, cadence/depth, failure/equivocation, IBD, T/M/K, hard maximum DAA score.
-- `docs/x-fork/DECISIONS.md`, P5.1–P5.8 entries — rationale for the corresponding non-obvious design decisions, particularly P5.2 freshness and P5.8 parameterization.
+- `docs/marigold/DECISIONS.md`, P5.1–P5.8 entries — rationale for the corresponding non-obvious design decisions, particularly P5.2 freshness and P5.8 parameterization.
 
 ## Closing assessment
 

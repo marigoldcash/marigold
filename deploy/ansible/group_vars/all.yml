@@ -17,7 +17,7 @@ deploy_passwordless_sudo: true
 deploy_ssh_public_key_file: "~/.ssh/id_ed25519.pub"
 
 marigold_repo: "https://github.com/marigoldcash/marigold-node.git"
-marigold_ref: "x-fork"          # branch, tag, or commit to build and deploy
+marigold_ref: "main"            # branch, tag, or commit to build and deploy
 marigold_network: "testnet"     # testnet | mainnet | devnet | simnet
 
 # P2P port marigoldd actually listens on for each network — must match
@@ -49,14 +49,14 @@ marigold_config_root: "/etc/marigold"
 # machine caches fetched binaries between runs (keyed by commit, so re-running
 # the playbook against an unchanged commit never re-copies anything — see the
 # build role for why this matters: a stale binary has silently caused wrong
-# behavior in this project more than once, see docs/x-fork/NOTES.md's P2.3 and
+# behavior in this project more than once, see docs/marigold/NOTES.md's P2.3 and
 # P4.2 entries).
 marigold_build_checkout: "/opt/marigold-build/marigold-node"
 marigold_fetch_cache: "{{ playbook_dir }}/.fetched"
 
 # marigoldd defaults — a public seed node deliberately passes NONE of
 # --rpclisten/--rpclisten-borsh/--rpclisten-json/--unsaferpc: gRPC then defaults to
-# loopback-only and wRPC doesn't start at all (see docs/x-fork/WALLET.md's and
+# loopback-only and wRPC doesn't start at all (see docs/marigold/WALLET.md's and
 # SMOKE.md's P7.7/P7.8 findings) — the safest possible posture is simply never
 # passing those flags on a host reachable from the internet.
 kaspad_archival: false

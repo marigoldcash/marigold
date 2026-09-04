@@ -52,10 +52,10 @@ it simply never records who holds a note, the same way a banknote doesn't.
   therefore hold nothing but note keys: no addresses, no balances, no seed phrase.
 
 The full design, with every decision and its rationale, lives in
-[FORK-PLAN.md](FORK-PLAN.md) and [docs/x-fork/](docs/x-fork/) — start with
-[POOL-SPEC.md](docs/x-fork/POOL-SPEC.md) (the pool specification),
-[DECISIONS.md](docs/x-fork/DECISIONS.md) (locked parameters and why), and
-[WALLET.md](docs/x-fork/WALLET.md) (wallet usage).
+[FORK-PLAN.md](FORK-PLAN.md) and [docs/marigold/](docs/marigold/) — start with
+[POOL-SPEC.md](docs/marigold/POOL-SPEC.md) (the pool specification),
+[DECISIONS.md](docs/marigold/DECISIONS.md) (locked parameters and why), and
+[WALLET.md](docs/marigold/WALLET.md) (wallet usage).
 
 ## Network parameters
 
@@ -82,7 +82,9 @@ This repository tracks upstream
 merging its fixes for years. For that reason the internal crate and module names remain
 `kaspa-*` — only user-facing identity (the `marigoldd` binary name, network name,
 ticker, prefixes, ports, genesis, emission) is changed. This is a deliberate,
-permanent choice, not an unfinished rebrand. Marigold is not affiliated with or
+permanent choice, not an unfinished rebrand. Development happens on the default
+branch `main`; `master` is a pristine mirror of upstream rusty-kaspa, kept as the
+merge base. Marigold is not affiliated with or
 endorsed by the Kaspa project; we are grateful to its developers, whose work this chain
 builds on.
 
@@ -157,7 +159,7 @@ cargo run --release --bin marigoldd -- --testnet --utxoindex
 
 `--utxoindex` is needed if you plan to use a wallet against the node. RPC listens on
 loopback only unless explicitly configured — see
-[docs/x-fork/TESTNET.md](docs/x-fork/TESTNET.md) for the full deployment runbook
+[docs/marigold/TESTNET.md](docs/marigold/TESTNET.md) for the full deployment runbook
 (including ready-made [Ansible plays](deploy/ansible/) that install the node and the
 stratum bridge as systemd services), and pass `--help` for all options. A configuration
 file is supported via `-C /path/to/configfile.toml`.
@@ -184,13 +186,13 @@ commands (mint, redeem, send/receive bearer notes, split/merge, vault backup):
 cargo run --release --bin marigold-cli
 ```
 
-Usage is documented in [docs/x-fork/WALLET.md](docs/x-fork/WALLET.md).
+Usage is documented in [docs/marigold/WALLET.md](docs/marigold/WALLET.md).
 
 ## Development process and review
 
 Marigold is developed by a human founder using AI-assisted engineering, with all
 consensus-critical work externally reviewed: the pool specification passed review by
-external cryptographers (see [docs/x-fork/reviews/](docs/x-fork/reviews/)), a full
+external cryptographers (see [docs/marigold/reviews/](docs/marigold/reviews/)), a full
 security audit precedes mainnet, and the network soaks on a public testnet for months
 before any real value touches it. The development record — including the step-by-step
 [FORK-PLAN.md](FORK-PLAN.md) this project is built from — is published as-is; trust
@@ -210,7 +212,7 @@ Do not open public issues for security-sensitive reports.
 
 - Website: [marigold.cash](https://marigold.cash)
 - Plan & roadmap: [FORK-PLAN.md](FORK-PLAN.md)
-- Design docs: [docs/x-fork/](docs/x-fork/)
+- Design docs: [docs/marigold/](docs/marigold/)
 - Upstream: [kaspanet/rusty-kaspa](https://github.com/kaspanet/rusty-kaspa)
 
 ## License

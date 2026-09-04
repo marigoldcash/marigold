@@ -2,8 +2,8 @@
 # P4.1 — Testnet-in-a-box: launches 3 local nodes on one machine, peered together.
 #
 # Usage:
-#   ./scripts/x-testnet-local.sh [data-dir]
-#   NETWORK=simnet ./scripts/x-testnet-local.sh [data-dir]
+#   ./scripts/marigold-testnet-local.sh [data-dir]
+#   NETWORK=simnet ./scripts/marigold-testnet-local.sh [data-dir]
 #
 # NETWORK selects the network shape (default: devnet). P7.7 found that
 # pool_activation is ForkActivation::never() on devnet specifically (mainnet/
@@ -12,7 +12,7 @@
 # extension, WALLET.md's own walkthrough): it's also the only shape with
 # skip_proof_of_work=true, so mined blocks confirm instantly, no real miner needed.
 #
-# data-dir defaults to ./x-testnet-local-data (repo-relative). Re-running the script
+# data-dir defaults to ./marigold-testnet-local-data (repo-relative). Re-running the script
 # reuses an existing data-dir (a stopped-and-restarted testnet resumes where it left
 # off); delete the directory for a clean start. Note that switching NETWORK against an
 # existing data-dir will fail (each node's datadir is bound to the network it was
@@ -29,7 +29,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-DATA_DIR="${1:-$REPO_ROOT/x-testnet-local-data}"
+DATA_DIR="${1:-$REPO_ROOT/marigold-testnet-local-data}"
 KASPAD="$REPO_ROOT/target/release/marigoldd"
 NETWORK="${NETWORK:-devnet}"
 

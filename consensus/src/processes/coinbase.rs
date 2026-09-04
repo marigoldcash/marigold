@@ -278,7 +278,7 @@ impl CoinbaseManager {
 }
 
 /*
-    Marigold's own subsidy schedule (P1.4/P3.2 — see docs/x-fork/DECISIONS.md and NOTES.md):
+    Marigold's own subsidy schedule (P1.4/P3.2 — see docs/marigold/DECISIONS.md and NOTES.md):
     210,000,000 MAGLD hard cap, no pre-deflationary phase (decay starts at block 0), smooth
     continuous geometric decay halving every 3 years (36 months), no tail — the table tapers
     to an exact 0 and stays there.

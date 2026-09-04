@@ -12,7 +12,7 @@ see the `[bootstrap]` group in `inventory.example.ini`. Skip it for hosts that
 already have a working `deploy` account.
 
 Full narrative, security posture, and DNS-seeder setup: see
-[docs/x-fork/TESTNET.md](../../docs/x-fork/TESTNET.md). Quick start:
+[docs/marigold/TESTNET.md](../../docs/marigold/TESTNET.md). Quick start:
 
 ```bash
 cd deploy/ansible

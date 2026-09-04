@@ -3,7 +3,7 @@
 //!
 //! Wire types for Marigold's note pool (P6.1 — pure data, no validation logic).
 //! Every type here is defined exactly as specified in
-//! `docs/x-fork/POOL-SPEC.md`'s P5.1/P5.2 sections — see that document for the
+//! `docs/marigold/POOL-SPEC.md`'s P5.1/P5.2 sections — see that document for the
 //! full rationale; this module only implements the byte layouts it fixes.
 //!
 

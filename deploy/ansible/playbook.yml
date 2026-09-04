@@ -10,7 +10,7 @@
 # 2. build must run before the deploy plays — it sets marigold_built_commit as
 #    a fact on the build host, which the deploy plays read via hostvars to
 #    know exactly which cached binaries to copy out.
-# See docs/x-fork/TESTNET.md.
+# See docs/marigold/TESTNET.md.
 
 - name: Bootstrap the deploy account on fresh machines
   hosts: bootstrap

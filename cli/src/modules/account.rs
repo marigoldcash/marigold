@@ -102,7 +102,7 @@ impl Account {
                             // The legacy (KDX/kaspanet) import path was removed in
                             // FORK-PLAN P7.0 — typing real Kaspa key material into
                             // Marigold software is a key-reuse hazard on a
-                            // fair-launch chain (see docs/x-fork/DECISIONS.md)
+                            // fair-launch chain (see docs/marigold/DECISIONS.md)
                             LEGACY_ACCOUNT_KIND => {
                                 tprintln!(ctx, "legacy (KDX/kaspanet) account import has been removed: importing");
                                 tprintln!(ctx, "real Kaspa key material into Marigold would be a key-reuse hazard\r\n");

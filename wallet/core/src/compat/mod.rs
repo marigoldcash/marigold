@@ -6,7 +6,7 @@
 //! fair-launch chain they could never find funds, and their only possible
 //! real-world effect was inviting users to type real Kaspa wallet passwords into
 //! Marigold software — a key-reuse hazard that normalizes exactly the behavior
-//! wallet phishing depends on. See docs/x-fork/DECISIONS.md (P7.0).
+//! wallet phishing depends on. See docs/marigold/DECISIONS.md (P7.0).
 //!
 //! The module itself is retained as a tombstone so the removal is discoverable in
 //! place. Pre-existing wallet *storage* containing legacy accounts still opens

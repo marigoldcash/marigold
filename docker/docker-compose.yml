@@ -3,7 +3,7 @@
 # Brings up a small Marigold topology on one machine so every component can be
 # verified talking to every other component before any of it touches real
 # infrastructure: two testnet nodes peered over P2P (proves block propagation
-# across containers, the same thing docs/x-fork/NOTES.md's P2.9 smoke test
+# across containers, the same thing docs/marigold/NOTES.md's P2.9 smoke test
 # proves on bare metal), a mainnet node running alongside them (proves two
 # networks can coexist without port/appdir collisions — each container gets
 # its own network namespace, so this is actually easier here than on a shared
@@ -39,7 +39,7 @@ services:
       # This node has no real peers (isolated compose network, DNS seeders
       # unreachable from inside Docker) so it never considers itself synced
       # by default and refuses to produce block templates — the same
-      # scenario docs/x-fork/NOTES.md's P0.4 devnet entry already solved.
+      # scenario docs/marigold/NOTES.md's P0.4 devnet entry already solved.
       # node-testnet-2 doesn't need this: it syncs for real, via P2P, from
       # this node.
       - --enable-unsynced-mining
@@ -48,7 +48,7 @@ services:
     ports:
       # gRPC/wRPC published to localhost only, for a host-side marigold-cli or
       # RPC client to connect to during testing — never do this on a real
-      # public host (see docs/x-fork/TESTNET.md's security section).
+      # public host (see docs/marigold/TESTNET.md's security section).
       - "127.0.0.1:26210:26210"
       - "127.0.0.1:27210:27210"
     networks:

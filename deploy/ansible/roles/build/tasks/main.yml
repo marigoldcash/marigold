@@ -2,7 +2,7 @@
 # Runs only on the `build` group's host (exactly one, per inventory.example.ini's
 # comment) — the only machine that needs the Rust toolchain. Every other host
 # just receives the two binaries this role produces, via the deploy role's fetch
-# step below. See docs/x-fork/STATE.md: "build host (only machine with the
+# step below. See docs/marigold/STATE.md: "build host (only machine with the
 # toolchain — others get binaries)".
 
 - name: Check the Rust toolchain is present

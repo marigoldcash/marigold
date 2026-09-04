@@ -1,6 +1,6 @@
 # SMOKE.md — Full user-journey manual test
 
-Documented manual smoke test for P4.2. Walks a full "user journey" end to end on the [P4.1 local testnet](../../scripts/x-testnet-local.sh): create a wallet, mine to it, wait for maturity, send to a second wallet, restart a node, confirm balances persist.
+Documented manual smoke test for P4.2. Walks a full "user journey" end to end on the [P4.1 local testnet](../../scripts/marigold-testnet-local.sh): create a wallet, mine to it, wait for maturity, send to a second wallet, restart a node, confirm balances persist.
 
 `marigold-cli` is REPL-only and cannot be scripted (see NOTES.md's P0.3 entry) — every step below uses RPC-direct commands (`rothschild` for keypair generation and sending, `kaspa-miner` for mining, a small throwaway gRPC client for balance/DAG queries) instead. This mirrors every prior live check in this project (P0.5, P2.9, P3.3, P4.1) and is the supported way to exercise the chain without a working interactive wallet.
 
@@ -17,7 +17,7 @@ cargo build --release --bin marigoldd --bin rothschild
 ### 1. Launch the local testnet
 
 ```bash
-./scripts/x-testnet-local.sh
+./scripts/marigold-testnet-local.sh
 ```
 
 Confirms 3 peered devnet nodes are up (node1 on default ports: gRPC `26610`, P2P `26611`).
@@ -84,10 +84,10 @@ Steps 1-8 above (P4.2) predate the note-pool wallet and use devnet + RPC-direct 
 
 ```bash
 cargo build --release --bin marigoldd --bin marigold-cli
-NETWORK=simnet ./scripts/x-testnet-local.sh
+NETWORK=simnet ./scripts/marigold-testnet-local.sh
 ```
 
-(P7.8 taught the [P4.1 script](../../scripts/x-testnet-local.sh) a `NETWORK=simnet` mode; it now also starts `--rpclisten-borsh` and `--unsaferpc` on every node, both required for `marigold-cli` to connect — neither was on by default before P7.7 found the gap.) Confirms 3 peered simnet nodes: node1 on gRPC `26510`/P2P `26511`/borsh-wRPC `27510`, node2 and node3 shifted by `+10`/`+20` on each port.
+(P7.8 taught the [P4.1 script](../../scripts/marigold-testnet-local.sh) a `NETWORK=simnet` mode; it now also starts `--rpclisten-borsh` and `--unsaferpc` on every node, both required for `marigold-cli` to connect — neither was on by default before P7.7 found the gap.) Confirms 3 peered simnet nodes: node1 on gRPC `26510`/P2P `26511`/borsh-wRPC `27510`, node2 and node3 shifted by `+10`/`+20` on each port.
 
 **`marigold-cli` cannot be driven by piped stdin** (NOTES.md's P0.3 finding) — every step below assumes a real TTY, or `pexpect` (a Python pty-driving library) sending literal `\r` for Enter, matching WALLET.md's own validation method.
 
@@ -191,7 +191,7 @@ Every step passed. Full narrative log (including the two bugs found and fixed al
 
 ## Verification (2026-08-18)
 
-Walked steps 9-14 above against a real 3-node simnet testnet (`NETWORK=simnet ./scripts/x-testnet-local.sh`, node1/2/3 on gRPC `26510`/`26520`/`26530`, borsh-wRPC `27510`/`27520`/`27530`), driving three separate real `marigold-cli` sessions (each its own `$HOME`, via `pexpect` — see WALLET.md's "Gotchas"):
+Walked steps 9-14 above against a real 3-node simnet testnet (`NETWORK=simnet ./scripts/marigold-testnet-local.sh`, node1/2/3 on gRPC `26510`/`26520`/`26530`, borsh-wRPC `27510`/`27520`/`27530`), driving three separate real `marigold-cli` sessions (each its own `$HOME`, via `pexpect` — see WALLET.md's "Gotchas"):
 
 - **Wallet A** (node1, port `27510`): created, funded past `coinbase_maturity * 2`, ran `note mint 3` successfully.
 - **Wallet B** (node2, port `27520`): created independently, ran `note request 1`, and — without any command run on wallet B's own session beyond the request itself — received `payment received: 1 MAGLD in 1 note(s)` once wallet A's `note pay marigoldreq:...` (run against node1) confirmed. Confirms cross-node `NotesChanged` propagation exactly as step 12 describes: node2 picked this up from its own view of the chain over P2P, not anything pushed directly from wallet A's session.

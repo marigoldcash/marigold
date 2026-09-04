@@ -16,7 +16,7 @@ Servers.toml
 release
 package-sizes.js
 rustbridge_*.log
-/x-testnet-local-data
+/marigold-testnet-local-data
 
 # Generated whitepaper artifacts (build with whitepaper/build-pdf.sh)
 whitepaper/*.pdf

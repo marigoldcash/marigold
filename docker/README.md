@@ -12,7 +12,7 @@ a non-root user, `tini` as PID 1.
 deployment recipe** — see its own header comment for the full rationale. It brings up:
 
 - Two testnet `marigoldd` nodes, peered over P2P (proves cross-container block
-  propagation, the same property `docs/x-fork/NOTES.md`'s P2.9 smoke test proves on
+  propagation, the same property `docs/marigold/NOTES.md`'s P2.9 smoke test proves on
   bare metal).
 - One mainnet `marigoldd` node running alongside them (proves the two networks coexist
   cleanly — mainnet hasn't launched yet, so this node has no real peers, it's purely a
@@ -27,7 +27,7 @@ docker compose up --build
 
 Everything published to the host is bound to `127.0.0.1` only — this file is for
 testing on your own machine, not for exposing anything to a network. Don't lift the
-`ports:` bindings from here into a real deployment; see `docs/x-fork/TESTNET.md` for
+`ports:` bindings from here into a real deployment; see `docs/marigold/TESTNET.md` for
 the actual production security posture (gRPC/wRPC never reachable from the internet,
 period), which the Ansible playbook under `deploy/ansible/` enforces for real hosts.
 
@@ -65,7 +65,7 @@ live node and reading both codebases side by side rather than assuming compatibi
 
 Both fixes are single, small, well-commented commits on marigold-miner's `marigold`
 branch (`main` continues to track upstream unmodified — same split as this repo's own
-`master`/`x-fork`) — confirmed working end to end in this exact compose stack: the
+`master`/`main`) — confirmed working end to end in this exact compose stack: the
 patched miner finds blocks, submits them successfully, `node-testnet-1` accepts them,
 `node-testnet-2` receives them over real P2P relay, and — once real blocks were
 flowing — `bridge-testnet`'s own `is_synced` gate cleared and its internal CPU miner
@@ -132,14 +132,14 @@ than assuming it would work:
 The eventual goal is pullable images (`docker pull marigoldcash/marigoldd`, etc.) so
 anyone can run a node without building from source. Before that happens, a few things
 need deciding — none of them technical blockers, just choices someone needs to make
-and record (candidate for a `docs/x-fork/DECISIONS.md` row when settled):
+and record (candidate for a `docs/marigold/DECISIONS.md` row when settled):
 
 - **Registry**: Docker Hub vs. GitHub Container Registry (GHCR) vs. both.
 - **Image naming/namespace**: `marigoldcash/marigoldd` seems the obvious pick,
   matching the GitHub org, but worth confirming against whatever's already
   registered/reserved.
-- **Tagging scheme**: at minimum a `latest` tracking `x-fork`, plus version tags once
-  there's a real release process — needs to land alongside whatever `x-fork` → tagged
+- **Tagging scheme**: at minimum a `latest` tracking `main`, plus version tags once
+  there's a real release process — needs to land alongside whatever `main` → tagged
   release convention this project ends up using.
 - **Multi-arch builds** (`linux/amd64` + `linux/arm64`) — the existing Dockerfiles are
   arch-generic (no arch-specific base images or flags), so this is mostly a CI/build

@@ -5,7 +5,7 @@ review-gate steps (currently just P5.9).
 
 ## P5.9 — Pool spec review (CLOSED 2026-08-15 — spec tagged `pool-spec-v1.1`)
 
-[docs/x-fork/POOL-SPEC.md](../POOL-SPEC.md) was frozen at tag `pool-spec-v1`
+[docs/marigold/POOL-SPEC.md](../POOL-SPEC.md) was frozen at tag `pool-spec-v1`
 (commit `9d93ab32`) on 2026-08-15. Per the plan, it needs review by **at least one
 person with an applied-cryptography background, outside the project**, before Phase 6
 (consensus implementation) begins.
@@ -47,7 +47,7 @@ What the reviewer should look at:
   parameters (3-of-5 trustees, the T/M/K sunset trigger, the hard maximum DAA score) —
   the two places genuine new cryptographic/game-theoretic design decisions were made
   rather than existing Kaspa mechanisms extended.
-- `docs/x-fork/DECISIONS.md`'s P5.1-P5.8 entries for the reasoning behind each
+- `docs/marigold/DECISIONS.md`'s P5.1-P5.8 entries for the reasoning behind each
   non-obvious choice, if the "why" behind a specific number or mechanism isn't clear
   from the spec section alone.
 

@@ -1,7 +1,7 @@
 # P4.1 -- Testnet-in-a-box: launches 3 local nodes on one machine, peered together.
 #
 # Usage:
-#   .\scripts\x-testnet-local.ps1 [-DataDir <path>] [-Network devnet|simnet]
+#   .\scripts\marigold-testnet-local.ps1 [-DataDir <path>] [-Network devnet|simnet]
 #
 # -Network selects the network shape (default: devnet). P7.7 found that
 # pool_activation is ForkActivation::never() on devnet specifically (mainnet/
@@ -10,7 +10,7 @@
 # extension, WALLET.md's own walkthrough): it's also the only shape with
 # skip_proof_of_work=true, so mined blocks confirm instantly, no real miner needed.
 #
-# DataDir defaults to .\x-testnet-local-data (repo-relative). Re-running the script reuses
+# DataDir defaults to .\marigold-testnet-local-data (repo-relative). Re-running the script reuses
 # an existing data dir (a stopped-and-restarted testnet resumes where it left off); delete
 # the directory for a clean start. Switching -Network against an existing data dir will
 # fail (each node's datadir is bound to the network it was created under) -- delete the
@@ -32,7 +32,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
-if (-not $DataDir) { $DataDir = Join-Path $RepoRoot "x-testnet-local-data" }
+if (-not $DataDir) { $DataDir = Join-Path $RepoRoot "marigold-testnet-local-data" }
 $Kaspad = Join-Path $RepoRoot "target\release\marigoldd.exe"
 
 if ($Network -eq "simnet") {

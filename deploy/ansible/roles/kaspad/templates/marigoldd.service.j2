@@ -38,7 +38,7 @@ ExecStart={{ marigold_install_root }}/bin/marigoldd \
 # Deliberately no --rpclisten / --rpclisten-borsh / --rpclisten-json / --unsaferpc:
 # gRPC then defaults to loopback-only and wRPC doesn't start at all. A local
 # stratum-bridge instance still reaches this node fine over
-# 127.0.0.1:{{ marigold_grpc_ports[marigold_network] }} — see docs/x-fork/TESTNET.md.
+# 127.0.0.1:{{ marigold_grpc_ports[marigold_network] }} — see docs/marigold/TESTNET.md.
 Restart=on-failure
 RestartSec=5
 LimitNOFILE=65536

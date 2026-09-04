@@ -35,7 +35,7 @@
 # this bit us (2026-08-20) -- `docker build --no-cache` recovered it that
 # time, but the real fix is making the ref part of the cache key, same
 # principle as this project's own build role keying its binary cache by
-# commit hash (docs/x-fork/NOTES.md's P2.3/P4.2 stale-binary lesson).
+# commit hash (docs/marigold/NOTES.md's P2.3/P4.2 stale-binary lesson).
 
 FROM rust:1.91-alpine3.23 AS builder
 RUN apk --no-cache add musl-dev g++ clang21-dev linux-headers protoc git

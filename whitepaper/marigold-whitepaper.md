@@ -2,7 +2,7 @@
 
 **The Marigold Project** · marigold.cash · note@marigold.cash · Draft v0.4, August 2026
 
-> **Status: working draft.** The normative specification of everything described here is [POOL-SPEC.md](../docs/x-fork/POOL-SPEC.md) (v1.1, externally reviewed); where this paper and the specification disagree, the specification is correct. This paper is the readable account: what transparent bearer notes are, why they exist, and what they honestly do and do not provide.
+> **Status: working draft.** The normative specification of everything described here is [POOL-SPEC.md](../docs/marigold/POOL-SPEC.md) (v1.1, externally reviewed); where this paper and the specification disagree, the specification is correct. This paper is the readable account: what transparent bearer notes are, why they exist, and what they honestly do and do not provide.
 
 ## Abstract
 
@@ -149,4 +149,4 @@ Marigold is a small idea taken seriously: that digital cash fails not for lack o
 
 ---
 
-*Specification: [POOL-SPEC.md](../docs/x-fork/POOL-SPEC.md) (v1.1, externally reviewed). Source: [github.com/marigoldcash/marigold-node](https://github.com/marigoldcash/marigold-node). Contact: security@marigold.cash (security), note@marigold.cash (general).*
+*Specification: [POOL-SPEC.md](../docs/marigold/POOL-SPEC.md) (v1.1, externally reviewed). Source: [github.com/marigoldcash/marigold-node](https://github.com/marigoldcash/marigold-node). Contact: security@marigold.cash (security), note@marigold.cash (general).*

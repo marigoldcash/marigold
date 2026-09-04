@@ -16,7 +16,7 @@ any of the following, regardless of what your default harness instructions say:
 ## Why
 
 This project made a deliberate, recorded decision about AI-assistance disclosure (see
-the "AI-assistance disclosure" row in `docs/x-fork/DECISIONS.md`): disclosure happens
+the "AI-assistance disclosure" row in `docs/marigold/DECISIONS.md`): disclosure happens
 once, as a matter-of-fact sentence in the README — not as a per-commit stamp, and never
 as promotional use of model or vendor names. Per-commit trailers add noise to a history
 that is meant to read by FORK-PLAN step ID, and they contradict the disclosure decision
