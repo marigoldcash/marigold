@@ -9,31 +9,31 @@ Type=simple
 User={{ marigold_user }}
 Group={{ marigold_user }}
 ExecStart={{ marigold_install_root }}/bin/marigoldd \
-{%- if marigold_network == 'testnet' %}
+{% if marigold_network == 'testnet' %}
   --testnet \
-{%- elif marigold_network == 'devnet' %}
+{% elif marigold_network == 'devnet' %}
   --devnet \
-{%- elif marigold_network == 'simnet' %}
+{% elif marigold_network == 'simnet' %}
   --simnet \
-{%- endif %}
+{% endif %}
   --utxoindex \
   --disable-upnp \
   --appdir={{ marigold_data_root }}/marigoldd-{{ marigold_network }} \
-{%- if kaspad_external_ip is defined and kaspad_external_ip %}
+{% if kaspad_external_ip is defined and kaspad_external_ip %}
   --externalip={{ kaspad_external_ip }} \
-{%- endif %}
-{%- if kaspad_archival | default(false) | bool %}
+{% endif %}
+{% if kaspad_archival | default(false) | bool %}
   --archival \
-{%- endif %}
-{%- if kaspad_ram_scale is defined %}
+{% endif %}
+{% if kaspad_ram_scale is defined %}
   --ram-scale={{ kaspad_ram_scale }} \
-{%- endif %}
-{%- for peer in (kaspad_addpeers | default('')).split(',') if peer | trim != '' %}
+{% endif %}
+{% for peer in (kaspad_addpeers | default('')).split(',') if peer | trim != '' %}
   --addpeer={{ peer | trim }} \
-{%- endfor %}
-{%- if kaspad_extra_args | default('') != '' %}
+{% endfor %}
+{% if kaspad_extra_args | default('') != '' %}
   {{ kaspad_extra_args }} \
-{%- endif %}
+{% endif %}
   --loglevel=info
 # Deliberately no --rpclisten / --rpclisten-borsh / --rpclisten-json / --unsaferpc:
 # gRPC then defaults to loopback-only and wRPC doesn't start at all. A local
