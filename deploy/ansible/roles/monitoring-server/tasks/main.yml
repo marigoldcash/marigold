@@ -1,0 +1,124 @@
+---
+# Runs on the [monitoring] host (the big rig): Prometheus + Alertmanager from
+# Debian packages, Grafana from Grafana's own apt repo (Debian doesn't ship
+# it). Everything binds to loopback — Grafana/Prometheus are reached via SSH
+# tunnel, matching the locked-down RPC posture; only alert PUSHES leave the
+# host (to Telegram). Scrape targets are reached over Tailscale.
+
+- name: Refuse to run without Telegram credentials
+  ansible.builtin.fail:
+    msg: "Set telegram_bot_token and telegram_chat_id in inventory.ini (see roles/monitoring-server/defaults/main.yml)."
+  when: telegram_bot_token == "" or telegram_chat_id == 0
+
+- name: Install Prometheus and Alertmanager
+  ansible.builtin.apt:
+    name:
+      - prometheus
+      - prometheus-alertmanager
+    state: present
+
+- name: Add the Grafana apt signing key
+  ansible.builtin.get_url:
+    url: https://apt.grafana.com/gpg.key
+    dest: /etc/apt/keyrings/grafana.asc
+    mode: "0644"
+
+- name: Add the Grafana apt repository
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/etc/apt/keyrings/grafana.asc] https://apt.grafana.com stable main"
+    filename: grafana
+    state: present
+
+- name: Install Grafana
+  ansible.builtin.apt:
+    name: grafana
+    state: present
+    update_cache: true
+
+- name: Bind Prometheus to loopback
+  ansible.builtin.template:
+    src: prometheus-default.j2
+    dest: /etc/default/prometheus
+    mode: "0644"
+  notify: restart prometheus
+
+- name: Bind Alertmanager to loopback (and disable its cluster listener)
+  ansible.builtin.template:
+    src: alertmanager-default.j2
+    dest: /etc/default/prometheus-alertmanager
+    mode: "0644"
+  notify: restart alertmanager
+
+- name: Install the Prometheus config
+  ansible.builtin.template:
+    src: prometheus.yml.j2
+    dest: /etc/prometheus/prometheus.yml
+    mode: "0644"
+  notify: restart prometheus
+
+- name: Install the alert rules
+  ansible.builtin.template:
+    src: alerts.yml.j2
+    dest: /etc/prometheus/alerts.yml
+    mode: "0644"
+  notify: restart prometheus
+
+- name: Install the Alertmanager config (holds the Telegram token)
+  ansible.builtin.template:
+    src: alertmanager.yml.j2
+    dest: /etc/prometheus/alertmanager.yml
+    owner: root
+    group: prometheus
+    mode: "0640"
+  notify: restart alertmanager
+
+- name: Bind Grafana to loopback
+  ansible.builtin.lineinfile:
+    path: /etc/default/grafana-server
+    regexp: "^GF_SERVER_HTTP_ADDR="
+    line: "GF_SERVER_HTTP_ADDR=127.0.0.1"
+  notify: restart grafana
+
+- name: Provision the Grafana Prometheus datasource
+  ansible.builtin.template:
+    src: grafana-datasource.yml.j2
+    dest: /etc/grafana/provisioning/datasources/marigold.yml
+    owner: root
+    group: grafana
+    mode: "0640"
+  notify: restart grafana
+
+- name: Provision the Grafana dashboard provider
+  ansible.builtin.template:
+    src: grafana-dashboards.yml.j2
+    dest: /etc/grafana/provisioning/dashboards/marigold.yml
+    owner: root
+    group: grafana
+    mode: "0640"
+  notify: restart grafana
+
+- name: Ensure the dashboards directory exists
+  ansible.builtin.file:
+    path: /var/lib/grafana/dashboards
+    state: directory
+    owner: grafana
+    group: grafana
+    mode: "0755"
+
+- name: Install the Marigold testnet dashboard
+  ansible.builtin.copy:
+    src: marigold-testnet-dashboard.json
+    dest: /var/lib/grafana/dashboards/marigold-testnet.json
+    owner: grafana
+    group: grafana
+    mode: "0644"
+
+- name: Enable and start the monitoring services
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop:
+    - prometheus
+    - prometheus-alertmanager
+    - grafana-server

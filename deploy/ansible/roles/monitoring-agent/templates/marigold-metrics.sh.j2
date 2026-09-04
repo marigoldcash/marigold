@@ -1,0 +1,28 @@
+#!/bin/sh
+# Managed by Ansible (deploy/ansible/roles/monitoring-agent).
+# Emits marigold-specific gauges for node_exporter's textfile collector.
+# Runs from marigold-metrics.timer every 30s.
+set -eu
+out={{ monitoring_textfile_dir }}/marigold.prom
+tmp=$(mktemp "$out.XXXXXX")
+
+# Established P2P connections (either direction on the testnet P2P port).
+peers=$(ss -Htn state established '( sport = :26211 or dport = :26211 )' 2>/dev/null | wc -l)
+printf 'marigold_p2p_peers %s\n' "$peers" >> "$tmp"
+
+{% if monitoring_block_age_from_journal | bool %}
+# Seconds since marigoldd last accepted a block, from its journal INFO lines.
+# 999999 when no line is found in the window — deliberately alarm-worthy: an
+# active node on this network logs acceptances every second.
+line=$(journalctl -u marigoldd -o cat --since "-30 min" 2>/dev/null | grep -F 'Accepted' | tail -1 || true)
+if [ -n "$line" ]; then
+  ts=$(echo "$line" | awk '{print $1 "T" $2}')
+  age=$(( $(date +%s) - $(date -d "$ts" +%s 2>/dev/null || echo 0) ))
+else
+  age=999999
+fi
+printf 'marigold_last_block_age_seconds %s\n' "$age" >> "$tmp"
+{% endif %}
+
+chmod 644 "$tmp"
+mv "$tmp" "$out"

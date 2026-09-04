@@ -32,3 +32,13 @@
   hosts: bridges
   roles:
     - bridge
+
+- name: Deploy monitoring agents
+  hosts: seed_nodes
+  roles:
+    - monitoring-agent
+
+- name: Deploy the monitoring server
+  hosts: monitoring
+  roles:
+    - monitoring-server

@@ -1,0 +1,17 @@
+# Managed by Ansible (deploy/ansible/roles/monitoring-server).
+# Contains the Telegram bot token — mode 0640, never committed (the values
+# live in the gitignored inventory.ini).
+route:
+  receiver: telegram
+  group_by: [alertname, node]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: {{ monitoring_alert_repeat_interval }}
+
+receivers:
+  - name: telegram
+    telegram_configs:
+      - bot_token: "{{ telegram_bot_token }}"
+        chat_id: {{ telegram_chat_id }}
+        api_url: "https://api.telegram.org"
+        send_resolved: true

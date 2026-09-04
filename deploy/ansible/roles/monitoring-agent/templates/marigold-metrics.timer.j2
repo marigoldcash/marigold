@@ -1,0 +1,11 @@
+# Managed by Ansible (deploy/ansible/roles/monitoring-agent).
+[Unit]
+Description=Run marigold-metrics every 30s
+
+[Timer]
+OnBootSec=30
+OnUnitActiveSec=30
+AccuracySec=5
+
+[Install]
+WantedBy=timers.target

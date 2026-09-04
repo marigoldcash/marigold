@@ -1,0 +1,13 @@
+---
+# Telegram alert delivery — set both in inventory.ini (gitignored; the token is
+# a secret and must never land in the repo). Create the bot with @BotFather,
+# message it once, then read the chat id from its getUpdates queue.
+telegram_bot_token: ""
+telegram_chat_id: 0
+
+# How long a condition must hold before alerting / how often to re-nag.
+monitoring_alert_repeat_interval: "4h"
+
+# NoNewBlocks threshold: this network targets ~10 blocks/second, so minutes of
+# silence is catastrophic; 300s leaves room for brief IBD/restart gaps.
+monitoring_block_age_alert_seconds: 300

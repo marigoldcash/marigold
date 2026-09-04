@@ -1,0 +1,8 @@
+# Managed by Ansible (deploy/ansible/roles/monitoring-server).
+apiVersion: 1
+providers:
+  - name: marigold
+    folder: Marigold
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards

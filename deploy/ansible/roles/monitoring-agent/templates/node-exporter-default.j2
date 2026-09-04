@@ -1,0 +1,7 @@
+# Managed by Ansible (deploy/ansible/roles/monitoring-agent).
+# Tailnet-only bind — see monitoring_bind_ip in the role defaults for why.
+# unit-include keeps systemd-collector cardinality to just our services.
+ARGS="--web.listen-address={{ monitoring_bind_ip }}:9100 \
+  --collector.systemd \
+  --collector.systemd.unit-include=marigold.*\.service \
+  --collector.textfile.directory={{ monitoring_textfile_dir }}"

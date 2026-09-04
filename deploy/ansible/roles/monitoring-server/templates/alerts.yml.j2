@@ -1,0 +1,52 @@
+# Managed by Ansible (deploy/ansible/roles/monitoring-server).
+# The three T6 failure modes (LAUNCH-PLAN.md) plus target-down and a
+# whole-network mining stall.
+groups:
+  - name: marigold
+    rules:
+      - alert: TargetDown
+        expr: up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Scrape target down: {{ '{{' }} $labels.node {{ '}}' }} ({{ '{{' }} $labels.job {{ '}}' }})"
+          description: "Prometheus cannot reach {{ '{{' }} $labels.instance {{ '}}' }} — host down, exporter down, or tailnet path broken."
+
+      - alert: MarigoldServiceDown
+# NOT marigold.*: that would match marigold-metrics.service, the oneshot
+# textfile-collector unit that is legitimately inactive between timer runs.
+        expr: node_systemd_unit_state{name=~"(marigoldd|marigold-bridge|marigold-cpu-miner)\\.service",state="active"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ '{{' }} $labels.name {{ '}}' }} not active on {{ '{{' }} $labels.node {{ '}}' }}"
+          description: "systemd reports the unit is not in active state."
+
+      - alert: NoPeers
+        expr: marigold_p2p_peers == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ '{{' }} $labels.node {{ '}}' }} has zero P2P connections"
+          description: "The node is isolated from the network."
+
+      - alert: NoNewBlocks
+        expr: marigold_last_block_age_seconds > {{ monitoring_block_age_alert_seconds }}
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "No new blocks seen by {{ '{{' }} $labels.node {{ '}}' }} for {{ '{{' }} $value {{ '}}' }}s"
+          description: "Chain liveness failure — the node hasn't accepted a block in over {{ monitoring_block_age_alert_seconds }}s on a ~10 BPS network."
+
+      - alert: MiningStalled
+        expr: sum(increase(ks_blocks_mined[15m])) == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "No blocks mined through either bridge in 15m"
+          description: "Both ASICs (and their bridges) have stopped producing — check miners, bridges, Starlink."

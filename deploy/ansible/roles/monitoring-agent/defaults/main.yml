@@ -1,0 +1,16 @@
+---
+# Where node_exporter listens. Deliberately NOT 0.0.0.0: set this per-host in
+# inventory.ini to the host's tailnet IP so metrics are reachable only over
+# Tailscale (the T6 decision, 2026-09-04) — never from the public internet,
+# even with the host firewall off.
+monitoring_bind_ip: "127.0.0.1"
+
+# Whether the textfile collector derives marigold_last_block_age_seconds from
+# the marigoldd journal. Set false on hosts whose journald discards INFO lines
+# (seed2 has MaxLevelStore=warning as host policy — founder's config, not ours
+# to change); such hosts are covered by peers/process/bridge metrics instead.
+monitoring_block_age_from_journal: true
+
+# Debian's prometheus-node-exporter package reads its textfile metrics from
+# here; the marigold-metrics timer writes into it.
+monitoring_textfile_dir: "/var/lib/prometheus/node-exporter"

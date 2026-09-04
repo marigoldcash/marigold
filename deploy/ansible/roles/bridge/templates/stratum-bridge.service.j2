@@ -1,7 +1,10 @@
 # Managed by Ansible (deploy/ansible/roles/bridge) — local edits will be overwritten.
 [Unit]
 Description=Marigold stratum-bridge ({{ marigold_network }})
-After=network-online.target marigoldd.service
+# tailscaled ordering matters only when bridge_prom_bind is a tailnet IP (the
+# bind fails until the interface exists); systemd ignores After= on units that
+# aren't installed, and Restart=on-failure self-heals the race regardless.
+After=network-online.target marigoldd.service tailscaled.service
 Wants=network-online.target
 Requires=marigoldd.service
 

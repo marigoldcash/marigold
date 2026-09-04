@@ -1,0 +1,7 @@
+# Managed by Ansible (deploy/ansible/roles/monitoring-agent).
+[Unit]
+Description=Collect marigold textfile metrics for node_exporter
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/marigold-metrics

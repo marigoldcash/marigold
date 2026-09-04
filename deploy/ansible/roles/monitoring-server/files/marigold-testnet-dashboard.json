@@ -1,0 +1,53 @@
+{
+  "title": "Marigold Testnet",
+  "uid": "marigold-testnet",
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1, "type": "timeseries", "title": "Last accepted block age (s)",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "targets": [ { "expr": "marigold_last_block_age_seconds", "legendFormat": "{{node}}" } ],
+      "fieldConfig": { "defaults": { "unit": "s", "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 300 } ] } }, "overrides": [] }
+    },
+    {
+      "id": 2, "type": "timeseries", "title": "P2P peers",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "targets": [ { "expr": "marigold_p2p_peers", "legendFormat": "{{node}}" } ],
+      "fieldConfig": { "defaults": { "decimals": 0, "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] } }, "overrides": [] }
+    },
+    {
+      "id": 3, "type": "timeseries", "title": "Blocks mined per minute (per worker)",
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "targets": [ { "expr": "sum by (worker) (rate(ks_blocks_mined[5m])) * 60", "legendFormat": "{{worker}}" } ],
+      "fieldConfig": { "defaults": {}, "overrides": [] }
+    },
+    {
+      "id": 4, "type": "stat", "title": "Marigold services active",
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "targets": [ { "expr": "node_systemd_unit_state{name=~\"(marigoldd|marigold-bridge|marigold-cpu-miner)\\\\.service\",state=\"active\"}", "legendFormat": "{{node}} {{name}}", "instant": true } ],
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] } }, "overrides": [] }
+    },
+    {
+      "id": 5, "type": "timeseries", "title": "CPU busy %",
+      "gridPos": { "x": 0, "y": 16, "w": 8, "h": 8 },
+      "targets": [ { "expr": "100 - avg by (node) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100", "legendFormat": "{{node}}" } ],
+      "fieldConfig": { "defaults": { "unit": "percent", "max": 100 }, "overrides": [] }
+    },
+    {
+      "id": 6, "type": "timeseries", "title": "Memory available",
+      "gridPos": { "x": 8, "y": 16, "w": 8, "h": 8 },
+      "targets": [ { "expr": "node_memory_MemAvailable_bytes", "legendFormat": "{{node}}" } ],
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] }
+    },
+    {
+      "id": 7, "type": "timeseries", "title": "Root filesystem free",
+      "gridPos": { "x": 16, "y": 16, "w": 8, "h": 8 },
+      "targets": [ { "expr": "node_filesystem_avail_bytes{mountpoint=\"/\"}", "legendFormat": "{{node}}" } ],
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] }
+    }
+  ],
+  "schemaVersion": 39,
+  "version": 1
+}

@@ -19,5 +19,5 @@ coinbase_tag_suffix: ""
 instances:
   - stratum_port: ":{{ bridge_stratum_port }}"
     min_share_diff: {{ bridge_min_share_diff }}
-    prom_port: "127.0.0.1:{{ bridge_prom_port }}"
+    prom_port: "{{ bridge_prom_bind | default('127.0.0.1') }}:{{ bridge_prom_port }}"
     log_to_file: false

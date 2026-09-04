@@ -1,0 +1,4 @@
+# Managed by Ansible (deploy/ansible/roles/monitoring-server).
+# Empty cluster.listen-address disables the HA gossip listener (single node,
+# and it would otherwise bind 0.0.0.0:9094).
+ARGS="--web.listen-address=127.0.0.1:9093 --cluster.listen-address="

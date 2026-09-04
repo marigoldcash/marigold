@@ -1,0 +1,45 @@
+---
+# Runs on every marigold host: node_exporter (host + systemd-unit metrics,
+# bound to the tailnet IP) plus a small textfile collector emitting the
+# marigold-specific gauges the T6 alert rules need. See LAUNCH-PLAN.md T6.
+
+- name: Install node exporter
+  ansible.builtin.apt:
+    name: prometheus-node-exporter
+    state: present
+
+- name: Configure node exporter (tailnet bind, systemd collector, textfile dir)
+  ansible.builtin.template:
+    src: node-exporter-default.j2
+    dest: /etc/default/prometheus-node-exporter
+    mode: "0644"
+  notify: restart node exporter
+
+- name: Ensure the textfile collector directory exists
+  ansible.builtin.file:
+    path: "{{ monitoring_textfile_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Install the marigold metrics collector script
+  ansible.builtin.template:
+    src: marigold-metrics.sh.j2
+    dest: /usr/local/bin/marigold-metrics
+    mode: "0755"
+
+- name: Install the marigold metrics service and timer
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    mode: "0644"
+  loop:
+    - marigold-metrics.service
+    - marigold-metrics.timer
+  notify: reload systemd
+
+- name: Enable the marigold metrics timer
+  ansible.builtin.systemd:
+    name: marigold-metrics.timer
+    enabled: true
+    state: started
+    daemon_reload: true
