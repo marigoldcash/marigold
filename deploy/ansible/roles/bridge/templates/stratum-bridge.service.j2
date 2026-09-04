@@ -18,6 +18,14 @@ WorkingDirectory={{ marigold_config_root }}
 # this, which would start a second, separate node process competing for this
 # same host's P2P/data — not what we want when kaspad already runs as its own
 # systemd unit. external mode just connects to config.yaml's kaspad_address.
+{% if bridge_prom_bind is defined and bridge_prom_bind != '127.0.0.1' %}
+# The prom listener binds a tailnet IP, and After=tailscaled only orders
+# against the daemon starting — not the address being assigned. The bridge
+# doesn't crash on a failed prom bind (it logs and mines on, metrics silently
+# missing — caught by the reboot-survival test, 2026-09-04), so waiting for
+# the address here is the only reliable fix.
+ExecStartPre=/bin/sh -c 'for i in $(seq 60); do ip -o addr show | grep -qF "{{ bridge_prom_bind }}" && exit 0; sleep 1; done; echo "tailnet address {{ bridge_prom_bind }} never appeared" >&2; exit 1'
+{% endif %}
 ExecStart={{ marigold_install_root }}/bin/stratum-bridge \
   --config {{ marigold_config_root }}/bridge-config.yaml \
   --node-mode external

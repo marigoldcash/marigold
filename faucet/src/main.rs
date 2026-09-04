@@ -49,10 +49,12 @@ use tokio::sync::Mutex;
 use workflow_core::abortable::Abortable;
 
 const WALLET_FILENAME: &str = "marigold-faucet";
-/// One claim: 1 x 1-MAGLD + 2 x 0.01-MAGLD, minted together (1.02 MAGLD
-/// decomposes to exactly that shape, greedy largest-first).
-const BUNDLE_MINT_PETALS: u64 = 102_000_000;
-const HEADLINE_TAG: DenominationTag = DenominationTag::D1;
+/// One claim: 1 x 10-MAGLD + 2 x 0.01-MAGLD, minted together (10.02 MAGLD
+/// decomposes to exactly that shape, greedy largest-first). 10 rather than 1
+/// per the founder's call (2026-09-04): gives testers enough to genuinely
+/// exercise split/merge/rotate, not just hold a note.
+const BUNDLE_MINT_PETALS: u64 = 1_002_000_000;
+const HEADLINE_TAG: DenominationTag = DenominationTag::D10;
 const FEE_TAG: DenominationTag = DenominationTag::D0_01;
 const FEE_NOTES_PER_BUNDLE: usize = 2;
 
