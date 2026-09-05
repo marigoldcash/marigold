@@ -480,7 +480,11 @@ impl Terminal {
         let separator = separator.unwrap_or(" ");
         let term_width: usize = self.cols().unwrap_or(80);
         let cmd_width = list.iter().map(|(c, _)| c.len()).fold(0, |a, b| a.max(b)) + 2;
-        let help_width = term_width - cmd_width - 2 - 4 - separator.len();
+        // Saturating with a readable floor (Marigold fix): the subtraction
+        // underflowed and panicked whenever the widest command was near the
+        // terminal width, and a couple of leftover columns produced the
+        // one-word-per-line help tables seen on narrow windows.
+        let help_width = term_width.saturating_sub(cmd_width + 2 + 4 + separator.len()).max(24);
         let cmd_space = "".pad_to_width(cmd_width);
         self.writeln("");
         for (cmd, help) in list {

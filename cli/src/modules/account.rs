@@ -170,7 +170,26 @@ impl Account {
                     }
                 }
             }
-            "scan" | "sweep" => {
+            "sweep" => {
+                // Disambiguate rather than guess: 'sweep' at top level
+                // consolidates tracked coins; 'account recover' hunts the
+                // derivation chain. They overlap in effect, so a bare
+                // 'account sweep' asks which one was meant.
+                tprintln!(ctx, "Did you mean:");
+                tprintln!(ctx, "  'sweep'            - consolidate this account's coins into fewer, larger ones");
+                tprintln!(ctx, "  'account recover'  - search this account's extended derivation chain for funds and bring them home");
+                return Ok(());
+            }
+            "recover" => {
+                // 'dry-run' walks the derivation chain and reports what it
+                // finds without moving anything (this was the separate 'scan'
+                // verb — same code path, one boolean apart; folded in so
+                // 'scan' stays free for QR//camera use and 'sweep' keeps its
+                // established meaning).
+                let dry_run = argv.first().map(|s| s.to_lowercase()).as_deref() == Some("dry-run");
+                if dry_run {
+                    argv.remove(0);
+                }
                 let len = argv.len();
                 let mut start = 0;
                 let mut count = 100_000;
@@ -184,7 +203,7 @@ impl Account {
 
                 count = count.max(1);
 
-                let sweep = action.eq("sweep");
+                let sweep = !dry_run;
                 // TODO fee_rate
                 let fee_rate = None;
                 self.derivation_scan(&ctx, start, count, window, sweep, fee_rate).await?;
@@ -208,10 +227,12 @@ impl Account {
                 Use 'account import' for additional help.",
                 ),
                 ("name <name>", "Name or rename the selected account (use 'remove' to remove the name"),
-                ("scan [<derivations>] or scan [<start>] [<derivations>]", "Scan extended address derivation chain (legacy accounts)"),
                 (
-                    "sweep [<derivations>] or sweep [<start>] [<derivations>]",
-                    "Sweep extended address derivation chain (legacy accounts)",
+                    "recover [dry-run] [<start>] [<derivations>]",
+                    "Search this account's extended address derivation chain for funds and bring them into its \
+                     current address (for legacy or imported accounts whose coins sit beyond the normal scan \
+                     window). 'dry-run' reports what it finds and moves nothing. For consolidating the coins \
+                     this account already holds, use the top-level 'sweep' instead.",
                 ),
                 // ("purge", "Purge an account from the wallet"),
             ],

@@ -751,8 +751,25 @@ pub trait DerivationCapableAccount: Account {
 
             let utxos = rpc.get_utxos_by_addresses(addresses.clone()).await?;
             let mut balance = 0;
+            // Skip UTXOs the consensus would reject as immature. This path
+            // reads the UTXO set straight off RPC, bypassing `UtxoContext`'s
+            // maturity tracking — without this filter a sweep of a mining
+            // wallet reliably picks up a fresh coinbase output and the whole
+            // batch is rejected ("spends an immature UTXO"). At 10 BPS with a
+            // 1000-DAA maturity there are always immature coinbases in range.
+            let maturity_params = self.wallet().utxo_processor().network_params();
+            let current_daa_score = self.wallet().utxo_processor().current_daa_score();
             let utxos = utxos
                 .iter()
+                .filter(|utxo| match (maturity_params.as_ref(), current_daa_score) {
+                    (Ok(params), Some(daa)) => {
+                        use crate::utxo::reference::UtxoEntryReferenceExtension;
+                        matches!(UtxoEntryReference::from(*utxo).maturity(params, daa), crate::utxo::Maturity::Confirmed)
+                    }
+                    // Unknown DAA score (not yet synced): keep prior behavior
+                    // rather than silently sweeping nothing.
+                    _ => true,
+                })
                 .map(|utxo| {
                     let utxo_ref = UtxoEntryReference::from(utxo);
                     if let Some(address) = utxo_ref.utxo.address.as_ref() {

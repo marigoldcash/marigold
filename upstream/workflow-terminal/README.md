@@ -37,6 +37,10 @@ Three more defects, found in live use the day after the first batch:
 
 Reproduction for 7-9: open any secret prompt and press Ctrl+C — observe empty-answer semantics and app teardown; repeat the cycle several times to accumulate the channel panic.
 
+## Also in the patch: real terminal dimensions
+
+`Crossterm::cols()`/`rows()` returned `None`, so `Terminal::help()` and `para()` always wrapped to the fallback 80 columns regardless of the actual window. With a wide first column that squeezed help descriptions down to a few characters per line (one word per row) on any terminal. Now implemented with `crossterm::terminal::size()`. Related: `help()`'s `term_width - cmd_width - 2 - 4 - separator.len()` could underflow and panic when the widest command approached the terminal width — now `saturating_sub` with a 24-column floor.
+
 ## Also in the patch: Ctrl+D and the Ctrl+C hint
 
 `Key::Ctrl('d')` at an empty line exits (EOF, like every modern REPL); with text on the line it does nothing. The idle-prompt `Ctrl+C` (which clears the line rather than exiting — see the Ctrl+C section) now prints a one-line hint pointing at `exit`/Ctrl+D so the exit path is discoverable.

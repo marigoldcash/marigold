@@ -176,12 +176,16 @@ impl Crossterm {
         Ok(())
     }
 
+    /// Real terminal dimensions (Marigold fix): upstream returned None on
+    /// this backend, so `help()` tables and `para()` wrapped to a hardcoded
+    /// 80 columns no matter the window — on a wide terminal with a wide first
+    /// column that squeezed help descriptions to a few characters per line.
     pub fn cols(&self) -> Option<usize> {
-        None
+        terminal::size().ok().map(|(cols, _)| cols as usize)
     }
 
     pub fn rows(&self) -> Option<usize> {
-        None
+        terminal::size().ok().map(|(_, rows)| rows as usize)
     }
 
     pub fn increase_font_size(&self) -> Result<Option<f64>> {
