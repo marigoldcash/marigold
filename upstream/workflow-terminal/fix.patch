@@ -1,0 +1,145 @@
+diff -ruN '--exclude=Cargo.toml.orig' '--exclude=.cargo_vcs_info.json' '--exclude=.cargo-ok' /home/dom/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/workflow-terminal-0.18.0/src/terminal/crossterm.rs extern/workflow-terminal/src/terminal/crossterm.rs
+--- /home/dom/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/workflow-terminal-0.18.0/src/terminal/crossterm.rs	2006-07-23 21:21:28.000000000 -0400
++++ extern/workflow-terminal/src/terminal/crossterm.rs	2026-09-04 21:43:20.109253307 -0300
+@@ -61,8 +61,35 @@
+         Ok(())
+     }
+ 
++    /// Discard any keystrokes already buffered in the tty. Called before a
++    /// secret prompt opens: without this, a stale Enter (typed while output
++    /// was scrolling) is consumed as the entire password the instant the
++    /// prompt opens — the prompt flashes past, decrypt fails, and the user
++    /// retypes their password into the NORMAL editor (cleartext echo, stored
++    /// in Up-arrow history, executed as a command). Marigold fix; upstream
++    /// workflow-terminal 0.18.0 has no input flush at all.
++    pub fn flush_pending_input(&self) {
++        while let Ok(true) = event::poll(std::time::Duration::ZERO) {
++            if event::read().is_err() {
++                break;
++            }
++        }
++    }
++
+     pub async fn intake(&self, terminate: &Arc<AtomicBool>) -> Result<()> {
+         loop {
++            // Check terminate BEFORE blocking on input, polling so the check
++            // repeats: upstream checked only after a successful read, so a
++            // secondary intake loop spawned by `UserInput::capture` whose
++            // closing Enter was consumed elsewhere stayed blocked in
++            // `event::read()` forever — a ghost reader stealing keystrokes
++            // from every later prompt (Marigold fix).
++            if terminate.load(Ordering::SeqCst) {
++                break;
++            }
++            if !event::poll(std::time::Duration::from_millis(50))? {
++                continue;
++            }
+             let event = event::read()?;
+             // println!("{:?}",event);
+             if let Event::Key(key) = event {
+diff -ruN '--exclude=Cargo.toml.orig' '--exclude=.cargo_vcs_info.json' '--exclude=.cargo-ok' /home/dom/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/workflow-terminal-0.18.0/src/terminal/mod.rs extern/workflow-terminal/src/terminal/mod.rs
+--- /home/dom/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/workflow-terminal-0.18.0/src/terminal/mod.rs	2006-07-23 21:21:28.000000000 -0400
++++ extern/workflow-terminal/src/terminal/mod.rs	2026-09-04 21:44:15.191126495 -0300
+@@ -375,6 +375,10 @@
+                     if !self.user_input.secret.load(Ordering::SeqCst) {
+                         self.write(self.user_input.get_buffer());
+                     }
++                } else {
++                    // kbhit-style prompt (no text): upstream dropped the
++                    // output line entirely here (Marigold fix).
++                    self.write(format!("{}{}\n\r", ClearLine, s.to_string()));
+                 }
+             } else {
+                 self.write(format!("{}\n\r", s.to_string()));
+@@ -384,7 +388,9 @@
+             let data = self.inner().unwrap();
+             let p = format!("{}{}", self.get_prompt(), data.buffer);
+             self.write(p);
+-            let l = data.buffer.len() - data.cursor;
++            // saturating: cursor/buffer are updated without a common lock and
++            // this repo builds with overflow-checks in release (Marigold fix).
++            let l = data.buffer.len().saturating_sub(data.cursor);
+             for _ in 0..l {
+                 self.write("\x08".to_string());
+             }
+@@ -395,12 +401,17 @@
+     /// is useful when the prompt is handled externally and contains
+     /// data that should be updated.
+     pub fn refresh_prompt(&self) {
++        // Never repaint the normal `$ ` prompt over an open secret prompt
++        // (Marigold fix — upstream only checked is_running).
++        if self.user_input.is_enabled() {
++            return;
++        }
+         if !self.is_running() {
+             self.write(format!("{}", ClearLine));
+             let data = self.inner().unwrap();
+             let p = format!("{}{}", self.get_prompt(), data.buffer);
+             self.write(p);
+-            let l = data.buffer.len() - data.cursor;
++            let l = data.buffer.len().saturating_sub(data.cursor);
+             for _ in 0..l {
+                 self.write("\x08".to_string());
+             }
+@@ -548,10 +559,18 @@
+     /// user input (useful for password entry)
+     pub async fn ask(self: &Arc<Terminal>, secret: bool, prompt: &str) -> Result<String> {
+         self.reset_line_buffer();
++        // Drop any type-ahead BEFORE the modal prompt opens, and again after
++        // it closes — a buffered stray Enter must never become the answer to
++        // a password prompt, and keys typed a beat too late must never leak
++        // into the next command line (Marigold fix, see crossterm.rs).
++        self.term().flush_pending_input();
+         self.term().write(prompt.to_string());
+-        self.user_input
++        let answer = self
++            .user_input
+             .capture(secret, false, Some(prompt.to_string()), self)
+-            .await
++            .await;
++        self.term().flush_pending_input();
++        answer
+     }
+ 
+     pub async fn kbhit(self: &Arc<Terminal>, prompt: Option<&str>) -> Result<String> {
+@@ -607,6 +626,16 @@
+             return Ok(());
+         }
+ 
++        // While a command is executing, the only meaningful keystroke is
++        // Ctrl+C. Everything else is discarded: upstream fed it into the
++        // normal line editor, so characters typed toward a prompt that had
++        // already closed (or not yet opened) were echoed, recorded in
++        // history, and executed as commands — the exact path by which a
++        // wallet password ended up in cleartext scrollback (Marigold fix).
++        if self.is_running() && !matches!(key, Key::Ctrl('c')) {
++            return Ok(());
++        }
++
+         match key {
+             Key::Backspace => {
+                 let mut data = self.inner()?;
+diff -ruN '--exclude=Cargo.toml.orig' '--exclude=.cargo_vcs_info.json' '--exclude=.cargo-ok' /home/dom/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/workflow-terminal-0.18.0/src/terminal/termion.rs extern/workflow-terminal/src/terminal/termion.rs
+--- /home/dom/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/workflow-terminal-0.18.0/src/terminal/termion.rs	2006-07-23 21:21:28.000000000 -0400
++++ extern/workflow-terminal/src/terminal/termion.rs	2026-09-04 21:43:34.681748899 -0300
+@@ -21,6 +21,8 @@
+ }
+ 
+ impl Termion {
++    /// No-op on this backend; see crossterm.rs (Marigold fix).
++    pub fn flush_pending_input(&self) {}
+     pub fn try_new() -> Result<Self> {
+         Self::try_new_with_options(&Options::default())
+     }
+diff -ruN '--exclude=Cargo.toml.orig' '--exclude=.cargo_vcs_info.json' '--exclude=.cargo-ok' /home/dom/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/workflow-terminal-0.18.0/src/terminal/xterm.rs extern/workflow-terminal/src/terminal/xterm.rs
+--- /home/dom/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/workflow-terminal-0.18.0/src/terminal/xterm.rs	2006-07-23 21:21:28.000000000 -0400
++++ extern/workflow-terminal/src/terminal/xterm.rs	2026-09-04 21:43:34.681748899 -0300
+@@ -182,6 +182,8 @@
+ unsafe impl Sync for Xterm {}
+ 
+ impl Xterm {
++    /// No-op on this backend; see crossterm.rs (Marigold fix).
++    pub fn flush_pending_input(&self) {}
+     pub fn try_new() -> Result<Self> {
+         Self::try_new_with_options(&Options::default())
+     }
