@@ -79,17 +79,19 @@ impl Wallet {
                             let last = last.filter(|l| wallets.iter().any(|w| &w.filename == l));
                             tprintln!(ctx, "");
                             for (i, w) in wallets.iter().enumerate() {
+                                // 1-based: humans count from one.
+                                let n = i + 1;
                                 let marker = if Some(&w.filename) == last.as_ref() { "  (last used)" } else { "" };
                                 match &w.title {
-                                    Some(title) => tprintln!(ctx, "{i}: {title} ({}){marker}", w.filename),
-                                    None => tprintln!(ctx, "{i}: {}{marker}", w.filename),
+                                    Some(title) => tprintln!(ctx, "{n}: {title} ({}){marker}", w.filename),
+                                    None => tprintln!(ctx, "{n}: {}{marker}", w.filename),
                                 }
                             }
                             tprintln!(ctx, "");
                             let default = last.unwrap_or_else(|| wallets[0].filename.clone());
                             let selection = ctx
                                 .term()
-                                .ask(false, &format!("Select wallet [0..{}] or <enter> for '{default}': ", wallets.len() - 1))
+                                .ask(false, &format!("Select wallet [1..{}] or <enter> for '{default}': ", wallets.len()))
                                 .await?
                                 .trim()
                                 .to_string();
@@ -97,7 +99,7 @@ impl Wallet {
                                 Some(default)
                             } else {
                                 match selection.parse::<usize>() {
-                                    Ok(i) if i < wallets.len() => Some(wallets[i].filename.clone()),
+                                    Ok(i) if i >= 1 && i <= wallets.len() => Some(wallets[i - 1].filename.clone()),
                                     _ => {
                                         tprintln!(ctx, "No such wallet: '{selection}'");
                                         return Ok(());

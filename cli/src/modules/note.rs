@@ -489,15 +489,17 @@ impl Note {
         }
         tprintln!(ctx, "");
         for (i, w) in others.iter().enumerate() {
+            let n = i + 1;
             match &w.title {
-                Some(title) => tprintln!(ctx, "{i}: {title} ({})", w.filename),
-                None => tprintln!(ctx, "{i}: {}", w.filename),
+                Some(title) => tprintln!(ctx, "{n}: {title} ({})", w.filename),
+                None => tprintln!(ctx, "{n}: {}", w.filename),
             }
         }
         tprintln!(ctx, "");
-        let selection = ctx.term().ask(false, &format!("Move all active notes to which wallet [0..{}]? ", others.len() - 1)).await?.trim().to_string();
+        let selection =
+            ctx.term().ask(false, &format!("Move all active notes to which wallet [1..{}]? ", others.len())).await?.trim().to_string();
         let dest = match selection.parse::<usize>() {
-            Ok(i) if i < others.len() => others[i].filename.clone(),
+            Ok(i) if i >= 1 && i <= others.len() => others[i - 1].filename.clone(),
             _ => {
                 tprintln!(ctx, "No such wallet: '{selection}'\r\n");
                 return Ok(());

@@ -635,7 +635,8 @@ impl KaspaCli {
                 tprintln!(self, "• {prv_key_data_info}");
 
                 accounts.iter().for_each(|(seq, account)| {
-                    let seq = style(seq.to_string()).cyan();
+                    // 1-based for humans (the internal index stays 0-based).
+                    let seq = style((seq + 1).to_string()).cyan();
                     let ls_string = account.get_list_string().unwrap_or_else(|err| panic!("{err}"));
                     tprintln!(self, "    {seq}: {ls_string}");
                 })
@@ -646,14 +647,14 @@ impl KaspaCli {
             }
 
             watch_accounts.iter().for_each(|(seq, account)| {
-                let seq = style(seq.to_string()).cyan();
+                let seq = style((seq + 1).to_string()).cyan();
                 let ls_string = account.get_list_string().unwrap_or_else(|err| panic!("{err}"));
                 tprintln!(self, "    {seq}: {ls_string}");
             });
 
             tprintln!(self);
 
-            let range = if flat_list.len() > 1 { format!("[{}..{}] ", 0, flat_list.len() - 1) } else { "".to_string() };
+            let range = if flat_list.len() > 1 { format!("[{}..{}] ", 1, flat_list.len()) } else { "".to_string() };
 
             let text =
                 self.term().ask(false, &format!("Please select account {}or <enter> to abort: ", range)).await?.trim().to_string();
@@ -661,7 +662,7 @@ impl KaspaCli {
                 return Err(Error::UserAbort);
             } else {
                 match text.parse::<usize>() {
-                    Ok(seq) if seq < flat_list.len() => selection = flat_list.get(seq).cloned(),
+                    Ok(seq) if seq >= 1 && seq <= flat_list.len() => selection = flat_list.get(seq - 1).cloned(),
                     _ => {}
                 };
             }
