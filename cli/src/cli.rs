@@ -11,6 +11,7 @@ use kaspa_wallet_core::rpc::DynRpcApi;
 use kaspa_wallet_core::storage::{IdT, PrvKeyDataInfo};
 use kaspa_wrpc_client::{KaspaRpcClient, Resolver};
 use workflow_core::channel::*;
+use std::sync::atomic::AtomicUsize;
 use workflow_core::time::Instant;
 use workflow_log::*;
 pub use workflow_terminal::Event as TerminalEvent;
@@ -44,6 +45,9 @@ pub struct KaspaCli {
     miner: Mutex<Option<Arc<Miner>>>,
     notifier: Notifier,
     sync_state: Mutex<Option<SyncState>>,
+    /// Widest balance segment rendered this session — the prompt pads to it
+    /// so the command line never shifts under the user's fingers.
+    prompt_balance_width: Arc<AtomicUsize>,
 }
 
 impl From<&KaspaCli> for Arc<Terminal> {
@@ -119,6 +123,7 @@ impl KaspaCli {
             miner: Mutex::new(None),
             notifier: Notifier::try_new()?,
             sync_state: Mutex::new(None),
+            prompt_balance_width: Arc::new(AtomicUsize::new(0)),
         });
 
         let term = Arc::new(Terminal::try_new_with_options(kaspa_cli.clone(), options.terminal)?);
@@ -1017,14 +1022,23 @@ impl Cli for KaspaCli {
             if let Ok(account) = self.wallet.account() {
                 prompt.push(style(account.name_with_id()).blue().to_string());
 
-                if let Ok(balance) = account.balance_as_strings(None) {
-                    if let Some(pending) = balance.pending {
-                        prompt.push(format!("{} ({})", balance.mature, pending));
-                    } else {
-                        prompt.push(balance.mature);
+                // Stable-width balance: fixed 8 decimals and a monotonic
+                // session pad, so the prompt (and the text being typed at it)
+                // never jumps as per-block balance updates change digit
+                // counts or the pending segment appears/disappears.
+                match (account.balance(), self.wallet.network_id()) {
+                    (Some(balance), Ok(network_id)) => {
+                        use kaspa_wallet_core::utils::sompi_to_kaspa_string_with_trailing_zeroes_and_suffix as fmt_balance;
+                        let network_type = NetworkType::from(network_id);
+                        let mut segment = fmt_balance(balance.mature, &network_type);
+                        if balance.pending > 0 {
+                            segment.push_str(&format!(" ({})", fmt_balance(balance.pending, &network_type)));
+                        }
+                        let width =
+                            self.prompt_balance_width.fetch_max(segment.len(), Ordering::SeqCst).max(segment.len());
+                        prompt.push(segment.pad_to_width(width));
                     }
-                } else {
-                    prompt.push("N/A".to_string());
+                    _ => prompt.push("N/A".to_string()),
                 }
             }
         }
