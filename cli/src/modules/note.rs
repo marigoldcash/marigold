@@ -243,6 +243,13 @@ impl Note {
         Ok(())
     }
 
+    fn progress_printer(ctx: &Arc<KaspaCli>) -> notepool::NoteProgress {
+        let ctx = ctx.clone();
+        std::sync::Arc::new(move |message: String| {
+            tprintln!(ctx, "  {message}");
+        })
+    }
+
     async fn mint(&self, ctx: &Arc<KaspaCli>, mut argv: Vec<String>) -> Result<()> {
         let account = ctx.wallet().account()?;
 
@@ -252,7 +259,9 @@ impl Note {
         let all = match argv.first().map(|s| s.to_lowercase()).as_deref() {
             None => {
                 let abortable = Abortable::default();
-                let max = notepool::max_mintable_petals(account.clone(), None, &abortable).await?;
+                tprintln!(ctx, "Estimating the largest mintable amount — this dry-runs a sweep of your entire ledger balance and can take a while on a large wallet...");
+                let progress = Self::progress_printer(ctx);
+                let max = notepool::max_mintable_petals(account.clone(), None, &abortable, Some(progress)).await?;
                 if max == 0 {
                     tprintln!(ctx, "usage: 'note mint <amount>' or 'note mint all'  (no mintable balance right now)\r\n");
                     return Ok(());
@@ -272,7 +281,9 @@ impl Note {
             Some("all") => {
                 argv.remove(0);
                 let abortable = Abortable::default();
-                let max = notepool::max_mintable_petals(account.clone(), None, &abortable).await?;
+                tprintln!(ctx, "Estimating the largest mintable amount — this dry-runs a sweep of your entire ledger balance and can take a while on a large wallet...");
+                let progress = Self::progress_printer(ctx);
+                let max = notepool::max_mintable_petals(account.clone(), None, &abortable, Some(progress)).await?;
                 if max == 0 {
                     tprintln!(ctx, "no mintable balance right now\r\n");
                     return Ok(());
@@ -293,7 +304,22 @@ impl Note {
         let (wallet_secret, payment_secret) = ctx.ask_wallet_secret(Some(&account)).await?;
         let abortable = Abortable::default();
 
-        let result = account.mint(wallet_secret, payment_secret, amount_petals, None, &abortable).await?;
+        tprintln!(
+            ctx,
+            "Minting {} MAGLD — building, signing, and submitting the funding transactions (a large wallet sweeps in many batches; progress below)...",
+            sompi_to_kaspa_string(amount_petals)
+        );
+        let progress = Self::progress_printer(ctx);
+        let result = notepool::mint_with_progress(
+            account.clone(),
+            wallet_secret,
+            payment_secret,
+            amount_petals,
+            None,
+            &abortable,
+            Some(progress),
+        )
+        .await?;
 
         tprintln!(ctx, "minted {} MAGLD into {} note(s):", sompi_to_kaspa_string(amount_petals), result.notes.len());
         for entry in &result.notes {

@@ -86,6 +86,12 @@ pub struct MintResult {
     pub notes: Vec<NoteKeyEntry>,
 }
 
+/// Display-oriented progress reporting for long-running note operations —
+/// a mint over a mining wallet can sweep hundreds of thousands of UTXOs in
+/// thousands of batch transactions, minutes during which a silent CLI reads
+/// as a hang. Messages are pre-formatted, ready to print.
+pub type NoteProgress = std::sync::Arc<dyn Fn(String) + Send + Sync>;
+
 /// Mint `amount_petals` worth of notes, splitting into the P1.6 denomination ladder,
 /// funded from the account's transparent balance (FORK-PLAN P7.2).
 pub async fn mint(
@@ -95,6 +101,18 @@ pub async fn mint(
     amount_petals: u64,
     fee_rate: Option<f64>,
     abortable: &Abortable,
+) -> Result<MintResult> {
+    mint_with_progress(account, wallet_secret, payment_secret, amount_petals, fee_rate, abortable, None).await
+}
+
+pub async fn mint_with_progress(
+    account: Arc<dyn Account>,
+    wallet_secret: Secret,
+    payment_secret: Option<Secret>,
+    amount_petals: u64,
+    fee_rate: Option<f64>,
+    abortable: &Abortable,
+    progress: Option<NoteProgress>,
 ) -> Result<MintResult> {
     let denominations = decompose_amount(amount_petals).ok_or_else(|| {
         Error::Custom(format!(
@@ -136,6 +154,12 @@ pub async fn mint(
     while let Some(transaction) = stream.try_next().await? {
         transaction.try_sign()?;
         transaction_ids.push(transaction.try_submit(&account.wallet().rpc_api()).await?);
+        if let Some(progress) = &progress {
+            let n = transaction_ids.len();
+            if n == 1 || n % 50 == 0 {
+                progress(format!("signed and submitted {n} batch transaction(s)..."));
+            }
+        }
     }
     let tx_id = *transaction_ids.last().ok_or_else(|| Error::Custom("mint produced no transaction".to_string()))?;
 
@@ -1565,7 +1589,12 @@ mod tests {
 /// the full mature balance with a same-shape dummy Mint payload (only payload
 /// LENGTH affects mass, so zeroed keys suffice), refined once for the final
 /// amount's own decomposition, then verified with a real SenderPays estimate.
-pub async fn max_mintable_petals(account: Arc<dyn Account>, fee_rate: Option<f64>, abortable: &Abortable) -> Result<u64> {
+pub async fn max_mintable_petals(
+    account: Arc<dyn Account>,
+    fee_rate: Option<f64>,
+    abortable: &Abortable,
+    progress: Option<NoteProgress>,
+) -> Result<u64> {
     let quantum = DENOMINATION_PETALS[0];
     let mature = account.balance().map(|balance| balance.mature).unwrap_or(0);
     if mature < quantum * 2 {
@@ -1580,7 +1609,10 @@ pub async fn max_mintable_petals(account: Arc<dyn Account>, fee_rate: Option<f64
     // Sweep-style estimate: fees come out of the destination, so this always
     // has funds and yields the fee for consuming the whole mature set.
     let mut candidate = mature - mature % quantum;
-    for _ in 0..3 {
+    for pass in 1..=3 {
+        if let Some(progress) = &progress {
+            progress(format!("estimating the sweep fee (pass {pass}, dry-running the transaction generator)..."));
+        }
         let Some(payload) = dummy_payload(candidate) else { return Ok(0) };
         let change_address = account.change_address()?;
         let destination = PaymentDestination::PaymentOutputs(PaymentOutputs::from((change_address, mature)));
@@ -1600,6 +1632,9 @@ pub async fn max_mintable_petals(account: Arc<dyn Account>, fee_rate: Option<f64
     // Verify the exact shape mint() will use; back off by one quantum at a
     // time if the refined estimate still lands a hair over.
     for _ in 0..4 {
+        if let Some(progress) = &progress {
+            progress(format!("verifying the final amount ({} MAGLD)...", crate::utils::sompi_to_kaspa_string(candidate)));
+        }
         let Some(payload) = dummy_payload(candidate) else { return Ok(0) };
         let destination = PaymentDestination::PaymentOutputs(PaymentOutputs { outputs: vec![] });
         match account.clone().estimate(destination, fee_rate, Fees::SenderPays(candidate), Some(payload), abortable).await {
