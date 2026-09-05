@@ -106,6 +106,7 @@ impl Crossterm {
                             }
                         }
                         KeyCode::Enter => Key::Enter,
+                        KeyCode::Tab => Key::Tab,
                         KeyCode::Esc => Key::Esc,
                         KeyCode::Left => Key::ArrowLeft,
                         KeyCode::Right => Key::ArrowRight,

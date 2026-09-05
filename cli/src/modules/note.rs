@@ -64,6 +64,7 @@ impl Note {
             "balance" => self.balance(&ctx).await,
             "list" => self.list(&ctx).await,
             "vault" => self.vault(&ctx, argv).await,
+            "help" => self.display_help(ctx, argv).await,
             v => {
                 tprintln!(ctx, "unknown command: '{v}'\r\n");
                 self.display_help(ctx, argv).await

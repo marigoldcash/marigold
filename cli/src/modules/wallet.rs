@@ -388,6 +388,9 @@ impl Wallet {
                     tprintln!(ctx, "usage:\n'wallet hint <text>' or 'wallet hint remove' to remove the hint");
                 }
             }
+            "help" => {
+                return self.display_help(ctx, argv).await;
+            }
             v => {
                 tprintln!(ctx, "unknown command: '{v}'");
                 return self.display_help(ctx, argv).await;

@@ -37,6 +37,10 @@ Three more defects, found in live use the day after the first batch:
 
 Reproduction for 7-9: open any secret prompt and press Ctrl+C — observe empty-answer semantics and app teardown; repeat the cycle several times to accumulate the channel panic.
 
+## Also in the patch: Tab completion (feature, not fix)
+
+The `Cli::complete` hook has existed in the trait all along but nothing drove it: `KeyCode::Tab` was never mapped to a `Key` variant, so Tab never reached `Terminal::ingest`. The patch adds `Key::Tab`, maps it in the crossterm backend, and adds a completion driver to `ingest` (single candidate completes in place; several extend to the common prefix or list alternatives). Contract: `complete(line)` returns full-line candidates. Offered together since it touches the same files.
+
 ## The fixes (see fix.patch)
 
 - `crossterm.rs`: new `flush_pending_input()` (drains via `event::poll(Duration::ZERO)`); `intake()` polls with a 50 ms timeout and checks `terminate` *before* reading, so orphaned readers exit.

@@ -878,6 +878,25 @@ impl Cli for KaspaCli {
 
     async fn digest(self: Arc<Self>, term: Arc<Terminal>, cmd: String) -> TerminalResult<()> {
         *self.last_interaction.lock().unwrap() = Instant::now();
+        // '<command> [...] help' (or '?') explains the command instead of
+        // running it — discoverability rule, wallet-UX refinements 2026-09-05.
+        let tokens: Vec<&str> = cmd.split_whitespace().collect();
+        if tokens.len() >= 2 && matches!(tokens.last().map(|s| s.to_lowercase()).as_deref(), Some("help") | Some("?")) {
+            let verb = tokens[0].to_lowercase();
+            let ctx: Arc<dyn Context> = self.clone();
+            if let Some(handler) = self.handlers.get(&verb) {
+                term.writeln(format!("\n{} — {}", verb, get_handler_help(handler, &ctx)));
+                // Commands with sub-command tables print them too.
+                if matches!(verb.as_str(), "wallet" | "note" | "account" | "history" | "node" | "miner") {
+                    if let Err(err) = self.handlers.execute(&self, &format!("{verb} help")).await {
+                        term.writeln(style(err.to_string()).red().to_string());
+                    }
+                } else {
+                    term.writeln("");
+                }
+                return Ok(());
+            }
+        }
         if let Err(err) = self.handlers.execute(&self, &cmd).await {
             term.writeln(style(err.to_string()).red().to_string());
         }
@@ -885,8 +904,81 @@ impl Cli for KaspaCli {
     }
 
     async fn complete(self: Arc<Self>, _term: Arc<Terminal>, cmd: String) -> TerminalResult<Option<Vec<String>>> {
-        let list = self.handlers.complete(&self, &cmd).await?;
-        Ok(list)
+        // Tab completion: returns FULL-LINE candidates (the terminal's
+        // contract). First word completes against registered verbs; known
+        // multi-command verbs complete their subcommands; wallet-name slots
+        // complete against the wallet files on disk.
+        let ctx: Arc<dyn Context> = self.clone();
+        let trailing_space = cmd.ends_with(' ');
+        let tokens: Vec<String> = cmd.split_whitespace().map(String::from).collect();
+
+        let subcommands = |verb: &str, sub: &str| -> Option<Vec<&'static str>> {
+            match (verb, sub) {
+                ("note", "vault") => Some(vec!["create", "backup", "verify", "restore", "export", "import"]),
+                ("note", _) => Some(vec![
+                    "mint", "rotate", "move", "redeem", "request", "pay", "import", "export", "pos", "balance", "list", "vault",
+                    "help",
+                ]),
+                ("wallet", _) => Some(vec![
+                    "list", "create", "import", "open", "close", "where", "remember", "forget", "rename", "destroy", "hint", "help",
+                ]),
+                ("history", _) => Some(vec!["list", "details"]),
+                ("settings", _) => Some(vec!["set"]),
+                ("track", _) => Some(vec!["balance", "pending", "tx", "utxo", "daa"]),
+                ("network", _) => Some(vec!["mainnet", "testnet-10"]),
+                ("node", _) | ("miner", _) => Some(vec!["start", "stop", "restart", "status"]),
+                ("utxos", _) => Some(vec!["all"]),
+                _ => None,
+            }
+        };
+
+        let complete_token = |prefix: &str, candidates: Vec<String>, head: &[String]| -> Vec<String> {
+            let head = if head.is_empty() { String::new() } else { format!("{} ", head.join(" ")) };
+            candidates
+                .into_iter()
+                .filter(|c| c.starts_with(prefix) )
+                .map(|c| format!("{head}{c}"))
+                .collect()
+        };
+
+        let verbs: Vec<String> = {
+            let handlers = self.handlers.collect();
+            let mut verbs: Vec<String> = handlers.into_iter().filter_map(|h| h.verb(&ctx).map(String::from)).collect();
+            verbs.sort();
+            verbs
+        };
+
+        let candidates: Vec<String> = match (tokens.len(), trailing_space) {
+            (0, _) => verbs,
+            (1, false) => complete_token(&tokens[0], verbs, &[]),
+            _ => {
+                let verb = tokens[0].to_lowercase();
+                let (head, prefix): (&[String], &str) =
+                    if trailing_space { (&tokens[..], "") } else { (&tokens[..tokens.len() - 1], tokens.last().unwrap()) };
+                // wallet-name slots: 'open <name>', 'wallet open|destroy <name>'
+                let wallet_name_slot = (verb == "open" && head.len() == 1)
+                    || (verb == "wallet" && head.len() == 2 && matches!(head[1].as_str(), "open" | "destroy"));
+                if wallet_name_slot {
+                    let names = self
+                        .store()
+                        .wallet_list()
+                        .await
+                        .map(|list| list.into_iter().map(|w| w.filename).collect::<Vec<_>>())
+                        .unwrap_or_default();
+                    complete_token(prefix, names, head)
+                } else {
+                    let sub = tokens.get(1).map(|s| s.as_str()).unwrap_or("");
+                    match subcommands(&verb, sub) {
+                        Some(subs) if head.len() <= 2 || (verb == "note" && sub == "vault" && head.len() <= 3) => {
+                            complete_token(prefix, subs.into_iter().map(String::from).collect(), head)
+                        }
+                        _ => vec![],
+                    }
+                }
+            }
+        };
+
+        Ok(Some(candidates))
     }
 
     fn prompt(&self) -> Option<String> {

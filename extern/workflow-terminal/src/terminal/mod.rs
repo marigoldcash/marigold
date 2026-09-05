@@ -670,6 +670,59 @@ impl Terminal {
                 data.buffer.remove(idx);
                 self.trail(data.cursor, &data.buffer, true, true, 0);
             }
+            Key::Tab => {
+                // Tab completion (Marigold fix — upstream never mapped Tab and
+                // the Cli::complete hook was dead). Contract with the handler:
+                // `complete(line)` returns full-line candidates. One candidate
+                // completes in place; several extend to their common prefix or
+                // list the alternatives (last token only, for brevity).
+                let buffer = {
+                    let data = self.inner()?;
+                    if data.cursor != data.buffer.len() {
+                        return Ok(());
+                    }
+                    data.buffer.clone().to_string()
+                };
+                if buffer.trim().is_empty() {
+                    return Ok(());
+                }
+                if let Ok(Some(candidates)) = self.handler.clone().complete(self.clone(), buffer.clone()).await {
+                    match candidates.len() {
+                        0 => {}
+                        1 => {
+                            let mut data = self.inner()?;
+                            data.buffer = format!("{} ", candidates[0]).into();
+                            data.cursor = data.buffer.len();
+                            let p = format!("{}{}{}", ClearLine, self.get_prompt(), data.buffer);
+                            self.write(p);
+                        }
+                        _ => {
+                            let mut prefix = candidates[0].clone();
+                            for candidate in candidates.iter().skip(1) {
+                                let common = prefix.chars().zip(candidate.chars()).take_while(|(a, b)| a == b).count();
+                                prefix.truncate(prefix.char_indices().nth(common).map(|(i, _)| i).unwrap_or(prefix.len()));
+                            }
+                            if prefix.len() > buffer.len() {
+                                let mut data = self.inner()?;
+                                data.buffer = prefix.into();
+                                data.cursor = data.buffer.len();
+                                let p = format!("{}{}{}", ClearLine, self.get_prompt(), data.buffer);
+                                self.write(p);
+                            } else {
+                                let display = candidates
+                                    .iter()
+                                    .map(|c| c.rsplit(' ').next().unwrap_or(c.as_str()).to_string())
+                                    .collect::<Vec<_>>()
+                                    .join("  ");
+                                self.write(format!("{}\n\r{}\n\r", ClearLine, display));
+                                let data = self.inner()?;
+                                let p = format!("{}{}", self.get_prompt(), data.buffer);
+                                self.write(p);
+                            }
+                        }
+                    }
+                }
+            }
             Key::ArrowUp => {
                 let mut data = self.inner()?;
                 if data.history_index == 0 {

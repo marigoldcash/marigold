@@ -14,6 +14,7 @@ pub enum Key {
     End,
     PageUp,
     PageDown,
+    Tab,
     BackTab,
     Delete,
     Insert,
