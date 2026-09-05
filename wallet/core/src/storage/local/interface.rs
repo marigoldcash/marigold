@@ -491,6 +491,48 @@ impl Interface for LocalStore {
         Ok(descriptors)
     }
 
+    async fn client_metadata(&self, filename: &str) -> Result<Option<crate::storage::local::wallet::ClientMetadata>> {
+        let location = self.location.lock().unwrap().clone().unwrap();
+        let path = fs::resolve_path(&location.folder)?.join(format!("{filename}.wallet"));
+        if !fs::exists(&path).await? {
+            return Err(Error::NoWalletInStorage(filename.to_string()));
+        }
+        let data = fs::read(&path).await?;
+        let wallet = WalletStorage::try_from_slice(data.as_slice())?;
+        Ok(wallet.client_metadata)
+    }
+
+    async fn set_client_metadata(&self, filename: &str, metadata: Option<crate::storage::local::wallet::ClientMetadata>) -> Result<()> {
+        let location = self.location.lock().unwrap().clone().unwrap();
+        let path = fs::resolve_path(&location.folder)?.join(format!("{filename}.wallet"));
+        if !fs::exists(&path).await? {
+            return Err(Error::NoWalletInStorage(filename.to_string()));
+        }
+        // Plaintext-tier edit: the encrypted payload round-trips untouched, so
+        // no password is needed — same access level as wallet_list's title read.
+        let data = fs::read(&path).await?;
+        let mut wallet = WalletStorage::try_from_slice(data.as_slice())?;
+        wallet.client_metadata = metadata.clone();
+        let serialized = borsh::to_vec(&wallet)?;
+        fs::write(&path, serialized.as_slice()).await?;
+        // If this wallet is currently open, its in-memory cache would clobber
+        // the file on the next full save — keep it in step.
+        if let Some(inner) = self.inner.lock().unwrap().clone() {
+            if inner.descriptor().filename == filename {
+                inner.cache.write().unwrap().client_metadata = metadata;
+            }
+        }
+        Ok(())
+    }
+
+    fn set_storage_folder(&self, folder: &str) -> Result<()> {
+        if self.inner.lock().unwrap().is_some() {
+            return Err(Error::Custom("cannot change the storage folder while a wallet is open".to_string()));
+        }
+        *self.location.lock().unwrap() = Some(Arc::new(Location::new(folder)));
+        Ok(())
+    }
+
     fn is_open(&self) -> bool {
         self.inner.lock().unwrap().is_some()
     }

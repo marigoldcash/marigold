@@ -33,6 +33,32 @@ pub(crate) async fn create(
         tprintln!(ctx);
         return Err(err.into());
     }
+    // Storage-location step: the wallet file is the user's money — its
+    // location must be proposed up front, not revealed after the fact
+    // (wallet-UX refinements, 2026-09-05).
+    let mut name: Option<String> = name.map(String::from);
+    let folder: String = ctx
+        .wallet()
+        .settings()
+        .get(WalletSettings::Folder)
+        .unwrap_or_else(|| kaspa_wallet_core::storage::local::default_storage_folder().to_string());
+    loop {
+        let filename = make_filename(&name, &None);
+        tprintln!(ctx);
+        tprintln!(ctx, "This wallet will be stored as: {}", style(format!("{folder}/{filename}.wallet")).cyan());
+        tprintln!(ctx, "(change the folder for all wallets with 'settings set folder <path>' before creating)");
+        let input = term.ask(false, "Press <enter> to accept, or type a different wallet name: ").await?.trim().to_string();
+        if input.is_empty() {
+            break;
+        }
+        if input.to_lowercase() == "wallet" {
+            tprintln!(ctx, "Wallet name cannot be 'wallet'");
+            continue;
+        }
+        name = Some(input);
+    }
+    let name = name.as_deref();
+
     let filename = make_filename(&name.map(String::from), &None);
     if wallet.exists(Some(&filename)).await? {
         tprintln!(ctx, "{}", style("WARNING - A previously created wallet already exists!").red().to_string());
@@ -142,7 +168,7 @@ pub(crate) async fn create(
     wallet.store().batch().await?;
 
     let wallet_args = WalletCreateArgs::new(name.map(String::from), None, EncryptionKind::XChaCha20Poly1305, hint, true);
-    let (_wallet_descriptor, storage_descriptor) = ctx.wallet().create_wallet(&wallet_secret, wallet_args).await?;
+    let (wallet_descriptor, storage_descriptor) = ctx.wallet().create_wallet(&wallet_secret, wallet_args).await?;
     let prv_key_data_id = wallet.create_prv_key_data(&wallet_secret, prv_key_data_args).await?;
 
     let account_args = AccountCreateArgsBip32::new(account_name, None);
@@ -190,6 +216,18 @@ pub(crate) async fn create(
 
     wallet.open(&wallet_secret, name.map(String::from), WalletOpenArgs::default_with_legacy_accounts(), &guard).await?;
     wallet.activate_accounts(None, &guard).await?;
+
+    // Remember this wallet: plaintext client metadata in the wallet file
+    // itself (travels with the file) + last-opened pointer in settings.
+    // 'wallet remember off' opts out later.
+    let meta = kaspa_wallet_core::storage::local::ClientMetadata {
+        network: wallet.network_id().ok().map(|n| n.to_string()),
+        server: None,
+        last_opened: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_secs()),
+        remember: true,
+    };
+    wallet.store().set_client_metadata(&wallet_descriptor.filename, Some(meta)).await.ok();
+    ctx.wallet().settings().set(WalletSettings::Wallet, wallet_descriptor.filename.clone()).await.ok();
 
     Ok(())
 }

@@ -23,7 +23,7 @@ pub mod wallet;
 pub use collection::Collection;
 pub use payload::Payload;
 pub use storage::Storage;
-pub use wallet::WalletStorage;
+pub use wallet::{ClientMetadata, WalletStorage};
 
 use crate::error::Error;
 use crate::result::Result;

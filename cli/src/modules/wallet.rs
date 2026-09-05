@@ -1,5 +1,6 @@
 use crate::imports::*;
 use crate::wizards;
+use std::str::FromStr;
 
 #[derive(Default, Handler)]
 #[help("Wallet management operations")]
@@ -64,14 +65,172 @@ impl Wallet {
                     }
                     Some(name)
                 } else {
-                    ctx.wallet().settings().get(WalletSettings::Wallet).clone()
+                    // No name given: enumerate. One wallet opens directly; several
+                    // get a numbered picker with the last-used one on <enter>.
+                    let wallets = ctx.store().wallet_list().await?;
+                    match wallets.len() {
+                        0 => {
+                            tprintln!(ctx, "No wallets found — create one with 'wallet create <name>'");
+                            return Ok(());
+                        }
+                        1 => Some(wallets[0].filename.clone()),
+                        _ => {
+                            let last: Option<String> = ctx.wallet().settings().get(WalletSettings::Wallet);
+                            let last = last.filter(|l| wallets.iter().any(|w| &w.filename == l));
+                            tprintln!(ctx, "");
+                            for (i, w) in wallets.iter().enumerate() {
+                                let marker = if Some(&w.filename) == last.as_ref() { "  (last used)" } else { "" };
+                                match &w.title {
+                                    Some(title) => tprintln!(ctx, "{i}: {title} ({}){marker}", w.filename),
+                                    None => tprintln!(ctx, "{i}: {}{marker}", w.filename),
+                                }
+                            }
+                            tprintln!(ctx, "");
+                            let default = last.unwrap_or_else(|| wallets[0].filename.clone());
+                            let selection = ctx
+                                .term()
+                                .ask(false, &format!("Select wallet [0..{}] or <enter> for '{default}': ", wallets.len() - 1))
+                                .await?
+                                .trim()
+                                .to_string();
+                            if selection.is_empty() {
+                                Some(default)
+                            } else {
+                                match selection.parse::<usize>() {
+                                    Ok(i) if i < wallets.len() => Some(wallets[i].filename.clone()),
+                                    _ => {
+                                        tprintln!(ctx, "No such wallet: '{selection}'");
+                                        return Ok(());
+                                    }
+                                }
+                            }
+                        }
+                    }
                 };
+
+                // Plaintext metadata is readable before the password: apply the
+                // wallet's remembered network first, since account activation
+                // derives addresses for whatever network is current.
+                let meta = match &name {
+                    Some(name) => ctx.store().client_metadata(name).await.ok().flatten(),
+                    None => None,
+                };
+                if let Some(network) = meta.as_ref().and_then(|m| m.network.clone()) {
+                    if let Ok(network_id) = NetworkId::from_str(&network) {
+                        if ctx.wallet().network_id().ok() != Some(network_id) {
+                            match ctx.wallet().set_network_id(&network_id) {
+                                Ok(_) => tprintln!(ctx, "Network set to {network_id} (remembered by this wallet)"),
+                                Err(err) => {
+                                    tprintln!(ctx, "This wallet remembers network {network}, which can't be applied now: {err}")
+                                }
+                            }
+                        }
+                    }
+                }
 
                 let (wallet_secret, _) = ctx.ask_wallet_secret(None).await?;
                 let _ = ctx.notifier().show(Notification::Processing).await;
                 let args = WalletOpenArgs::default_with_legacy_accounts();
-                ctx.wallet().open(&wallet_secret, name, args, &guard).await?;
+                ctx.wallet().open(&wallet_secret, name.clone(), args, &guard).await?;
                 ctx.wallet().activate_accounts(None, &guard).await?;
+
+                if let Some(name) = &name {
+                    let remember = meta.as_ref().map(|m| m.remember).unwrap_or(true);
+                    if remember {
+                        let mut updated = meta.clone().unwrap_or_default();
+                        updated.remember = true;
+                        updated.network = ctx.wallet().network_id().ok().map(|n| n.to_string());
+                        updated.last_opened =
+                            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_secs());
+                        ctx.store().set_client_metadata(name, Some(updated.clone())).await.ok();
+                        ctx.wallet().settings().set(WalletSettings::Wallet, name.clone()).await.ok();
+
+                        if let Some(server) = &updated.server {
+                            if !ctx.wallet().is_connected() {
+                                let answer =
+                                    ctx.term().ask(false, &format!("Connect to {server}? [Y/n]: ")).await?.trim().to_lowercase();
+                                if answer.is_empty() || answer == "y" || answer == "yes" {
+                                    ctx.term().exec(format!("connect {server}")).await?;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            "where" => {
+                let folder: String = ctx
+                    .wallet()
+                    .settings()
+                    .get(WalletSettings::Folder)
+                    .unwrap_or_else(|| kaspa_wallet_core::storage::local::default_storage_folder().to_string());
+                tprintln!(ctx, "");
+                if ctx.wallet().is_open() {
+                    if let Some(descriptor) = ctx.store().descriptor() {
+                        tprintln!(ctx, "Wallet file:    {folder}/{}.wallet", descriptor.filename);
+                        tprintln!(ctx, "Note vault:     {folder}/{}.notes/", descriptor.filename);
+                        tprintln!(ctx, "Transactions:   {folder}/{}.transactions/", descriptor.filename);
+                    }
+                } else {
+                    tprintln!(ctx, "Wallet folder:  {folder}  (no wallet open — 'wallet list' shows the files)");
+                }
+                tprintln!(
+                    ctx,
+                    "Settings file:  {}/marigold.settings",
+                    kaspa_wallet_core::storage::local::default_storage_folder()
+                );
+                tprintln!(ctx, "");
+                tprintln!(ctx, "These files ARE your money and your keys — back them up accordingly.");
+                tprintln!(ctx, "");
+            }
+            "remember" => {
+                if !ctx.wallet().is_open() {
+                    tprintln!(ctx, "Open a wallet first");
+                    return Ok(());
+                }
+                let Some(descriptor) = ctx.store().descriptor() else {
+                    tprintln!(ctx, "Unable to resolve the open wallet's file");
+                    return Ok(());
+                };
+                let arg = argv.first().map(|s| s.to_lowercase());
+                match arg.as_deref() {
+                    Some("off") => {
+                        // Incognito: strip recorded details and stop recording.
+                        let meta = kaspa_wallet_core::storage::local::ClientMetadata { remember: false, ..Default::default() };
+                        ctx.store().set_client_metadata(&descriptor.filename, Some(meta)).await?;
+                        tprintln!(ctx, "This wallet will no longer record network/server/usage details (stored details removed).");
+                    }
+                    Some("on") => {
+                        let meta = kaspa_wallet_core::storage::local::ClientMetadata {
+                            network: ctx.wallet().network_id().ok().map(|n| n.to_string()),
+                            server: None,
+                            last_opened: std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .ok()
+                                .map(|d| d.as_secs()),
+                            remember: true,
+                        };
+                        ctx.store().set_client_metadata(&descriptor.filename, Some(meta)).await?;
+                        tprintln!(ctx, "This wallet now remembers its network and connection details.");
+                    }
+                    _ => {
+                        let meta = ctx.store().client_metadata(&descriptor.filename).await.ok().flatten();
+                        let state = meta.map(|m| m.remember).unwrap_or(true);
+                        tprintln!(ctx, "remember is {} — 'wallet remember on|off' to change", if state { "on" } else { "off" });
+                    }
+                }
+            }
+            "forget" => {
+                if !ctx.wallet().is_open() {
+                    tprintln!(ctx, "Open a wallet first");
+                    return Ok(());
+                }
+                let Some(descriptor) = ctx.store().descriptor() else {
+                    tprintln!(ctx, "Unable to resolve the open wallet's file");
+                    return Ok(());
+                };
+                ctx.store().set_client_metadata(&descriptor.filename, None).await?;
+                ctx.wallet().settings().set(WalletSettings::Wallet, "marigold".to_string()).await.ok();
+                tprintln!(ctx, "Stored network/server/usage details cleared for this wallet.");
             }
             "close" => {
                 ctx.wallet().close().await?;
@@ -107,8 +266,11 @@ impl Wallet {
                 ("list", "List available local wallet files"),
                 ("create [<name>]", "Create a new bip32 wallet"),
                 ("import [<name>]", "Create a wallet from an existing mnemonic (bip32 only)"),
-                ("open [<name>]", "Open an existing wallet (shorthand: 'open [<name>]')"),
+                ("open [<name>]", "Open an existing wallet (shorthand: 'open [<name>]'; no name shows a picker)"),
                 ("close", "Close an opened wallet (shorthand: 'close')"),
+                ("where", "Show where the wallet, note vault, and settings files live on disk"),
+                ("remember [on|off]", "Whether this wallet records its network/server/last-used details (in the wallet file)"),
+                ("forget", "Clear this wallet's recorded network/server/usage details"),
                 ("hint", "Change the wallet phishing hint"),
             ],
             None,

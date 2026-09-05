@@ -23,6 +23,8 @@ pub enum WalletSettings {
     Server,
     #[describe("Wallet storage or file name (default 'marigold')")]
     Wallet,
+    #[describe("Wallet storage folder (default ~/.marigold; this settings file itself always stays in ~/.marigold)")]
+    Folder,
 }
 
 #[async_trait]

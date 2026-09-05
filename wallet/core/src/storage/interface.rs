@@ -273,6 +273,28 @@ pub trait Interface: Send + Sync + AnySync {
     /// enumerate all wallets available in the storage
     async fn wallet_list(&self) -> Result<Vec<WalletDescriptor>>;
 
+    /// read a wallet's plaintext client metadata (network/server/last-opened)
+    /// without opening it — no password required. `Ok(None)` when the wallet
+    /// predates the field or the backend doesn't support it.
+    async fn client_metadata(&self, _filename: &str) -> Result<Option<crate::storage::local::wallet::ClientMetadata>> {
+        Ok(None)
+    }
+
+    /// rewrite a wallet's plaintext client metadata in place. No password
+    /// required (the encrypted payload passes through untouched). No-op on
+    /// backends that don't support it.
+    async fn set_client_metadata(&self, _filename: &str, _metadata: Option<crate::storage::local::wallet::ClientMetadata>) -> Result<()> {
+        Ok(())
+    }
+
+    /// redirect where wallet files live (the `folder` setting). Applies to
+    /// wallet/vault/transaction files only — the settings file stays at the
+    /// default location so the redirect itself has a fixed home. Must be
+    /// called before a wallet is opened; no-op on backends without folders.
+    fn set_storage_folder(&self, _folder: &str) -> Result<()> {
+        Ok(())
+    }
+
     /// check if a wallet is currently open
     fn is_open(&self) -> bool;
 

@@ -10,6 +10,21 @@ use crate::storage::local::Storage;
 use crate::storage::{AccountMetadata, Decrypted, Encrypted, Hint, PrvKeyData, PrvKeyDataId};
 use workflow_store::fs;
 
+/// Client convenience metadata stored in the wallet file's PLAINTEXT tier
+/// (alongside `title`/`user_hint`) — readable without the wallet password, so
+/// the wallet picker and post-open connect flow work before decryption, and
+/// the settings travel with the file when it is copied to another machine
+/// (deliberate: a bearer-era wallet file should carry its own context).
+/// Never put secrets here. `remember: false` means the wallet asked not to
+/// have usage details recorded; writers must honor it by storing `None`.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
+pub struct ClientMetadata {
+    pub network: Option<String>,
+    pub server: Option<String>,
+    pub last_opened: Option<u64>,
+    pub remember: bool,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct WalletStorage {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -21,11 +36,15 @@ pub struct WalletStorage {
     pub metadata: Vec<AccountMetadata>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub transactions: Option<Encryptable<HashMap<AccountId, Vec<TransactionRecord>>>>,
+    /// v1 field — `None` for files written by v0 software (see version-gated
+    /// read below; v0 files stay readable, and are upgraded to v1 on next save).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_metadata: Option<ClientMetadata>,
 }
 
 impl WalletStorage {
     pub const STORAGE_MAGIC: u32 = 0x5753414b;
-    pub const STORAGE_VERSION: u32 = 0;
+    pub const STORAGE_VERSION: u32 = 1;
 
     pub fn try_new(
         title: Option<String>,
@@ -36,7 +55,7 @@ impl WalletStorage {
         metadata: Vec<AccountMetadata>,
     ) -> Result<Self> {
         let payload = Decrypted::new(payload).encrypt(secret, encryption_kind)?;
-        Ok(Self { title, encryption_kind, payload, metadata, user_hint, transactions: None })
+        Ok(Self { title, encryption_kind, payload, metadata, user_hint, transactions: None, client_metadata: None })
     }
 
     pub fn payload(&self, secret: &Secret) -> Result<Decrypted<Payload>> {
@@ -95,6 +114,8 @@ impl BorshSerialize for WalletStorage {
         BorshSerialize::serialize(&self.payload, writer)?;
         BorshSerialize::serialize(&self.metadata, writer)?;
         BorshSerialize::serialize(&self.transactions, writer)?;
+        // v1 tail — readers gate on the header version.
+        BorshSerialize::serialize(&self.client_metadata, writer)?;
 
         Ok(())
     }
@@ -128,8 +149,13 @@ impl BorshDeserialize for WalletStorage {
         let payload = BorshDeserialize::deserialize_reader(reader)?;
         let metadata = BorshDeserialize::deserialize_reader(reader)?;
         let transactions = BorshDeserialize::deserialize_reader(reader)?;
+        // Version-gated: v0 files end here. Reading the field unconditionally
+        // would error on every wallet created before v1 (positional Borsh, no
+        // length prefix) — the exact backward-compat trap this fork's docs
+        // warn about for this file format.
+        let client_metadata = if version >= 1 { BorshDeserialize::deserialize_reader(reader)? } else { None };
 
-        Ok(Self { title, user_hint, encryption_kind, payload, metadata, transactions })
+        Ok(Self { title, user_hint, encryption_kind, payload, metadata, transactions, client_metadata })
     }
 }
 

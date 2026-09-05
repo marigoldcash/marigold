@@ -51,6 +51,30 @@ impl Connect {
                 ..Default::default()
             };
             wrpc_client.connect(Some(options)).await.map_err(|e| e.to_string())?;
+
+            // Persist what we actually connected to, so the next session (and
+            // this wallet's own metadata) reflect reality — previously only
+            // the `server` command wrote the setting and it drifted.
+            if let Some(explicit) = argv.first() {
+                if explicit != "public" {
+                    ctx.wallet().settings().set(WalletSettings::Server, explicit.clone()).await.ok();
+                    if ctx.wallet().is_open() {
+                        if let Some(descriptor) = ctx.wallet().store().descriptor() {
+                            if let Ok(meta) = ctx.wallet().store().client_metadata(&descriptor.filename).await {
+                                // Absent metadata means a pre-v1 wallet: remembering is the
+                                // default. An explicit remember=false is an opt-out — honor it.
+                                let remember = meta.as_ref().map(|m| m.remember).unwrap_or(true);
+                                if remember {
+                                    let mut meta = meta.unwrap_or_default();
+                                    meta.remember = true;
+                                    meta.server = Some(explicit.clone());
+                                    ctx.wallet().store().set_client_metadata(&descriptor.filename, Some(meta)).await.ok();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         } else {
             terrorln!(ctx, "Unable to connect with non-wRPC client");
         }

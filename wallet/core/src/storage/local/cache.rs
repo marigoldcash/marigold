@@ -10,6 +10,10 @@ use std::collections::HashMap;
 pub struct Cache {
     pub wallet_title: Option<String>,
     pub user_hint: Option<Hint>,
+    /// Plaintext client metadata (network/server/last-opened) — carried
+    /// through the cache so a full wallet save round-trips it instead of
+    /// silently erasing what `set_client_metadata` wrote.
+    pub client_metadata: Option<crate::storage::local::wallet::ClientMetadata>,
     pub encryption_kind: EncryptionKind,
     pub prv_key_data: Encrypted,
     pub prv_key_data_info: Collection<PrvKeyDataId, PrvKeyDataInfo>,
@@ -55,6 +59,7 @@ impl Cache {
         let metadata: Collection<AccountId, AccountMetadata> = wallet.metadata.try_into()?;
         let user_hint = wallet.user_hint;
         let wallet_title = wallet.title;
+        let client_metadata = wallet.client_metadata;
         let address_book = payload.0.address_book.into_iter().collect();
 
         let (payment_request_map, payment_request_info) = payment_request_map_and_info(payload.0.payment_request_keys.clone())?;
@@ -63,6 +68,7 @@ impl Cache {
         Ok(Cache {
             wallet_title,
             user_hint,
+            client_metadata,
             encryption_kind,
             prv_key_data,
             prv_key_data_info,
@@ -92,10 +98,12 @@ impl Cache {
 
         let (payment_request_map, payment_request_info) = payment_request_map_and_info(payload.payment_request_keys)?;
         let payment_request_data = Decrypted::new(payment_request_map).encrypt(secret, encryption_kind)?;
+        let client_metadata = None;
 
         Ok(Cache {
             wallet_title,
             user_hint,
+            client_metadata,
             encryption_kind,
             prv_key_data,
             prv_key_data_info,
@@ -130,6 +138,7 @@ impl Cache {
             user_hint: self.user_hint.clone(),
             title: self.wallet_title.clone(),
             transactions,
+            client_metadata: self.client_metadata.clone(),
         })
     }
 }
