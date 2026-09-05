@@ -274,6 +274,9 @@ impl KaspaCli {
         let multiplexer = MultiplexerChannel::from(self.wallet.multiplexer());
 
         workflow_core::task::spawn(async move {
+            // See the Events::Balance arm: rate-limits prompt redraws driven
+            // by per-block balance updates.
+            let mut last_balance_refresh = Instant::now();
             loop {
                 select! {
 
@@ -482,7 +485,15 @@ impl KaspaCli {
                                         tprintln!(this, "{NOTIFY} {} {id}: {balance_strings}   {utxo_info}",style("balance".pad_to_width(8)).blue());
                                     }
 
-                                    this.term().refresh_prompt();
+                                    // Throttled: on a 10 BPS network a wallet holding the
+                                    // mining payout address gets a Balance event nearly
+                                    // every block; the unconditional redraw here repainted
+                                    // the prompt ~10x/sec regardless of mute, making
+                                    // typing next to impossible.
+                                    if last_balance_refresh.elapsed() >= Duration::from_millis(1000) {
+                                        last_balance_refresh = Instant::now();
+                                        this.term().refresh_prompt();
+                                    }
                                 }
                             }
                         }
@@ -504,7 +515,23 @@ impl KaspaCli {
     /// Asks uses for a wallet secret, checks the supplied account's private key info
     /// and if it requires a payment secret, asks for it as well.
     pub(crate) async fn ask_wallet_secret(&self, account: Option<&Arc<dyn Account>>) -> Result<(Secret, Option<Secret>)> {
-        let wallet_secret = Secret::new(self.term().ask(true, "Enter wallet password: ").await?.trim().as_bytes().to_vec());
+        // Re-ask on empty input instead of proceeding to a guaranteed decrypt
+        // failure: an empty answer here has historically meant a stray Enter
+        // reached the prompt, not an intentional empty password — and the
+        // failure path trained users to retype their password at the normal
+        // command prompt (cleartext, history). Ctrl+C still aborts.
+        let mut attempts = 0;
+        let wallet_secret = loop {
+            let entered = self.term().ask(true, "Enter wallet password: ").await?.trim().as_bytes().to_vec();
+            if !entered.is_empty() {
+                break Secret::new(entered);
+            }
+            attempts += 1;
+            if attempts >= 3 {
+                return Err(Error::custom("no password entered"));
+            }
+            tprintln!(self, "Password was empty — try again (Ctrl+C to abort).");
+        };
 
         let payment_secret = if let Some(account) = account {
             if self.wallet().is_account_key_encrypted(account).await?.is_some_and(|f| f) {

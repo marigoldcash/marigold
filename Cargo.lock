@@ -8932,8 +8932,6 @@ dependencies = [
 [[package]]
 name = "workflow-terminal"
 version = "0.18.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "75b64a2ecf68442edf844c3138f0b78e1398cfe4279540f94cc51b4afb885e5b"
 dependencies = [
  "async-std",
  "async-trait",

@@ -425,3 +425,12 @@ opt-level = 2
 [workspace.lints.clippy]
 empty_docs = "allow"
 uninlined_format_args = "allow"
+
+# Vendored fork of workflow-terminal 0.18.0 (MIT OR Apache-2.0, from
+# crates.io) carrying Marigold security/UX fixes to the interactive terminal:
+# type-ahead flush around secret prompts, input gating while a command runs,
+# terminate-aware intake loops (no ghost stdin readers), modal-aware prompt
+# refresh, and underflow guards. Each change is marked "Marigold fix" in
+# extern/workflow-terminal. Worth upstreaming to workflow-rs eventually.
+[patch.crates-io]
+workflow-terminal = { path = "extern/workflow-terminal" }
