@@ -820,10 +820,21 @@ impl Terminal {
                 return Ok(());
             }
             Key::Ctrl('c') => {
-                cfg_if! {
-                    if #[cfg(not(target_arch = "wasm32"))] {
-                        self.exit().await;
+                // Shell semantics (Marigold fix): at an idle prompt Ctrl+C
+                // clears the line and redraws — only `exit` exits. While a
+                // command is RUNNING it keeps upstream's app-exit behavior,
+                // as the escape hatch from a hung command.
+                if self.is_running() {
+                    cfg_if! {
+                        if #[cfg(not(target_arch = "wasm32"))] {
+                            self.exit().await;
+                        }
                     }
+                } else {
+                    let mut data = self.inner()?;
+                    data.buffer.clear();
+                    data.cursor = 0;
+                    self.write(format!("^C\n\r{}", self.get_prompt()));
                 }
                 return Ok(());
             }
