@@ -251,6 +251,127 @@ impl Wallet {
             "close" => {
                 ctx.wallet().close().await?;
             }
+            "destroy" => {
+                let Some(name) = argv.first().cloned() else {
+                    tprintln!(ctx, "usage: 'wallet destroy <name> [force]' — permanently deletes a wallet's file, note vault, and transaction history");
+                    return Ok(());
+                };
+                let force = argv.get(1).map(|s| s.to_lowercase()).as_deref() == Some("force");
+                if ctx.wallet().is_open() && ctx.store().descriptor().map(|d| d.filename) == Some(name.clone()) {
+                    tprintln!(ctx, "'{name}' is currently open — 'close' it first");
+                    return Ok(());
+                }
+                use kaspa_wallet_core::storage::local::notevault::NoteVault as DestroyVault;
+                use kaspa_wallet_core::storage::local::{Storage, WalletStorage, wallet_file_name};
+                let folder: String = ctx
+                    .wallet()
+                    .settings()
+                    .get(WalletSettings::Folder)
+                    .unwrap_or_else(|| kaspa_wallet_core::storage::local::default_storage_folder().to_string());
+                let storage = Storage::try_new_with_folder(&folder, &wallet_file_name(&name))?;
+                let target = match WalletStorage::try_load(&storage).await {
+                    Ok(target) => target,
+                    Err(_) => {
+                        tprintln!(ctx, "No wallet named '{name}' found");
+                        return Ok(());
+                    }
+                };
+                // Ownership proof: only someone holding the password may shred it.
+                let secret =
+                    Secret::new(ctx.term().ask(true, &format!("Enter the password for '{name}': ")).await?.trim().as_bytes().to_vec());
+                if target.payload(&secret).is_err() {
+                    tprintln!(ctx, "Unable to decrypt '{name}' with that password — nothing was destroyed.");
+                    return Ok(());
+                }
+                // Count what dies with it — and verify it against the chain,
+                // which requires a connection: without one we can't tell a
+                // spendable note from a stale tombstone-to-be.
+                if !ctx.wallet().is_connected() && !force {
+                    tprintln!(ctx, "Not connected — cannot verify this wallet's notes against the chain.");
+                    tprintln!(ctx, "'connect' first, or use 'wallet destroy {name} force' to destroy without verification.");
+                    return Ok(());
+                }
+                let vault = DestroyVault::new(&folder, &name);
+                let mut active_notes = 0usize;
+                let mut active_petals = 0u64;
+                if vault.exists().await? {
+                    let mut serials = Vec::new();
+                    let mut by_serial = std::collections::HashMap::new();
+                    let mut stream = vault.iter().await?;
+                    while let Some(info) = stream.try_next().await? {
+                        if info.status == kaspa_wallet_core::storage::NoteStatus::Active {
+                            serials.push(info.sn);
+                            by_serial.insert(info.sn, info.d);
+                        }
+                    }
+                    if ctx.wallet().is_connected() && !serials.is_empty() {
+                        // Only chain-live serials count — the vault may hold
+                        // rows the chain has already retired.
+                        let on_chain = ctx.wallet().rpc_api().get_notes_by_serial(serials).await?;
+                        for entry in on_chain {
+                            if let Some(d) = by_serial.get(&entry.sn) {
+                                active_notes += 1;
+                                active_petals += kaspa_consensus_core::notepool::DENOMINATION_PETALS[*d as usize];
+                            }
+                        }
+                    } else {
+                        for d in by_serial.values() {
+                            active_notes += 1;
+                            active_petals += kaspa_consensus_core::notepool::DENOMINATION_PETALS[*d as usize];
+                        }
+                    }
+                }
+                if active_notes > 0 && !force {
+                    tprintln!(ctx, "");
+                    tprintln!(
+                        ctx,
+                        "{}",
+                        style(format!(
+                            "Refusing: '{name}' still holds {active_notes} spendable note(s) worth {} MAGLD.",
+                            kaspa_wallet_core::utils::sompi_to_kaspa_string(active_petals)
+                        ))
+                        .red()
+                    );
+                    tprintln!(ctx, "Open it and 'note move' them to another wallet (or 'note redeem' them), then destroy.");
+                    tprintln!(ctx, "Or 'wallet destroy {name} force' to burn them forever.\r\n");
+                    return Ok(());
+                }
+                tprintln!(ctx, "");
+                tprintln!(ctx, "{}", style(format!("About to permanently destroy '{name}':")).red());
+                tprintln!(ctx, "  wallet file, note vault, and transaction history — deleted from disk");
+                if active_notes > 0 {
+                    tprintln!(
+                        ctx,
+                        "{}",
+                        style(format!(
+                            "  ⚠ its vault still holds {active_notes} ACTIVE note(s) worth {} MAGLD — without a backup, NOBODY can ever spend them again",
+                            kaspa_wallet_core::utils::sompi_to_kaspa_string(active_petals)
+                        ))
+                        .red()
+                    );
+                    tprintln!(ctx, "    ('note move' them to another wallet first if you want to keep them)");
+                }
+                tprintln!(ctx, "  any LEDGER balance stays recoverable only through this wallet's 12-word account mnemonic");
+                tprintln!(ctx, "");
+                let confirm = ctx.term().ask(false, &format!("Type the wallet name ('{name}') to confirm destruction: ")).await?.trim().to_string();
+                if confirm != name {
+                    tprintln!(ctx, "Confirmation did not match — nothing was destroyed.");
+                    return Ok(());
+                }
+                let base = workflow_store::fs::resolve_path(&folder).map_err(|e| Error::custom(e.to_string()))?;
+                std::fs::remove_file(base.join(wallet_file_name(&name))).map_err(|e| Error::custom(e.to_string()))?;
+                for suffix in [".notes", ".transactions"] {
+                    let dir = base.join(format!("{name}{suffix}"));
+                    if dir.exists() {
+                        std::fs::remove_dir_all(&dir).map_err(|e| Error::custom(e.to_string()))?;
+                    }
+                }
+                let last: Option<String> = ctx.wallet().settings().get(WalletSettings::Wallet);
+                if last.as_deref() == Some(name.as_str()) {
+                    ctx.wallet().settings().set(WalletSettings::Wallet, "marigold".to_string()).await.ok();
+                }
+                tprintln!(ctx, "'{name}' destroyed.");
+            }
             "hint" => {
                 if !argv.is_empty() {
                     let re = regex::Regex::new(r"wallet\s+hint\s+").unwrap();
@@ -288,6 +409,7 @@ impl Wallet {
                 ("rename <name>", "Change the wallet's display name (the on-disk file name is unchanged)"),
                 ("remember [on|off]", "Whether this wallet records its network/server/last-used details (in the wallet file)"),
                 ("forget", "Clear this wallet's recorded network/server/usage details"),
+                ("destroy <name> [force]", "Permanently delete a wallet (refuses while it holds live notes, unless forced)"),
                 ("hint", "Change the wallet phishing hint"),
             ],
             None,

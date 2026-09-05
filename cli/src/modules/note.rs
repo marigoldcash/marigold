@@ -8,7 +8,7 @@ use kaspa_wallet_core::account::notepool::{
     paper_export_peek_header, plan_restore_rotation,
 };
 use kaspa_wallet_core::storage::local::notevault::NoteVault;
-use kaspa_wallet_core::storage::NoteStatus;
+use kaspa_wallet_core::storage::{NoteKeyEntry, NoteProvenance, NoteStatus};
 use std::path::Path;
 use std::time::Duration;
 use workflow_core::abortable::Abortable;
@@ -53,6 +53,8 @@ impl Note {
         let action = argv.remove(0);
         match action.as_str() {
             "mint" => self.mint(&ctx, argv).await,
+            "rotate" => self.rotate(&ctx, argv).await,
+            "move" => self.move_notes(&ctx, argv).await,
             "redeem" => self.redeem(&ctx, argv).await,
             "request" => self.request(&ctx, argv).await,
             "pay" => self.pay(&ctx, argv).await,
@@ -141,8 +143,9 @@ impl Note {
         let account = ctx.wallet().account()?;
         let bearer = BearerNote::from_text(&argv[0])?;
         let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(Some(&account)).await?;
+        self.ensure_vault_interactive(ctx, &wallet_secret).await?;
 
-        let result = account.bearer_import(wallet_secret, bearer).await?;
+        let result = account.bearer_import(wallet_secret.clone(), bearer).await?;
         tprintln!(ctx, "imported note {} and immediately rotated it to fresh cold key(s):", result.imported_sn);
         for note in &result.rotation.own_notes {
             tprintln!(ctx, "  {} - {}", note.sn, sompi_to_kaspa_string(DENOMINATION_PETALS[note.d as usize]));
@@ -302,6 +305,7 @@ impl Note {
             }
         };
         let (wallet_secret, payment_secret) = ctx.ask_wallet_secret(Some(&account)).await?;
+        self.ensure_vault_interactive(ctx, &wallet_secret).await?;
         let abortable = Abortable::default();
 
         tprintln!(
@@ -327,6 +331,262 @@ impl Note {
         }
         tprintln!(ctx, "tx: {}\r\n", result.transaction_ids.last().expect("mint always submits at least one transaction"));
 
+        Ok(())
+    }
+
+
+    /// Interactive vault ceremony for wallets created before vaults moved into
+    /// the creation wizard — replaces the lazy auto-create that logged the 24
+    /// words as a passing warning (which is how the founder's vault words
+    /// ended up in scrollback, 2026-09-05).
+    async fn ensure_vault_interactive(&self, ctx: &Arc<KaspaCli>, wallet_secret: &Secret) -> Result<()> {
+        let store = ctx.wallet().store().as_note_key_store()?;
+        if store.vault_exists().await? {
+            return Ok(());
+        }
+        tprintln!(ctx, "");
+        tprintln!(ctx, "This wallet has no note vault yet — creating one now.");
+        let words = loop {
+            let input = ctx
+                .term()
+                .ask(false, "Enter your own 24-word vault recovery phrase, or press <enter> to generate one: ")
+                .await?
+                .trim()
+                .to_string();
+            if input.is_empty() {
+                break None;
+            }
+            let count = input.split_whitespace().count();
+            if count != 24 {
+                tprintln!(ctx, "Expected 24 words, got {count} — try again (or press <enter> to generate)");
+                continue;
+            }
+            match kaspa_bip32::Mnemonic::new(input.clone(), kaspa_bip32::Language::default()) {
+                Ok(_) => break Some(input),
+                Err(err) => {
+                    tprintln!(ctx, "Not a valid 24-word phrase ({err}) — try again (or press <enter> to generate)");
+                }
+            }
+        };
+        match words {
+            Some(words) => {
+                store.vault_restore_from_words(&words, wallet_secret).await?;
+                tprintln!(ctx, "Note vault created from your recovery phrase.\r\n");
+            }
+            None => {
+                let words = store.vault_create(wallet_secret).await?;
+                tprintln!(ctx, "");
+                tprintln!(ctx, "{}", style("Your note vault recovery phrase — write these 24 words down NOW:").red());
+                tprintln!(ctx, "");
+                tprintln!(ctx, "{}", style(&words).cyan());
+                tprintln!(ctx, "");
+                tprintln!(ctx, "Recovery requires BOTH these words AND the vault files ('note vault backup <dir>').");
+                ctx.term().ask(false, "Press <enter> once you have written them down: ").await?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Shared batched-rotation driver (same per-batch liveness re-check as the
+    /// vault-restore flow — an earlier batch's fee stamp may already have
+    /// rotated a later batch's note; that's the mechanism working, not an error).
+    async fn rotate_serials(
+        &self,
+        ctx: &Arc<KaspaCli>,
+        account: &Arc<dyn kaspa_wallet_core::account::Account>,
+        wallet_secret: &Secret,
+        serials: Vec<Hash>,
+    ) -> Result<()> {
+        let store = ctx.wallet().store().as_note_key_store()?;
+        let batches = plan_restore_rotation(serials);
+        for (i, batch) in batches.iter().enumerate() {
+            let mut still_active = Vec::with_capacity(batch.len());
+            for sn in batch {
+                if let Some(info) = store.load_info(sn).await?
+                    && info.status == NoteStatus::Active
+                {
+                    still_active.push(*sn);
+                }
+            }
+            if still_active.is_empty() {
+                tprintln!(ctx, "  batch {}/{}: already rotated by an earlier batch's fee stamp - skipped", i + 1, batches.len());
+                continue;
+            }
+            match account.clone().rotate_notes(wallet_secret.clone(), still_active).await {
+                Ok(result) => tprintln!(
+                    ctx,
+                    "  batch {}/{}: {} note(s), tx {} (fee {} MAGLD)",
+                    i + 1,
+                    batches.len(),
+                    result.own_notes.len(),
+                    result.transaction_id,
+                    sompi_to_kaspa_string(result.fee_petals)
+                ),
+                Err(err) => tprintln!(ctx, "  batch {}/{}: failed - {err} (other batches still attempted)", i + 1, batches.len()),
+            }
+        }
+        Ok(())
+    }
+
+    /// `note rotate all` / `note rotate <serial> [...]` — on-chain rotation to
+    /// fresh cold keys: the remedy when a vault's recovery words or files may
+    /// have leaked, making every old or stolen copy of the keys worthless.
+    async fn rotate(&self, ctx: &Arc<KaspaCli>, mut argv: Vec<String>) -> Result<()> {
+        if argv.is_empty() {
+            tprintln!(ctx, "usage: 'note rotate all' or 'note rotate <serial> [<serial> ...]'\r\n");
+            return Ok(());
+        }
+        let account = ctx.wallet().account()?;
+        let store = ctx.wallet().store().as_note_key_store()?;
+        let serials: Vec<Hash> = if argv[0].to_lowercase() == "all" {
+            let mut stream = store.iter().await?;
+            let mut serials = Vec::new();
+            while let Some(info) = stream.try_next().await? {
+                if info.status == NoteStatus::Active {
+                    serials.push(info.sn);
+                }
+            }
+            serials
+        } else {
+            let mut serials = Vec::with_capacity(argv.len());
+            for raw in argv.drain(..) {
+                let sn = raw.parse::<Hash>().map_err(|_| Error::Custom(format!("'{raw}' is not a valid note serial (32-byte hex)")))?;
+                serials.push(sn);
+            }
+            serials
+        };
+        if serials.is_empty() {
+            tprintln!(ctx, "no active notes to rotate\r\n");
+            return Ok(());
+        }
+        let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(Some(&account)).await?;
+        tprintln!(ctx, "rotating {} note(s) to fresh cold keys...", serials.len());
+        self.rotate_serials(ctx, &account, &wallet_secret, serials).await?;
+        tprintln!(ctx, "rotation complete - every old copy (backups, exports, stolen files) of these keys is now worthless\r\n");
+        Ok(())
+    }
+
+    /// `note move` — move ALL active notes into another wallet's vault on this
+    /// machine: pure key handover between vaults, no chain transaction, no
+    /// UTXO involvement (the litepaper's "move between wallets" promise). The
+    /// destination stores them Hot (a key that crossed a wallet boundary), and
+    /// an optional up-front rotation covers the compromised-vault case.
+    async fn move_notes(&self, ctx: &Arc<KaspaCli>, _argv: Vec<String>) -> Result<()> {
+        let account = ctx.wallet().account()?;
+        let store = ctx.wallet().store().as_note_key_store()?;
+        let Some(descriptor) = ctx.store().descriptor() else {
+            tprintln!(ctx, "Unable to resolve the open wallet's file\r\n");
+            return Ok(());
+        };
+
+        // Destination picker (other wallets only).
+        let wallets = ctx.store().wallet_list().await?;
+        let others: Vec<_> = wallets.into_iter().filter(|w| w.filename != descriptor.filename).collect();
+        if others.is_empty() {
+            tprintln!(ctx, "No other wallet exists to move notes into — create one first with 'wallet create <name>', then re-run 'note move'.\r\n");
+            return Ok(());
+        }
+        tprintln!(ctx, "");
+        for (i, w) in others.iter().enumerate() {
+            match &w.title {
+                Some(title) => tprintln!(ctx, "{i}: {title} ({})", w.filename),
+                None => tprintln!(ctx, "{i}: {}", w.filename),
+            }
+        }
+        tprintln!(ctx, "");
+        let selection = ctx.term().ask(false, &format!("Move all active notes to which wallet [0..{}]? ", others.len() - 1)).await?.trim().to_string();
+        let dest = match selection.parse::<usize>() {
+            Ok(i) if i < others.len() => others[i].filename.clone(),
+            _ => {
+                tprintln!(ctx, "No such wallet: '{selection}'\r\n");
+                return Ok(());
+            }
+        };
+
+        // Secrets: source (decrypt keys out) and destination (write them in).
+        let wallet_secret = Secret::new(
+            ctx.term().ask(true, &format!("Enter the CURRENT wallet's ('{}') password: ", descriptor.filename)).await?.trim().as_bytes().to_vec(),
+        );
+        let dest_secret =
+            Secret::new(ctx.term().ask(true, &format!("Enter the password for '{dest}': ")).await?.trim().as_bytes().to_vec());
+
+        // Validate the destination password before touching anything.
+        use kaspa_wallet_core::storage::local::{Storage, WalletStorage, wallet_file_name};
+        let folder: String = ctx
+            .wallet()
+            .settings()
+            .get(WalletSettings::Folder)
+            .unwrap_or_else(|| kaspa_wallet_core::storage::local::default_storage_folder().to_string());
+        let dest_storage = Storage::try_new_with_folder(&folder, &wallet_file_name(&dest))?;
+        let dest_wallet = WalletStorage::try_load(&dest_storage).await?;
+        if dest_wallet.payload(&dest_secret).is_err() {
+            tprintln!(ctx, "Unable to decrypt '{dest}' with that password — nothing was moved.\r\n");
+            return Ok(());
+        }
+
+        // Optional (recommended) on-chain rotation first: moving copies the
+        // SAME keys — only rotation makes old/stolen copies worthless.
+        let answer = ctx
+            .term()
+            .ask(false, "Rotate the notes on-chain before moving (recommended - makes any old or stolen copies of their keys worthless)? [Y/n]: ")
+            .await?
+            .trim()
+            .to_lowercase();
+        if answer.is_empty() || answer == "y" || answer == "yes" {
+            let mut stream = store.iter().await?;
+            let mut serials = Vec::new();
+            while let Some(info) = stream.try_next().await? {
+                if info.status == NoteStatus::Active {
+                    serials.push(info.sn);
+                }
+            }
+            tprintln!(ctx, "rotating {} note(s) first...", serials.len());
+            self.rotate_serials(ctx, &account, &wallet_secret, serials).await?;
+        }
+
+        // Destination vault (ceremony if it doesn't exist yet).
+        let dest_vault = NoteVault::new(&folder, &dest);
+        if !dest_vault.exists().await? {
+            tprintln!(ctx, "'{dest}' has no note vault yet — creating one (its own 24-word recovery phrase):");
+            let words = dest_vault.create(&dest_secret).await?;
+            tprintln!(ctx, "");
+            tprintln!(ctx, "{}", style(&words).cyan());
+            tprintln!(ctx, "");
+            ctx.term().ask(false, "Write these 24 words down for the destination wallet, then press <enter>: ").await?;
+        }
+
+        // The move itself: dest write, verify, source delete — per note, so an
+        // interruption leaves at most one duplicate, cleaned by re-running.
+        let mut stream = store.iter().await?;
+        let mut serials = Vec::new();
+        while let Some(info) = stream.try_next().await? {
+            if info.status == NoteStatus::Active {
+                serials.push(info.sn);
+            }
+        }
+        if serials.is_empty() {
+            tprintln!(ctx, "no active notes to move\r\n");
+            return Ok(());
+        }
+        let mut moved = 0usize;
+        let mut moved_petals = 0u64;
+        for sn in &serials {
+            let Some(entry) = store.load_key(&wallet_secret, sn).await? else { continue };
+            dest_vault.store(&dest_secret, NoteKeyEntry::new(entry.sn, entry.sk, entry.d, NoteProvenance::Hot)).await?;
+            if dest_vault.load_info(sn).await?.is_none() {
+                tprintln!(ctx, "  {} - destination write could not be verified, keeping it here", sn);
+                continue;
+            }
+            store.remove(&wallet_secret, sn).await?;
+            moved += 1;
+            moved_petals += DENOMINATION_PETALS[entry.d as usize];
+            if moved % 25 == 0 {
+                tprintln!(ctx, "  moved {moved}/{} notes...", serials.len());
+            }
+        }
+        tprintln!(ctx, "");
+        tprintln!(ctx, "moved {} note(s) ({} MAGLD) into '{dest}' — no chain transaction involved.", moved, sompi_to_kaspa_string(moved_petals));
+        tprintln!(ctx, "They no longer exist in this wallet. Open '{dest}' to use them (it holds them as imported Hot keys).\r\n");
         Ok(())
     }
 
@@ -739,7 +999,9 @@ impl Note {
     async fn display_help(self: Arc<Self>, ctx: Arc<KaspaCli>, _argv: Vec<String>) -> Result<()> {
         ctx.term().help(
             &[
-                ("mint <amount>", "Mint notes worth <amount> MAGLD from the transparent balance"),
+                ("mint <amount> | all", "Mint notes from the transparent balance ('all' mints everything, fee-aware)"),
+                ("rotate all | <serial> ...", "Rotate notes to fresh keys on-chain (revokes old backups/stolen copies)"),
+                ("move", "Move ALL active notes into another wallet's vault - no chain transaction"),
                 ("redeem <serial> [<serial> ...]", "Redeem specific notes by serial"),
                 ("redeem amount <amount>", "Redeem enough owned notes to cover at least <amount> MAGLD"),
                 ("request [<amount>]", "Create a payment request (QR + text), then watch for the payment"),

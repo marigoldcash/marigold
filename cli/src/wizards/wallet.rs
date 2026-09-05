@@ -226,6 +226,68 @@ pub(crate) async fn create(
             .for_each(|line| term.writeln(line));
     }
 
+    // Note-vault ceremony — at wallet creation, where it belongs, not as a
+    // lazy auto-create that logs the 24 words mid-command (which is exactly
+    // how the founder's vault words ended up in scrollback, 2026-09-05).
+    tprintln!(ctx, "");
+    tprintln!(ctx, "---");
+    tpara!(
+        ctx,
+        "\
+        Your note vault holds the keys to your bearer notes. It has its own \
+        24-word recovery phrase — a second, independent secret from the \
+        account mnemonic above. You can supply your own 24 words or have \
+        them generated now.\
+        ",
+    );
+    tprintln!(ctx, "");
+    let vault_words = loop {
+        let input = term
+            .ask(false, "Enter your own 24-word vault recovery phrase, or press <enter> to generate one: ")
+            .await?
+            .trim()
+            .to_string();
+        if input.is_empty() {
+            break None;
+        }
+        let words: Vec<&str> = input.split_whitespace().collect();
+        if words.len() != 24 {
+            tprintln!(ctx, "Expected 24 words, got {} — try again (or press <enter> to generate)", words.len());
+            continue;
+        }
+        match Mnemonic::new(words.join(" "), Language::default()) {
+            Ok(_) => break Some(words.join(" ")),
+            Err(err) => {
+                tprintln!(ctx, "Not a valid 24-word phrase ({err}) — try again (or press <enter> to generate)");
+                continue;
+            }
+        }
+    };
+    let store = wallet.store().as_note_key_store()?;
+    match vault_words {
+        Some(words) => {
+            store.vault_restore_from_words(&words, &wallet_secret).await?;
+            tprintln!(ctx, "Note vault created from your recovery phrase.");
+        }
+        None => {
+            let words = store.vault_create(&wallet_secret).await?;
+            tprintln!(ctx, "");
+            tprintln!(ctx, "{}", style("Your note vault recovery phrase — write these 24 words down NOW:").red());
+            tprintln!(ctx, "");
+            term.writeln(style(&words).cyan().to_string());
+            tprintln!(ctx, "");
+            tpara!(
+                ctx,
+                "\
+                Recovering your notes on another machine requires BOTH these 24 words \
+                AND the vault files ('note vault backup <dir>' copies them). The words \
+                will not be shown again.\
+                ",
+            );
+            term.ask(false, "Press <enter> once you have written them down: ").await?;
+        }
+    }
+
     term.writeln("");
     term.writeln(format!("Your wallet is stored in: {}", storage_descriptor));
     term.writeln("");

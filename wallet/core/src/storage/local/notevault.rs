@@ -373,6 +373,15 @@ impl NoteVault {
     async fn remove_note_file(&self, sn: &Hash, d: DenominationTag, status: NoteStatus) -> Result<()> {
         let path = self.subdir(status).join(note_file_name(sn, d));
         if fs::exists(&path).await? {
+            // Shred before unlink: a deleted file's blocks survive on disk, and
+            // this file wraps a note's spending key ('note move' relies on the
+            // key genuinely LEAVING the source wallet). Best effort by nature —
+            // journaling filesystems and SSD wear-leveling may retain old
+            // blocks — but strictly better than a bare delete.
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let _ = Self::shred_file_sync(&path);
+            }
             fs::remove(&path).await?;
         }
         Ok(())
@@ -474,6 +483,29 @@ impl NoteVault {
         let info = NoteKeyInfo { sn: entry.sn, pk, d: entry.d, provenance: entry.provenance, status: NoteStatus::Active };
         self.index.write().await.insert(entry.sn, ManifestRow { info, last_rotated_at });
         self.persist_manifest().await?;
+        Ok(())
+    }
+
+    /// Overwrite a note file's bytes in place (zero pass, then random pass,
+    /// fsync after each) before it is unlinked. See `remove_note_file`.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn shred_file_sync(path: &std::path::Path) -> std::io::Result<()> {
+        use rand::RngCore;
+        use std::io::{Seek, SeekFrom, Write};
+        let len = std::fs::metadata(path)?.len() as usize;
+        if len == 0 {
+            return Ok(());
+        }
+        let mut file = std::fs::OpenOptions::new().write(true).open(path)?;
+        for pass in 0..2u8 {
+            let mut buffer = vec![0u8; len];
+            if pass == 1 {
+                rand::thread_rng().fill_bytes(&mut buffer);
+            }
+            file.seek(SeekFrom::Start(0))?;
+            file.write_all(&buffer)?;
+            file.sync_all()?;
+        }
         Ok(())
     }
 
