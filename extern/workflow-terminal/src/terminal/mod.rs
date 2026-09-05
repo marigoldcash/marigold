@@ -834,7 +834,19 @@ impl Terminal {
                     let mut data = self.inner()?;
                     data.buffer.clear();
                     data.cursor = 0;
-                    self.write(format!("^C\n\r{}", self.get_prompt()));
+                    self.write(format!("^C  (type 'exit' or press Ctrl+D to quit)\n\r{}", self.get_prompt()));
+                }
+                return Ok(());
+            }
+            Key::Ctrl('d') => {
+                // EOF at an empty line exits, like every modern REPL
+                // (Marigold fix). With text on the line it does nothing.
+                let empty = { self.inner()?.buffer.is_empty() };
+                if empty {
+                    self.crlf();
+                    self.running.store(true, Ordering::SeqCst);
+                    self.exec("exit".to_string()).await.ok();
+                    self.running.store(false, Ordering::SeqCst);
                 }
                 return Ok(());
             }

@@ -309,12 +309,12 @@ impl FromStr for NetworkId {
         let mut parts = network_name.split('-').fuse();
         let network_type = NetworkType::from_str(parts.next().unwrap_or_default())?;
         let suffix = parts.next().map(|x| u32::from_str(x).map_err(|_| NetworkIdError::InvalidSuffix(x.to_string()))).transpose()?;
-        // Disallow testnet network without suffix.
-        // Lack of suffix makes it impossible to distinguish between
-        // multiple testnet networks
-        if !matches!(network_type, NetworkType::Mainnet | NetworkType::Devnet | NetworkType::Simnet) && suffix.is_none() {
-            return Err(NetworkIdError::MissingNetworkSuffix(network_name.to_string()));
-        }
+        // Upstream disallowed suffix-less testnet (ambiguous across multiple
+        // testnets). Marigold has one canonical public testnet, so bare
+        // "testnet" aliases to testnet-10; other suffixes remain reachable
+        // explicitly (testnet-11 etc. stay available for future protocol-
+        // upgrade rehearsal networks — the reason the number exists at all).
+        let suffix = if matches!(network_type, NetworkType::Testnet) && suffix.is_none() { Some(10) } else { suffix };
         match parts.next() {
             Some(extra_token) => Err(NetworkIdError::UnexpectedExtraToken(extra_token.to_string())),
             None => Ok(Self { network_type, suffix }),

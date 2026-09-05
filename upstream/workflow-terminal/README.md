@@ -37,6 +37,10 @@ Three more defects, found in live use the day after the first batch:
 
 Reproduction for 7-9: open any secret prompt and press Ctrl+C — observe empty-answer semantics and app teardown; repeat the cycle several times to accumulate the channel panic.
 
+## Also in the patch: Ctrl+D and the Ctrl+C hint
+
+`Key::Ctrl('d')` at an empty line exits (EOF, like every modern REPL); with text on the line it does nothing. The idle-prompt `Ctrl+C` (which clears the line rather than exiting — see the Ctrl+C section) now prints a one-line hint pointing at `exit`/Ctrl+D so the exit path is discoverable.
+
 ## Also in the patch: Tab completion (feature, not fix)
 
 The `Cli::complete` hook has existed in the trait all along but nothing drove it: `KeyCode::Tab` was never mapped to a `Key` variant, so Tab never reached `Terminal::ingest`. The patch adds `Key::Tab`, maps it in the crossterm backend, and adds a completion driver to `ingest` (single candidate completes in place; several extend to the common prefix or list alternatives). Contract: `complete(line)` returns full-line candidates. Offered together since it touches the same files.

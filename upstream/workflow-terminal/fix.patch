@@ -58,7 +58,7 @@ diff -ruN '--exclude=Cargo.toml.orig' '--exclude=.cargo_vcs_info.json' '--exclud
                          KeyCode::Right => Key::ArrowRight,
 diff -ruN '--exclude=Cargo.toml.orig' '--exclude=.cargo_vcs_info.json' '--exclude=.cargo-ok' /home/dom/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/workflow-terminal-0.18.0/src/terminal/mod.rs extern/workflow-terminal/src/terminal/mod.rs
 --- /home/dom/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/workflow-terminal-0.18.0/src/terminal/mod.rs	2006-07-23 21:21:28.000000000 -0400
-+++ extern/workflow-terminal/src/terminal/mod.rs	2026-09-05 12:54:59.565170198 -0300
++++ extern/workflow-terminal/src/terminal/mod.rs	2026-09-05 16:04:21.510986143 -0300
 @@ -99,6 +99,11 @@
      secret: Arc<AtomicBool>,
      kbhit: Arc<AtomicBool>,
@@ -274,6 +274,43 @@ diff -ruN '--exclude=Cargo.toml.orig' '--exclude=.cargo_vcs_info.json' '--exclud
              Key::ArrowUp => {
                  let mut data = self.inner()?;
                  if data.history_index == 0 {
+@@ -716,10 +820,33 @@
+                 return Ok(());
+             }
+             Key::Ctrl('c') => {
+-                cfg_if! {
+-                    if #[cfg(not(target_arch = "wasm32"))] {
+-                        self.exit().await;
++                // Shell semantics (Marigold fix): at an idle prompt Ctrl+C
++                // clears the line and redraws — only `exit` exits. While a
++                // command is RUNNING it keeps upstream's app-exit behavior,
++                // as the escape hatch from a hung command.
++                if self.is_running() {
++                    cfg_if! {
++                        if #[cfg(not(target_arch = "wasm32"))] {
++                            self.exit().await;
++                        }
+                     }
++                } else {
++                    let mut data = self.inner()?;
++                    data.buffer.clear();
++                    data.cursor = 0;
++                    self.write(format!("^C  (type 'exit' or press Ctrl+D to quit)\n\r{}", self.get_prompt()));
++                }
++                return Ok(());
++            }
++            Key::Ctrl('d') => {
++                // EOF at an empty line exits, like every modern REPL
++                // (Marigold fix). With text on the line it does nothing.
++                let empty = { self.inner()?.buffer.is_empty() };
++                if empty {
++                    self.crlf();
++                    self.running.store(true, Ordering::SeqCst);
++                    self.exec("exit".to_string()).await.ok();
++                    self.running.store(false, Ordering::SeqCst);
+                 }
+                 return Ok(());
+             }
 diff -ruN '--exclude=Cargo.toml.orig' '--exclude=.cargo_vcs_info.json' '--exclude=.cargo-ok' /home/dom/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/workflow-terminal-0.18.0/src/terminal/termion.rs extern/workflow-terminal/src/terminal/termion.rs
 --- /home/dom/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/workflow-terminal-0.18.0/src/terminal/termion.rs	2006-07-23 21:21:28.000000000 -0400
 +++ extern/workflow-terminal/src/terminal/termion.rs	2026-09-04 21:43:34.681748899 -0300

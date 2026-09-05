@@ -1,7 +1,7 @@
 use crate::imports::*;
 
 #[derive(Default, Handler)]
-#[help("Show or generate a new address for the current wallet account")]
+#[help("Show or generate a new ledger address (the transparent side of your wallet)")]
 pub struct Address;
 
 impl Address {
@@ -32,7 +32,7 @@ impl Address {
     }
 
     async fn display_help(self: Arc<Self>, ctx: Arc<KaspaCli>, _argv: Vec<String>) -> Result<()> {
-        ctx.term().help(&[("address [new]", "Show current or generate a new account address")], None)?;
+        ctx.term().help(&[("address [new]", "Show the current or generate a new ledger address")], None)?;
 
         Ok(())
     }

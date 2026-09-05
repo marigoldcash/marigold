@@ -28,6 +28,7 @@ pub mod note;
 pub mod open;
 pub mod ping;
 pub mod pskb;
+pub mod quit;
 pub mod reload;
 pub mod rpc;
 pub mod select;
@@ -60,7 +61,7 @@ pub fn register_handlers(cli: &Arc<KaspaCli>) -> Result<()> {
         cli.handlers(),
         [
             account, address, balance, close, connect, details, disconnect, estimate, exit, export, guide, help, history, rpc, list,
-            miner, message, monitor, mute, network, node, note, open, ping, pskb, reload, select, send, server, settings, sweep,
+            miner, message, monitor, mute, network, node, note, open, ping, pskb, quit, reload, select, send, server, settings, sweep,
             track, transfer, utxos, wallet,
             // halt,
             // theme,  start, stop
