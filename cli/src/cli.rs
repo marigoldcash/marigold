@@ -324,7 +324,12 @@ impl KaspaCli {
                                     if sync_state.is_synced() && this.wallet().is_open() {
                                         let guard = this.wallet().guard();
                                         let guard = guard.lock().await;
-                                        if let Err(error) = this.wallet().reload(false, &guard).await {
+                                        // reactivate: true — reload(false) stops every account and
+                                        // resets the UTXO processor, leaving reactivation to the
+                                        // caller... which this caller never did (inherited upstream).
+                                        // Anyone who opened their wallet BEFORE connecting got a
+                                        // permanent N/A balance out of it.
+                                        if let Err(error) = this.wallet().reload(true, &guard).await {
                                             terrorln!(this, "Unable to reload wallet: {error}");
                                         }
                                     }
