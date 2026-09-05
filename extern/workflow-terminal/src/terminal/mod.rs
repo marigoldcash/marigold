@@ -99,6 +99,11 @@ struct UserInput {
     secret: Arc<AtomicBool>,
     kbhit: Arc<AtomicBool>,
     terminate: Arc<AtomicBool>,
+    /// Set when the prompt is closed by Ctrl+C rather than Enter, so
+    /// `capture()` can surface cancellation as an error instead of returning
+    /// an empty string indistinguishable from a real empty answer
+    /// (Marigold fix).
+    aborted: Arc<AtomicBool>,
     sender: Sender<String>,
     receiver: Receiver<String>,
 }
@@ -113,6 +118,7 @@ impl UserInput {
             secret: Arc::new(AtomicBool::new(false)),
             kbhit: Arc::new(AtomicBool::new(false)),
             terminate: Arc::new(AtomicBool::new(false)),
+            aborted: Arc::new(AtomicBool::new(false)),
             sender,
             receiver,
         }
@@ -132,10 +138,18 @@ impl UserInput {
         self.secret.store(secret, Ordering::SeqCst);
         self.kbhit.store(kbhit, Ordering::SeqCst);
         self.terminate.store(false, Ordering::SeqCst);
+        self.aborted.store(false, Ordering::SeqCst);
         Ok(())
     }
 
     pub fn close(&self) -> Result<()> {
+        // Idempotent: a duplicate close (a ghost reader, or Ctrl+C racing
+        // Enter) must not send a second value — the upstream unconditional
+        // try_send().unwrap() panicked the runtime with "Channel TrySend
+        // Error: Full" once stray closes accumulated (Marigold fix).
+        if !self.enabled.swap(false, Ordering::SeqCst) {
+            return Ok(());
+        }
         let s = {
             self.prompt.lock().unwrap().take();
             let mut buffer = self.buffer.lock().unwrap();
@@ -144,9 +158,8 @@ impl UserInput {
             s
         };
 
-        self.enabled.store(false, Ordering::SeqCst);
         self.terminate.store(true, Ordering::SeqCst);
-        self.sender.try_send(s.to_string()).unwrap();
+        self.sender.try_send(s.to_string()).ok();
         Ok(())
     }
 
@@ -179,6 +192,9 @@ impl UserInput {
         }
 
         let string = self.receiver.recv().await?;
+        if self.aborted.swap(false, Ordering::SeqCst) {
+            return Err(Error::Custom("cancelled".to_string()));
+        }
         Ok(string)
     }
 
@@ -197,8 +213,14 @@ impl UserInput {
     fn ingest(&self, key: Key, term: &Arc<Terminal>) -> Result<()> {
         match key {
             Key::Ctrl('c') => {
+                // Cancel the PROMPT, not the application: upstream called
+                // term.abort() here, so changing your mind at a password
+                // prompt tore down the whole CLI (Marigold fix). The aborted
+                // flag turns capture()'s result into an error so callers can
+                // tell cancellation from an intentionally empty answer.
+                self.aborted.store(true, Ordering::SeqCst);
+                term.crlf();
                 self.close()?;
-                term.abort();
             }
             Key::Char(ch) => {
                 self.buffer.lock().unwrap().push(ch);

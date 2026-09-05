@@ -27,6 +27,16 @@ All in `src/terminal/mod.rs` and `src/terminal/crossterm.rs` of 0.18.0:
 5. **Output dropped during kbhit prompts.** `Terminal::writeln()` with `user_input` enabled but `get_prompt() == None` (the `kbhit(None)` case) silently discards the line.
 6. **Panic-capable arithmetic.** `writeln()`/`refresh_prompt()` compute `data.buffer.len() - data.cursor` with no ordering guarantee between the two reads; with `overflow-checks = true` (as rusty-kaspa sets in its release profile) an interleaving underflow panics the terminal.
 
+## Second find (2026-09-05): Ctrl+C during a secret prompt
+
+Three more defects, found in live use the day after the first batch:
+
+7. **Ctrl+C at a secret prompt is indistinguishable from an empty answer.** `UserInput::ingest`'s `Ctrl('c')` arm closed the prompt, so `capture()` returned `Ok("")` — a caller re-asking on empty input (a sensible policy after root cause #1) greets a user who just cancelled with "try again". Fixed with an `aborted` flag on `UserInput`; `capture()` now returns an error on cancellation.
+8. **Ctrl+C at a secret prompt killed the whole application.** The same arm called `term.abort()` — changing your mind about entering a password tore down the CLI. Now it cancels the prompt only (crlf + close); the normal-prompt Ctrl+C behavior is unchanged.
+9. **Duplicate prompt-close panics the runtime.** `close()` unconditionally `try_send().unwrap()`-ed into the shared channel; a stray second close (ghost reader, or Ctrl+C racing Enter) eventually panicked a tokio worker with `Channel TrySend Error: Full(..)`. `close()` is now idempotent (guards on `enabled.swap(false)`) and the send result is not unwrapped.
+
+Reproduction for 7-9: open any secret prompt and press Ctrl+C — observe empty-answer semantics and app teardown; repeat the cycle several times to accumulate the channel panic.
+
 ## The fixes (see fix.patch)
 
 - `crossterm.rs`: new `flush_pending_input()` (drains via `event::poll(Duration::ZERO)`); `intake()` polls with a 50 ms timeout and checks `terminate` *before* reading, so orphaned readers exit.

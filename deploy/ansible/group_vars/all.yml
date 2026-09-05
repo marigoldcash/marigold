@@ -69,6 +69,43 @@ bridge_min_share_diff: 64
 bridge_prom_port: 2114
 bridge_health_port: 8080
 
+# Multi-instance support: a host can run more than one marigoldd/stratum-bridge/
+# kaspa-miner at once (e.g. a testnet node + a mainnet node side by side) — each
+# item below becomes one running, independently-managed systemd service, named
+# by its `network`. The defaults here reproduce today's single-instance
+# behavior from the flat vars above, so a host that never sets these directly
+# is completely unaffected — override per-host in inventory.ini only when a
+# host genuinely needs more than one instance of something.
+marigold_node_instances:
+  - network: "{{ marigold_network }}"
+    archival: "{{ kaspad_archival }}"
+    addpeers: "{{ kaspad_addpeers }}"
+    extra_args: "{{ kaspad_extra_args }}"
+
+marigold_bridge_instances:
+  - network: "{{ marigold_network }}"
+    stratum_port: "{{ bridge_stratum_port }}"
+    min_share_diff: "{{ bridge_min_share_diff }}"
+    prom_port: "{{ bridge_prom_port }}"
+    health_port: "{{ bridge_health_port }}"
+
+# Empty by default — only hosts in the `cpu_miners` inventory group need to set
+# this. Each item needs `network` and `mining_address` (a real address you
+# control — see roles/cpu-miner/tasks/main.yml, this is enforced, not just
+# documented). `threads` is optional, falls back to cpu_miner_threads below.
+marigold_cpu_miner_instances: []
+
+# CPU miner (roles/cpu-miner) — kaspa-miner (elichai/kaspa-miner), the same
+# tool this project's own testing has used since P0.4 (see NOTES.md). It's not
+# part of this Cargo workspace, so the build role fetches and builds it
+# separately. It talks gRPC directly to a co-located node over loopback — no
+# stratum, no bridge, no port to add to any firewall; that's the whole appeal
+# of a CPU miner over an ASIC here.
+cpu_miner_git_repo: "https://github.com/elichai/kaspa-miner"
+cpu_miner_git_ref: ""           # empty = always build the latest default branch;
+                                 # set to a full commit SHA to pin (and cache) a build
+cpu_miner_threads: 2
+
 # Firewall is opt-in per host (see roles/marigoldd and roles/bridge) — set
 # ufw_manage: true in inventory.ini only after confirming your SSH access rule
 # survives (see TESTNET.md's firewall section). Never enabled by this playbook

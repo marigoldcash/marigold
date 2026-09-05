@@ -2,6 +2,7 @@ use crate::imports::*;
 
 pub mod account;
 pub mod address;
+pub mod balance;
 pub mod broadcast;
 pub mod close;
 pub mod connect;
@@ -41,6 +42,7 @@ pub mod sweep;
 pub mod theme;
 pub mod track;
 pub mod transfer;
+pub mod utxos;
 pub mod wallet;
 
 // this module is registered manually within
@@ -57,9 +59,9 @@ pub fn register_handlers(cli: &Arc<KaspaCli>) -> Result<()> {
         cli,
         cli.handlers(),
         [
-            account, address, close, connect, details, disconnect, estimate, exit, export, guide, help, history, rpc, list, miner,
-            message, monitor, mute, network, node, note, open, ping, pskb, reload, select, send, server, settings, sweep, track,
-            transfer, wallet,
+            account, address, balance, close, connect, details, disconnect, estimate, exit, export, guide, help, history, rpc, list,
+            miner, message, monitor, mute, network, node, note, open, ping, pskb, reload, select, send, server, settings, sweep,
+            track, transfer, utxos, wallet,
             // halt,
             // theme,  start, stop
         ]

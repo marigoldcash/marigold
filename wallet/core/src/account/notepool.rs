@@ -1558,3 +1558,59 @@ mod tests {
         assert!(entries.is_empty());
     }
 }
+
+/// Largest amount [`mint`] can currently fund from the account's mature
+/// balance — i.e. mature minus the mint transaction's own fee ("note mint
+/// all"). The fee is discovered by dry-running the generator over a sweep of
+/// the full mature balance with a same-shape dummy Mint payload (only payload
+/// LENGTH affects mass, so zeroed keys suffice), refined once for the final
+/// amount's own decomposition, then verified with a real SenderPays estimate.
+pub async fn max_mintable_petals(account: Arc<dyn Account>, fee_rate: Option<f64>, abortable: &Abortable) -> Result<u64> {
+    let quantum = DENOMINATION_PETALS[0];
+    let mature = account.balance().map(|balance| balance.mature).unwrap_or(0);
+    if mature < quantum * 2 {
+        return Ok(0);
+    }
+
+    let dummy_payload = |petals: u64| -> Option<Vec<u8>> {
+        let new_notes: Vec<NewNote> = decompose_amount(petals)?.iter().map(|d| NewNote { d: *d, pk: [0u8; 32] }).collect();
+        Some(PoolOp::Mint(MintOp { new_notes }).encode_payload())
+    };
+
+    // Sweep-style estimate: fees come out of the destination, so this always
+    // has funds and yields the fee for consuming the whole mature set.
+    let mut candidate = mature - mature % quantum;
+    for _ in 0..3 {
+        let Some(payload) = dummy_payload(candidate) else { return Ok(0) };
+        let change_address = account.change_address()?;
+        let destination = PaymentDestination::PaymentOutputs(PaymentOutputs::from((change_address, mature)));
+        let summary =
+            account.clone().estimate(destination, fee_rate, Fees::ReceiverPays(0), Some(payload), abortable).await?;
+        let next = mature.saturating_sub(summary.aggregate_fees()) / quantum * quantum;
+        if next == 0 || next == candidate {
+            candidate = next;
+            break;
+        }
+        candidate = next;
+    }
+    if candidate == 0 {
+        return Ok(0);
+    }
+
+    // Verify the exact shape mint() will use; back off by one quantum at a
+    // time if the refined estimate still lands a hair over.
+    for _ in 0..4 {
+        let Some(payload) = dummy_payload(candidate) else { return Ok(0) };
+        let destination = PaymentDestination::PaymentOutputs(PaymentOutputs { outputs: vec![] });
+        match account.clone().estimate(destination, fee_rate, Fees::SenderPays(candidate), Some(payload), abortable).await {
+            Ok(_) => return Ok(candidate),
+            Err(_) => {
+                candidate = candidate.saturating_sub(quantum);
+                if candidate == 0 {
+                    return Ok(0);
+                }
+            }
+        }
+    }
+    Ok(0)
+}

@@ -39,8 +39,84 @@ diff -ruN '--exclude=Cargo.toml.orig' '--exclude=.cargo_vcs_info.json' '--exclud
              if let Event::Key(key) = event {
 diff -ruN '--exclude=Cargo.toml.orig' '--exclude=.cargo_vcs_info.json' '--exclude=.cargo-ok' /home/dom/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/workflow-terminal-0.18.0/src/terminal/mod.rs extern/workflow-terminal/src/terminal/mod.rs
 --- /home/dom/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/workflow-terminal-0.18.0/src/terminal/mod.rs	2006-07-23 21:21:28.000000000 -0400
-+++ extern/workflow-terminal/src/terminal/mod.rs	2026-09-04 21:44:15.191126495 -0300
-@@ -375,6 +375,10 @@
++++ extern/workflow-terminal/src/terminal/mod.rs	2026-09-05 09:49:47.775827371 -0300
+@@ -99,6 +99,11 @@
+     secret: Arc<AtomicBool>,
+     kbhit: Arc<AtomicBool>,
+     terminate: Arc<AtomicBool>,
++    /// Set when the prompt is closed by Ctrl+C rather than Enter, so
++    /// `capture()` can surface cancellation as an error instead of returning
++    /// an empty string indistinguishable from a real empty answer
++    /// (Marigold fix).
++    aborted: Arc<AtomicBool>,
+     sender: Sender<String>,
+     receiver: Receiver<String>,
+ }
+@@ -113,6 +118,7 @@
+             secret: Arc::new(AtomicBool::new(false)),
+             kbhit: Arc::new(AtomicBool::new(false)),
+             terminate: Arc::new(AtomicBool::new(false)),
++            aborted: Arc::new(AtomicBool::new(false)),
+             sender,
+             receiver,
+         }
+@@ -132,10 +138,18 @@
+         self.secret.store(secret, Ordering::SeqCst);
+         self.kbhit.store(kbhit, Ordering::SeqCst);
+         self.terminate.store(false, Ordering::SeqCst);
++        self.aborted.store(false, Ordering::SeqCst);
+         Ok(())
+     }
+ 
+     pub fn close(&self) -> Result<()> {
++        // Idempotent: a duplicate close (a ghost reader, or Ctrl+C racing
++        // Enter) must not send a second value — the upstream unconditional
++        // try_send().unwrap() panicked the runtime with "Channel TrySend
++        // Error: Full" once stray closes accumulated (Marigold fix).
++        if !self.enabled.swap(false, Ordering::SeqCst) {
++            return Ok(());
++        }
+         let s = {
+             self.prompt.lock().unwrap().take();
+             let mut buffer = self.buffer.lock().unwrap();
+@@ -144,9 +158,8 @@
+             s
+         };
+ 
+-        self.enabled.store(false, Ordering::SeqCst);
+         self.terminate.store(true, Ordering::SeqCst);
+-        self.sender.try_send(s.to_string()).unwrap();
++        self.sender.try_send(s.to_string()).ok();
+         Ok(())
+     }
+ 
+@@ -179,6 +192,9 @@
+         }
+ 
+         let string = self.receiver.recv().await?;
++        if self.aborted.swap(false, Ordering::SeqCst) {
++            return Err(Error::Custom("cancelled".to_string()));
++        }
+         Ok(string)
+     }
+ 
+@@ -197,8 +213,14 @@
+     fn ingest(&self, key: Key, term: &Arc<Terminal>) -> Result<()> {
+         match key {
+             Key::Ctrl('c') => {
++                // Cancel the PROMPT, not the application: upstream called
++                // term.abort() here, so changing your mind at a password
++                // prompt tore down the whole CLI (Marigold fix). The aborted
++                // flag turns capture()'s result into an error so callers can
++                // tell cancellation from an intentionally empty answer.
++                self.aborted.store(true, Ordering::SeqCst);
++                term.crlf();
+                 self.close()?;
+-                term.abort();
+             }
+             Key::Char(ch) => {
+                 self.buffer.lock().unwrap().push(ch);
+@@ -375,6 +397,10 @@
                      if !self.user_input.secret.load(Ordering::SeqCst) {
                          self.write(self.user_input.get_buffer());
                      }
@@ -51,7 +127,7 @@ diff -ruN '--exclude=Cargo.toml.orig' '--exclude=.cargo_vcs_info.json' '--exclud
                  }
              } else {
                  self.write(format!("{}\n\r", s.to_string()));
-@@ -384,7 +388,9 @@
+@@ -384,7 +410,9 @@
              let data = self.inner().unwrap();
              let p = format!("{}{}", self.get_prompt(), data.buffer);
              self.write(p);
@@ -62,7 +138,7 @@ diff -ruN '--exclude=Cargo.toml.orig' '--exclude=.cargo_vcs_info.json' '--exclud
              for _ in 0..l {
                  self.write("\x08".to_string());
              }
-@@ -395,12 +401,17 @@
+@@ -395,12 +423,17 @@
      /// is useful when the prompt is handled externally and contains
      /// data that should be updated.
      pub fn refresh_prompt(&self) {
@@ -81,7 +157,7 @@ diff -ruN '--exclude=Cargo.toml.orig' '--exclude=.cargo_vcs_info.json' '--exclud
              for _ in 0..l {
                  self.write("\x08".to_string());
              }
-@@ -548,10 +559,18 @@
+@@ -548,10 +581,18 @@
      /// user input (useful for password entry)
      pub async fn ask(self: &Arc<Terminal>, secret: bool, prompt: &str) -> Result<String> {
          self.reset_line_buffer();
@@ -102,7 +178,7 @@ diff -ruN '--exclude=Cargo.toml.orig' '--exclude=.cargo_vcs_info.json' '--exclud
      }
  
      pub async fn kbhit(self: &Arc<Terminal>, prompt: Option<&str>) -> Result<String> {
-@@ -607,6 +626,16 @@
+@@ -607,6 +648,16 @@
              return Ok(());
          }
  

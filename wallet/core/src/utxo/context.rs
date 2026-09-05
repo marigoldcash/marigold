@@ -199,6 +199,13 @@ impl UtxoContext {
         &self.inner.id
     }
 
+    /// Snapshot of this context's UTXO sets `(mature, pending, stasis)` for
+    /// display purposes (the CLI `utxos` command).
+    pub fn utxo_entries_snapshot(&self) -> (Vec<UtxoEntryReference>, Vec<UtxoEntryReference>, Vec<UtxoEntryReference>) {
+        let context = self.context();
+        (context.mature.clone(), context.pending.values().cloned().collect(), context.stasis.values().cloned().collect())
+    }
+
     pub fn mature_utxo_size(&self) -> usize {
         self.context().mature.len()
     }

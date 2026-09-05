@@ -81,7 +81,7 @@ impl LocalStoreInner {
             let title = args.title.clone();
             let filename = make_filename(&title, &args.filename);
 
-            let storage = Storage::try_new_with_folder(folder, &format!("{filename}.wallet"))?;
+            let storage = Storage::try_new_with_folder(folder, &super::wallet_file_name(&filename))?;
             if storage.exists().await? && !args.overwrite_wallet {
                 return Err(Error::WalletAlreadyExists);
             }
@@ -129,7 +129,7 @@ impl LocalStoreInner {
 
     async fn try_load(wallet_secret: &Secret, folder: &str, args: OpenArgs) -> Result<Self> {
         let filename = make_filename(&None, &args.filename);
-        let storage = Storage::try_new_with_folder(folder, &format!("{filename}.wallet"))?;
+        let storage = Storage::try_new_with_folder(folder, &super::wallet_file_name(&filename))?;
 
         let wallet = WalletStorage::try_load(&storage).await?;
         let cache = Arc::new(RwLock::new(Cache::from_wallet(wallet, wallet_secret)?));
@@ -154,7 +154,7 @@ impl LocalStoreInner {
         let _ = wallet.payload(wallet_secret)?;
 
         let filename = make_filename(&wallet.title, &None);
-        let storage = Storage::try_new_with_folder(folder, &format!("{filename}.wallet"))?;
+        let storage = Storage::try_new_with_folder(folder, &super::wallet_file_name(&filename))?;
         if storage.exists_sync()? {
             return Err(Error::WalletAlreadyExists);
         }
@@ -438,7 +438,7 @@ impl Interface for LocalStore {
     async fn exists(&self, name: Option<&str>) -> Result<bool> {
         let location = self.location.lock().unwrap().clone().unwrap();
         let store =
-            Storage::try_new_with_folder(&location.folder, &format!("{}.wallet", name.unwrap_or(super::default_wallet_file())))?;
+            Storage::try_new_with_folder(&location.folder, &super::wallet_file_name(name.unwrap_or(super::default_wallet_file())))?;
         store.exists().await
     }
 
@@ -493,7 +493,7 @@ impl Interface for LocalStore {
 
     async fn client_metadata(&self, filename: &str) -> Result<Option<crate::storage::local::wallet::ClientMetadata>> {
         let location = self.location.lock().unwrap().clone().unwrap();
-        let path = fs::resolve_path(&location.folder)?.join(format!("{filename}.wallet"));
+        let path = fs::resolve_path(&location.folder)?.join(super::wallet_file_name(filename));
         if !fs::exists(&path).await? {
             return Err(Error::NoWalletInStorage(filename.to_string()));
         }
@@ -504,7 +504,7 @@ impl Interface for LocalStore {
 
     async fn set_client_metadata(&self, filename: &str, metadata: Option<crate::storage::local::wallet::ClientMetadata>) -> Result<()> {
         let location = self.location.lock().unwrap().clone().unwrap();
-        let path = fs::resolve_path(&location.folder)?.join(format!("{filename}.wallet"));
+        let path = fs::resolve_path(&location.folder)?.join(super::wallet_file_name(filename));
         if !fs::exists(&path).await? {
             return Err(Error::NoWalletInStorage(filename.to_string()));
         }

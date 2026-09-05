@@ -219,6 +219,22 @@ impl Wallet {
                     }
                 }
             }
+            "rename" => {
+                if !ctx.wallet().is_open() {
+                    tprintln!(ctx, "Open a wallet first");
+                    return Ok(());
+                }
+                if argv.is_empty() {
+                    tprintln!(ctx, "usage: 'wallet rename <new display name>'");
+                    tprintln!(ctx, "(the display name is what 'wallet list' and the prompt show; the FILE keeps its name —");
+                    tprintln!(ctx, " renaming the file would orphan its note-vault and transaction folders, so that stays manual)");
+                    return Ok(());
+                }
+                let title = argv.join(" ");
+                let (wallet_secret, _) = ctx.ask_wallet_secret(None).await?;
+                ctx.store().rename(&wallet_secret, Some(&title), None).await?;
+                tprintln!(ctx, "Wallet display name is now: {title}");
+            }
             "forget" => {
                 if !ctx.wallet().is_open() {
                     tprintln!(ctx, "Open a wallet first");
@@ -269,6 +285,7 @@ impl Wallet {
                 ("open [<name>]", "Open an existing wallet (shorthand: 'open [<name>]'; no name shows a picker)"),
                 ("close", "Close an opened wallet (shorthand: 'close')"),
                 ("where", "Show where the wallet, note vault, and settings files live on disk"),
+                ("rename <name>", "Change the wallet's display name (the on-disk file name is unchanged)"),
                 ("remember [on|off]", "Whether this wallet records its network/server/last-used details (in the wallet file)"),
                 ("forget", "Clear this wallet's recorded network/server/usage details"),
                 ("hint", "Change the wallet phishing hint"),

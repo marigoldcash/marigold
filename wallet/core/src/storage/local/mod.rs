@@ -25,6 +25,15 @@ pub use payload::Payload;
 pub use storage::Storage;
 pub use wallet::{ClientMetadata, WalletStorage};
 
+/// On-disk file name for a wallet: `<name>.wallet` normally, but a name that
+/// already carries an extension (contains a dot) is used verbatim — the user
+/// may deliberately disguise or namespace their wallet file. Such files are
+/// NOT discovered by `wallet_list`/the open picker (discovery is by the
+/// `.wallet` extension); they must be opened by name.
+pub fn wallet_file_name(name: &str) -> String {
+    if name.contains('.') { name.to_string() } else { format!("{name}.wallet") }
+}
+
 use crate::error::Error;
 use crate::result::Result;
 use wasm_bindgen::prelude::*;

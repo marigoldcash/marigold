@@ -244,14 +244,52 @@ impl Note {
     }
 
     async fn mint(&self, ctx: &Arc<KaspaCli>, mut argv: Vec<String>) -> Result<()> {
-        if argv.is_empty() {
-            tprintln!(ctx, "usage: 'note mint <amount>'\r\n");
-            return Ok(());
-        }
-
         let account = ctx.wallet().account()?;
-        let amount_petals = try_parse_required_nonzero_kaspa_as_sompi_u64(argv.first())?;
-        argv.remove(0);
+
+        // 'note mint' with no amount offers to mint everything; 'note mint all'
+        // does it without asking. "Everything" is fee-aware: the mint
+        // transaction's own fee comes out of the same balance.
+        let all = match argv.first().map(|s| s.to_lowercase()).as_deref() {
+            None => {
+                let abortable = Abortable::default();
+                let max = notepool::max_mintable_petals(account.clone(), None, &abortable).await?;
+                if max == 0 {
+                    tprintln!(ctx, "usage: 'note mint <amount>' or 'note mint all'  (no mintable balance right now)\r\n");
+                    return Ok(());
+                }
+                let answer = ctx
+                    .term()
+                    .ask(false, &format!("Mint all available (~{} MAGLD)? [y/N]: ", sompi_to_kaspa_string(max)))
+                    .await?
+                    .trim()
+                    .to_lowercase();
+                if answer != "y" && answer != "yes" {
+                    tprintln!(ctx, "usage: 'note mint <amount>' or 'note mint all'\r\n");
+                    return Ok(());
+                }
+                Some(max)
+            }
+            Some("all") => {
+                argv.remove(0);
+                let abortable = Abortable::default();
+                let max = notepool::max_mintable_petals(account.clone(), None, &abortable).await?;
+                if max == 0 {
+                    tprintln!(ctx, "no mintable balance right now\r\n");
+                    return Ok(());
+                }
+                Some(max)
+            }
+            _ => None,
+        };
+
+        let amount_petals = match all {
+            Some(petals) => petals,
+            None => {
+                let petals = try_parse_required_nonzero_kaspa_as_sompi_u64(argv.first())?;
+                argv.remove(0);
+                petals
+            }
+        };
         let (wallet_secret, payment_secret) = ctx.ask_wallet_secret(Some(&account)).await?;
         let abortable = Abortable::default();
 
@@ -332,23 +370,43 @@ impl Note {
     async fn list(&self, ctx: &Arc<KaspaCli>) -> Result<()> {
         let note_key_store = ctx.wallet().store().as_note_key_store()?;
         let mut stream = note_key_store.iter().await?;
-        let mut printed = 0;
+        let mut notes = Vec::new();
         while let Some(info) = stream.try_next().await? {
+            notes.push(info);
+        }
+        if notes.is_empty() {
+            tprintln!(ctx, "no notes held\r\n");
+            return Ok(());
+        }
+        // Active first (largest denomination first — matches `note balance`'s
+        // active-only view), then handed-over, then superseded history.
+        let status_rank = |status: &NoteStatus| match status {
+            NoteStatus::Active => 0u8,
+            NoteStatus::HandedOver => 1,
+            NoteStatus::Superseded => 2,
+        };
+        notes.sort_by(|a, b| status_rank(&a.status).cmp(&status_rank(&b.status)).then(b.d.cmp(&a.d)).then(a.sn.cmp(&b.sn)));
+        let mut current: Option<u8> = None;
+        for info in &notes {
+            let rank = status_rank(&info.status);
+            if current != Some(rank) {
+                current = Some(rank);
+                let header = match info.status {
+                    NoteStatus::Active => "active:",
+                    NoteStatus::HandedOver => "handed over (awaiting the receiver's rotation):",
+                    NoteStatus::Superseded => "superseded (spent history):",
+                };
+                tprintln!(ctx, "{}", style(header).dim());
+            }
             tprintln!(
                 ctx,
-                "{} - {} MAGLD - {:?} - {:?}",
+                "  {} - {} MAGLD - {:?}",
                 info.sn,
                 sompi_to_kaspa_string(DENOMINATION_PETALS[info.d as usize]),
                 info.provenance,
-                info.status,
             );
-            printed += 1;
         }
-        if printed == 0 {
-            tprintln!(ctx, "no notes held\r\n");
-        } else {
-            tprintln!(ctx, "");
-        }
+        tprintln!(ctx, "");
 
         Ok(())
     }

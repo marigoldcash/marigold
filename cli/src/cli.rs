@@ -245,6 +245,11 @@ impl KaspaCli {
         self.handlers.start(self).await?;
         // wallet starts rpc and notifier
         self.wallet.load_settings().await.unwrap_or_else(|_| log_error!("Unable to load settings, discarding..."));
+        // Apply the custom wallet-storage folder before anything opens a
+        // wallet (the setting itself always lives at the default location).
+        if let Some(folder) = self.wallet.settings().get::<String>(WalletSettings::Folder) {
+            self.wallet.store().set_storage_folder(&folder).unwrap_or_else(|err| log_error!("Unable to apply wallet folder setting: {err}"));
+        }
         self.wallet.start().await?;
         Ok(())
     }
@@ -740,6 +745,25 @@ impl KaspaCli {
             }
         }
         tprintln!(self);
+
+        // Discoverability nudge: ledger balance but no notes yet — the note
+        // pool is the product; nobody should have to guess its entry point.
+        if let Ok(account) = self.wallet.account() {
+            let mature = account.balance().map(|b| b.mature).unwrap_or(0);
+            if mature > 0 {
+                let has_notes = match self.wallet.store().as_note_key_store() {
+                    Ok(store) => match store.iter().await {
+                        Ok(mut stream) => stream.try_next().await.ok().flatten().is_some(),
+                        Err(_) => true,
+                    },
+                    Err(_) => true,
+                };
+                if !has_notes {
+                    tprintln!(self, "Tip: turn ledger balance into bearer notes with 'note mint <amount>' (or 'note mint all')");
+                    tprintln!(self);
+                }
+            }
+        }
 
         Ok(())
     }

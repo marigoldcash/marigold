@@ -42,10 +42,14 @@ pub(crate) async fn create(
         .settings()
         .get(WalletSettings::Folder)
         .unwrap_or_else(|| kaspa_wallet_core::storage::local::default_storage_folder().to_string());
+    let mut custom_filename: Option<String> = None;
     loop {
-        let filename = make_filename(&name, &None);
+        let file = match &custom_filename {
+            Some(file) => kaspa_wallet_core::storage::local::wallet_file_name(file),
+            None => kaspa_wallet_core::storage::local::wallet_file_name(&make_filename(&name, &None)),
+        };
         tprintln!(ctx);
-        tprintln!(ctx, "This wallet will be stored as: {}", style(format!("{folder}/{filename}.wallet")).cyan());
+        tprintln!(ctx, "This wallet will be stored as: {}", style(format!("{folder}/{file}")).cyan());
         tprintln!(ctx, "(change the folder for all wallets with 'settings set folder <path>' before creating)");
         let input = term.ask(false, "Press <enter> to accept, or type a different wallet name: ").await?.trim().to_string();
         if input.is_empty() {
@@ -55,11 +59,28 @@ pub(crate) async fn create(
             tprintln!(ctx, "Wallet name cannot be 'wallet'");
             continue;
         }
-        name = Some(input);
+        if input.contains('.') {
+            // A name with an extension is used verbatim — powerful, with sharp edges.
+            tprintln!(ctx);
+            tprintln!(ctx, "{}", style("Custom extension — two things to know:").yellow());
+            tprintln!(ctx, "  1. Files without the .wallet extension do NOT appear in 'wallet list' or the");
+            tprintln!(ctx, "     open picker — you must remember to 'open {input}' by name.");
+            tprintln!(ctx, "  2. Other programs may claim the extension: double-clicking a wallet named");
+            tprintln!(ctx, "     notes.doc opens a word processor, not your money. Oops-resistant it is not.");
+            let keep = term.ask(false, "Keep this file name anyway? (type 'y' to keep): ").await?.trim().to_lowercase();
+            if keep != "y" {
+                continue;
+            }
+            custom_filename = Some(input.clone());
+            name = Some(input);
+        } else {
+            custom_filename = None;
+            name = Some(input);
+        }
     }
     let name = name.as_deref();
 
-    let filename = make_filename(&name.map(String::from), &None);
+    let filename = make_filename(&name.map(String::from), &custom_filename);
     if wallet.exists(Some(&filename)).await? {
         tprintln!(ctx, "{}", style("WARNING - A previously created wallet already exists!").red().to_string());
         tprintln!(ctx, "NOTE: You can create a differently named wallet by using 'wallet create <name>'");
@@ -167,7 +188,7 @@ pub(crate) async fn create(
     // suspend commits for multiple operations
     wallet.store().batch().await?;
 
-    let wallet_args = WalletCreateArgs::new(name.map(String::from), None, EncryptionKind::XChaCha20Poly1305, hint, true);
+    let wallet_args = WalletCreateArgs::new(name.map(String::from), custom_filename.clone(), EncryptionKind::XChaCha20Poly1305, hint, true);
     let (wallet_descriptor, storage_descriptor) = ctx.wallet().create_wallet(&wallet_secret, wallet_args).await?;
     let prv_key_data_id = wallet.create_prv_key_data(&wallet_secret, prv_key_data_args).await?;
 
@@ -214,7 +235,7 @@ pub(crate) async fn create(
     term.writeln(style(receive_address).blue().to_string());
     term.writeln("");
 
-    wallet.open(&wallet_secret, name.map(String::from), WalletOpenArgs::default_with_legacy_accounts(), &guard).await?;
+    wallet.open(&wallet_secret, custom_filename.clone().or_else(|| name.map(String::from)), WalletOpenArgs::default_with_legacy_accounts(), &guard).await?;
     wallet.activate_accounts(None, &guard).await?;
 
     // Remember this wallet: plaintext client metadata in the wallet file

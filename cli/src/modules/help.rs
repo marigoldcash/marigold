@@ -16,6 +16,8 @@ impl Help {
 
         term.help(&handlers, None)?;
 
+        term.writeln("New to Marigold? 'guide' walks the basics — fund your wallet, 'note mint' to turn balance into bearer notes, hold and spend them like cash.".crlf());
+
         Ok(())
     }
 }

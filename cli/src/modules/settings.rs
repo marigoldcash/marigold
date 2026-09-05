@@ -5,8 +5,30 @@ use crate::imports::*;
 pub struct Settings;
 
 impl Settings {
-    async fn main(self: Arc<Self>, ctx: &Arc<dyn Context>, _argv: Vec<String>, _cmd: &str) -> Result<()> {
+    async fn main(self: Arc<Self>, ctx: &Arc<dyn Context>, argv: Vec<String>, _cmd: &str) -> Result<()> {
         let ctx = ctx.clone().downcast_arc::<KaspaCli>()?;
+
+        if argv.first().map(|s| s.as_str()) == Some("set") {
+            match (argv.get(1).map(|s| s.as_str()), argv.get(2)) {
+                (Some("folder"), Some(path)) => {
+                    ctx.wallet().settings().set(WalletSettings::Folder, path.clone()).await?;
+                    if let Err(err) = ctx.wallet().store().set_storage_folder(path) {
+                        tprintln!(ctx, "Saved, but not applied to this session: {err}");
+                    }
+                    tprintln!(ctx, "Wallet storage folder set to: {path}");
+                    tprintln!(ctx, "(existing wallet files are NOT moved — move them yourself, or create new wallets there)");
+                    return Ok(());
+                }
+                (Some("network"), _) | (Some("server"), _) | (Some("wallet"), _) => {
+                    tprintln!(ctx, "Use the dedicated commands: 'network <id>', 'server <url>', 'open <name>'");
+                    return Ok(());
+                }
+                _ => {
+                    tprintln!(ctx, "usage: 'settings set folder <path>'");
+                    return Ok(());
+                }
+            }
+        }
 
         tprintln!(ctx, "\nSettings:\n");
         // let list = WalletSettings::list();
