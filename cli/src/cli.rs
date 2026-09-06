@@ -431,59 +431,12 @@ impl KaspaCli {
         };
         let payment_secret = self.auto_payment_secret.lock().unwrap().clone();
 
-        // --- 1. consolidate, if the ledger has broken into too many pieces ---
-        let sweep_threshold = self.auto_sweep_threshold();
-        let pieces = account.utxo_context().mature_utxo_size() as u64;
-        if sweep_threshold > 0 && pieces > sweep_threshold && !self.has_unconfirmed_spends() {
-            if loud {
-                tprintln!(self, "Consolidating {} ledger pieces — this can take a while...", pieces.separated_string());
-            }
-            let notifier: Option<kaspa_wallet_core::account::GenerationNotifier> = None;
-            match account.clone().sweep(secret.clone(), payment_secret.clone(), None, &abortable, notifier).await {
-                Ok(summary) => {
-                    if loud {
-                        tprintln!(
-                            self,
-                            "Consolidated (fees {} MAGLD).",
-                            kaspa_wallet_core::utils::sompi_to_kaspa_string(summary.0.aggregate_fees())
-                        );
-                    }
-                    // A sweep's own outputs are unconfirmed for a moment, so
-                    // the ledger reads as empty the instant it finishes —
-                    // which made the mint that follows report "nothing to
-                    // mint" on a wallet holding six figures (founder report,
-                    // 2026-09-05). Wait for the consolidated coins to land.
-                    if loud {
-                        tprintln!(self, "Waiting for the consolidated coins to confirm...");
-                    }
-                    // Wait for the consolidated value itself, not merely for
-                    // the first coin to mature: a sweep produces one output
-                    // per batch transaction, so most of the swept balance is
-                    // still confirming when the first few land. Breaking early
-                    // made the mint see 0.6 MAGLD of a 116,000 MAGLD wallet.
-                    let want = self.auto_mint_threshold().max(1);
-                    for _ in 0..120 {
-                        workflow_core::task::sleep(Duration::from_millis(500)).await;
-                        if self.has_unconfirmed_spends() {
-                            continue;
-                        }
-                        let (mature, pending, _) = account.utxo_context().utxo_entries_snapshot();
-                        let mature_value: u64 = mature.iter().map(|e| e.amount()).sum();
-                        // Enough to mint, or nothing left in flight to wait for.
-                        if mature_value >= want || pending.is_empty() {
-                            break;
-                        }
-                    }
-                }
-                Err(err) => {
-                    if loud {
-                        tprintln!(self, "Consolidation stopped: {err}");
-                    }
-                }
-            }
-        }
-
-        // --- 2. turn the ledger into notes ---
+        // --- 1. turn the ledger into notes ---
+        // Minting comes FIRST because a mint IS a consolidation: it takes many
+        // mature coins as inputs and leaves notes plus a single change coin.
+        // Sweeping first spent the very coins the mint needed and pushed them
+        // into "pending", so the mint that followed saw almost nothing —
+        // 1.32 MAGLD of a 143,000 MAGLD ledger (founder report, 2026-09-06).
         let threshold = self.auto_mint_threshold();
         if threshold > 0 && self.has_unconfirmed_spends() && loud {
             tprintln!(self, "Waiting: this wallet has transactions the chain has not confirmed yet.");
@@ -516,12 +469,16 @@ impl KaspaCli {
                 let minted = async {
                     let mintable =
                         kaspa_wallet_core::account::notepool::max_mintable_petals(account.clone(), None, &abortable, None).await?;
-                    // Bounded per run: minting a whole mining wallet at once
-                    // means thousands of batch transactions and a flood of
-                    // change notifications the wallet's own coin list cannot
-                    // keep up with.
-                    let cap = threshold.saturating_mul(10).max(10_000_000_000);
-                    let amount = mintable.min(cap);
+                    // No ceiling on the amount. Amounts decompose greedily
+                    // from the largest denomination down, so a big mint makes
+                    // FEW notes (143,000 MAGLD is about thirty) while a small
+                    // one makes dust — 1.32 MAGLD is six notes, two of them
+                    // 0.01. The old 100 MAGLD-per-run cap therefore produced
+                    // exactly the fragmentation it was meant to avoid, and
+                    // took a day to drain a mining wallet besides. What is
+                    // actually expensive is the number of input coins, and
+                    // that is what consolidation below is for.
+                    let amount = mintable;
                     if amount == 0 {
                         return Ok(None);
                     }
@@ -568,6 +525,41 @@ impl KaspaCli {
                         } else if loud {
                             tprintln!(self, "Minting stopped: {err}");
                         }
+                    }
+                }
+            }
+        }
+
+        // --- 2. consolidate whatever minting could not take ---
+        // Only what the mint left behind: change, dust below a whole petal,
+        // and coins that arrived while it ran.
+        let sweep_threshold = self.auto_sweep_threshold();
+        let pieces = account.utxo_context().mature_utxo_size() as u64;
+        if sweep_threshold > 0 && pieces > sweep_threshold && !self.has_unconfirmed_spends() {
+            if loud {
+                tprintln!(self, "Consolidating {} ledger pieces — this can take a while...", pieces.separated_string());
+            }
+            let notifier: Option<kaspa_wallet_core::account::GenerationNotifier> = None;
+            match account.clone().sweep(secret.clone(), payment_secret.clone(), None, &abortable, notifier).await {
+                Ok(summary) => {
+                    if loud {
+                        tprintln!(
+                            self,
+                            "Consolidated (fees {} MAGLD).",
+                            kaspa_wallet_core::utils::sompi_to_kaspa_string(summary.0.aggregate_fees())
+                        );
+                    }
+                    // No waiting here for the swept coins to confirm: that
+                    // wait was racing the chain and breaking early, and there
+                    // is nothing to race for. The next housekeeping run mints
+                    // them once they are actually mature.
+                    if loud {
+                        tprintln!(self, "The consolidated coins will be minted once they confirm.");
+                    }
+                }
+                Err(err) => {
+                    if loud {
+                        tprintln!(self, "Consolidation stopped: {err}");
                     }
                 }
             }
