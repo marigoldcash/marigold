@@ -162,8 +162,15 @@ impl Note {
         // Housekeeping on receipt: ten notes of one size become one of the
         // next, so a vault never accumulates a drawer full of small change.
         match notepool::merge_held_notes(account.clone(), wallet_secret, 4).await {
-            Ok(0) => {}
-            Ok(merged) => tprintln!(ctx, "consolidated {merged} group(s) of ten notes into larger ones"),
+            Ok((0, None)) => {}
+            Ok((merged, failure)) => {
+                if merged > 0 {
+                    tprintln!(ctx, "consolidated {merged} group(s) of ten notes into larger ones");
+                }
+                if let Some(reason) = failure {
+                    tprintln!(ctx, "(note consolidation stopped: {reason})");
+                }
+            }
             Err(err) => tprintln!(ctx, "(note consolidation skipped: {err})"),
         }
         tprintln!(ctx, "");

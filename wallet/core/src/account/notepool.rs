@@ -1889,7 +1889,18 @@ pub async fn send_combined(
 /// and breaks its denomination. A merge costs one fee quantum (0.01), so this
 /// also keeps the cost proportionate: consolidating ten 0.1s into 1 MAGLD
 /// spends 1% of it, while the same fee against ten 1s is a tenth of a percent.
-pub const STAMP_RESERVE: usize = 20;
+/// Fee stamps (0.01 notes) to keep on hand. Every pure pool operation spends
+/// one, so a wallet needs a working supply — merging the supply away would
+/// force later rotations into slack mode, where the fee comes out of a note's
+/// own value and breaks its denomination.
+pub const STAMP_RESERVE: usize = 50;
+
+/// Don't touch the stamps until there are clearly too many. Merging as soon as
+/// the count passes the reserve would have the wallet consolidating stamps
+/// continuously, since minting makes more whenever the supply runs low — the
+/// two would chase each other forever. A gap between the trigger and the
+/// reserve is what makes the cycle terminate.
+pub const STAMP_MERGE_TRIGGER: usize = 100;
 
 pub async fn plan_merges(account: Arc<dyn Account>) -> Result<Vec<Vec<Hash>>> {
     let note_key_store = account.wallet().store().as_note_key_store()?;
@@ -1906,9 +1917,10 @@ pub async fn plan_merges(account: Arc<dyn Account>) -> Result<Vec<Vec<Hash>>> {
     // pool operation spends one, and merging the supply away would force later
     // rotations into slack mode. Above the reserve they are just dust that can
     // never merge on its own, which is how a wallet ended up holding 125 of
-    // them (founder report, 2026-09-06). Consolidate the excess only.
+    // them (founder report, 2026-09-06). Once past the trigger, consolidate
+    // down toward the reserve and leave the rest alone.
     if let Some(serials) = by_denomination.get(&0) {
-        if serials.len() > STAMP_RESERVE {
+        if serials.len() > STAMP_MERGE_TRIGGER {
             let excess = &serials[STAMP_RESERVE..];
             for group in excess.chunks(10) {
                 if group.len() == 10 {
@@ -1933,13 +1945,16 @@ pub async fn plan_merges(account: Arc<dyn Account>) -> Result<Vec<Vec<Hash>>> {
 /// many groups were merged. Skips a group whose fee cannot be sourced, and
 /// keeps going — a failed merge is housekeeping that can wait, never an error
 /// worth failing a receive over.
-pub async fn merge_held_notes(account: Arc<dyn Account>, wallet_secret: Secret, limit: usize) -> Result<usize> {
+pub async fn merge_held_notes(account: Arc<dyn Account>, wallet_secret: Secret, limit: usize) -> Result<(usize, Option<String>)> {
     let mut merged = 0usize;
+    // The reason a merge stopped is reported, not swallowed. A silent `Ok(0)`
+    // is indistinguishable from "nothing to do", and that is precisely how a
+    // wallet sat with 22 notes of 1 MAGLD unmerged without saying why.
     for group in plan_merges(account.clone()).await?.into_iter().take(limit) {
         match rotate_notes(account.clone(), wallet_secret.clone(), group).await {
             Ok(_) => merged += 1,
-            Err(_) => break,
+            Err(err) => return Ok((merged, Some(err.to_string()))),
         }
     }
-    Ok(merged)
+    Ok((merged, None))
 }

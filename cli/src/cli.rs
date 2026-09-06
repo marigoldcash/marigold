@@ -621,12 +621,31 @@ impl KaspaCli {
         }
 
         // --- 4. tidy the notes themselves (ten of a size become one larger) ---
-        if !self.has_unconfirmed_spends() {
-            match kaspa_wallet_core::account::notepool::merge_held_notes(account, secret, 4).await {
-                Ok(merged) if merged > 0 && loud => {
+        // Deliberately NOT gated on has_unconfirmed_spends(): that measures the
+        // ledger's outgoing balance, and a note merge is a pure pool operation
+        // that spends notes and pays its fee from a spare one — it touches no
+        // ledger coin at all. Since minting runs first and always leaves an
+        // outgoing balance behind, the gate meant this step simply never ran,
+        // which is why ten 0.1s, twenty-two 1s and twelve 10,000s all sat
+        // unmerged (founder report, 2026-09-06). Notes already in flight are
+        // marked Superseded at submit time, so plan_merges cannot pick them
+        // twice — the double-spend the gate was guarding against is handled
+        // where it actually applies.
+        match kaspa_wallet_core::account::notepool::merge_held_notes(account, secret, 12).await {
+            Ok((merged, failure)) => {
+                if merged > 0 && loud {
                     tprintln!(self, "Consolidated {merged} group(s) of ten notes into larger ones.");
                 }
-                _ => {}
+                if let Some(reason) = failure {
+                    if loud {
+                        tprintln!(self, "Note consolidation stopped: {reason}");
+                    }
+                }
+            }
+            Err(err) => {
+                if loud {
+                    tprintln!(self, "Note consolidation stopped: {err}");
+                }
             }
         }
 
