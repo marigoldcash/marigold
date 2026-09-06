@@ -3,9 +3,12 @@ use kaspa_wallet_core::utils::sompi_to_kaspa_string;
 
 /// Default trigger: 1 MAGLD of matured ledger balance.
 const DEFAULT_THRESHOLD_PETALS: u64 = 100_000_000;
+/// Default sweep trigger: consolidate once the account holds this many
+/// mature ledger coins.
+pub const DEFAULT_SWEEP_UTXOS: u64 = 2_000;
 
 #[derive(Default, Handler)]
-#[help("Automatically turn arriving ledger balance into notes ('auto on|off|<amount>')")]
+#[help("Automate the ledger chores: mint arriving balance into notes, and consolidate coins ('auto' for details)")]
 pub struct Auto;
 
 impl Auto {
@@ -42,14 +45,55 @@ impl Auto {
                 tprintln!(ctx, "notes once it passes the threshold — so your money ends up as cash without you asking,");
                 tprintln!(ctx, "and the ledger never accumulates the dust that makes 'sweep' necessary.");
                 tprintln!(ctx, "");
-                tprintln!(ctx, "  'auto on'          turn it on (arms now and every time you open this wallet)");
-                tprintln!(ctx, "  'auto off'         turn it off");
-                tprintln!(ctx, "  'auto <amount>'    set the threshold, e.g. 'auto 10'");
+                if meta.auto_sweep {
+                    let sweep_threshold =
+                        if meta.auto_sweep_utxo_threshold == 0 { DEFAULT_SWEEP_UTXOS } else { meta.auto_sweep_utxo_threshold };
+                    tprintln!(ctx, "auto-sweep is ON above {sweep_threshold} coins");
+                } else {
+                    tprintln!(ctx, "auto-sweep is OFF");
+                }
+                tprintln!(ctx, "");
+                tprintln!(ctx, "  'auto on'            mint arriving balance into notes (arms whenever you open this wallet)");
+                tprintln!(ctx, "  'auto off'           stop minting");
+                tprintln!(ctx, "  'auto <amount>'      set the mint threshold, e.g. 'auto 10'");
+                tprintln!(ctx, "  'auto sweep [<n>]'   consolidate coins above <n> of them — independent of minting, for");
+                tprintln!(ctx, "                       holders (exchanges, say) who want plain ledger balance kept tidy");
+                tprintln!(ctx, "  'auto sweep off'     stop consolidating");
                 tprintln!(ctx, "");
                 tprintln!(ctx, "It signs on your behalf, so while it is armed this wallet's password is held in memory");
                 tprintln!(ctx, "for as long as the wallet is open — never written to disk. That is the hot-wallet trade;");
                 tprintln!(ctx, "'auto off' or closing the wallet ends it.");
                 tprintln!(ctx, "");
+            }
+            Some("sweep") => {
+                let arg = argv.get(1).map(|s| s.to_lowercase());
+                match arg.as_deref() {
+                    Some("off") => {
+                        meta.auto_sweep = false;
+                        ctx.store().set_client_metadata(&descriptor.filename, Some(meta)).await?;
+                        tprintln!(ctx, "auto-sweep off.");
+                    }
+                    Some("on") | None => {
+                        meta.auto_sweep = true;
+                        if meta.auto_sweep_utxo_threshold == 0 {
+                            meta.auto_sweep_utxo_threshold = DEFAULT_SWEEP_UTXOS;
+                        }
+                        let threshold = meta.auto_sweep_utxo_threshold;
+                        ctx.store().set_client_metadata(&descriptor.filename, Some(meta)).await?;
+                        let (wallet_secret, _) = ctx.ask_wallet_secret(None).await?;
+                        ctx.arm_auto_sweep(wallet_secret, threshold);
+                        tprintln!(ctx, "auto-sweep on: coins are consolidated once this account holds more than {threshold}.");
+                    }
+                    Some(count) => {
+                        let threshold: u64 = count.parse().map_err(|_| Error::custom("usage: 'auto sweep <coin count>'"))?;
+                        meta.auto_sweep = true;
+                        meta.auto_sweep_utxo_threshold = threshold;
+                        ctx.store().set_client_metadata(&descriptor.filename, Some(meta)).await?;
+                        let (wallet_secret, _) = ctx.ask_wallet_secret(None).await?;
+                        ctx.arm_auto_sweep(wallet_secret, threshold);
+                        tprintln!(ctx, "auto-sweep on: coins are consolidated once this account holds more than {threshold}.");
+                    }
+                }
             }
             Some("on") => {
                 meta.auto_mint = true;

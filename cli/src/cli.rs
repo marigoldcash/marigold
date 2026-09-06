@@ -50,6 +50,8 @@ pub struct KaspaCli {
     /// it is never written anywhere and is dropped on close/disarm.
     auto_secret: Mutex<Option<Secret>>,
     auto_threshold_petals: Arc<AtomicU64>,
+    /// 0 disables auto-sweep; otherwise the UTXO count that triggers one.
+    auto_sweep_utxos: Arc<AtomicU64>,
     auto_busy: Arc<AtomicBool>,
     auto_last_run: Mutex<Instant>,
     /// Widest balance segment rendered this session — the prompt pads to it
@@ -132,6 +134,7 @@ impl KaspaCli {
             sync_state: Mutex::new(None),
             auto_secret: Mutex::new(None),
             auto_threshold_petals: Arc::new(AtomicU64::new(0)),
+            auto_sweep_utxos: Arc::new(AtomicU64::new(0)),
             auto_busy: Arc::new(AtomicBool::new(false)),
             auto_last_run: Mutex::new(Instant::now()),
             prompt_balance_width: Arc::new(AtomicUsize::new(0)),
@@ -208,7 +211,68 @@ impl KaspaCli {
         self.auto_threshold_petals.store(threshold_petals, Ordering::SeqCst);
     }
 
+    /// Arm auto-sweep (consolidation only — no minting). Independent of
+    /// auto-mint: a wallet that deliberately holds ledger balance still wants
+    /// its dust consolidated.
+    pub fn arm_auto_sweep(&self, secret: Secret, utxo_threshold: u64) {
+        let mut guard = self.auto_secret.lock().unwrap();
+        if guard.is_none() {
+            *guard = Some(secret);
+        }
+        drop(guard);
+        self.auto_sweep_utxos.store(utxo_threshold, Ordering::SeqCst);
+    }
+
+    pub fn auto_sweep_threshold(&self) -> u64 {
+        self.auto_sweep_utxos.load(Ordering::SeqCst)
+    }
+
+    /// Consolidate when the account holds more mature UTXOs than the
+    /// threshold. Shares the busy flag and rate limit with auto-mint so the
+    /// two never run at once.
+    pub fn maybe_auto_sweep(self: &Arc<Self>) {
+        let threshold = self.auto_sweep_threshold();
+        if threshold == 0 || self.auto_busy.load(Ordering::SeqCst) || !self.wallet.is_connected() {
+            return;
+        }
+        let Ok(account) = self.wallet.account() else { return };
+        if (account.utxo_context().mature_utxo_size() as u64) < threshold {
+            return;
+        }
+        {
+            let last = self.auto_last_run.lock().unwrap();
+            if last.elapsed().as_secs() < 60 {
+                return;
+            }
+        }
+        let Some(secret) = self.auto_secret.lock().unwrap().clone() else { return };
+
+        self.auto_busy.store(true, Ordering::SeqCst);
+        let this = self.clone();
+        workflow_core::task::spawn(async move {
+            *this.auto_last_run.lock().unwrap() = Instant::now();
+            let abortable = Abortable::default();
+            let before = account.utxo_context().mature_utxo_size();
+            let notifier: Option<kaspa_wallet_core::account::GenerationNotifier> = None;
+            match account.clone().sweep(secret, None, None, &abortable, notifier).await {
+                Ok(_) => tprintln!(this, "{NOTIFY} auto-sweep: consolidated {before} coins"),
+                Err(err) => tprintln!(this, "{NOTIFY} auto-sweep failed: {err}"),
+            }
+            this.auto_busy.store(false, Ordering::SeqCst);
+        });
+    }
+
     pub fn disarm_auto_mint(&self) {
+        self.auto_threshold_petals.store(0, Ordering::SeqCst);
+        if self.auto_sweep_threshold() == 0 {
+            self.auto_secret.lock().unwrap().take();
+        }
+    }
+
+    /// Drop every armed automation and the secret with it (wallet close).
+    pub fn disarm_automation(&self) {
+        self.auto_threshold_petals.store(0, Ordering::SeqCst);
+        self.auto_sweep_utxos.store(0, Ordering::SeqCst);
         self.auto_secret.lock().unwrap().take();
     }
 
@@ -622,6 +686,7 @@ impl KaspaCli {
                                     }
 
                                     this.maybe_auto_mint();
+                                    this.maybe_auto_sweep();
                                 }
                             }
                         }
@@ -1056,7 +1121,7 @@ impl Cli for KaspaCli {
                 ("network", _) => Some(vec!["mainnet", "testnet-10"]),
                 ("node", _) | ("miner", _) => Some(vec!["start", "stop", "restart", "status"]),
                 ("utxos", _) => Some(vec!["all"]),
-                ("auto", _) => Some(vec!["on", "off"]),
+                ("auto", _) => Some(vec!["on", "off", "sweep"]),
                 _ => None,
             }
         };

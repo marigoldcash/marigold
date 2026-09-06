@@ -35,6 +35,14 @@ pub struct ClientMetadata {
     pub auto_mint: bool,
     #[serde(default)]
     pub auto_mint_threshold_petals: u64,
+    /// Auto-sweep: consolidate ledger coins on its own schedule, independent
+    /// of auto-mint — a holder who wants to keep plain ledger balance (an
+    /// exchange, say) still wants the dust kept under control.
+    #[serde(default)]
+    pub auto_sweep: bool,
+    /// UTXO count above which a sweep is triggered (0 = use the default).
+    #[serde(default)]
+    pub auto_sweep_utxo_threshold: u64,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

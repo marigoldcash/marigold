@@ -200,6 +200,24 @@ pub struct RedeemResult {
 /// input `RedeemOp` transaction directly (see this module's doc comment for why),
 /// signs each `SignedGroup` with its notes' own key(s), and submits over RPC.
 pub async fn redeem(account: Arc<dyn Account>, wallet_secret: Secret, selection: RedeemSelection) -> Result<RedeemResult> {
+    redeem_to(account, wallet_secret, selection, None).await
+}
+
+/// Redeem notes, optionally paying an EXTERNAL address in the same
+/// transaction: `destination` is `(address, petals)`, and whatever the
+/// redeemed notes are worth beyond that (less the fee) returns to this
+/// account's own ledger address. One transaction destroys the notes and pays
+/// the recipient — the shape an exchange deposit wants. Consensus already
+/// supports it: a pool op's consumed value funds transparent outputs, the
+/// count of which is unconstrained, and every pool-op signature covers
+/// `tx.outputs` (POOL-SPEC P5.2, review-1 fix), so the destination is bound
+/// by the signature and cannot be rewritten in flight.
+pub async fn redeem_to(
+    account: Arc<dyn Account>,
+    wallet_secret: Secret,
+    selection: RedeemSelection,
+    destination: Option<(Address, u64)>,
+) -> Result<RedeemResult> {
     let note_key_store = account.wallet().store().as_note_key_store()?;
 
     let serials = match selection {
@@ -285,9 +303,18 @@ pub async fn redeem(account: Arc<dyn Account>, wallet_secret: Secret, selection:
     let placeholder_groups: Vec<SignedGroup> =
         groups_by_sk.values().map(|group_serials| SignedGroup { serials: group_serials.clone(), signature: [0u8; 64] }).collect();
     let placeholder_payload = PoolOp::Redeem(RedeemOp { consumed: placeholder_groups, freshness }).encode_payload();
-    let placeholder_output = TransactionOutput::new(redeemed_value_petals, script_public_key.clone());
+    // Placeholder must have the same OUTPUT COUNT as the final transaction —
+    // mass (and therefore the fee) depends on it, and a two-output redeem
+    // costs more than a one-output one.
+    let placeholder_outputs = match &destination {
+        None => vec![TransactionOutput::new(redeemed_value_petals, script_public_key.clone())],
+        Some((address, petals)) => vec![
+            TransactionOutput::new(*petals, pay_to_address_script(address)),
+            TransactionOutput::new(redeemed_value_petals.saturating_sub(*petals), script_public_key.clone()),
+        ],
+    };
     let placeholder_tx =
-        Transaction::new(TX_VERSION_TOCCATA, vec![], vec![placeholder_output], 0, SUBNETWORK_ID_NOTE_POOL, 0, placeholder_payload);
+        Transaction::new(TX_VERSION_TOCCATA, vec![], placeholder_outputs, 0, SUBNETWORK_ID_NOTE_POOL, 0, placeholder_payload);
     let populated = PopulatedTransaction::new(&placeholder_tx, vec![]);
     let storage_mass = mass_calculator
         .calc_contextual_masses(&populated)
@@ -306,8 +333,25 @@ pub async fn redeem(account: Arc<dyn Account>, wallet_secret: Secret, selection:
         )));
     }
     let output_value = redeemed_value_petals - fee_sompi;
-    let output = TransactionOutput::new(output_value, script_public_key);
-    let outputs_hash = transparent_outputs_hash(std::slice::from_ref(&output));
+    let outputs = match &destination {
+        None => vec![TransactionOutput::new(output_value, script_public_key)],
+        Some((address, petals)) => {
+            if *petals > output_value {
+                return Err(Error::Custom(format!(
+                    "redeemed value after fee ({output_value} petals) does not cover the requested payment ({petals} petals)"
+                )));
+            }
+            let change = output_value - petals;
+            let mut outputs = vec![TransactionOutput::new(*petals, pay_to_address_script(address))];
+            // Dust-sized change is left to the fee rather than created as an
+            // unspendable output.
+            if change >= DENOMINATION_PETALS[0] {
+                outputs.push(TransactionOutput::new(change, script_public_key));
+            }
+            outputs
+        }
+    };
+    let outputs_hash = transparent_outputs_hash(&outputs);
 
     let mut signed_groups = Vec::with_capacity(groups_by_sk.len());
     for (sk_bytes, group_serials) in groups_by_sk {
@@ -320,15 +364,7 @@ pub async fn redeem(account: Arc<dyn Account>, wallet_secret: Secret, selection:
     }
 
     let redeem_payload = PoolOp::Redeem(RedeemOp { consumed: signed_groups, freshness }).encode_payload();
-    let tx = Transaction::new(
-        TX_VERSION_TOCCATA,
-        vec![],
-        vec![output],
-        0,
-        SUBNETWORK_ID_NOTE_POOL,
-        0,
-        redeem_payload,
-    );
+    let tx = Transaction::new(TX_VERSION_TOCCATA, vec![], outputs, 0, SUBNETWORK_ID_NOTE_POOL, 0, redeem_payload);
     tx.set_storage_mass(storage_mass);
 
     let rpc_tx: kaspa_rpc_core::RpcTransaction = (&tx).into();

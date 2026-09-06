@@ -154,6 +154,19 @@ impl Wallet {
                 ctx.wallet().open(&wallet_secret, name.clone(), args, &guard).await?;
                 ctx.wallet().activate_accounts(None, &guard).await?;
 
+                // Auto-sweep arms independently of auto-mint, and runs its
+                // check immediately: a wallet opened after a long absence may
+                // already be far past the threshold (item 3, 2026-09-05).
+                if meta.as_ref().map(|m| m.auto_sweep).unwrap_or(false) {
+                    let threshold = meta
+                        .as_ref()
+                        .map(|m| m.auto_sweep_utxo_threshold)
+                        .filter(|t| *t > 0)
+                        .unwrap_or(crate::modules::auto::DEFAULT_SWEEP_UTXOS);
+                    ctx.arm_auto_sweep(wallet_secret.clone(), threshold);
+                    ctx.maybe_auto_sweep();
+                }
+
                 // Auto-mint arms with the password just typed — no second prompt.
                 if meta.as_ref().map(|m| m.auto_mint).unwrap_or(false) {
                     let threshold = meta
@@ -246,6 +259,8 @@ impl Wallet {
                             hidden: false,
                             auto_mint: false,
                             auto_mint_threshold_petals: 0,
+                            auto_sweep: false,
+                            auto_sweep_utxo_threshold: 0,
                         };
                         ctx.store().set_client_metadata(&descriptor.filename, Some(meta)).await?;
                         tprintln!(ctx, "Autoconnect on: this wallet remembers its network and node, and offers to reconnect when opened.");

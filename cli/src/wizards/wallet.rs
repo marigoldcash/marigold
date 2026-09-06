@@ -311,6 +311,8 @@ pub(crate) async fn create(
         hidden: false,
         auto_mint: false,
         auto_mint_threshold_petals: 0,
+        auto_sweep: false,
+        auto_sweep_utxo_threshold: 0,
     };
     wallet.store().set_client_metadata(&wallet_descriptor.filename, Some(meta)).await.ok();
     ctx.wallet().settings().set(WalletSettings::Wallet, wallet_descriptor.filename.clone()).await.ok();
