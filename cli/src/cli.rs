@@ -305,11 +305,24 @@ impl KaspaCli {
             tprintln!(this, "{NOTIFY} auto-sweep: consolidating {before} coins (this can take a while and costs fees)...");
             let notifier: Option<kaspa_wallet_core::account::GenerationNotifier> = None;
             match account.clone().sweep(secret, None, None, &abortable, notifier).await {
-                Ok(summary) => tprintln!(
-                    this,
-                    "{NOTIFY} auto-sweep: done, fees {}",
-                    kaspa_wallet_core::utils::sompi_to_kaspa_string(summary.0.aggregate_fees())
-                ),
+                Ok(summary) => {
+                    // Rebuild the in-memory coin list from the chain. A
+                    // consolidation of this size produces a torrent of change
+                    // notifications, and incremental bookkeeping can fall out
+                    // of step with reality — which shows up as a balance far
+                    // below the truth and, worse, as refusing to spend money
+                    // the wallet actually has (founder report, 2026-09-05).
+                    // Re-reading is what reopening the wallet does; do it here
+                    // so nobody has to.
+                    if let Err(err) = account.clone().scan(None, None).await {
+                        tprintln!(this, "{NOTIFY} auto-sweep: balance refresh failed ({err}) - reopen the wallet to resync");
+                    }
+                    tprintln!(
+                        this,
+                        "{NOTIFY} auto-sweep: done, fees {}",
+                        kaspa_wallet_core::utils::sompi_to_kaspa_string(summary.0.aggregate_fees())
+                    );
+                }
                 Err(err) => tprintln!(this, "{NOTIFY} auto-sweep failed: {err}"),
             }
             this.auto_busy.store(false, Ordering::SeqCst);
@@ -394,6 +407,11 @@ impl KaspaCli {
 
             match result {
                 Ok(Some((amount, notes))) => {
+                    // Same reasoning as the sweep path: a mint that swept many
+                    // coins into notes can leave the incremental view behind.
+                    if let Err(err) = account.clone().scan(None, None).await {
+                        tprintln!(this, "{NOTIFY} auto-mint: balance refresh failed ({err}) - reopen the wallet to resync");
+                    }
                     tprintln!(
                         this,
                         "{NOTIFY} auto-mint: {} MAGLD -> {notes} note(s)",
