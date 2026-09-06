@@ -29,7 +29,7 @@ pub(crate) async fn create(
         tprintln!(ctx);
         tprintln!(ctx, "Before creating a wallet, you need to select a Marigold network.");
         tprintln!(ctx, "Please use 'network <name>' command to select a network.");
-        tprintln!(ctx, "Currently available networks are 'mainnet' and 'testnet-10'");
+        tprintln!(ctx, "Available networks: {}", kaspa_consensus_core::network::NetworkId::supported_list());
         tprintln!(ctx);
         return Err(err.into());
     }
@@ -308,6 +308,7 @@ pub(crate) async fn create(
         server: None,
         last_opened: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_secs()),
         remember: true,
+        hidden: false,
     };
     wallet.store().set_client_metadata(&wallet_descriptor.filename, Some(meta)).await.ok();
     ctx.wallet().settings().set(WalletSettings::Wallet, wallet_descriptor.filename.clone()).await.ok();

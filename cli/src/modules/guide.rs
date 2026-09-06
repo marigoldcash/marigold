@@ -6,7 +6,14 @@ pub struct Guide;
 
 impl Guide {
     async fn main(self: Arc<Self>, ctx: &Arc<dyn Context>, _argv: Vec<String>, _cmd: &str) -> cli::Result<()> {
-        let guide = include_str!("guide.txt");
+        let guide = include_str!("guide.txt").replace(
+            "#[networks]",
+            &format!(
+                "Before you start, choose a network. This build supports {}. To experiment, \
+                 select the public testnet by entering `network testnet`.",
+                kaspa_consensus_core::network::NetworkId::supported_list()
+            ),
+        );
 
         let lines = guide.split('\n');
 

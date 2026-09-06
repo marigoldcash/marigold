@@ -1,7 +1,7 @@
 use crate::imports::*;
 
 #[derive(Default, Handler)]
-#[help("Select network type (mainnet|testnet)")]
+#[help("Select the network to use ('network' alone lists what this build supports)")]
 pub struct Network;
 
 impl Network {
@@ -26,8 +26,12 @@ impl Network {
                 }
             }
         } else {
-            let network_id = ctx.wallet().network_id()?;
-            tprintln!(ctx, "Current network id is: {network_id}");
+            match ctx.wallet().network_id() {
+                Ok(network_id) => tprintln!(ctx, "Current network: {network_id}"),
+                Err(_) => tprintln!(ctx, "No network selected yet"),
+            }
+            tprintln!(ctx, "Available: {}", NetworkId::supported_list());
+            tprintln!(ctx, "(select one with 'network <name>'; bare 'testnet' means the current public testnet)");
         }
 
         Ok(())

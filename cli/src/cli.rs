@@ -732,15 +732,42 @@ impl KaspaCli {
         let mut keys = self.wallet.keys().await?;
 
         tprintln!(self);
+        // A wallet holds KEYS (recovery secrets); each key holds ACCOUNTS
+        // (balances and addresses). Upstream printed a bare key id per line
+        // with no label, so a wallet with keys that have no accounts looked
+        // like a list of mystery accounts (founder report, 2026-09-05).
+        let mut empty_keys = 0usize;
         while let Some(key) = keys.try_next().await? {
-            tprintln!(self, "• {}", style(&key).dim());
-
             let mut accounts = self.wallet.accounts(Some(key.id), &guard).await?;
+            let mut printed_any = false;
+            let mut rows = Vec::new();
             while let Some(account) = accounts.try_next().await? {
                 let receive_address = account.receive_address()?;
-                tprintln!(self, "    • {}", account.get_list_string()?);
-                tprintln!(self, "      {}", style(receive_address.to_string()).blue());
+                rows.push((account.get_list_string()?, receive_address.to_string()));
+                printed_any = true;
             }
+            if printed_any {
+                tprintln!(self, "• key {}", style(&key).dim());
+                for (list_string, address) in rows {
+                    tprintln!(self, "    • {}", list_string);
+                    tprintln!(self, "      {}", style(address).blue());
+                }
+            } else {
+                empty_keys += 1;
+                tprintln!(self, "• key {} {}", style(&key).dim(), style("(no accounts)").dim());
+            }
+        }
+        if empty_keys > 0 {
+            tprintln!(self);
+            tprintln!(
+                self,
+                "{}",
+                style(format!(
+                    "{empty_keys} key(s) hold no accounts — usually left over from an interrupted 'account create'. \
+                     Create one with 'account create', or ignore them; they cost nothing."
+                ))
+                .dim()
+            );
         }
 
         let mut unfiltered_accounts = self.wallet.accounts(None, &guard).await?;

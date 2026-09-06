@@ -303,6 +303,21 @@ impl From<NetworkId> for NetworkType {
     }
 }
 
+impl NetworkId {
+    /// Every network this build actually has consensus params for — the single
+    /// source of truth for user-facing "available networks" lists (keep in step
+    /// with `Params::from(NetworkId)`). Devnet/simnet are omitted: they are
+    /// local-only development networks, not something to offer a wallet user.
+    pub fn supported() -> Vec<NetworkId> {
+        vec![NetworkId::new(NetworkType::Mainnet), NetworkId::with_suffix(NetworkType::Testnet, 10)]
+    }
+
+    /// e.g. "mainnet | testnet-10" — for help strings and prompts.
+    pub fn supported_list() -> String {
+        Self::supported().iter().map(|id| id.to_string()).collect::<Vec<_>>().join(" | ")
+    }
+}
+
 impl FromStr for NetworkId {
     type Err = NetworkIdError;
     fn from_str(network_name: &str) -> Result<Self, Self::Err> {

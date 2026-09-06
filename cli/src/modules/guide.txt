@@ -1,6 +1,4 @@
-Before you start, you must configure the default network setting.  There are currently
-2 networks available.  `mainnet` and `testnet-10`.  If you wish to experiment,
-you should select `testnet-10` by entering `network testnet-10`
+#[networks]
 
 The `server` command configures the target server.  You can connect to any Marigold
 node that has wRPC enabled with `--rpclisten-borsh=0.0.0.0`. If the server setting 

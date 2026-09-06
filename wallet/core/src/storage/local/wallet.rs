@@ -23,6 +23,11 @@ pub struct ClientMetadata {
     pub server: Option<String>,
     pub last_opened: Option<u64>,
     pub remember: bool,
+    /// Hidden from the `open` picker (still openable by name, still listed by
+    /// `wallet list` marked as hidden). For wallets you keep but don't want in
+    /// your face — archives, one-purpose stashes.
+    #[serde(default)]
+    pub hidden: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -153,7 +158,11 @@ impl BorshDeserialize for WalletStorage {
         // would error on every wallet created before v1 (positional Borsh, no
         // length prefix) — the exact backward-compat trap this fork's docs
         // warn about for this file format.
-        let client_metadata = if version >= 1 { BorshDeserialize::deserialize_reader(reader)? } else { None };
+        // Tolerant tail read: a v0 file has no tail at all, and a client
+        // metadata struct that gained fields in a later build would otherwise
+        // make the whole wallet unreadable. Convenience data is never worth
+        // failing an open over — fall back to None.
+        let client_metadata = if version >= 1 { BorshDeserialize::deserialize_reader(reader).unwrap_or(None) } else { None };
 
         Ok(Self { title, user_hint, encryption_kind, payload, metadata, transactions, client_metadata })
     }
