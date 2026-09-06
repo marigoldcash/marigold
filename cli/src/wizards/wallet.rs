@@ -309,6 +309,8 @@ pub(crate) async fn create(
         last_opened: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_secs()),
         remember: true,
         hidden: false,
+        auto_mint: false,
+        auto_mint_threshold_petals: 0,
     };
     wallet.store().set_client_metadata(&wallet_descriptor.filename, Some(meta)).await.ok();
     ctx.wallet().settings().set(WalletSettings::Wallet, wallet_descriptor.filename.clone()).await.ok();

@@ -154,6 +154,21 @@ impl Wallet {
                 ctx.wallet().open(&wallet_secret, name.clone(), args, &guard).await?;
                 ctx.wallet().activate_accounts(None, &guard).await?;
 
+                // Auto-mint arms with the password just typed — no second prompt.
+                if meta.as_ref().map(|m| m.auto_mint).unwrap_or(false) {
+                    let threshold = meta
+                        .as_ref()
+                        .map(|m| m.auto_mint_threshold_petals)
+                        .filter(|t| *t > 0)
+                        .unwrap_or(100_000_000);
+                    ctx.arm_auto_mint(wallet_secret.clone(), threshold);
+                    tprintln!(
+                        ctx,
+                        "auto-mint is on: ledger balance above {} MAGLD becomes notes automatically ('auto' for details)",
+                        kaspa_wallet_core::utils::sompi_to_kaspa_string(threshold)
+                    );
+                }
+
                 if let Some(name) = &name {
                     let remember = meta.as_ref().map(|m| m.remember).unwrap_or(true);
                     if remember {
@@ -229,6 +244,8 @@ impl Wallet {
                                 .map(|d| d.as_secs()),
                             remember: true,
                             hidden: false,
+                            auto_mint: false,
+                            auto_mint_threshold_petals: 0,
                         };
                         ctx.store().set_client_metadata(&descriptor.filename, Some(meta)).await?;
                         tprintln!(ctx, "Autoconnect on: this wallet remembers its network and node, and offers to reconnect when opened.");

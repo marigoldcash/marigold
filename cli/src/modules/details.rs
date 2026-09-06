@@ -9,7 +9,7 @@ impl Details {
         let ctx = ctx.clone().downcast_arc::<KaspaCli>()?;
         let account = ctx.select_account().await?.as_derivation_capable()?;
 
-        let derivation = account.derivation();
+        let _derivation = account.derivation();
 
         // One ledger address per account (2026-09-05). Any further addresses
         // shown here are historical — derived before the single-address

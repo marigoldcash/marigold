@@ -28,6 +28,13 @@ pub struct ClientMetadata {
     /// your face — archives, one-purpose stashes.
     #[serde(default)]
     pub hidden: bool,
+    /// Auto-mint: turn arriving ledger balance into notes automatically once
+    /// it passes `auto_mint_threshold_petals`. A preference only — it arms
+    /// with the password typed at `open` and never persists any secret.
+    #[serde(default)]
+    pub auto_mint: bool,
+    #[serde(default)]
+    pub auto_mint_threshold_petals: u64,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

@@ -11,7 +11,7 @@ use kaspa_wallet_core::rpc::DynRpcApi;
 use kaspa_wallet_core::storage::{IdT, PrvKeyDataInfo};
 use kaspa_wrpc_client::{KaspaRpcClient, Resolver};
 use workflow_core::channel::*;
-use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{AtomicU64, AtomicUsize};
 use workflow_core::time::Instant;
 use workflow_log::*;
 pub use workflow_terminal::Event as TerminalEvent;
@@ -45,6 +45,13 @@ pub struct KaspaCli {
     miner: Mutex<Option<Arc<Miner>>>,
     notifier: Notifier,
     sync_state: Mutex<Option<SyncState>>,
+    /// Auto-mint state. The secret lives in memory only while a wallet is
+    /// open and auto-mint is armed (a hot-wallet posture, entered knowingly);
+    /// it is never written anywhere and is dropped on close/disarm.
+    auto_secret: Mutex<Option<Secret>>,
+    auto_threshold_petals: Arc<AtomicU64>,
+    auto_busy: Arc<AtomicBool>,
+    auto_last_run: Mutex<Instant>,
     /// Widest balance segment rendered this session — the prompt pads to it
     /// so the command line never shifts under the user's fingers.
     prompt_balance_width: Arc<AtomicUsize>,
@@ -123,6 +130,10 @@ impl KaspaCli {
             miner: Mutex::new(None),
             notifier: Notifier::try_new()?,
             sync_state: Mutex::new(None),
+            auto_secret: Mutex::new(None),
+            auto_threshold_petals: Arc::new(AtomicU64::new(0)),
+            auto_busy: Arc::new(AtomicBool::new(false)),
+            auto_last_run: Mutex::new(Instant::now()),
             prompt_balance_width: Arc::new(AtomicUsize::new(0)),
         });
 
@@ -188,6 +199,106 @@ impl KaspaCli {
 
     pub fn flags(&self) -> &Flags {
         &self.flags
+    }
+
+    /// Arm auto-mint for this session with the secret already in hand (the
+    /// one typed at `open`) — no extra prompt, and nothing persisted.
+    pub fn arm_auto_mint(&self, secret: Secret, threshold_petals: u64) {
+        *self.auto_secret.lock().unwrap() = Some(secret);
+        self.auto_threshold_petals.store(threshold_petals, Ordering::SeqCst);
+    }
+
+    pub fn disarm_auto_mint(&self) {
+        self.auto_secret.lock().unwrap().take();
+    }
+
+    pub fn auto_mint_armed(&self) -> bool {
+        self.auto_secret.lock().unwrap().is_some()
+    }
+
+    pub fn auto_mint_threshold(&self) -> u64 {
+        self.auto_threshold_petals.load(Ordering::SeqCst)
+    }
+
+    /// Turn matured ledger balance into notes once it crosses the threshold.
+    /// Runs off the balance-notification stream; one at a time, rate limited,
+    /// and quiet unless it actually does something. A mint consumes the
+    /// coinbase outputs it spends, so on a mining wallet this also keeps UTXO
+    /// fragmentation from ever building up — no manual 'sweep' needed. If the
+    /// ledger has fragmented far enough that a mint hits the storage-mass
+    /// ceiling, it consolidates first and mints on the next tick.
+    fn maybe_auto_mint(self: &Arc<Self>) {
+        if !self.auto_mint_armed() || self.auto_busy.load(Ordering::SeqCst) || !self.wallet.is_connected() {
+            return;
+        }
+        let threshold = self.auto_mint_threshold();
+        if threshold == 0 {
+            return;
+        }
+        let Ok(account) = self.wallet.account() else { return };
+        let mature = account.balance().map(|b| b.mature).unwrap_or(0);
+        if mature < threshold {
+            return;
+        }
+        // Rate limit: a mining wallet's balance changes every block; without
+        // this we would mint continuously and pay a fee every few seconds.
+        {
+            let last = self.auto_last_run.lock().unwrap();
+            if last.elapsed().as_secs() < 60 {
+                return;
+            }
+        }
+        let Some(secret) = self.auto_secret.lock().unwrap().clone() else { return };
+
+        self.auto_busy.store(true, Ordering::SeqCst);
+        let this = self.clone();
+        workflow_core::task::spawn(async move {
+            *this.auto_last_run.lock().unwrap() = Instant::now();
+            let abortable = Abortable::default();
+            let result = async {
+                let amount =
+                    kaspa_wallet_core::account::notepool::max_mintable_petals(account.clone(), None, &abortable, None).await?;
+                if amount == 0 {
+                    return Ok(None);
+                }
+                let minted = kaspa_wallet_core::account::notepool::mint(
+                    account.clone(),
+                    secret.clone(),
+                    None,
+                    amount,
+                    None,
+                    &abortable,
+                )
+                .await?;
+                Ok::<_, kaspa_wallet_core::error::Error>(Some((amount, minted.notes.len())))
+            }
+            .await;
+
+            match result {
+                Ok(Some((amount, notes))) => {
+                    tprintln!(
+                        this,
+                        "{NOTIFY} auto-mint: {} MAGLD -> {notes} note(s)",
+                        kaspa_wallet_core::utils::sompi_to_kaspa_string(amount)
+                    );
+                }
+                Ok(None) => {}
+                Err(err) => {
+                    let message = err.to_string();
+                    if message.contains("Storage mass") || message.contains("maximum allowed mass") {
+                        tprintln!(this, "{NOTIFY} auto-mint: consolidating fragmented coins first...");
+                        let notifier: Option<kaspa_wallet_core::account::GenerationNotifier> = None;
+                        match account.clone().sweep(secret, None, None, &abortable, notifier).await {
+                            Ok(_) => tprintln!(this, "{NOTIFY} auto-mint: consolidated; minting on the next update"),
+                            Err(err) => tprintln!(this, "{NOTIFY} auto-mint: consolidation failed - {err}"),
+                        }
+                    } else {
+                        tprintln!(this, "{NOTIFY} auto-mint failed: {err}");
+                    }
+                }
+            }
+            this.auto_busy.store(false, Ordering::SeqCst);
+        });
     }
 
     pub fn toggle_mute(&self) -> &'static str {
@@ -509,6 +620,8 @@ impl KaspaCli {
                                         last_balance_refresh = Instant::now();
                                         this.term().refresh_prompt();
                                     }
+
+                                    this.maybe_auto_mint();
                                 }
                             }
                         }
@@ -943,6 +1056,7 @@ impl Cli for KaspaCli {
                 ("network", _) => Some(vec!["mainnet", "testnet-10"]),
                 ("node", _) | ("miner", _) => Some(vec!["start", "stop", "restart", "status"]),
                 ("utxos", _) => Some(vec!["all"]),
+                ("auto", _) => Some(vec!["on", "off"]),
                 _ => None,
             }
         };
