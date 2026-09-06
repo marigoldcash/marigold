@@ -770,6 +770,14 @@ impl KaspaCli {
                                     if let Some(hint) = hint {
                                         tprintln!(this, "\nYour wallet hint is: {hint}\n");
                                     }
+                                    // Counting a large vault takes real time —
+                                    // ten seconds on tens of thousands of
+                                    // notes, more as it grows. Printed here
+                                    // rather than from the open command so it
+                                    // lands after the hint: the hint arrives
+                                    // as an event and would otherwise overtake
+                                    // it.
+                                    tprintln!(this, "Loading...");
 
                                 },
                                 Events::AccountSelection { .. } => { },

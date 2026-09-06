@@ -86,6 +86,19 @@ pub struct MintResult {
     pub notes: Vec<NoteKeyEntry>,
 }
 
+/// Fee rate for note-pool transactions, in sompi per gram.
+///
+/// The mempool's minimum relay price is 100 sompi/gram
+/// (`DEFAULT_MINIMUM_RELAY_TRANSACTION_FEE` = 100_000 sompi/kg in
+/// `mining/src/mempool/config.rs`), and the generator charges the MAX of that
+/// minimum and the requested rate — not their sum — so any rate at or below
+/// 100 changes nothing at all. Paying the exact minimum is fragile: the
+/// mempool recomputes mass independently and has landed tens of grams above
+/// the generator's figure, rejecting a mint for being 0.07% short. 105 buys a
+/// 5% margin over the floor, which in absolute terms is a rounding error and
+/// makes that class of rejection impossible.
+pub const POOL_FEE_RATE: f64 = 105.0;
+
 /// Display-oriented progress reporting for long-running note operations —
 /// a mint over a mining wallet can sweep hundreds of thousands of UTXOs in
 /// thousands of batch transactions, minutes during which a silent CLI reads
@@ -135,12 +148,7 @@ pub async fn mint_with_progress(
     let keydata = account.prv_key_data(wallet_secret.clone()).await?;
     let signer = Arc::new(Signer::new(account.clone(), keydata, payment_secret));
 
-    // Pay a hair above the minimum relay fee. The mempool recomputes mass
-    // independently and can land a few grams above the generator's figure —
-    // a mint was rejected for being 2,400 sompi short of 3,526,400 (0.07%),
-    // which is a rounding difference, not a funding problem. A fee rate of
-    // 1 sompi/gram adds about 1% and makes the class of failure go away.
-    let fee_rate = fee_rate.or(Some(1.0));
+    let fee_rate = fee_rate.or(Some(POOL_FEE_RATE));
 
     // No explicit payment output: the minted value is withheld from change via
     // `Fees::SenderPays(amount_petals)` rather than appearing as a real transparent
@@ -1638,7 +1646,7 @@ pub async fn max_mintable_petals(
     abortable: &Abortable,
     progress: Option<NoteProgress>,
 ) -> Result<u64> {
-    let fee_rate = fee_rate.or(Some(1.0));
+    let fee_rate = fee_rate.or(Some(POOL_FEE_RATE));
     let quantum = DENOMINATION_PETALS[0];
     // Sum the coins rather than trusting the cached Balance: it is None in
     // the window right after account activation, and reading 0 there made
