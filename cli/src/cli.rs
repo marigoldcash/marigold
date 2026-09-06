@@ -1142,7 +1142,19 @@ impl KaspaCli {
             let mut accounts = self.wallet.accounts(Some(key.id), &guard).await?;
             while let Some(account) = accounts.try_next().await? {
                 let receive_address = account.receive_address()?;
-                tprintln!(self, "• {}", account.get_list_string()?);
+                // An unknown ledger balance is not "N/A" — it means the coins
+                // have not been read yet. Say what is actually happening
+                // rather than printing a value that looks like zero.
+                if account.balance().is_none() {
+                    let status = if self.wallet.is_connected() {
+                        "connected — please stand by"
+                    } else {
+                        "not connected — 'connect <node>' to read the ledger"
+                    };
+                    tprintln!(self, "• {}: {}", style(account.name_with_id()).blue(), style(status).dim());
+                } else {
+                    tprintln!(self, "• {}", account.get_list_string()?);
+                }
                 tprintln!(self, "  {}", style(receive_address.to_string()).blue());
                 printed_accounts += 1;
             }
