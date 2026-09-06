@@ -53,7 +53,6 @@ pub struct KaspaCli {
     /// 0 disables auto-sweep; otherwise the UTXO count that triggers one.
     auto_sweep_utxos: Arc<AtomicU64>,
     auto_busy: Arc<AtomicBool>,
-    auto_last_run: Mutex<Instant>,
     auto_verbose: Arc<AtomicBool>,
     /// Set at `open`; the opening report + housekeeping run on the first
     /// balance event after it, which is the moment the wallet actually knows
@@ -145,7 +144,6 @@ impl KaspaCli {
             auto_threshold_petals: Arc::new(AtomicU64::new(0)),
             auto_sweep_utxos: Arc::new(AtomicU64::new(0)),
             auto_busy: Arc::new(AtomicBool::new(false)),
-            auto_last_run: Mutex::new(Instant::now()),
             auto_verbose: Arc::new(AtomicBool::new(false)),
             open_housekeeping_pending: Arc::new(AtomicBool::new(false)),
             prompt_total_petals: Arc::new(AtomicU64::new(0)),
@@ -423,6 +421,23 @@ impl KaspaCli {
                             "Consolidated (fees {} MAGLD).",
                             kaspa_wallet_core::utils::sompi_to_kaspa_string(summary.0.aggregate_fees())
                         );
+                    }
+                    // A sweep's own outputs are unconfirmed for a moment, so
+                    // the ledger reads as empty the instant it finishes —
+                    // which made the mint that follows report "nothing to
+                    // mint" on a wallet holding six figures (founder report,
+                    // 2026-09-05). Wait for the consolidated coins to land.
+                    if loud {
+                        tprintln!(self, "Waiting for the consolidated coins to confirm...");
+                    }
+                    for _ in 0..120 {
+                        workflow_core::task::sleep(Duration::from_millis(500)).await;
+                        if !self.has_unconfirmed_spends() {
+                            let (mature, _, _) = account.utxo_context().utxo_entries_snapshot();
+                            if !mature.is_empty() {
+                                break;
+                            }
+                        }
                     }
                 }
                 Err(err) => {
