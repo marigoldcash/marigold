@@ -1147,7 +1147,7 @@ impl KaspaCli {
                 // rather than printing a value that looks like zero.
                 if account.balance().is_none() {
                     let status = if self.wallet.is_connected() {
-                        "connected — please stand by"
+                        "connecting..."
                     } else {
                         "not connected — 'connect <node>' to read the ledger"
                     };

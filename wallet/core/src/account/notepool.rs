@@ -135,6 +135,13 @@ pub async fn mint_with_progress(
     let keydata = account.prv_key_data(wallet_secret.clone()).await?;
     let signer = Arc::new(Signer::new(account.clone(), keydata, payment_secret));
 
+    // Pay a hair above the minimum relay fee. The mempool recomputes mass
+    // independently and can land a few grams above the generator's figure —
+    // a mint was rejected for being 2,400 sompi short of 3,526,400 (0.07%),
+    // which is a rounding difference, not a funding problem. A fee rate of
+    // 1 sompi/gram adds about 1% and makes the class of failure go away.
+    let fee_rate = fee_rate.or(Some(1.0));
+
     // No explicit payment output: the minted value is withheld from change via
     // `Fees::SenderPays(amount_petals)` rather than appearing as a real transparent
     // output (see this module's doc comment and NOTES.md's P7.2 entry for why this
@@ -1631,6 +1638,7 @@ pub async fn max_mintable_petals(
     abortable: &Abortable,
     progress: Option<NoteProgress>,
 ) -> Result<u64> {
+    let fee_rate = fee_rate.or(Some(1.0));
     let quantum = DENOMINATION_PETALS[0];
     // Sum the coins rather than trusting the cached Balance: it is None in
     // the window right after account activation, and reading 0 there made
