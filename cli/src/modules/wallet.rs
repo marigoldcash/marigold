@@ -176,11 +176,35 @@ impl Wallet {
                 // Show what is held, do the ledger housekeeping out loud (the
                 // backlog can be large if the wallet has been closed a while),
                 // then show the result. Sequential by construction.
-                // Runs on the first balance event — the moment the wallet
-                // actually knows its coins. Doing it inline here raced the
-                // asynchronous account selection and initial scan, and
-                // silently reported an empty ledger on a funded wallet.
-                ctx.request_open_housekeeping();
+                if ctx.wallet().is_connected() {
+                    // Runs on the first balance event — the moment the wallet
+                    // actually knows its coins. Doing it inline raced the
+                    // asynchronous account selection and initial scan.
+                    ctx.request_open_housekeeping();
+                } else {
+                    // Offline is a perfectly good state to open in: notes live
+                    // in the local vault and can be counted without a node.
+                    ctx.report_holdings().await;
+                    tprintln!(ctx, "Not connected — the figure above is your notes; the ledger needs a node.");
+                    // Offer whatever target we know: the wallet's own record
+                    // first, then the global setting. (Connecting before
+                    // opening the wallet means the wallet never recorded one,
+                    // which is why this prompt had stopped appearing.)
+                    let target = meta
+                        .as_ref()
+                        .and_then(|m| m.server.clone())
+                        .or_else(|| ctx.wallet().settings().get::<String>(WalletSettings::Server))
+                        .filter(|server| server != "public");
+                    if let Some(server) = target {
+                        let answer = ctx.term().ask(false, &format!("Connect to {server}? [Y/n]: ")).await?.trim().to_lowercase();
+                        if answer.is_empty() || answer == "y" || answer == "yes" {
+                            ctx.term().exec(format!("connect {server}")).await?;
+                            ctx.request_open_housekeeping();
+                        }
+                    } else {
+                        tprintln!(ctx, "('connect <node>' to connect — e.g. 'connect 127.0.0.1:27210' for a node on this machine)");
+                    }
+                }
 
                 if let Some(name) = &name {
                     let remember = meta.as_ref().map(|m| m.remember).unwrap_or(true);
@@ -193,15 +217,6 @@ impl Wallet {
                         ctx.store().set_client_metadata(name, Some(updated.clone())).await.ok();
                         ctx.wallet().settings().set(WalletSettings::Wallet, name.clone()).await.ok();
 
-                        if let Some(server) = &updated.server {
-                            if !ctx.wallet().is_connected() {
-                                let answer =
-                                    ctx.term().ask(false, &format!("Connect to {server}? [Y/n]: ")).await?.trim().to_lowercase();
-                                if answer.is_empty() || answer == "y" || answer == "yes" {
-                                    ctx.term().exec(format!("connect {server}")).await?;
-                                }
-                            }
-                        }
                     }
                 }
             }

@@ -1416,7 +1416,9 @@ impl Cli for KaspaCli {
         // }
 
         if (self.wallet.is_open() && !self.wallet.is_connected()) || (node_running && !self.wallet.is_connected()) {
-            prompt.push(style("N/C").red().to_string());
+            // "N/C" meant nothing to anyone who had not written it. The word
+            // costs a few columns and vanishes the moment you connect.
+            prompt.push(style("DISCONNECTED").red().to_string());
         } else if self.wallet.is_connected()
             && !self.wallet.is_synced()
             && let Some(state) = self.sync_state()

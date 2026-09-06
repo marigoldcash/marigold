@@ -55,7 +55,11 @@ impl Connect {
             // Persist what we actually connected to, so the next session (and
             // this wallet's own metadata) reflect reality — previously only
             // the `server` command wrote the setting and it drifted.
-            if let Some(explicit) = argv.first() {
+            // Record what we actually connected to — including the no-argument
+            // case, which is how most people connect and which previously
+            // recorded nothing, so the wallet could never offer to reconnect.
+            let recorded = argv.first().cloned().or_else(|| ctx.wallet().settings().get::<String>(WalletSettings::Server));
+            if let Some(explicit) = recorded.as_ref() {
                 if explicit != "public" {
                     ctx.wallet().settings().set(WalletSettings::Server, explicit.clone()).await.ok();
                     if ctx.wallet().is_open() {
