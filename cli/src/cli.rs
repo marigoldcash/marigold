@@ -732,42 +732,23 @@ impl KaspaCli {
         let mut keys = self.wallet.keys().await?;
 
         tprintln!(self);
-        // A wallet holds KEYS (recovery secrets); each key holds ACCOUNTS
-        // (balances and addresses). Upstream printed a bare key id per line
-        // with no label, so a wallet with keys that have no accounts looked
-        // like a list of mystery accounts (founder report, 2026-09-05).
-        let mut empty_keys = 0usize;
+        // Show ACCOUNTS — what a person actually has. The keys underneath are
+        // plumbing: a wallet can carry keys with no accounts (left over from
+        // an interrupted create), and listing those made a wallet look full of
+        // mystery entries. 'details' has the expert view; 'wallet tidy'
+        // removes unused keys.
+        let mut printed_accounts = 0usize;
         while let Some(key) = keys.try_next().await? {
             let mut accounts = self.wallet.accounts(Some(key.id), &guard).await?;
-            let mut printed_any = false;
-            let mut rows = Vec::new();
             while let Some(account) = accounts.try_next().await? {
                 let receive_address = account.receive_address()?;
-                rows.push((account.get_list_string()?, receive_address.to_string()));
-                printed_any = true;
-            }
-            if printed_any {
-                tprintln!(self, "• key {}", style(&key).dim());
-                for (list_string, address) in rows {
-                    tprintln!(self, "    • {}", list_string);
-                    tprintln!(self, "      {}", style(address).blue());
-                }
-            } else {
-                empty_keys += 1;
-                tprintln!(self, "• key {} {}", style(&key).dim(), style("(no accounts)").dim());
+                tprintln!(self, "• {}", account.get_list_string()?);
+                tprintln!(self, "  {}", style(receive_address.to_string()).blue());
+                printed_accounts += 1;
             }
         }
-        if empty_keys > 0 {
-            tprintln!(self);
-            tprintln!(
-                self,
-                "{}",
-                style(format!(
-                    "{empty_keys} key(s) hold no accounts — usually left over from an interrupted 'account create'. \
-                     Create one with 'account create', or ignore them; they cost nothing."
-                ))
-                .dim()
-            );
+        if printed_accounts == 0 {
+            tprintln!(self, "No accounts yet — create one with 'account create'");
         }
 
         let mut unfiltered_accounts = self.wallet.accounts(None, &guard).await?;
@@ -953,7 +934,7 @@ impl Cli for KaspaCli {
                     "help",
                 ]),
                 ("wallet", _) => Some(vec![
-                    "list", "create", "import", "open", "close", "where", "remember", "forget", "rename", "destroy", "hint", "help",
+                    "list", "create", "import", "open", "close", "where", "autoconnect", "forget", "show", "rename", "tidy", "destroy", "hint", "help",
                 ]),
                 ("account", _) => Some(vec!["create", "import", "name", "recover", "watch", "help"]),
                 ("history", _) => Some(vec!["list", "details"]),

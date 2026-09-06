@@ -202,7 +202,7 @@ impl Wallet {
                 tprintln!(ctx, "These files ARE your money and your keys — back them up accordingly.");
                 tprintln!(ctx, "");
             }
-            "remember" => {
+            "autoconnect" => {
                 if !ctx.wallet().is_open() {
                     tprintln!(ctx, "Open a wallet first");
                     return Ok(());
@@ -217,7 +217,7 @@ impl Wallet {
                         // Incognito: strip recorded details and stop recording.
                         let meta = kaspa_wallet_core::storage::local::ClientMetadata { remember: false, ..Default::default() };
                         ctx.store().set_client_metadata(&descriptor.filename, Some(meta)).await?;
-                        tprintln!(ctx, "This wallet will no longer record network/server/usage details (stored details removed).");
+                        tprintln!(ctx, "Autoconnect off: this wallet no longer stores its network or node, and won't offer to reconnect (stored details removed).");
                     }
                     Some("on") => {
                         let meta = kaspa_wallet_core::storage::local::ClientMetadata {
@@ -231,12 +231,16 @@ impl Wallet {
                             hidden: false,
                         };
                         ctx.store().set_client_metadata(&descriptor.filename, Some(meta)).await?;
-                        tprintln!(ctx, "This wallet now remembers its network and connection details.");
+                        tprintln!(ctx, "Autoconnect on: this wallet remembers its network and node, and offers to reconnect when opened.");
                     }
                     _ => {
                         let meta = ctx.store().client_metadata(&descriptor.filename).await.ok().flatten();
                         let state = meta.map(|m| m.remember).unwrap_or(true);
-                        tprintln!(ctx, "remember is {} — 'wallet remember on|off' to change", if state { "on" } else { "off" });
+                        tprintln!(
+                            ctx,
+                            "autoconnect is {} — 'wallet autoconnect on|off' to change (it remembers this wallet's network and node)",
+                            if state { "on" } else { "off" }
+                        );
                     }
                 }
             }
@@ -280,6 +284,47 @@ impl Wallet {
                     tprintln!(ctx, "'{name}' will appear in the picker again.");
                 }
             }
+            "tidy" => {
+                if !ctx.wallet().is_open() {
+                    tprintln!(ctx, "Open a wallet first");
+                    return Ok(());
+                }
+                // Keys with no accounts hold nothing and can receive nothing —
+                // they are leftovers from an interrupted 'account create'.
+                let store = ctx.store().as_prv_key_data_store()?;
+                let wallet = ctx.wallet();
+                let mut ids = Vec::new();
+                let mut stream = store.iter().await?;
+                while let Some(info) = stream.try_next().await? {
+                    let mut accounts = wallet.accounts(Some(info.id), &guard).await?;
+                    if accounts.try_next().await?.is_none() {
+                        ids.push(info.id);
+                    }
+                }
+                if ids.is_empty() {
+                    tprintln!(ctx, "Nothing to tidy — every recovery key in this wallet is in use.");
+                    return Ok(());
+                }
+                tprintln!(ctx, "");
+                tprintln!(ctx, "{} unused recovery key(s) can be removed.", ids.len());
+                tprintln!(ctx, "They were created but never used by an account, so they hold no funds and no address can");
+                tprintln!(ctx, "have received any. (If you ever imported a mnemonic that failed to finish, you can simply");
+                tprintln!(ctx, "import it again.)");
+                let confirm = ctx.term().ask(false, "Remove them? (type 'y' to confirm): ").await?.trim().to_lowercase();
+                if confirm != "y" {
+                    tprintln!(ctx, "Nothing was removed.");
+                    return Ok(());
+                }
+                let (wallet_secret, _) = ctx.ask_wallet_secret(None).await?;
+                let mut removed = 0usize;
+                for id in ids {
+                    if store.remove(&wallet_secret, &id).await.is_ok() {
+                        removed += 1;
+                    }
+                }
+                ctx.store().commit(&wallet_secret).await?;
+                tprintln!(ctx, "Removed {removed} unused key(s).");
+            }
             "hint" => {
                 if !argv.is_empty() {
                     let re = regex::Regex::new(r"wallet\s+hint\s+").unwrap();
@@ -318,7 +363,8 @@ impl Wallet {
                 ("close", "Close an opened wallet (shorthand: 'close')"),
                 ("where", "Show where the wallet, note vault, and settings files live on disk"),
                 ("rename <name>", "Change the wallet's display name (the on-disk file name is unchanged)"),
-                ("remember [on|off]", "Whether this wallet records its network/server/last-used details (in the wallet file)"),
+                ("autoconnect [on|off]", "Whether this wallet remembers its network and node, and offers to reconnect when opened"),
+                ("tidy", "Remove unused recovery keys left behind by an interrupted 'account create'"),
                 ("forget <name>", "Hide a wallet from the open picker (it is NOT deleted; 'wallet show <name>' undoes it)"),
                 ("show <name>", "Un-hide a wallet previously hidden with 'wallet forget'"),
                 ("destroy <name> [force]", "Permanently delete a wallet (refuses while it holds live notes, unless forced)"),
