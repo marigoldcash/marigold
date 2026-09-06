@@ -707,13 +707,20 @@ pub async fn rotate_notes(account: Arc<dyn Account>, wallet_secret: Secret, seri
     }
     let rotate_value: u64 = rotate_entries.iter().map(|e| DENOMINATION_PETALS[e.d as usize]).sum();
 
-    // Spare (fee-source) candidates: every Active note not being rotated, smallest first.
+    // Spare (fee-source) candidates: every Active note not being rotated,
+    // smallest first — and confirmed present in the pool, for the same reason
+    // the rotated group must be. A fee sourced from a note whose creating
+    // transaction has not landed yet fails validation exactly as a consumed
+    // one does, and the rejection names the spare's serial rather than
+    // anything the caller chose, which makes it needlessly baffling.
     let mut spares: Vec<Arc<NoteKeyInfo>> = note_key_store
         .iter()
         .await?
         .try_filter(|info| futures::future::ready(info.status == NoteStatus::Active && !serials.contains(&info.sn)))
         .try_collect()
         .await?;
+    let spare_confirmed = pool_confirmed(&account, spares.iter().map(|info| info.sn).collect()).await?;
+    spares.retain(|info| spare_confirmed.contains(&info.sn));
     spares.sort_by_key(|info| DENOMINATION_PETALS[info.d as usize]);
 
     let network_id = account.utxo_context().processor().network_id()?;
@@ -1902,13 +1909,45 @@ pub const STAMP_RESERVE: usize = 50;
 /// reserve is what makes the cycle terminate.
 pub const STAMP_MERGE_TRIGGER: usize = 100;
 
+/// Which of `serials` the node actually holds in the pool. A wallet stores a
+/// note as `Active` the moment its creating transaction is submitted — the
+/// serial is derived from the transaction id, so it is known before the chain
+/// has accepted it — and consuming one that has not landed yet is rejected
+/// outright. A failed query is an error, never an empty set: silently reading
+/// as "you hold nothing" would turn a dropped connection into a no-op that
+/// looks like tidy housekeeping.
+async fn pool_confirmed(account: &Arc<dyn Account>, serials: Vec<Hash>) -> Result<HashSet<Hash>> {
+    if serials.is_empty() {
+        return Ok(HashSet::new());
+    }
+    let entries = account.wallet().rpc_api().get_notes_by_serial(serials).await?;
+    Ok(entries.into_iter().map(|entry| entry.sn).collect())
+}
+
 pub async fn plan_merges(account: Arc<dyn Account>) -> Result<Vec<Vec<Hash>>> {
     let note_key_store = account.wallet().store().as_note_key_store()?;
-    let mut by_denomination: HashMap<usize, Vec<Hash>> = HashMap::new();
+    let mut candidates: Vec<(usize, Hash)> = Vec::new();
     let mut stream = note_key_store.iter().await?;
     while let Some(info) = stream.try_next().await? {
         if info.status == NoteStatus::Active {
-            by_denomination.entry(info.d as usize).or_default().push(info.sn);
+            candidates.push((info.d as usize, info.sn));
+        }
+    }
+
+    // Local `Active` is not the same as "exists in the pool". A note is stored
+    // Active the moment its creating transaction is SUBMITTED — its serial is
+    // derived from the transaction id, so it is known before the chain has
+    // accepted it. Planning against that set means proposing to consume notes
+    // that do not exist yet, which the node rejects outright: "consumed serial
+    // ... does not exist in the pool" (founder report, 2026-09-06). Ask the
+    // node what is really there and plan only over that.
+    let serials: Vec<Hash> = candidates.iter().map(|(_, sn)| *sn).collect();
+    let confirmed: HashSet<Hash> = pool_confirmed(&account, serials).await?;
+
+    let mut by_denomination: HashMap<usize, Vec<Hash>> = HashMap::new();
+    for (d, sn) in candidates {
+        if confirmed.contains(&sn) {
+            by_denomination.entry(d).or_default().push(sn);
         }
     }
 
@@ -1941,10 +1980,15 @@ pub async fn plan_merges(account: Arc<dyn Account>) -> Result<Vec<Vec<Hash>>> {
     Ok(plans)
 }
 
-/// Consolidate held notes into the fewest possible, ten at a time. Returns how
-/// many groups were merged. Skips a group whose fee cannot be sourced, and
-/// keeps going — a failed merge is housekeeping that can wait, never an error
-/// worth failing a receive over.
+/// Consolidate held notes into the fewest possible, ten at a time, carrying up
+/// the ladder until nothing more can merge. Returns how many groups were merged
+/// and the reason it stopped, if it stopped early.
+///
+/// `limit` is a safety bound on one call, not a work quota: the caller that
+/// wants the vault actually tidy passes a number large enough to reach the top.
+/// A small one leaves a backlog — capping a run at twelve merged eleven groups
+/// of fee stamps and one of 0.1s, and left 122 notes of 10 MAGLD sitting
+/// exactly where they were (founder report, 2026-09-06).
 pub async fn merge_held_notes(account: Arc<dyn Account>, wallet_secret: Secret, limit: usize) -> Result<(usize, Option<String>)> {
     let mut merged = 0usize;
     // Re-plan after each pass so the merge carries up the ladder in one call:

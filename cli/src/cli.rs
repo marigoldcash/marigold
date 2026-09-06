@@ -631,7 +631,7 @@ impl KaspaCli {
         // marked Superseded at submit time, so plan_merges cannot pick them
         // twice — the double-spend the gate was guarding against is handled
         // where it actually applies.
-        match kaspa_wallet_core::account::notepool::merge_held_notes(account, secret, 12).await {
+        match kaspa_wallet_core::account::notepool::merge_held_notes(account, secret, 250).await {
             Ok((merged, failure)) => {
                 if merged > 0 && loud {
                     tprintln!(self, "Consolidated {merged} group(s) of ten notes into larger ones.");
