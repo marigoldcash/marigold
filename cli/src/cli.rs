@@ -400,6 +400,21 @@ impl KaspaCli {
     /// can be large and silence would look like a hang. The once-a-minute
     /// runs stay quiet unless 'auto verbose' is on: the ledger is plumbing,
     /// and plumbing should not talk.
+    /// How many 0.01 notes to keep on hand. They are the fee stamps a pure
+    /// pool operation spends, so a wallet needs a working supply — but only a
+    /// working supply. Above this, minting stops making more.
+    pub async fn stamp_count(&self) -> usize {
+        let Ok(store) = self.wallet.store().as_note_key_store() else { return 0 };
+        let Ok(mut stream) = store.iter().await else { return 0 };
+        let mut count = 0usize;
+        while let Ok(Some(info)) = stream.try_next().await {
+            if info.status == kaspa_wallet_core::storage::NoteStatus::Active && info.d as usize == 0 {
+                count += 1;
+            }
+        }
+        count
+    }
+
     pub async fn run_housekeeping(self: &Arc<Self>, announce: bool) {
         let loud = announce || self.auto_verbose();
         // "Armed" means something is actually configured to run — holding the
@@ -478,7 +493,17 @@ impl KaspaCli {
                     // took a day to drain a mining wallet besides. What is
                     // actually expensive is the number of input coins, and
                     // that is what consolidation below is for.
-                    let amount = mintable;
+                    // Round down to whole MAGLD once the stamp reserve is
+                    // full. Minting an exact remainder like 1.32 mints two
+                    // 0.01 notes with it, and 0.01s are the fee stamps every
+                    // pool operation spends — plan_merges deliberately refuses
+                    // to merge them away, so they only ever accumulate. 125 of
+                    // them on a wallet that needs a handful is not tidy, it is
+                    // a leak (founder report, 2026-09-06). The remainder stays
+                    // on the ledger and joins the next whole MAGLD.
+                    let whole = kaspa_consensus_core::notepool::DENOMINATION_PETALS[2];
+                    let stamps = self.stamp_count().await;
+                    let amount = if stamps >= kaspa_wallet_core::account::notepool::STAMP_RESERVE { mintable / whole * whole } else { mintable };
                     if amount == 0 {
                         return Ok(None);
                     }

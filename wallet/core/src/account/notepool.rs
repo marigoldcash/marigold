@@ -1889,6 +1889,8 @@ pub async fn send_combined(
 /// and breaks its denomination. A merge costs one fee quantum (0.01), so this
 /// also keeps the cost proportionate: consolidating ten 0.1s into 1 MAGLD
 /// spends 1% of it, while the same fee against ten 1s is a tenth of a percent.
+pub const STAMP_RESERVE: usize = 20;
+
 pub async fn plan_merges(account: Arc<dyn Account>) -> Result<Vec<Vec<Hash>>> {
     let note_key_store = account.wallet().store().as_note_key_store()?;
     let mut by_denomination: HashMap<usize, Vec<Hash>> = HashMap::new();
@@ -1900,7 +1902,22 @@ pub async fn plan_merges(account: Arc<dyn Account>) -> Result<Vec<Vec<Hash>>> {
     }
 
     let mut plans = Vec::new();
-    // Skip index 0 (fee stamps) and the top denomination (nothing above it).
+    // Fee stamps (index 0) are held back up to a working reserve — every pure
+    // pool operation spends one, and merging the supply away would force later
+    // rotations into slack mode. Above the reserve they are just dust that can
+    // never merge on its own, which is how a wallet ended up holding 125 of
+    // them (founder report, 2026-09-06). Consolidate the excess only.
+    if let Some(serials) = by_denomination.get(&0) {
+        if serials.len() > STAMP_RESERVE {
+            let excess = &serials[STAMP_RESERVE..];
+            for group in excess.chunks(10) {
+                if group.len() == 10 {
+                    plans.push(group.to_vec());
+                }
+            }
+        }
+    }
+    // Skip the top denomination — nothing above it to merge into.
     for d in 1..DENOMINATION_PETALS.len() - 1 {
         let Some(serials) = by_denomination.get(&d) else { continue };
         for group in serials.chunks(10) {
