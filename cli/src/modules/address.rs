@@ -1,7 +1,7 @@
 use crate::imports::*;
 
 #[derive(Default, Handler)]
-#[help("Show or generate a new ledger address (the transparent side of your wallet)")]
+#[help("Show this account's ledger address (the transparent side of your wallet)")]
 pub struct Address;
 
 impl Address {
@@ -14,12 +14,19 @@ impl Address {
         } else {
             let op = argv.first().unwrap();
             match op.as_str() {
+                // Marigold uses one ledger address per account (2026-09-05).
+                // Explain rather than silently doing nothing — and point at
+                // the thing that actually gives a fresh key per payment.
                 "new" => {
-                    let account = ctx.wallet().account()?.as_derivation_capable()?;
-                    let ident = account.name_with_id();
-                    let new_address = account.new_receive_address().await?;
-                    tprintln!(ctx, "Generating new address for account {}", style(ident).cyan());
-                    tprintln!(ctx, "{}", style(new_address).blue());
+                    tprintln!(ctx, "");
+                    tprintln!(ctx, "This account has one ledger address, and it doesn't change:");
+                    tprintln!(ctx, "");
+                    tprintln!(ctx, "{}", style(ctx.account().await?.receive_address()?.to_string()).blue());
+                    tprintln!(ctx, "");
+                    tprintln!(ctx, "The ledger is the transparent side — it is not where privacy lives, so rotating");
+                    tprintln!(ctx, "addresses there buys little and makes recovery a guessing game. For a fresh key");
+                    tprintln!(ctx, "per payment, use notes: 'note request' issues one per invoice.");
+                    tprintln!(ctx, "");
                 }
                 v => {
                     tprintln!(ctx, "unknown command: '{v}'\r\n");
@@ -32,7 +39,7 @@ impl Address {
     }
 
     async fn display_help(self: Arc<Self>, ctx: Arc<KaspaCli>, _argv: Vec<String>) -> Result<()> {
-        ctx.term().help(&[("address [new]", "Show the current or generate a new ledger address")], None)?;
+        ctx.term().help(&[("address", "Show this account's ledger address (one per account; it never changes)")], None)?;
 
         Ok(())
     }

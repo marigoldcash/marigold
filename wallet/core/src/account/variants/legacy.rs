@@ -164,7 +164,16 @@ impl Account for Legacy {
     }
 
     fn change_address(&self) -> Result<Address> {
-        self.derivation.change_address_manager().current_address()
+        // Single ledger address per account (decided 2026-09-05): change
+        // returns to the same address the account receives on, instead of a
+        // separate change-branch address. The ledger is a loading dock, not
+        // the privacy layer — privacy lives in notes, and rotating addresses
+        // on a fully transparent side buys little (change-output heuristics
+        // relink them anyway) while costing gap-limit scans and probabilistic
+        // recovery. The derivation managers still TRACK previously derived
+        // addresses, so funds already sitting on old change addresses remain
+        // visible and spendable.
+        self.receive_address()
     }
 
     // default account address (receive[0])
