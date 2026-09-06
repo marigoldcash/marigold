@@ -243,6 +243,9 @@ impl KaspaCli {
         if !self.auto_mint_armed() || self.auto_busy.load(Ordering::SeqCst) || !self.wallet.is_connected() {
             return;
         }
+        if self.has_unconfirmed_spends() {
+            return;
+        }
         {
             let last = self.auto_last_run.lock().unwrap();
             if last.elapsed().as_secs() < 60 {
@@ -277,7 +280,7 @@ impl KaspaCli {
         // it produces notes rather than only paying fees to shuffle coins
         // around. When both are armed, minting wins and sweeping stays a
         // fallback for the storage-mass case.
-        if self.auto_mint_threshold() > 0 {
+        if self.auto_mint_threshold() > 0 || self.has_unconfirmed_spends() {
             return;
         }
         let Ok(account) = self.wallet.account() else { return };
@@ -305,24 +308,11 @@ impl KaspaCli {
             tprintln!(this, "{NOTIFY} auto-sweep: consolidating {before} coins (this can take a while and costs fees)...");
             let notifier: Option<kaspa_wallet_core::account::GenerationNotifier> = None;
             match account.clone().sweep(secret, None, None, &abortable, notifier).await {
-                Ok(summary) => {
-                    // Rebuild the in-memory coin list from the chain. A
-                    // consolidation of this size produces a torrent of change
-                    // notifications, and incremental bookkeeping can fall out
-                    // of step with reality — which shows up as a balance far
-                    // below the truth and, worse, as refusing to spend money
-                    // the wallet actually has (founder report, 2026-09-05).
-                    // Re-reading is what reopening the wallet does; do it here
-                    // so nobody has to.
-                    if let Err(err) = account.clone().scan(None, None).await {
-                        tprintln!(this, "{NOTIFY} auto-sweep: balance refresh failed ({err}) - reopen the wallet to resync");
-                    }
-                    tprintln!(
-                        this,
-                        "{NOTIFY} auto-sweep: done, fees {}",
-                        kaspa_wallet_core::utils::sompi_to_kaspa_string(summary.0.aggregate_fees())
-                    );
-                }
+                Ok(summary) => tprintln!(
+                    this,
+                    "{NOTIFY} auto-sweep: done, fees {}",
+                    kaspa_wallet_core::utils::sompi_to_kaspa_string(summary.0.aggregate_fees())
+                ),
                 Err(err) => tprintln!(this, "{NOTIFY} auto-sweep failed: {err}"),
             }
             this.auto_busy.store(false, Ordering::SeqCst);
@@ -351,6 +341,16 @@ impl KaspaCli {
         self.auto_threshold_petals.load(Ordering::SeqCst)
     }
 
+    /// True while this wallet has transactions it submitted that the chain has
+    /// not confirmed yet. Starting another automated spend during that window
+    /// is how a wallet double-spends its own inputs: the coins are gone from
+    /// its point of view only once the spending transaction confirms, and the
+    /// node rejects the second attempt with "already spent in the mempool"
+    /// (founder report, 2026-09-05).
+    fn has_unconfirmed_spends(&self) -> bool {
+        self.wallet.account().ok().and_then(|account| account.balance()).map(|balance| balance.outgoing > 0).unwrap_or(false)
+    }
+
     /// Turn matured ledger balance into notes once it crosses the threshold.
     /// Runs off the balance-notification stream; one at a time, rate limited,
     /// and quiet unless it actually does something. A mint consumes the
@@ -360,6 +360,9 @@ impl KaspaCli {
     /// ceiling, it consolidates first and mints on the next tick.
     fn maybe_auto_mint(self: &Arc<Self>) {
         if !self.auto_mint_armed() || self.auto_busy.load(Ordering::SeqCst) || !self.wallet.is_connected() {
+            return;
+        }
+        if self.has_unconfirmed_spends() {
             return;
         }
         let threshold = self.auto_mint_threshold();
@@ -407,11 +410,6 @@ impl KaspaCli {
 
             match result {
                 Ok(Some((amount, notes))) => {
-                    // Same reasoning as the sweep path: a mint that swept many
-                    // coins into notes can leave the incremental view behind.
-                    if let Err(err) = account.clone().scan(None, None).await {
-                        tprintln!(this, "{NOTIFY} auto-mint: balance refresh failed ({err}) - reopen the wallet to resync");
-                    }
                     tprintln!(
                         this,
                         "{NOTIFY} auto-mint: {} MAGLD -> {notes} note(s)",

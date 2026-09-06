@@ -43,11 +43,6 @@ impl Sweep {
             .await?;
 
         tprintln!(ctx, "  submitted {} transaction(s) in total", submitted.load(Ordering::Relaxed));
-        // See the auto-sweep path: a large consolidation can leave the
-        // in-memory coin list behind, which shows as a wrong balance.
-        if let Err(err) = account.clone().scan(None, None).await {
-            tprintln!(ctx, "(balance refresh failed: {err} — reopen the wallet to resync)");
-        }
         tprintln!(ctx, "Sweep: {summary}");
 
         Ok(())
