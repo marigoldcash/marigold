@@ -43,10 +43,18 @@ Restart=on-failure
 RestartSec=5
 LimitNOFILE=65536
 
-# Sandboxing — marigoldd only ever needs to write inside its own appdir.
+# Sandboxing — marigoldd only ever needs to write inside its own appdir,
+# with one exception: the pruning processor builds its proof/anticone data in
+# a temp directory (/tmp/rusty-kaspa). ProtectSystem=strict makes that
+# read-only, so the node ran happily for days and then crash-looped the moment
+# it first reached a pruning point — panicking with ReadOnlyFilesystem and, on
+# the way down, corrupting its own database (8-core, 2026-09-06).
+# PrivateTmp gives it a writable /tmp of its own, which is also stricter than
+# sharing the host's.
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
+PrivateTmp=true
 ReadWritePaths={{ marigold_data_root }}/marigoldd-{{ marigold_network }}
 
 [Install]
