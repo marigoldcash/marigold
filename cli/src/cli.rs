@@ -49,6 +49,7 @@ pub struct KaspaCli {
     /// open and auto-mint is armed (a hot-wallet posture, entered knowingly);
     /// it is never written anywhere and is dropped on close/disarm.
     auto_secret: Mutex<Option<Secret>>,
+    auto_payment_secret: Mutex<Option<Secret>>,
     auto_threshold_petals: Arc<AtomicU64>,
     /// 0 disables auto-sweep; otherwise the UTXO count that triggers one.
     auto_sweep_utxos: Arc<AtomicU64>,
@@ -141,6 +142,7 @@ impl KaspaCli {
             notifier: Notifier::try_new()?,
             sync_state: Mutex::new(None),
             auto_secret: Mutex::new(None),
+            auto_payment_secret: Mutex::new(None),
             auto_threshold_petals: Arc::new(AtomicU64::new(0)),
             auto_sweep_utxos: Arc::new(AtomicU64::new(0)),
             auto_busy: Arc::new(AtomicBool::new(false)),
@@ -217,18 +219,38 @@ impl KaspaCli {
 
     /// Arm auto-mint for this session with the secret already in hand (the
     /// one typed at `open`) — no extra prompt, and nothing persisted.
-    pub fn arm_auto_mint(&self, secret: Secret, threshold_petals: u64) {
+    pub fn arm_auto_mint(&self, secret: Secret, payment_secret: Option<Secret>, threshold_petals: u64) {
         *self.auto_secret.lock().unwrap() = Some(secret);
+        *self.auto_payment_secret.lock().unwrap() = payment_secret;
         self.auto_threshold_petals.store(threshold_petals, Ordering::SeqCst);
+    }
+
+    /// Check a password against the account's own key data before arming
+    /// anything with it. Housekeeping signs in the background, an hour after
+    /// the prompt has scrolled away — a typo accepted here becomes an
+    /// automation that quietly does nothing, which is the worst way to find out.
+    pub async fn verify_wallet_secret(&self, secret: &Secret, payment_secret: Option<&Secret>) -> Result<()> {
+        let account = self.wallet().account()?;
+        let id = account.prv_key_data_id()?;
+        let key_data = match self.wallet().get_prv_key_data(secret, id).await {
+            Ok(Some(key_data)) => key_data,
+            Ok(None) => return Err(Error::custom("this account has no key to sign with")),
+            Err(_) => return Err(Error::custom("That password does not open this wallet")),
+        };
+        // The wallet password unwraps the key store; a bip39 passphrase, if the
+        // key has one, unwraps the key itself. Automation needs both.
+        key_data.get_xprv(payment_secret).map_err(|_| Error::custom("That passphrase does not unlock this account's key"))?;
+        Ok(())
     }
 
     /// Arm auto-sweep (consolidation only — no minting). Independent of
     /// auto-mint: a wallet that deliberately holds ledger balance still wants
     /// its dust consolidated.
-    pub fn arm_auto_sweep(&self, secret: Secret, utxo_threshold: u64) {
+    pub fn arm_auto_sweep(&self, secret: Secret, payment_secret: Option<Secret>, utxo_threshold: u64) {
         let mut guard = self.auto_secret.lock().unwrap();
         if guard.is_none() {
             *guard = Some(secret);
+            *self.auto_payment_secret.lock().unwrap() = payment_secret;
         }
         drop(guard);
         self.auto_sweep_utxos.store(utxo_threshold, Ordering::SeqCst);
@@ -240,6 +262,7 @@ impl KaspaCli {
         self.auto_sweep_utxos.store(0, Ordering::SeqCst);
         if self.auto_threshold_petals.load(Ordering::SeqCst) == 0 {
             self.auto_secret.lock().unwrap().take();
+            self.auto_payment_secret.lock().unwrap().take();
         }
     }
 
@@ -251,6 +274,7 @@ impl KaspaCli {
         self.auto_threshold_petals.store(0, Ordering::SeqCst);
         if self.auto_sweep_threshold() == 0 {
             self.auto_secret.lock().unwrap().take();
+            self.auto_payment_secret.lock().unwrap().take();
         }
     }
 
@@ -259,6 +283,7 @@ impl KaspaCli {
         self.auto_threshold_petals.store(0, Ordering::SeqCst);
         self.auto_sweep_utxos.store(0, Ordering::SeqCst);
         self.auto_secret.lock().unwrap().take();
+        self.auto_payment_secret.lock().unwrap().take();
         self.prompt_total_valid.store(false, Ordering::SeqCst);
     }
 
@@ -404,6 +429,7 @@ impl KaspaCli {
             self.auto_busy.store(false, Ordering::SeqCst);
             return;
         };
+        let payment_secret = self.auto_payment_secret.lock().unwrap().clone();
 
         // --- 1. consolidate, if the ledger has broken into too many pieces ---
         let sweep_threshold = self.auto_sweep_threshold();
@@ -413,7 +439,7 @@ impl KaspaCli {
                 tprintln!(self, "Consolidating {} ledger pieces — this can take a while...", pieces.separated_string());
             }
             let notifier: Option<kaspa_wallet_core::account::GenerationNotifier> = None;
-            match account.clone().sweep(secret.clone(), None, None, &abortable, notifier).await {
+            match account.clone().sweep(secret.clone(), payment_secret.clone(), None, &abortable, notifier).await {
                 Ok(summary) => {
                     if loud {
                         tprintln!(
@@ -502,7 +528,7 @@ impl KaspaCli {
                     let result = kaspa_wallet_core::account::notepool::mint(
                         account.clone(),
                         secret.clone(),
-                        None,
+                        payment_secret.clone(),
                         amount,
                         None,
                         &abortable,
@@ -527,7 +553,19 @@ impl KaspaCli {
                         }
                     }
                     Err(err) => {
-                        if loud {
+                        // A decrypt failure will fail identically forever.
+                        // Retrying it every minute in silence is how an
+                        // automation ends up doing nothing for a week without
+                        // anyone noticing, so this one always speaks up.
+                        if matches!(
+                            err,
+                            kaspa_wallet_core::error::Error::Chacha20poly1305(_)
+                                | kaspa_wallet_core::error::Error::WalletDecrypt(_)
+                        ) {
+                            self.disarm_auto_mint();
+                            tprintln!(self, "Auto-mint turned itself off: the stored password no longer opens this wallet.");
+                            tprintln!(self, "Run 'auto on' and enter it again.");
+                        } else if loud {
                             tprintln!(self, "Minting stopped: {err}");
                         }
                     }

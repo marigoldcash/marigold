@@ -99,8 +99,13 @@ impl Auto {
                         }
                         let threshold = meta.auto_sweep_utxo_threshold;
                         ctx.store().set_client_metadata(&descriptor.filename, Some(meta)).await?;
-                        let (wallet_secret, _) = ctx.ask_wallet_secret(None).await?;
-                        ctx.arm_auto_sweep(wallet_secret, threshold);
+                        let account = ctx.wallet().account().ok();
+                        let (wallet_secret, payment_secret) = ctx.ask_wallet_secret(account.as_ref()).await?;
+                        if let Err(err) = ctx.verify_wallet_secret(&wallet_secret, payment_secret.as_ref()).await {
+                            tprintln!(ctx, "{err} — nothing was turned on.");
+                            return Ok(());
+                        }
+                        ctx.arm_auto_sweep(wallet_secret, payment_secret, threshold);
                         tprintln!(ctx, "auto-sweep on: coins are consolidated once this account holds more than {threshold}.");
                     }
                     Some(count) => {
@@ -118,8 +123,13 @@ impl Auto {
                         meta.auto_sweep = true;
                         meta.auto_sweep_utxo_threshold = threshold;
                         ctx.store().set_client_metadata(&descriptor.filename, Some(meta)).await?;
-                        let (wallet_secret, _) = ctx.ask_wallet_secret(None).await?;
-                        ctx.arm_auto_sweep(wallet_secret, threshold);
+                        let account = ctx.wallet().account().ok();
+                        let (wallet_secret, payment_secret) = ctx.ask_wallet_secret(account.as_ref()).await?;
+                        if let Err(err) = ctx.verify_wallet_secret(&wallet_secret, payment_secret.as_ref()).await {
+                            tprintln!(ctx, "{err} — nothing was turned on.");
+                            return Ok(());
+                        }
+                        ctx.arm_auto_sweep(wallet_secret, payment_secret, threshold);
                         tprintln!(ctx, "auto-sweep on: coins are consolidated once this account holds more than {threshold}.");
                     }
                 }
@@ -131,8 +141,13 @@ impl Auto {
                 }
                 let threshold = meta.auto_mint_threshold_petals;
                 ctx.store().set_client_metadata(&descriptor.filename, Some(meta)).await?;
-                let (wallet_secret, _) = ctx.ask_wallet_secret(None).await?;
-                ctx.arm_auto_mint(wallet_secret, threshold);
+                let account = ctx.wallet().account().ok();
+                        let (wallet_secret, payment_secret) = ctx.ask_wallet_secret(account.as_ref()).await?;
+                        if let Err(err) = ctx.verify_wallet_secret(&wallet_secret, payment_secret.as_ref()).await {
+                            tprintln!(ctx, "{err} — nothing was turned on.");
+                            return Ok(());
+                        }
+                ctx.arm_auto_mint(wallet_secret, payment_secret, threshold);
                 tprintln!(ctx, "auto-mint on: ledger balance above {} MAGLD becomes notes automatically.", sompi_to_kaspa_string(threshold));
             }
             Some("off") => {
@@ -147,8 +162,13 @@ impl Auto {
                 let armed = meta.auto_mint;
                 ctx.store().set_client_metadata(&descriptor.filename, Some(meta)).await?;
                 if armed && ctx.auto_mint_armed() {
-                    let (wallet_secret, _) = ctx.ask_wallet_secret(None).await?;
-                    ctx.arm_auto_mint(wallet_secret, threshold);
+                    let account = ctx.wallet().account().ok();
+                        let (wallet_secret, payment_secret) = ctx.ask_wallet_secret(account.as_ref()).await?;
+                        if let Err(err) = ctx.verify_wallet_secret(&wallet_secret, payment_secret.as_ref()).await {
+                            tprintln!(ctx, "{err} — nothing was turned on.");
+                            return Ok(());
+                        }
+                    ctx.arm_auto_mint(wallet_secret, payment_secret, threshold);
                 }
                 tprintln!(ctx, "auto-mint threshold set to {} MAGLD.", sompi_to_kaspa_string(threshold));
                 if !armed {

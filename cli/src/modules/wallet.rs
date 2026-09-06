@@ -158,21 +158,34 @@ impl Wallet {
                 // person should not have to learn about it. Both arm with the
                 // password just typed — no second prompt, nothing persisted.
                 // On unless the user has explicitly configured otherwise.
+                // A bip39 passphrase on the account key can't be guessed from
+                // the wallet password, and asking for a second password at
+                // every open would tax the majority who have none. Those
+                // wallets arm through 'auto on' instead, which asks for both.
+                let needs_passphrase = match ctx.wallet().account() {
+                    Ok(account) => ctx.wallet().is_account_key_encrypted(&account).await.ok().flatten().unwrap_or(false),
+                    Err(_) => false,
+                };
                 let configured = meta.as_ref().map(|m| m.auto_configured).unwrap_or(false);
                 let auto_mint_on = if configured { meta.as_ref().map(|m| m.auto_mint).unwrap_or(true) } else { true };
                 let auto_sweep_on = if configured { meta.as_ref().map(|m| m.auto_sweep).unwrap_or(true) } else { true };
-                if auto_sweep_on {
+                if needs_passphrase && (auto_mint_on || auto_sweep_on) {
+                    tprintln!(ctx, "");
+                    tprintln!(ctx, "This account's key has its own passphrase, so the automatic housekeeping");
+                    tprintln!(ctx, "cannot sign on its own. Run 'auto on' to turn it on for this session.");
+                }
+                if auto_sweep_on && !needs_passphrase {
                     let threshold = meta
                         .as_ref()
                         .map(|m| m.auto_sweep_utxo_threshold)
                         .filter(|t| *t > 0)
                         .unwrap_or(crate::modules::auto::DEFAULT_SWEEP_UTXOS);
-                    ctx.arm_auto_sweep(wallet_secret.clone(), threshold);
+                    ctx.arm_auto_sweep(wallet_secret.clone(), None, threshold);
                 }
-                if auto_mint_on {
+                if auto_mint_on && !needs_passphrase {
                     let threshold =
                         meta.as_ref().map(|m| m.auto_mint_threshold_petals).filter(|t| *t > 0).unwrap_or(100_000_000);
-                    ctx.arm_auto_mint(wallet_secret.clone(), threshold);
+                    ctx.arm_auto_mint(wallet_secret.clone(), None, threshold);
                 }
 
                 // Show what is held, do the ledger housekeeping out loud (the
