@@ -430,13 +430,22 @@ impl KaspaCli {
                     if loud {
                         tprintln!(self, "Waiting for the consolidated coins to confirm...");
                     }
+                    // Wait for the consolidated value itself, not merely for
+                    // the first coin to mature: a sweep produces one output
+                    // per batch transaction, so most of the swept balance is
+                    // still confirming when the first few land. Breaking early
+                    // made the mint see 0.6 MAGLD of a 116,000 MAGLD wallet.
+                    let want = self.auto_mint_threshold().max(1);
                     for _ in 0..120 {
                         workflow_core::task::sleep(Duration::from_millis(500)).await;
-                        if !self.has_unconfirmed_spends() {
-                            let (mature, _, _) = account.utxo_context().utxo_entries_snapshot();
-                            if !mature.is_empty() {
-                                break;
-                            }
+                        if self.has_unconfirmed_spends() {
+                            continue;
+                        }
+                        let (mature, pending, _) = account.utxo_context().utxo_entries_snapshot();
+                        let mature_value: u64 = mature.iter().map(|e| e.amount()).sum();
+                        // Enough to mint, or nothing left in flight to wait for.
+                        if mature_value >= want || pending.is_empty() {
+                            break;
                         }
                     }
                 }
@@ -459,12 +468,23 @@ impl KaspaCli {
             let (mature_entries, _, _) = account.utxo_context().utxo_entries_snapshot();
             let mature: u64 = mature_entries.iter().map(|entry| entry.amount()).sum();
             if loud && mature < threshold {
-                tprintln!(
-                    self,
-                    "Nothing to mint: ledger holds {} MAGLD, threshold is {}.",
-                    kaspa_wallet_core::utils::sompi_to_kaspa_string(mature),
-                    kaspa_wallet_core::utils::sompi_to_kaspa_string(threshold)
-                );
+                let (_, pending, stasis) = account.utxo_context().utxo_entries_snapshot();
+                let waiting: u64 = pending.iter().chain(stasis.iter()).map(|e| e.amount()).sum();
+                if waiting > 0 {
+                    tprintln!(
+                        self,
+                        "Nothing to mint yet: {} MAGLD is confirming (threshold {}). It will be minted as it lands.",
+                        kaspa_wallet_core::utils::sompi_to_kaspa_string(waiting),
+                        kaspa_wallet_core::utils::sompi_to_kaspa_string(threshold)
+                    );
+                } else {
+                    tprintln!(
+                        self,
+                        "Nothing to mint: ledger holds {} MAGLD, threshold is {}.",
+                        kaspa_wallet_core::utils::sompi_to_kaspa_string(mature),
+                        kaspa_wallet_core::utils::sompi_to_kaspa_string(threshold)
+                    );
+                }
             }
             if mature >= threshold {
                 let minted = async {
