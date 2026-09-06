@@ -43,6 +43,12 @@ pub struct ClientMetadata {
     /// UTXO count above which a sweep is triggered (0 = use the default).
     #[serde(default)]
     pub auto_sweep_utxo_threshold: u64,
+    /// Set once the user has touched the `auto` command. Until then the
+    /// automation defaults are ON — housekeeping the ledger is not a thing a
+    /// person should have to discover, and an untouched wallet must not be
+    /// mistaken for one that opted out.
+    #[serde(default)]
+    pub auto_configured: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

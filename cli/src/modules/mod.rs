@@ -13,6 +13,7 @@ pub mod create_unsigned_tx;
 pub mod details;
 pub mod disconnect;
 pub mod estimate;
+pub mod exchange;
 pub mod exit;
 pub mod export;
 pub mod guide;
@@ -34,7 +35,6 @@ pub mod quit;
 pub mod reload;
 pub mod rpc;
 pub mod select;
-pub mod send;
 pub mod server;
 pub mod settings;
 pub mod sign;
@@ -62,8 +62,8 @@ pub fn register_handlers(cli: &Arc<KaspaCli>) -> Result<()> {
         cli,
         cli.handlers(),
         [
-            account, address, advanced, auto, balance, close, connect, details, disconnect, estimate, exit, export, guide, help, history, rpc, list,
-            miner, message, monitor, mute, network, node, note, open, ping, pskb, quit, reload, select, send, server, settings, sweep,
+            account, address, advanced, auto, balance, close, connect, details, disconnect, estimate, exchange, exit, export, guide, help, history, rpc, list,
+            miner, message, monitor, mute, network, node, note, open, ping, pskb, quit, reload, select, server, settings, sweep,
             track, transfer, utxos, wallet,
             // halt,
             // theme,  start, stop

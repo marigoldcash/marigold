@@ -63,6 +63,7 @@ impl Note {
             "pos" => self.pos(&ctx, argv).await,
             "balance" => self.balance(&ctx).await,
             "list" => self.list(&ctx).await,
+            "history" => self.history(&ctx).await,
             "vault" => self.vault(&ctx, argv).await,
             "help" => self.display_help(ctx, argv).await,
             v => {
@@ -664,51 +665,76 @@ impl Note {
         Ok(())
     }
 
+    /// `note list` — what you hold. Superseded notes are history, not
+    /// holdings, and on an active wallet they pile up quickly; they live in
+    /// `note history` instead.
     async fn list(&self, ctx: &Arc<KaspaCli>) -> Result<()> {
         let note_key_store = ctx.wallet().store().as_note_key_store()?;
         let mut stream = note_key_store.iter().await?;
         let mut notes = Vec::new();
+        let mut retired = 0usize;
         while let Some(info) = stream.try_next().await? {
-            notes.push(info);
+            match info.status {
+                NoteStatus::Superseded => retired += 1,
+                _ => notes.push(info),
+            }
         }
         if notes.is_empty() {
             tprintln!(ctx, "no notes held\r\n");
             return Ok(());
         }
-        // Active first (largest denomination first — matches `note balance`'s
-        // active-only view), then handed-over, then superseded history.
-        let status_rank = |status: &NoteStatus| match status {
-            NoteStatus::Active => 0u8,
-            NoteStatus::HandedOver => 1,
-            NoteStatus::Superseded => 2,
-        };
-        notes.sort_by(|a, b| status_rank(&a.status).cmp(&status_rank(&b.status)).then(b.d.cmp(&a.d)).then(a.sn.cmp(&b.sn)));
-        let mut current: Option<u8> = None;
-        for info in &notes {
-            let rank = status_rank(&info.status);
-            if current != Some(rank) {
-                current = Some(rank);
-                let header = match info.status {
-                    NoteStatus::Active => "active:",
-                    NoteStatus::HandedOver => "handed over (awaiting the receiver's rotation):",
-                    NoteStatus::Superseded => "superseded (spent history):",
-                };
-                tprintln!(ctx, "{}", style(header).dim());
-            }
+        notes.sort_by(|a, b| b.d.cmp(&a.d).then(a.sn.cmp(&b.sn)));
+        let mut handed_over_header = false;
+        for info in notes.iter().filter(|i| i.status == NoteStatus::Active) {
             tprintln!(
                 ctx,
                 "  {} - {} MAGLD - {:?}",
                 info.sn,
                 sompi_to_kaspa_string(DENOMINATION_PETALS[info.d as usize]),
-                info.provenance,
+                info.provenance
             );
+        }
+        for info in notes.iter().filter(|i| i.status == NoteStatus::HandedOver) {
+            if !handed_over_header {
+                tprintln!(ctx, "{}", style("handed over (awaiting the receiver's rotation):").dim());
+                handed_over_header = true;
+            }
+            tprintln!(ctx, "  {} - {} MAGLD", info.sn, sompi_to_kaspa_string(DENOMINATION_PETALS[info.d as usize]));
+        }
+        if retired > 0 {
+            tprintln!(ctx, "{}", style(format!("({retired} spent note(s) in 'note history')")).dim());
         }
         tprintln!(ctx, "");
 
         Ok(())
     }
 
-    /// `note vault <create|backup|verify|restore|export|import>` (FORK-PLAN P7.6).
+    /// `note history` — notes this wallet once held and has since spent.
+    /// The vault keeps them as tombstones with the time they were last
+    /// rotated, which is the closest thing to a note-spend record: the pool
+    /// records that a serial was retired, never who retired it.
+    async fn history(&self, ctx: &Arc<KaspaCli>) -> Result<()> {
+        let note_key_store = ctx.wallet().store().as_note_key_store()?;
+        let mut stream = note_key_store.iter().await?;
+        let mut retired = Vec::new();
+        while let Some(info) = stream.try_next().await? {
+            if info.status == NoteStatus::Superseded {
+                retired.push(info);
+            }
+        }
+        if retired.is_empty() {
+            tprintln!(ctx, "no spent notes yet\r\n");
+            return Ok(());
+        }
+        retired.sort_by(|a, b| b.d.cmp(&a.d).then(a.sn.cmp(&b.sn)));
+        tprintln!(ctx, "spent notes ({}):", retired.len());
+        for info in &retired {
+            tprintln!(ctx, "  {} - {} MAGLD", info.sn, sompi_to_kaspa_string(DENOMINATION_PETALS[info.d as usize]));
+        }
+        tprintln!(ctx, "");
+        Ok(())
+    }
+
     async fn vault(&self, ctx: &Arc<KaspaCli>, mut argv: Vec<String>) -> Result<()> {
         if argv.is_empty() {
             return self.vault_help(ctx).await;
@@ -1021,7 +1047,8 @@ impl Note {
                 ("export <serial>", "Bearer-export a note (auto-isolates first if its key is shared)"),
                 ("pos <amount>", "One POS checkout: fresh landing-pad pk, wait for payment, auto-sweep"),
                 ("balance", "Show note balance by denomination"),
-                ("list", "List every held note (serial, denomination, provenance, status)"),
+                ("list", "List the notes you hold"),
+                ("history", "List notes this wallet has spent"),
                 ("vault <cmd>", "Note vault: create/backup/verify/restore/export/import (see 'note vault')"),
             ],
             None,

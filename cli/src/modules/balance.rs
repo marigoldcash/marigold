@@ -13,16 +13,6 @@ impl Balance {
         let account = ctx.wallet().account()?;
 
         tprintln!(ctx, "");
-        let network_id = ctx.wallet().network_id()?;
-        let network_type = NetworkType::from(network_id);
-        match account.balance() {
-            Some(balance) => {
-                let strings = BalanceStrings::from((Some(&balance), &network_type, None));
-                tprintln!(ctx, "ledger balance: {strings}   ({} UTXOs, {} pending)", balance.mature_utxo_count, balance.pending_utxo_count);
-            }
-            None => tprintln!(ctx, "ledger balance: n/a (connect and open a wallet first)"),
-        }
-
         let note_key_store = ctx.wallet().store().as_note_key_store()?;
         let mut stream = note_key_store.iter().await?;
         let mut counts = [0u64; DENOMINATION_PETALS.len()];
@@ -33,10 +23,27 @@ impl Balance {
                 total += DENOMINATION_PETALS[info.d as usize];
             }
         }
-        tprintln!(ctx, "note balance:   {} MAGLD", sompi_to_kaspa_string(total));
+        tprintln!(ctx, "notes:  {} MAGLD", sompi_to_kaspa_string(total));
         for (index, count) in counts.iter().enumerate().rev() {
             if *count > 0 {
                 tprintln!(ctx, "  {} x {} MAGLD", count, sompi_to_kaspa_string(DENOMINATION_PETALS[index]));
+            }
+        }
+
+        // The ledger comes last and only when it holds something — for anyone
+        // but an exchange it should be empty most of the time.
+        let network_id = ctx.wallet().network_id()?;
+        let network_type = NetworkType::from(network_id);
+        if let Some(balance) = account.balance() {
+            if balance.mature > 0 || balance.pending > 0 {
+                let strings = BalanceStrings::from((Some(&balance), &network_type, None));
+                tprintln!(ctx, "");
+                tprintln!(
+                    ctx,
+                    "ledger: {strings}   ({} piece{})",
+                    balance.mature_utxo_count,
+                    if balance.mature_utxo_count == 1 { "" } else { "s" }
+                );
             }
         }
 

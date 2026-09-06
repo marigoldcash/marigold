@@ -428,6 +428,55 @@ impl Interface for LocalStore {
         Ok(())
     }
 
+    /// A wallet is not one file. It is `<name>.wallet` alongside a
+    /// `<name>.notes` vault and a `<name>.transactions` folder, and the name is
+    /// the only thing tying the three together — rename the file alone and the
+    /// notes are orphaned. So all three move as a unit, and only while the
+    /// wallet is closed, since an open wallet's handles hold the old paths.
+    async fn rename_storage(&self, from: &str, to: &str) -> Result<()> {
+        if self.inner.lock().unwrap().is_some() {
+            return Err(Error::Custom("close the wallet before renaming its files".to_string()));
+        }
+        let location = self.location.lock().unwrap().clone().ok_or(Error::WalletNotOpen)?;
+        let folder = fs::resolve_path(&location.folder)?;
+
+        let from_file = folder.join(super::wallet_file_name(from));
+        let to_file = folder.join(super::wallet_file_name(to));
+        if !fs::exists(&from_file).await? {
+            return Err(Error::NoWalletInStorage(from.to_string()));
+        }
+        if fs::exists(&to_file).await? {
+            return Err(Error::WalletAlreadyExists);
+        }
+
+        // The companion folders are moved FIRST: if one of those fails the
+        // wallet file is still where it was and the wallet still opens. Moving
+        // the file first and then failing would leave a wallet that opens under
+        // the new name with an empty vault, which is the one outcome worth
+        // engineering against.
+        let mut moved: Vec<(std::path::PathBuf, std::path::PathBuf)> = Vec::new();
+        for suffix in ["notes", "transactions"] {
+            let src = folder.join(format!("{from}.{suffix}"));
+            let dst = folder.join(format!("{to}.{suffix}"));
+            if fs::exists(&src).await? {
+                if let Err(err) = std::fs::rename(&src, &dst) {
+                    for (a, b) in moved.iter().rev() {
+                        std::fs::rename(b, a).ok();
+                    }
+                    return Err(Error::Custom(format!("could not move {from}.{suffix}: {err}")));
+                }
+                moved.push((src, dst));
+            }
+        }
+        if let Err(err) = std::fs::rename(&from_file, &to_file) {
+            for (a, b) in moved.iter().rev() {
+                std::fs::rename(b, a).ok();
+            }
+            return Err(Error::Custom(format!("could not move the wallet file: {err}")));
+        }
+        Ok(())
+    }
+
     /// change the secret of the currently open wallet
     async fn change_secret(&self, old_wallet_secret: &Secret, new_wallet_secret: &Secret) -> Result<()> {
         let inner = self.inner.lock().unwrap().clone().ok_or(Error::WalletNotOpen)?;

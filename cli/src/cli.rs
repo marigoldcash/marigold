@@ -535,7 +535,37 @@ impl KaspaCli {
             }
         }
 
-        // --- 3. tidy the notes themselves (ten of a size become one larger) ---
+        // --- 3. remove recovery keys no account uses ---
+        // Left behind by an interrupted 'account create'; they hold nothing
+        // and no address can have received to them. Cleaning them up is
+        // housekeeping, not a decision to put to the user.
+        if let Ok(store) = self.wallet.store().as_prv_key_data_store() {
+            if let Ok(mut stream) = store.iter().await {
+                let mut orphans = Vec::new();
+                let guard = self.wallet.guard();
+                let guard = guard.lock().await;
+                while let Ok(Some(info)) = stream.try_next().await {
+                    if let Ok(mut accounts) = self.wallet.accounts(Some(info.id), &guard).await {
+                        if accounts.try_next().await.ok().flatten().is_none() {
+                            orphans.push(info.id);
+                        }
+                    }
+                }
+                drop(guard);
+                if !orphans.is_empty() {
+                    let removed = orphans.len();
+                    for id in orphans {
+                        store.remove(&secret, &id).await.ok();
+                    }
+                    self.wallet.store().commit(&secret).await.ok();
+                    if loud {
+                        tprintln!(self, "Removed {removed} unused recovery key(s).");
+                    }
+                }
+            }
+        }
+
+        // --- 4. tidy the notes themselves (ten of a size become one larger) ---
         if !self.has_unconfirmed_spends() {
             match kaspa_wallet_core::account::notepool::merge_held_notes(account, secret, 4).await {
                 Ok(merged) if merged > 0 && loud => {
@@ -1350,7 +1380,7 @@ impl Cli for KaspaCli {
             match (verb, sub) {
                 ("note", "vault") => Some(vec!["create", "backup", "verify", "restore", "export", "import"]),
                 ("note", _) => Some(vec![
-                    "mint", "rotate", "move", "redeem", "request", "pay", "import", "export", "pos", "balance", "list", "vault",
+                    "mint", "rotate", "move", "redeem", "request", "pay", "import", "export", "pos", "balance", "list", "history", "vault",
                     "help",
                 ]),
                 ("wallet", _) => Some(vec![

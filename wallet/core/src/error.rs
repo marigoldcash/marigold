@@ -76,7 +76,7 @@ pub enum Error {
     #[error("Wallet is not connected")]
     NotConnected,
 
-    #[error("No network selected. Please use `network (mainnet|testnet-10|testnet-11)` to select a network.")]
+    #[error("No network selected. Use `network testnet` (or `network mainnet`) to pick one.")]
     MissingNetworkId,
 
     #[error("RPC client version mismatch, please upgrade you client (needs: v{0}, connected to: v{1})")]

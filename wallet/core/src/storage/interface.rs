@@ -310,6 +310,12 @@ pub trait Interface: Send + Sync + AnySync {
     /// rename the currently open wallet (title or the filename)
     async fn rename(&self, wallet_secret: &Secret, title: Option<&str>, filename: Option<&str>) -> Result<()>;
 
+    /// Rename a CLOSED wallet on disk: the `<name>.wallet` file and the
+    /// `<name>.notes` / `<name>.transactions` folders that belong to it move
+    /// together. The wallet must not be open — its in-memory handles hold the
+    /// old paths.
+    async fn rename_storage(&self, from: &str, to: &str) -> Result<()>;
+
     /// change the secret of the currently open wallet
     async fn change_secret(&self, old_wallet_secret: &Secret, new_wallet_secret: &Secret) -> Result<()>;
 
