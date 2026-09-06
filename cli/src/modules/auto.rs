@@ -6,6 +6,9 @@ const DEFAULT_THRESHOLD_PETALS: u64 = 100_000_000;
 /// Default sweep trigger: consolidate once the account holds this many
 /// mature ledger coins.
 pub const DEFAULT_SWEEP_UTXOS: u64 = 2_000;
+/// Below this, sweeping cannot keep up with newly mined coins and simply
+/// burns fees in a loop.
+const MIN_SWEEP_UTXOS: u64 = 500;
 
 #[derive(Default, Handler)]
 #[help("Automate the ledger chores: mint arriving balance into notes, and consolidate coins ('auto' for details)")]
@@ -71,7 +74,8 @@ impl Auto {
                     Some("off") => {
                         meta.auto_sweep = false;
                         ctx.store().set_client_metadata(&descriptor.filename, Some(meta)).await?;
-                        tprintln!(ctx, "auto-sweep off.");
+                        ctx.disarm_auto_sweep();
+                        tprintln!(ctx, "auto-sweep off. (A consolidation already in flight finishes; nothing new starts.)");
                     }
                     Some("on") | None => {
                         meta.auto_sweep = true;
@@ -85,7 +89,17 @@ impl Auto {
                         tprintln!(ctx, "auto-sweep on: coins are consolidated once this account holds more than {threshold}.");
                     }
                     Some(count) => {
-                        let threshold: u64 = count.parse().map_err(|_| Error::custom("usage: 'auto sweep <coin count>'"))?;
+                        let mut threshold: u64 = count.parse().map_err(|_| Error::custom("usage: 'auto sweep <coin count>'"))?;
+                        // A low threshold on a chain that mints coins every
+                        // block means sweeping forever and paying fees forever
+                        // — consolidation can never get ahead of arrivals.
+                        if threshold < MIN_SWEEP_UTXOS {
+                            tprintln!(
+                                ctx,
+                                "A threshold of {threshold} would sweep continuously and burn fees without ever catching up — using {MIN_SWEEP_UTXOS}."
+                            );
+                            threshold = MIN_SWEEP_UTXOS;
+                        }
                         meta.auto_sweep = true;
                         meta.auto_sweep_utxo_threshold = threshold;
                         ctx.store().set_client_metadata(&descriptor.filename, Some(meta)).await?;

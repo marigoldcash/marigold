@@ -223,6 +223,15 @@ impl KaspaCli {
         self.auto_sweep_utxos.store(utxo_threshold, Ordering::SeqCst);
     }
 
+    /// Stop auto-sweep in THIS session (the preference is stored separately).
+    /// An already-running consolidation finishes; nothing new starts.
+    pub fn disarm_auto_sweep(&self) {
+        self.auto_sweep_utxos.store(0, Ordering::SeqCst);
+        if self.auto_threshold_petals.load(Ordering::SeqCst) == 0 {
+            self.auto_secret.lock().unwrap().take();
+        }
+    }
+
     pub fn auto_sweep_threshold(&self) -> u64 {
         self.auto_sweep_utxos.load(Ordering::SeqCst)
     }
@@ -264,13 +273,24 @@ impl KaspaCli {
         if threshold == 0 || self.auto_busy.load(Ordering::SeqCst) || !self.wallet.is_connected() {
             return;
         }
+        // Minting already consolidates (it consumes the coins it spends), and
+        // it produces notes rather than only paying fees to shuffle coins
+        // around. When both are armed, minting wins and sweeping stays a
+        // fallback for the storage-mass case.
+        if self.auto_mint_threshold() > 0 {
+            return;
+        }
         let Ok(account) = self.wallet.account() else { return };
         if (account.utxo_context().mature_utxo_size() as u64) < threshold {
             return;
         }
         {
+            // Sweeping is expensive — it pays fees purely to reshape the
+            // ledger — so it gets a much longer leash than minting. On a
+            // chain producing coins every block, a short interval means
+            // sweeping forever and paying for it forever.
             let last = self.auto_last_run.lock().unwrap();
-            if last.elapsed().as_secs() < 60 {
+            if last.elapsed().as_secs() < 900 {
                 return;
             }
         }
@@ -282,9 +302,14 @@ impl KaspaCli {
             *this.auto_last_run.lock().unwrap() = Instant::now();
             let abortable = Abortable::default();
             let before = account.utxo_context().mature_utxo_size();
+            tprintln!(this, "{NOTIFY} auto-sweep: consolidating {before} coins (this can take a while and costs fees)...");
             let notifier: Option<kaspa_wallet_core::account::GenerationNotifier> = None;
             match account.clone().sweep(secret, None, None, &abortable, notifier).await {
-                Ok(_) => tprintln!(this, "{NOTIFY} auto-sweep: consolidated {before} coins"),
+                Ok(summary) => tprintln!(
+                    this,
+                    "{NOTIFY} auto-sweep: done, fees {}",
+                    kaspa_wallet_core::utils::sompi_to_kaspa_string(summary.0.aggregate_fees())
+                ),
                 Err(err) => tprintln!(this, "{NOTIFY} auto-sweep failed: {err}"),
             }
             this.auto_busy.store(false, Ordering::SeqCst);
