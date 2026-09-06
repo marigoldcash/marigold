@@ -843,15 +843,14 @@ impl Terminal {
                 return Ok(());
             }
             Key::Ctrl('d') => {
-                // EOF at an empty line exits, like every modern REPL
-                // (Marigold fix). With text on the line it does nothing.
-                let empty = { self.inner()?.buffer.is_empty() };
-                if empty {
-                    self.crlf();
-                    self.running.store(true, Ordering::SeqCst);
-                    self.exec("exit".to_string()).await.ok();
-                    self.running.store(false, Ordering::SeqCst);
-                }
+                // EOF exits, whatever is on the line (Marigold fix). Shells
+                // only honor it on an empty line; here a half-typed command
+                // is not work worth protecting, and "I changed my mind, get
+                // me out" is the intent every time.
+                self.crlf();
+                self.running.store(true, Ordering::SeqCst);
+                self.exec("exit".to_string()).await.ok();
+                self.running.store(false, Ordering::SeqCst);
                 return Ok(());
             }
             Key::Ctrl(_c) => {

@@ -77,7 +77,7 @@ diff -ruN '--exclude=Cargo.toml.orig' '--exclude=.cargo_vcs_info.json' '--exclud
      pub fn increase_font_size(&self) -> Result<Option<f64>> {
 diff -ruN '--exclude=Cargo.toml.orig' '--exclude=.cargo_vcs_info.json' '--exclude=.cargo-ok' /home/dom/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/workflow-terminal-0.18.0/src/terminal/mod.rs extern/workflow-terminal/src/terminal/mod.rs
 --- /home/dom/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/workflow-terminal-0.18.0/src/terminal/mod.rs	2006-07-23 21:21:28.000000000 -0400
-+++ extern/workflow-terminal/src/terminal/mod.rs	2026-09-05 20:33:44.412430805 -0300
++++ extern/workflow-terminal/src/terminal/mod.rs	2026-09-05 21:10:52.235455159 -0300
 @@ -99,6 +99,11 @@
      secret: Arc<AtomicBool>,
      kbhit: Arc<AtomicBool>,
@@ -306,7 +306,7 @@ diff -ruN '--exclude=Cargo.toml.orig' '--exclude=.cargo_vcs_info.json' '--exclud
              Key::ArrowUp => {
                  let mut data = self.inner()?;
                  if data.history_index == 0 {
-@@ -716,10 +824,33 @@
+@@ -716,13 +824,35 @@
                  return Ok(());
              }
              Key::Ctrl('c') => {
@@ -328,19 +328,21 @@ diff -ruN '--exclude=Cargo.toml.orig' '--exclude=.cargo_vcs_info.json' '--exclud
 +                    data.buffer.clear();
 +                    data.cursor = 0;
 +                    self.write(format!("^C  (type 'exit' or press Ctrl+D to quit)\n\r{}", self.get_prompt()));
-+                }
+                 }
+                 return Ok(());
+             }
++            Key::Ctrl('d') => {
++                // EOF exits, whatever is on the line (Marigold fix). Shells
++                // only honor it on an empty line; here a half-typed command
++                // is not work worth protecting, and "I changed my mind, get
++                // me out" is the intent every time.
++                self.crlf();
++                self.running.store(true, Ordering::SeqCst);
++                self.exec("exit".to_string()).await.ok();
++                self.running.store(false, Ordering::SeqCst);
 +                return Ok(());
 +            }
-+            Key::Ctrl('d') => {
-+                // EOF at an empty line exits, like every modern REPL
-+                // (Marigold fix). With text on the line it does nothing.
-+                let empty = { self.inner()?.buffer.is_empty() };
-+                if empty {
-+                    self.crlf();
-+                    self.running.store(true, Ordering::SeqCst);
-+                    self.exec("exit".to_string()).await.ok();
-+                    self.running.store(false, Ordering::SeqCst);
-                 }
+             Key::Ctrl(_c) => {
                  return Ok(());
              }
 diff -ruN '--exclude=Cargo.toml.orig' '--exclude=.cargo_vcs_info.json' '--exclude=.cargo-ok' /home/dom/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/workflow-terminal-0.18.0/src/terminal/termion.rs extern/workflow-terminal/src/terminal/termion.rs

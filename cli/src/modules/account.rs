@@ -14,12 +14,14 @@ impl Account {
         let ctx = ctx.clone().downcast_arc::<KaspaCli>()?;
         let wallet = ctx.wallet();
 
-        if !wallet.is_open() {
-            return Err(Error::WalletIsNotOpen);
+        // Help is readable without an open wallet — discoverability
+        // shouldn't require unlocking anything.
+        if argv.is_empty() || argv.first().map(|s| s.to_lowercase()).as_deref() == Some("help") {
+            return self.display_help(ctx, argv).await;
         }
 
-        if argv.is_empty() {
-            return self.display_help(ctx, argv).await;
+        if !wallet.is_open() {
+            return Err(Error::WalletIsNotOpen);
         }
 
         let action = argv.remove(0);
@@ -208,6 +210,9 @@ impl Account {
                 let fee_rate = None;
                 self.derivation_scan(&ctx, start, count, window, sweep, fee_rate).await?;
             }
+            "help" => {
+                return self.display_help(ctx, argv).await;
+            }
             v => {
                 tprintln!(ctx, "unknown command: '{v}'\r\n");
                 return self.display_help(ctx, argv).await;
@@ -226,7 +231,8 @@ impl Account {
                     "Import accounts from a private key using a 24 or 12 word mnemonic. \
                 Use 'account import' for additional help.",
                 ),
-                ("name <name>", "Name or rename the selected account (use 'remove' to remove the name"),
+                ("name <name>", "Name or rename the selected account (use 'remove' to remove the name)"),
+                ("watch <watch-type> [<name>]", "Create a watch-only account from an extended public key ('account watch' for help)"),
                 (
                     "recover [dry-run] [<start>] [<derivations>]",
                     "Search this account's extended address derivation chain for funds and bring them into its \

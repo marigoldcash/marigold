@@ -928,7 +928,7 @@ impl Cli for KaspaCli {
                 ("wallet", _) => Some(vec![
                     "list", "create", "import", "open", "close", "where", "remember", "forget", "rename", "destroy", "hint", "help",
                 ]),
-                ("account", _) => Some(vec!["create", "import", "name", "recover", "select", "help"]),
+                ("account", _) => Some(vec!["create", "import", "name", "recover", "watch", "help"]),
                 ("history", _) => Some(vec!["list", "details"]),
                 ("settings", _) => Some(vec!["set"]),
                 ("track", _) => Some(vec!["balance", "pending", "tx", "utxo", "daa"]),
