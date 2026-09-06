@@ -62,11 +62,22 @@ impl Auto {
                 tprintln!(ctx, "  'auto sweep [<n>]'   consolidate coins above <n> of them — independent of minting, for");
                 tprintln!(ctx, "                       holders (exchanges, say) who want plain ledger balance kept tidy");
                 tprintln!(ctx, "  'auto sweep off'     stop consolidating");
+                tprintln!(ctx, "  'auto verbose [off]' narrate every run (by default only the sequence at open speaks)");
                 tprintln!(ctx, "");
                 tprintln!(ctx, "It signs on your behalf, so while it is armed this wallet's password is held in memory");
                 tprintln!(ctx, "for as long as the wallet is open — never written to disk. That is the hot-wallet trade;");
                 tprintln!(ctx, "'auto off' or closing the wallet ends it.");
                 tprintln!(ctx, "");
+            }
+            Some("verbose") => {
+                let on = argv.get(1).map(|s| s.to_lowercase()).as_deref() != Some("off");
+                ctx.set_auto_verbose(on);
+                tprintln!(
+                    ctx,
+                    "auto housekeeping is now {} — {}",
+                    if on { "verbose" } else { "quiet" },
+                    if on { "each run reports what it does" } else { "only the sequence at wallet open is announced" }
+                );
             }
             Some("sweep") => {
                 let arg = argv.get(1).map(|s| s.to_lowercase());

@@ -54,6 +54,15 @@ pub struct KaspaCli {
     auto_sweep_utxos: Arc<AtomicU64>,
     auto_busy: Arc<AtomicBool>,
     auto_last_run: Mutex<Instant>,
+    auto_verbose: Arc<AtomicBool>,
+    /// Set at `open`; the opening report + housekeeping run on the first
+    /// balance event after it, which is the moment the wallet actually knows
+    /// its coins. Doing it inline raced the wallet's own startup.
+    open_housekeeping_pending: Arc<AtomicBool>,
+    /// Notes + ledger, refreshed once a minute. The prompt shows what you
+    /// hold, not the per-block churn of the ledger's plumbing.
+    prompt_total_petals: Arc<AtomicU64>,
+    prompt_total_valid: Arc<AtomicBool>,
     /// Widest balance segment rendered this session — the prompt pads to it
     /// so the command line never shifts under the user's fingers.
     prompt_balance_width: Arc<AtomicUsize>,
@@ -137,6 +146,10 @@ impl KaspaCli {
             auto_sweep_utxos: Arc::new(AtomicU64::new(0)),
             auto_busy: Arc::new(AtomicBool::new(false)),
             auto_last_run: Mutex::new(Instant::now()),
+            auto_verbose: Arc::new(AtomicBool::new(false)),
+            open_housekeeping_pending: Arc::new(AtomicBool::new(false)),
+            prompt_total_petals: Arc::new(AtomicU64::new(0)),
+            prompt_total_valid: Arc::new(AtomicBool::new(false)),
             prompt_balance_width: Arc::new(AtomicUsize::new(0)),
         });
 
@@ -236,89 +249,6 @@ impl KaspaCli {
         self.auto_sweep_utxos.load(Ordering::SeqCst)
     }
 
-    /// Keep the note vault tidy: ten notes of one size become one of the next.
-    /// Runs with the other armed automations, and is what stops a wallet that
-    /// receives many small payments from accumulating a drawer of change.
-    pub fn maybe_auto_merge(self: &Arc<Self>) {
-        if !self.auto_mint_armed() || self.auto_busy.load(Ordering::SeqCst) || !self.wallet.is_connected() {
-            return;
-        }
-        if self.has_unconfirmed_spends() {
-            return;
-        }
-        {
-            let last = self.auto_last_run.lock().unwrap();
-            if last.elapsed().as_secs() < 60 {
-                return;
-            }
-        }
-        let Ok(account) = self.wallet.account() else { return };
-        let Some(secret) = self.auto_secret.lock().unwrap().clone() else { return };
-
-        self.auto_busy.store(true, Ordering::SeqCst);
-        let this = self.clone();
-        workflow_core::task::spawn(async move {
-            *this.auto_last_run.lock().unwrap() = Instant::now();
-            match kaspa_wallet_core::account::notepool::merge_held_notes(account, secret, 4).await {
-                Ok(0) => {}
-                Ok(merged) => tprintln!(this, "{NOTIFY} auto-merge: consolidated {merged} group(s) of ten notes"),
-                Err(err) => tprintln!(this, "{NOTIFY} auto-merge skipped: {err}"),
-            }
-            this.auto_busy.store(false, Ordering::SeqCst);
-        });
-    }
-
-    /// Consolidate when the account holds more mature UTXOs than the
-    /// threshold. Shares the busy flag and rate limit with auto-mint so the
-    /// two never run at once.
-    pub fn maybe_auto_sweep(self: &Arc<Self>) {
-        let threshold = self.auto_sweep_threshold();
-        if threshold == 0 || self.auto_busy.load(Ordering::SeqCst) || !self.wallet.is_connected() {
-            return;
-        }
-        // Minting already consolidates (it consumes the coins it spends), and
-        // it produces notes rather than only paying fees to shuffle coins
-        // around. When both are armed, minting wins and sweeping stays a
-        // fallback for the storage-mass case.
-        if self.auto_mint_threshold() > 0 || self.has_unconfirmed_spends() {
-            return;
-        }
-        let Ok(account) = self.wallet.account() else { return };
-        if (account.utxo_context().mature_utxo_size() as u64) < threshold {
-            return;
-        }
-        {
-            // Sweeping is expensive — it pays fees purely to reshape the
-            // ledger — so it gets a much longer leash than minting. On a
-            // chain producing coins every block, a short interval means
-            // sweeping forever and paying for it forever.
-            let last = self.auto_last_run.lock().unwrap();
-            if last.elapsed().as_secs() < 900 {
-                return;
-            }
-        }
-        let Some(secret) = self.auto_secret.lock().unwrap().clone() else { return };
-
-        self.auto_busy.store(true, Ordering::SeqCst);
-        let this = self.clone();
-        workflow_core::task::spawn(async move {
-            *this.auto_last_run.lock().unwrap() = Instant::now();
-            let abortable = Abortable::default();
-            let before = account.utxo_context().mature_utxo_size();
-            tprintln!(this, "{NOTIFY} auto-sweep: consolidating {before} coins (this can take a while and costs fees)...");
-            let notifier: Option<kaspa_wallet_core::account::GenerationNotifier> = None;
-            match account.clone().sweep(secret, None, None, &abortable, notifier).await {
-                Ok(summary) => tprintln!(
-                    this,
-                    "{NOTIFY} auto-sweep: done, fees {}",
-                    kaspa_wallet_core::utils::sompi_to_kaspa_string(summary.0.aggregate_fees())
-                ),
-                Err(err) => tprintln!(this, "{NOTIFY} auto-sweep failed: {err}"),
-            }
-            this.auto_busy.store(false, Ordering::SeqCst);
-        });
-    }
-
     pub fn disarm_auto_mint(&self) {
         self.auto_threshold_petals.store(0, Ordering::SeqCst);
         if self.auto_sweep_threshold() == 0 {
@@ -331,6 +261,7 @@ impl KaspaCli {
         self.auto_threshold_petals.store(0, Ordering::SeqCst);
         self.auto_sweep_utxos.store(0, Ordering::SeqCst);
         self.auto_secret.lock().unwrap().take();
+        self.prompt_total_valid.store(false, Ordering::SeqCst);
     }
 
     pub fn auto_mint_armed(&self) -> bool {
@@ -345,101 +276,279 @@ impl KaspaCli {
     /// not confirmed yet. Starting another automated spend during that window
     /// is how a wallet double-spends its own inputs: the coins are gone from
     /// its point of view only once the spending transaction confirms, and the
-    /// node rejects the second attempt with "already spent in the mempool"
-    /// (founder report, 2026-09-05).
+    /// node rejects the second attempt with "already spent in the mempool".
     fn has_unconfirmed_spends(&self) -> bool {
         self.wallet.account().ok().and_then(|account| account.balance()).map(|balance| balance.outgoing > 0).unwrap_or(false)
     }
 
-    /// Turn matured ledger balance into notes once it crosses the threshold.
-    /// Runs off the balance-notification stream; one at a time, rate limited,
-    /// and quiet unless it actually does something. A mint consumes the
-    /// coinbase outputs it spends, so on a mining wallet this also keeps UTXO
-    /// fragmentation from ever building up — no manual 'sweep' needed. If the
-    /// ledger has fragmented far enough that a mint hits the storage-mass
-    /// ceiling, it consolidates first and mints on the next tick.
-    fn maybe_auto_mint(self: &Arc<Self>) {
-        if !self.auto_mint_armed() || self.auto_busy.load(Ordering::SeqCst) || !self.wallet.is_connected() {
-            return;
-        }
-        if self.has_unconfirmed_spends() {
-            return;
-        }
-        let threshold = self.auto_mint_threshold();
-        if threshold == 0 {
-            return;
-        }
-        let Ok(account) = self.wallet.account() else { return };
-        let mature = account.balance().map(|b| b.mature).unwrap_or(0);
-        if mature < threshold {
-            return;
-        }
-        // Rate limit: a mining wallet's balance changes every block; without
-        // this we would mint continuously and pay a fee every few seconds.
-        {
-            let last = self.auto_last_run.lock().unwrap();
-            if last.elapsed().as_secs() < 60 {
-                return;
-            }
-        }
-        let Some(secret) = self.auto_secret.lock().unwrap().clone() else { return };
+    /// Ask for the opening sequence (report, housekeeping, report) to run as
+    /// soon as the wallet's coins are known.
+    pub fn request_open_housekeeping(&self) {
+        self.open_housekeeping_pending.store(true, Ordering::SeqCst);
+    }
 
-        self.auto_busy.store(true, Ordering::SeqCst);
-        let this = self.clone();
-        workflow_core::task::spawn(async move {
-            *this.auto_last_run.lock().unwrap() = Instant::now();
-            let abortable = Abortable::default();
-            let result = async {
-                let mintable =
-                    kaspa_wallet_core::account::notepool::max_mintable_petals(account.clone(), None, &abortable, None).await?;
-                // Bound each automated mint. Minting an entire mining wallet
-                // in one go means thousands of batch transactions, minutes of
-                // work, and a flood of change notifications that leaves the
-                // wallet's own coin list behind (the "money disappeared"
-                // report). A chunk per minute drains steadily, stays a couple
-                // of transactions, and keeps every estimate comfortable.
-                let cap = threshold.saturating_mul(10).max(10_000_000_000);
-                let amount = mintable.min(cap);
-                if amount == 0 {
-                    return Ok(None);
-                }
-                let minted = kaspa_wallet_core::account::notepool::mint(
-                    account.clone(),
-                    secret.clone(),
-                    None,
-                    amount,
-                    None,
-                    &abortable,
-                )
-                .await?;
-                Ok::<_, kaspa_wallet_core::error::Error>(Some((amount, minted.notes.len())))
-            }
-            .await;
+    pub fn set_auto_verbose(&self, verbose: bool) {
+        self.auto_verbose.store(verbose, Ordering::SeqCst);
+    }
 
-            match result {
-                Ok(Some((amount, notes))) => {
-                    tprintln!(
-                        this,
-                        "{NOTIFY} auto-mint: {} MAGLD -> {notes} note(s)",
-                        kaspa_wallet_core::utils::sompi_to_kaspa_string(amount)
-                    );
+    pub fn auto_verbose(&self) -> bool {
+        self.auto_verbose.load(Ordering::SeqCst)
+    }
+
+    /// Wait for the wallet to be usable: an account selected (selection
+    /// happens asynchronously, off the activation event, so right after
+    /// `open` there is briefly none) and its coins loaded. Both the opening
+    /// report and the housekeeping used to bail out silently in that window —
+    /// which is why a wallet with a ledger balance reported none and minted
+    /// nothing (2026-09-05). Deliberately does not wait for the balance to
+    /// settle: on a mining wallet it never does, since every fee paid returns
+    /// as a block reward within seconds.
+    async fn wait_for_account(&self) -> Option<Arc<dyn Account>> {
+        for i in 0..60 {
+            if let Ok(account) = self.wallet.account() {
+                let has_coins = account.utxo_context().mature_utxo_size() > 0
+                    || account.balance().map(|b| b.mature > 0 || b.pending > 0).unwrap_or(false);
+                // Once an account exists, give its first scan a moment; an
+                // empty wallet must not hang here, so stop waiting after ~2s.
+                if has_coins || i > 12 {
+                    return Some(account);
                 }
-                Ok(None) => {}
-                Err(err) => {
-                    let message = err.to_string();
-                    if message.contains("Storage mass") || message.contains("maximum allowed mass") {
-                        tprintln!(this, "{NOTIFY} auto-mint: consolidating fragmented coins first...");
-                        let notifier: Option<kaspa_wallet_core::account::GenerationNotifier> = None;
-                        match account.clone().sweep(secret, None, None, &abortable, notifier).await {
-                            Ok(_) => tprintln!(this, "{NOTIFY} auto-mint: consolidated; minting on the next update"),
-                            Err(err) => tprintln!(this, "{NOTIFY} auto-mint: consolidation failed - {err}"),
-                        }
-                    } else {
-                        tprintln!(this, "{NOTIFY} auto-mint failed: {err}");
+            }
+            workflow_core::task::sleep(Duration::from_millis(150)).await;
+        }
+        self.wallet.account().ok()
+    }
+
+    /// Total holdings in petals: notes plus ledger. Notes first, because that
+    /// is where the money lives; the ledger is a loading dock.
+    pub async fn total_holdings(&self) -> (u64, u64, usize) {
+        // Read the coins themselves, not the cached Balance: the context is
+        // populated before `balance()` stops returning None, and trusting the
+        // cache here reported an empty ledger on a wallet that had one.
+        let (ledger, pieces) = self
+            .wallet
+            .account()
+            .ok()
+            .map(|account| {
+                let (mature, _, _) = account.utxo_context().utxo_entries_snapshot();
+                (mature.iter().map(|entry| entry.amount()).sum::<u64>(), mature.len())
+            })
+            .unwrap_or((0, 0));
+        let mut notes = 0u64;
+        if let Ok(store) = self.wallet.store().as_note_key_store() {
+            if let Ok(mut stream) = store.iter().await {
+                while let Ok(Some(info)) = stream.try_next().await {
+                    if info.status == kaspa_wallet_core::storage::NoteStatus::Active {
+                        notes += kaspa_consensus_core::notepool::DENOMINATION_PETALS[info.d as usize];
                     }
                 }
             }
-            this.auto_busy.store(false, Ordering::SeqCst);
+        }
+        (notes, ledger, pieces)
+    }
+
+    /// Show what the wallet holds: notes, then the ledger — and the ledger
+    /// only when it holds something, because for anyone but an exchange it
+    /// should be empty most of the time.
+    pub async fn report_holdings(self: &Arc<Self>) {
+        self.wait_for_account().await;
+        let (notes, ledger, pieces) = self.total_holdings().await;
+        // Keep the prompt's figure in step, so it is right from the moment a
+        // wallet opens rather than after the first minute tick.
+        self.prompt_total_petals.store(notes + ledger, Ordering::SeqCst);
+        self.prompt_total_valid.store(true, Ordering::SeqCst);
+        tprintln!(self, "");
+        tprintln!(self, "notes:  {} MAGLD", kaspa_wallet_core::utils::sompi_to_kaspa_string(notes));
+        if ledger > 0 {
+            tprintln!(
+                self,
+                "ledger: {} MAGLD  ({} piece{})",
+                kaspa_wallet_core::utils::sompi_to_kaspa_string(ledger),
+                pieces.separated_string(),
+                if pieces == 1 { "" } else { "s" }
+            );
+        }
+        tprintln!(self, "");
+    }
+
+    /// The ledger housekeeping sequence, in order and never overlapping:
+    /// consolidate the coins, turn them into notes, then tidy the notes.
+    /// `announce` narrates it — used when a wallet opens, where the backlog
+    /// can be large and silence would look like a hang. The once-a-minute
+    /// runs stay quiet unless 'auto verbose' is on: the ledger is plumbing,
+    /// and plumbing should not talk.
+    pub async fn run_housekeeping(self: &Arc<Self>, announce: bool) {
+        let loud = announce || self.auto_verbose();
+        // "Armed" means something is actually configured to run — holding the
+        // secret is not the same thing, and conflating them made a wallet with
+        // only auto-sweep on look like auto-mint was armed too.
+        if !self.auto_mint_armed() || (self.auto_mint_threshold() == 0 && self.auto_sweep_threshold() == 0) {
+            if loud {
+                tprintln!(self, "(nothing armed — 'auto on' turns on minting, 'auto sweep' consolidation)");
+            }
+            return;
+        }
+        if !self.wallet.is_connected() {
+            return;
+        }
+        if self.auto_busy.swap(true, Ordering::SeqCst) {
+            if loud {
+                tprintln!(self, "(housekeeping already running)");
+            }
+            return;
+        }
+        let abortable = Abortable::default();
+        let Some(account) = self.wait_for_account().await else {
+            self.auto_busy.store(false, Ordering::SeqCst);
+            return;
+        };
+        let Some(secret) = self.auto_secret.lock().unwrap().clone() else {
+            self.auto_busy.store(false, Ordering::SeqCst);
+            return;
+        };
+
+        // --- 1. consolidate, if the ledger has broken into too many pieces ---
+        let sweep_threshold = self.auto_sweep_threshold();
+        let pieces = account.utxo_context().mature_utxo_size() as u64;
+        if sweep_threshold > 0 && pieces > sweep_threshold && !self.has_unconfirmed_spends() {
+            if loud {
+                tprintln!(self, "Consolidating {} ledger pieces — this can take a while...", pieces.separated_string());
+            }
+            let notifier: Option<kaspa_wallet_core::account::GenerationNotifier> = None;
+            match account.clone().sweep(secret.clone(), None, None, &abortable, notifier).await {
+                Ok(summary) => {
+                    if loud {
+                        tprintln!(
+                            self,
+                            "Consolidated (fees {} MAGLD).",
+                            kaspa_wallet_core::utils::sompi_to_kaspa_string(summary.0.aggregate_fees())
+                        );
+                    }
+                }
+                Err(err) => {
+                    if loud {
+                        tprintln!(self, "Consolidation stopped: {err}");
+                    }
+                }
+            }
+        }
+
+        // --- 2. turn the ledger into notes ---
+        let threshold = self.auto_mint_threshold();
+        if threshold > 0 && self.has_unconfirmed_spends() && loud {
+            tprintln!(self, "Waiting: this wallet has transactions the chain has not confirmed yet.");
+        }
+        if threshold > 0 && !self.has_unconfirmed_spends() {
+            // Read the coins, not the cached Balance — it is None during the
+            // window right after activation, which silently skipped minting.
+            let (mature_entries, _, _) = account.utxo_context().utxo_entries_snapshot();
+            let mature: u64 = mature_entries.iter().map(|entry| entry.amount()).sum();
+            if loud && mature < threshold {
+                tprintln!(
+                    self,
+                    "Nothing to mint: ledger holds {} MAGLD, threshold is {}.",
+                    kaspa_wallet_core::utils::sompi_to_kaspa_string(mature),
+                    kaspa_wallet_core::utils::sompi_to_kaspa_string(threshold)
+                );
+            }
+            if mature >= threshold {
+                let minted = async {
+                    let mintable =
+                        kaspa_wallet_core::account::notepool::max_mintable_petals(account.clone(), None, &abortable, None).await?;
+                    // Bounded per run: minting a whole mining wallet at once
+                    // means thousands of batch transactions and a flood of
+                    // change notifications the wallet's own coin list cannot
+                    // keep up with.
+                    let cap = threshold.saturating_mul(10).max(10_000_000_000);
+                    let amount = mintable.min(cap);
+                    if amount == 0 {
+                        return Ok(None);
+                    }
+                    let result = kaspa_wallet_core::account::notepool::mint(
+                        account.clone(),
+                        secret.clone(),
+                        None,
+                        amount,
+                        None,
+                        &abortable,
+                    )
+                    .await?;
+                    Ok::<_, kaspa_wallet_core::error::Error>(Some((amount, result.notes.len())))
+                }
+                .await;
+                match minted {
+                    Ok(Some((amount, notes))) => {
+                        if loud {
+                            tprintln!(
+                                self,
+                                "Minted {} MAGLD into {notes} note(s).",
+                                kaspa_wallet_core::utils::sompi_to_kaspa_string(amount)
+                            );
+                        }
+                    }
+                    Ok(None) => {
+                        if loud {
+                            tprintln!(self, "Nothing mintable right now (the fee would exceed what is there).");
+                        }
+                    }
+                    Err(err) => {
+                        if loud {
+                            tprintln!(self, "Minting stopped: {err}");
+                        }
+                    }
+                }
+            }
+        }
+
+        // --- 3. tidy the notes themselves (ten of a size become one larger) ---
+        if !self.has_unconfirmed_spends() {
+            match kaspa_wallet_core::account::notepool::merge_held_notes(account, secret, 4).await {
+                Ok(merged) if merged > 0 && loud => {
+                    tprintln!(self, "Consolidated {merged} group(s) of ten notes into larger ones.");
+                }
+                _ => {}
+            }
+        }
+
+        self.auto_busy.store(false, Ordering::SeqCst);
+    }
+
+    /// One loop owns all housekeeping, so nothing can race anything else:
+    /// event-driven triggers competed for the same busy flag and silently
+    /// cancelled each other. It refreshes the prompt figure, runs the opening
+    /// sequence once (announced, as soon as the wallet knows its coins), and
+    /// thereafter runs quietly once a minute.
+    fn start_housekeeping_task(self: &Arc<Self>) {
+        let this = self.clone();
+        workflow_core::task::spawn(async move {
+            let mut last_run = Instant::now();
+            let mut first_run_done = false;
+            loop {
+                workflow_core::task::sleep(Duration::from_secs(5)).await;
+                if this.shutdown.load(Ordering::SeqCst) {
+                    break;
+                }
+                if !this.wallet.is_open() || !this.wallet.is_connected() {
+                    continue;
+                }
+
+                let (notes, ledger, _) = this.total_holdings().await;
+                this.prompt_total_petals.store(notes + ledger, Ordering::SeqCst);
+                this.prompt_total_valid.store(true, Ordering::SeqCst);
+
+                if this.open_housekeeping_pending.swap(false, Ordering::SeqCst) {
+                    first_run_done = true;
+                    last_run = Instant::now();
+                    this.report_holdings().await;
+                    this.run_housekeeping(true).await;
+                    this.report_holdings().await;
+                    this.term().refresh_prompt();
+                } else if first_run_done && last_run.elapsed().as_secs() >= 60 {
+                    last_run = Instant::now();
+                    this.run_housekeeping(false).await;
+                    this.term().refresh_prompt();
+                }
+            }
         });
     }
 
@@ -500,6 +609,7 @@ impl KaspaCli {
 
     pub async fn start(self: &Arc<Self>) -> Result<()> {
         self.start_notification_pipe_task();
+        self.start_housekeeping_task();
         self.handlers.start(self).await?;
         // wallet starts rpc and notifier
         self.wallet.load_settings().await.unwrap_or_else(|_| log_error!("Unable to load settings, discarding..."));
@@ -763,9 +873,7 @@ impl KaspaCli {
                                         this.term().refresh_prompt();
                                     }
 
-                                    this.maybe_auto_mint();
-                                    this.maybe_auto_sweep();
-                                    this.maybe_auto_merge();
+
                                 }
                             }
                         }
@@ -1200,7 +1308,7 @@ impl Cli for KaspaCli {
                 ("network", _) => Some(vec!["mainnet", "testnet-10"]),
                 ("node", _) | ("miner", _) => Some(vec!["start", "stop", "restart", "status"]),
                 ("utxos", _) => Some(vec!["all"]),
-                ("auto", _) => Some(vec!["on", "off", "sweep"]),
+                ("auto", _) => Some(vec!["on", "off", "sweep", "verbose"]),
                 _ => None,
             }
         };
@@ -1294,19 +1402,24 @@ impl Cli for KaspaCli {
                 // session pad, so the prompt (and the text being typed at it)
                 // never jumps as per-block balance updates change digit
                 // counts or the pending segment appears/disappears.
-                match (account.balance(), self.wallet.network_id()) {
-                    (Some(balance), Ok(network_id)) => {
-                        use kaspa_wallet_core::utils::sompi_to_kaspa_string_with_trailing_zeroes_and_suffix as fmt_balance;
-                        let network_type = NetworkType::from(network_id);
-                        let mut segment = fmt_balance(balance.mature, &network_type);
-                        if balance.pending > 0 {
-                            segment.push_str(&format!(" ({})", fmt_balance(balance.pending, &network_type)));
-                        }
-                        let width =
-                            self.prompt_balance_width.fetch_max(segment.len(), Ordering::SeqCst).max(segment.len());
-                        prompt.push(segment.pad_to_width(width));
-                    }
-                    _ => prompt.push("N/A".to_string()),
+                // What you hold, in one number: notes plus ledger, two
+                // decimals, refreshed once a minute. The ledger's piece count
+                // and its per-block churn are plumbing — 'balance' has the
+                // precise figures when they are wanted.
+                if self.prompt_total_valid.load(Ordering::SeqCst) {
+                    let petals = self.prompt_total_petals.load(Ordering::SeqCst);
+                    let whole = petals / 100_000_000;
+                    let hundredths = (petals % 100_000_000) / 1_000_000;
+                    let suffix = self
+                        .wallet
+                        .network_id()
+                        .map(|id| kaspa_wallet_core::utils::kaspa_suffix(&NetworkType::from(id)))
+                        .unwrap_or("");
+                    let segment = format!("{}.{:02} {suffix}", whole.separated_string(), hundredths);
+                    let width = self.prompt_balance_width.fetch_max(segment.len(), Ordering::SeqCst).max(segment.len());
+                    prompt.push(segment.pad_to_width(width));
+                } else {
+                    prompt.push("...".to_string());
                 }
             }
         }

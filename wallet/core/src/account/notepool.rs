@@ -1632,7 +1632,11 @@ pub async fn max_mintable_petals(
     progress: Option<NoteProgress>,
 ) -> Result<u64> {
     let quantum = DENOMINATION_PETALS[0];
-    let mature = account.balance().map(|balance| balance.mature).unwrap_or(0);
+    // Sum the coins rather than trusting the cached Balance: it is None in
+    // the window right after account activation, and reading 0 there made
+    // automated minting skip silently on a funded wallet (2026-09-05).
+    let (mature_entries, _, _) = account.utxo_context().utxo_entries_snapshot();
+    let mature: u64 = mature_entries.iter().map(|entry| entry.amount()).sum();
     if mature < quantum * 2 {
         return Ok(0);
     }

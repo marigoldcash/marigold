@@ -309,9 +309,11 @@ pub(crate) async fn create(
         last_opened: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_secs()),
         remember: true,
         hidden: false,
-        auto_mint: false,
-        auto_mint_threshold_petals: 0,
-        auto_sweep: false,
+        // Automation on by default — the ledger is plumbing a person should
+        // never have to manage (2026-09-05).
+        auto_mint: true,
+        auto_mint_threshold_petals: 100_000_000,
+        auto_sweep: true,
         auto_sweep_utxo_threshold: 0,
     };
     wallet.store().set_client_metadata(&wallet_descriptor.filename, Some(meta)).await.ok();

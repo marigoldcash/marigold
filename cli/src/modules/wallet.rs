@@ -154,33 +154,33 @@ impl Wallet {
                 ctx.wallet().open(&wallet_secret, name.clone(), args, &guard).await?;
                 ctx.wallet().activate_accounts(None, &guard).await?;
 
-                // Auto-sweep arms independently of auto-mint, and runs its
-                // check immediately: a wallet opened after a long absence may
-                // already be far past the threshold (item 3, 2026-09-05).
-                if meta.as_ref().map(|m| m.auto_sweep).unwrap_or(false) {
+                // Automation defaults ON: the ledger is plumbing, and a
+                // person should not have to learn about it. Both arm with the
+                // password just typed — no second prompt, nothing persisted.
+                let auto_mint_on = meta.as_ref().map(|m| m.auto_mint).unwrap_or(true);
+                let auto_sweep_on = meta.as_ref().map(|m| m.auto_sweep).unwrap_or(true);
+                if auto_sweep_on {
                     let threshold = meta
                         .as_ref()
                         .map(|m| m.auto_sweep_utxo_threshold)
                         .filter(|t| *t > 0)
                         .unwrap_or(crate::modules::auto::DEFAULT_SWEEP_UTXOS);
                     ctx.arm_auto_sweep(wallet_secret.clone(), threshold);
-                    ctx.maybe_auto_sweep();
+                }
+                if auto_mint_on {
+                    let threshold =
+                        meta.as_ref().map(|m| m.auto_mint_threshold_petals).filter(|t| *t > 0).unwrap_or(100_000_000);
+                    ctx.arm_auto_mint(wallet_secret.clone(), threshold);
                 }
 
-                // Auto-mint arms with the password just typed — no second prompt.
-                if meta.as_ref().map(|m| m.auto_mint).unwrap_or(false) {
-                    let threshold = meta
-                        .as_ref()
-                        .map(|m| m.auto_mint_threshold_petals)
-                        .filter(|t| *t > 0)
-                        .unwrap_or(100_000_000);
-                    ctx.arm_auto_mint(wallet_secret.clone(), threshold);
-                    tprintln!(
-                        ctx,
-                        "auto-mint is on: ledger balance above {} MAGLD becomes notes automatically ('auto' for details)",
-                        kaspa_wallet_core::utils::sompi_to_kaspa_string(threshold)
-                    );
-                }
+                // Show what is held, do the ledger housekeeping out loud (the
+                // backlog can be large if the wallet has been closed a while),
+                // then show the result. Sequential by construction.
+                // Runs on the first balance event — the moment the wallet
+                // actually knows its coins. Doing it inline here raced the
+                // asynchronous account selection and initial scan, and
+                // silently reported an empty ledger on a funded wallet.
+                ctx.request_open_housekeeping();
 
                 if let Some(name) = &name {
                     let remember = meta.as_ref().map(|m| m.remember).unwrap_or(true);
