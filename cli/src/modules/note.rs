@@ -141,12 +141,12 @@ impl Note {
             tprintln!(ctx, "usage: 'note import <bearer-text>'\r\n");
             return Ok(());
         }
-        let account = ctx.wallet().account()?;
+        let account: Arc<dyn kaspa_wallet_core::account::Account> = ctx.wallet().account()?;
         let bearer = BearerNote::from_text(&argv[0])?;
         let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(Some(&account)).await?;
         self.ensure_vault_interactive(ctx, &wallet_secret).await?;
 
-        let result = account.bearer_import(wallet_secret.clone(), bearer).await?;
+        let result = account.clone().bearer_import(wallet_secret.clone(), bearer).await?;
         tprintln!(ctx, "imported note {} and immediately rotated it to fresh cold key(s):", result.imported_sn);
         for note in &result.rotation.own_notes {
             tprintln!(ctx, "  {} - {}", note.sn, sompi_to_kaspa_string(DENOMINATION_PETALS[note.d as usize]));
@@ -157,6 +157,14 @@ impl Note {
             result.rotation.transaction_id,
             sompi_to_kaspa_string(result.rotation.fee_petals)
         );
+
+        // Housekeeping on receipt: ten notes of one size become one of the
+        // next, so a vault never accumulates a drawer full of small change.
+        match notepool::merge_held_notes(account.clone(), wallet_secret, 4).await {
+            Ok(0) => {}
+            Ok(merged) => tprintln!(ctx, "consolidated {merged} group(s) of ten notes into larger ones"),
+            Err(err) => tprintln!(ctx, "(note consolidation skipped: {err})"),
+        }
         tprintln!(ctx, "");
         Ok(())
     }

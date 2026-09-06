@@ -1685,3 +1685,211 @@ pub async fn max_mintable_petals(
     }
     Ok(0)
 }
+
+/// Pay `amount_petals` to `address` using BOTH sides of the wallet in one
+/// transaction: transparent inputs and consumed notes fund the same outputs.
+/// This is the case an ordinary holder hits constantly — 300 on the ledger,
+/// 300 in notes, wanting to send 500 — where paying from either side alone
+/// reports "insufficient funds" despite the money being there.
+///
+/// Consensus already unifies the two sides: a pool op's consumed value counts
+/// alongside transparent input value against outputs plus fee
+/// (`tx_validation_in_utxo_context`, POOL-SPEC P5.2/P5.3). Signing order is
+/// forced and non-circular: outputs are fixed first, the note signatures cover
+/// `tx.outputs`, the payload is then final, and only then are the transparent
+/// inputs signed over the whole transaction (which includes that payload).
+pub async fn send_combined(
+    account: Arc<dyn Account>,
+    wallet_secret: Secret,
+    payment_secret: Option<Secret>,
+    address: Address,
+    amount_petals: u64,
+) -> Result<(Hash, u64, usize, usize)> {
+    let network_id = account.wallet().network_id()?;
+    let params: Params = network_id.into();
+    let mass_calculator = MassCalculator::new_with_consensus_params(&params);
+
+    // --- select the transparent side (all of it; change returns home) ---
+    let (mature, _, _) = account.utxo_context().utxo_entries_snapshot();
+    let transparent_total: u64 = mature.iter().map(|entry| entry.amount()).sum();
+
+    // --- select notes to cover the rest, smallest-first so large notes stay whole ---
+    let note_key_store = account.wallet().store().as_note_key_store()?;
+    let mut available: Vec<Arc<NoteKeyInfo>> = Vec::new();
+    let mut stream = note_key_store.iter().await?;
+    while let Some(info) = stream.try_next().await? {
+        if info.status == NoteStatus::Active {
+            available.push(info);
+        }
+    }
+    available.sort_by_key(|info| DENOMINATION_PETALS[info.d as usize]);
+
+    // Cover the shortfall plus one quantum of headroom for the fee.
+    let shortfall = amount_petals.saturating_sub(transparent_total).saturating_add(DENOMINATION_PETALS[0]);
+    let mut selected_serials = Vec::new();
+    let mut selected_value = 0u64;
+    for info in available.iter() {
+        if selected_value >= shortfall {
+            break;
+        }
+        selected_serials.push(info.sn);
+        selected_value += DENOMINATION_PETALS[info.d as usize];
+    }
+    if transparent_total + selected_value <= amount_petals {
+        return Err(Error::Custom(format!(
+            "insufficient funds: {} MAGLD on the ledger plus {} MAGLD in selectable notes",
+            crate::utils::sompi_to_kaspa_string(transparent_total),
+            crate::utils::sompi_to_kaspa_string(selected_value)
+        )));
+    }
+
+    // --- note signature groups (one signature per shared key) ---
+    let mut entries = Vec::with_capacity(selected_serials.len());
+    for sn in &selected_serials {
+        let entry = note_key_store
+            .load_key(&wallet_secret, sn)
+            .await?
+            .ok_or_else(|| Error::Custom(format!("serial {sn} has no stored key")))?;
+        entries.push(entry);
+    }
+    let mut groups_by_sk: HashMap<[u8; 32], Vec<Hash>> = HashMap::new();
+    for entry in &entries {
+        groups_by_sk.entry(entry.sk).or_default().push(entry.sn);
+    }
+
+    let server_info = account.wallet().rpc_api().get_server_info().await?;
+    let freshness = FreshnessAnchor { anchor_daa_score: server_info.virtual_daa_score };
+    const REDEEM_OP_TYPE: u8 = 2;
+
+    // --- build inputs, then shape outputs and cost the transaction ---
+    let inputs: Vec<kaspa_consensus_core::tx::TransactionInput> = mature
+        .iter()
+        .map(|entry| {
+            kaspa_consensus_core::tx::TransactionInput::new(entry.utxo.outpoint.clone().into(), vec![], 0, 1)
+        })
+        .collect();
+    let utxo_entries: Vec<kaspa_consensus_core::tx::UtxoEntry> = mature.iter().map(|entry| entry.utxo.as_ref().into()).collect();
+
+    let change_script = pay_to_address_script(&account.change_address()?);
+    let recipient_script = pay_to_address_script(&address);
+    let available_total = transparent_total + selected_value;
+
+    let placeholder_groups: Vec<SignedGroup> =
+        groups_by_sk.values().map(|serials| SignedGroup { serials: serials.clone(), signature: [0u8; 64] }).collect();
+    let placeholder_payload = PoolOp::Redeem(RedeemOp { consumed: placeholder_groups, freshness }).encode_payload();
+    let placeholder_outputs = vec![
+        TransactionOutput::new(amount_petals, recipient_script.clone()),
+        TransactionOutput::new(available_total - amount_petals, change_script.clone()),
+    ];
+    let placeholder_tx = Transaction::new(
+        TX_VERSION_TOCCATA,
+        inputs.clone(),
+        placeholder_outputs,
+        0,
+        SUBNETWORK_ID_NOTE_POOL,
+        0,
+        placeholder_payload,
+    );
+    let populated = PopulatedTransaction::new(&placeholder_tx, utxo_entries.clone());
+    let masses = mass_calculator
+        .calc_contextual_masses(&populated)
+        .ok_or_else(|| Error::Custom("combined send: mass calculation failed".to_string()))?;
+    let compute_mass = mass_calculator.calc_non_contextual_masses(&placeholder_tx).compute_mass;
+    let total_mass = masses.storage_mass.max(compute_mass);
+
+    let feerate = match account.wallet().rpc_api().get_fee_estimate().await {
+        Ok(estimate) => estimate.normal_buckets.first().map(|b| b.feerate).unwrap_or(1.0),
+        Err(_) => 1.0,
+    };
+    let fee_sompi = ((total_mass as f64 * feerate).ceil() as u64).max(1_000);
+    if available_total <= amount_petals + fee_sompi {
+        return Err(Error::Custom("insufficient funds once the fee is included".to_string()));
+    }
+
+    let change = available_total - amount_petals - fee_sompi;
+    let mut outputs = vec![TransactionOutput::new(amount_petals, recipient_script)];
+    if change >= DENOMINATION_PETALS[0] {
+        outputs.push(TransactionOutput::new(change, change_script));
+    }
+    let outputs_hash = transparent_outputs_hash(&outputs);
+
+    // --- sign the notes over the final outputs, then finalize the payload ---
+    let mut signed_groups = Vec::with_capacity(groups_by_sk.len());
+    for (sk_bytes, group_serials) in groups_by_sk {
+        let hash = signing_hash(REDEEM_OP_TYPE, &group_serials, &[], outputs_hash, freshness.anchor_daa_score);
+        let keypair =
+            Keypair::from_seckey_slice(SECP256K1, &sk_bytes).map_err(|e| Error::Custom(format!("invalid note secret key: {e}")))?;
+        let signature: [u8; 64] = *keypair.sign_schnorr(Message::from_digest(hash.into())).as_ref();
+        signed_groups.push(SignedGroup { serials: group_serials, signature });
+    }
+    let payload = PoolOp::Redeem(RedeemOp { consumed: signed_groups, freshness }).encode_payload();
+
+    // --- sign the transparent inputs over the now-final transaction ---
+    let tx = Transaction::new(TX_VERSION_TOCCATA, inputs, outputs, 0, SUBNETWORK_ID_NOTE_POOL, 0, payload);
+    tx.set_storage_mass(masses.storage_mass);
+    let signable = kaspa_consensus_core::tx::SignableTransaction::with_entries(tx, utxo_entries);
+    let keydata = account.prv_key_data(wallet_secret.clone()).await?;
+    let signer = Signer::new(account.clone(), keydata, payment_secret);
+    let addresses: Vec<Address> = mature.iter().filter_map(|entry| entry.utxo.address.clone()).collect();
+    let signed = crate::tx::generator::signer::SignerT::try_sign(&signer, signable, &addresses)?;
+
+    let rpc_tx: kaspa_rpc_core::RpcTransaction = (&signed.tx).into();
+    let transaction_id = account.wallet().rpc_api().submit_transaction(rpc_tx, false).await?;
+
+    for sn in &selected_serials {
+        note_key_store.mark_status(sn, NoteStatus::Superseded).await?;
+    }
+
+    Ok((transaction_id, fee_sompi, mature.len(), selected_serials.len()))
+}
+
+/// Groups of ten same-denomination notes that would consolidate into one note
+/// of the next size up. Denominations being powers of ten, rotating such a
+/// group re-produces it as a single larger note (`decompose_amount` is greedy
+/// largest-first), so this needs no new operation — it is [`rotate_notes`]
+/// applied deliberately.
+///
+/// Two denominations are deliberately left alone: the top one (nothing larger
+/// to merge into) and the smallest, because 0.01 notes are the fee stamps
+/// every pure-pool operation spends — merging them away would force later
+/// rotations into slack mode, where the fee comes out of the note's own value
+/// and breaks its denomination. A merge costs one fee quantum (0.01), so this
+/// also keeps the cost proportionate: consolidating ten 0.1s into 1 MAGLD
+/// spends 1% of it, while the same fee against ten 1s is a tenth of a percent.
+pub async fn plan_merges(account: Arc<dyn Account>) -> Result<Vec<Vec<Hash>>> {
+    let note_key_store = account.wallet().store().as_note_key_store()?;
+    let mut by_denomination: HashMap<usize, Vec<Hash>> = HashMap::new();
+    let mut stream = note_key_store.iter().await?;
+    while let Some(info) = stream.try_next().await? {
+        if info.status == NoteStatus::Active {
+            by_denomination.entry(info.d as usize).or_default().push(info.sn);
+        }
+    }
+
+    let mut plans = Vec::new();
+    // Skip index 0 (fee stamps) and the top denomination (nothing above it).
+    for d in 1..DENOMINATION_PETALS.len() - 1 {
+        let Some(serials) = by_denomination.get(&d) else { continue };
+        for group in serials.chunks(10) {
+            if group.len() == 10 {
+                plans.push(group.to_vec());
+            }
+        }
+    }
+    Ok(plans)
+}
+
+/// Consolidate held notes into the fewest possible, ten at a time. Returns how
+/// many groups were merged. Skips a group whose fee cannot be sourced, and
+/// keeps going — a failed merge is housekeeping that can wait, never an error
+/// worth failing a receive over.
+pub async fn merge_held_notes(account: Arc<dyn Account>, wallet_secret: Secret, limit: usize) -> Result<usize> {
+    let mut merged = 0usize;
+    for group in plan_merges(account.clone()).await?.into_iter().take(limit) {
+        match rotate_notes(account.clone(), wallet_secret.clone(), group).await {
+            Ok(_) => merged += 1,
+            Err(_) => break,
+        }
+    }
+    Ok(merged)
+}

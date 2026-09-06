@@ -227,6 +227,35 @@ impl KaspaCli {
         self.auto_sweep_utxos.load(Ordering::SeqCst)
     }
 
+    /// Keep the note vault tidy: ten notes of one size become one of the next.
+    /// Runs with the other armed automations, and is what stops a wallet that
+    /// receives many small payments from accumulating a drawer of change.
+    pub fn maybe_auto_merge(self: &Arc<Self>) {
+        if !self.auto_mint_armed() || self.auto_busy.load(Ordering::SeqCst) || !self.wallet.is_connected() {
+            return;
+        }
+        {
+            let last = self.auto_last_run.lock().unwrap();
+            if last.elapsed().as_secs() < 60 {
+                return;
+            }
+        }
+        let Ok(account) = self.wallet.account() else { return };
+        let Some(secret) = self.auto_secret.lock().unwrap().clone() else { return };
+
+        self.auto_busy.store(true, Ordering::SeqCst);
+        let this = self.clone();
+        workflow_core::task::spawn(async move {
+            *this.auto_last_run.lock().unwrap() = Instant::now();
+            match kaspa_wallet_core::account::notepool::merge_held_notes(account, secret, 4).await {
+                Ok(0) => {}
+                Ok(merged) => tprintln!(this, "{NOTIFY} auto-merge: consolidated {merged} group(s) of ten notes"),
+                Err(err) => tprintln!(this, "{NOTIFY} auto-merge skipped: {err}"),
+            }
+            this.auto_busy.store(false, Ordering::SeqCst);
+        });
+    }
+
     /// Consolidate when the account holds more mature UTXOs than the
     /// threshold. Shares the busy flag and rate limit with auto-mint so the
     /// two never run at once.
@@ -687,6 +716,7 @@ impl KaspaCli {
 
                                     this.maybe_auto_mint();
                                     this.maybe_auto_sweep();
+                                    this.maybe_auto_merge();
                                 }
                             }
                         }

@@ -42,6 +42,33 @@ impl Send {
                 }
                 total
             };
+            // Neither side alone covers it, but together they do: one
+            // transaction spends transparent coins AND consumes notes.
+            if note_total < amount_sompi && mature + note_total > amount_sompi {
+                tprintln!(
+                    ctx,
+                    "Paying {} MAGLD from both sides at once: {} MAGLD on the ledger plus notes, in one transaction.",
+                    sompi_to_kaspa_string(amount_sompi),
+                    sompi_to_kaspa_string(mature)
+                );
+                let (transaction_id, fee, utxos, notes) = kaspa_wallet_core::account::notepool::send_combined(
+                    account.clone(),
+                    wallet_secret,
+                    payment_secret,
+                    address.clone(),
+                    amount_sompi,
+                )
+                .await?;
+                tprintln!(
+                    ctx,
+                    "\nSent {} MAGLD to {address} from {utxos} ledger coin(s) and {notes} note(s) (fee {} MAGLD); tx: {}\n",
+                    sompi_to_kaspa_string(amount_sompi),
+                    sompi_to_kaspa_string(fee),
+                    transaction_id
+                );
+                return Ok(());
+            }
+
             if note_total >= amount_sompi {
                 tprintln!(
                     ctx,
