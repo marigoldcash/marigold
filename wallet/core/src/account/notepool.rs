@@ -1665,6 +1665,19 @@ pub async fn max_mintable_petals(
         return Ok(0);
     }
 
+    // Leave headroom. The estimate above dry-runs a sweep-shaped transaction
+    // (one big output, fees deducted from it) while the real mint has no
+    // payment outputs, carries the note payload, and produces change — a
+    // different shape with a different mass. Spending the last petal means
+    // any discrepancy at all comes back as "Insufficient funds", which is
+    // exactly what a mining wallet with 140k coins reported (2026-09-05).
+    // Two percent, floored at one quantum, costs nothing and never fails.
+    let margin = (candidate / 50).max(quantum);
+    candidate = candidate.saturating_sub(margin) / quantum * quantum;
+    if candidate == 0 {
+        return Ok(0);
+    }
+
     // Verify the exact shape mint() will use; back off by one quantum at a
     // time if the refined estimate still lands a hair over.
     for _ in 0..4 {

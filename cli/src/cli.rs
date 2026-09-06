@@ -390,8 +390,16 @@ impl KaspaCli {
             *this.auto_last_run.lock().unwrap() = Instant::now();
             let abortable = Abortable::default();
             let result = async {
-                let amount =
+                let mintable =
                     kaspa_wallet_core::account::notepool::max_mintable_petals(account.clone(), None, &abortable, None).await?;
+                // Bound each automated mint. Minting an entire mining wallet
+                // in one go means thousands of batch transactions, minutes of
+                // work, and a flood of change notifications that leaves the
+                // wallet's own coin list behind (the "money disappeared"
+                // report). A chunk per minute drains steadily, stays a couple
+                // of transactions, and keeps every estimate comfortable.
+                let cap = threshold.saturating_mul(10).max(10_000_000_000);
+                let amount = mintable.min(cap);
                 if amount == 0 {
                     return Ok(None);
                 }
