@@ -661,7 +661,6 @@ impl KaspaCli {
         let this = self.clone();
         workflow_core::task::spawn(async move {
             let mut last_run = Instant::now();
-            let mut first_run_done = false;
             loop {
                 workflow_core::task::sleep(Duration::from_secs(5)).await;
                 if this.shutdown.load(Ordering::SeqCst) {
@@ -675,14 +674,22 @@ impl KaspaCli {
                 this.prompt_total_petals.store(notes + ledger, Ordering::SeqCst);
                 this.prompt_total_valid.store(true, Ordering::SeqCst);
 
+                // The periodic run is NOT conditional on the opening sequence
+                // having happened. It used to be, via a `first_run_done` flag
+                // set only inside the branch below — so a wallet opened while
+                // disconnected and connected by hand afterwards never set it,
+                // and housekeeping never ran once for the whole session. The
+                // prompt total kept climbing, because that is updated above
+                // this point, which made it look alive: a wallet sat for an
+                // hour minting nothing and merging nothing while its ledger
+                // ran to 42,605 coins (founder report, 2026-09-06).
                 if this.open_housekeeping_pending.swap(false, Ordering::SeqCst) {
-                    first_run_done = true;
                     last_run = Instant::now();
                     this.report_holdings().await;
                     this.run_housekeeping(true).await;
                     this.report_holdings().await;
                     this.term().refresh_prompt();
-                } else if first_run_done && last_run.elapsed().as_secs() >= 60 {
+                } else if last_run.elapsed().as_secs() >= 60 {
                     last_run = Instant::now();
                     this.run_housekeeping(false).await;
                     this.term().refresh_prompt();

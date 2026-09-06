@@ -52,6 +52,13 @@ impl Connect {
             };
             wrpc_client.connect(Some(options)).await.map_err(|e| e.to_string())?;
 
+            // Connecting by hand, after opening a wallet offline, is a normal
+            // way to start a session — and it should get the same loud opening
+            // housekeeping that opening while connected does.
+            if ctx.wallet().is_open() {
+                ctx.request_open_housekeeping();
+            }
+
             // Persist what we actually connected to, so the next session (and
             // this wallet's own metadata) reflect reality — previously only
             // the `server` command wrote the setting and it drifted.

@@ -1947,13 +1947,23 @@ pub async fn plan_merges(account: Arc<dyn Account>) -> Result<Vec<Vec<Hash>>> {
 /// worth failing a receive over.
 pub async fn merge_held_notes(account: Arc<dyn Account>, wallet_secret: Secret, limit: usize) -> Result<(usize, Option<String>)> {
     let mut merged = 0usize;
-    // The reason a merge stopped is reported, not swallowed. A silent `Ok(0)`
-    // is indistinguishable from "nothing to do", and that is precisely how a
-    // wallet sat with 22 notes of 1 MAGLD unmerged without saying why.
-    for group in plan_merges(account.clone()).await?.into_iter().take(limit) {
-        match rotate_notes(account.clone(), wallet_secret.clone(), group).await {
-            Ok(_) => merged += 1,
-            Err(err) => return Ok((merged, Some(err.to_string()))),
+    // Re-plan after each pass so the merge carries up the ladder in one call:
+    // ten 0.1s become a 1, and that new 1 may complete a group of ten 1s that
+    // becomes a 10. Planning once would climb a single rung per run.
+    while merged < limit {
+        let plans = plan_merges(account.clone()).await?;
+        if plans.is_empty() {
+            break;
+        }
+        // The reason a merge stopped is reported, not swallowed. A silent
+        // `Ok(0)` is indistinguishable from "nothing to do", and that is
+        // precisely how a wallet sat with 22 notes of 1 MAGLD unmerged
+        // without ever saying why.
+        for group in plans.into_iter().take(limit - merged) {
+            match rotate_notes(account.clone(), wallet_secret.clone(), group).await {
+                Ok(_) => merged += 1,
+                Err(err) => return Ok((merged, Some(err.to_string()))),
+            }
         }
     }
     Ok((merged, None))
