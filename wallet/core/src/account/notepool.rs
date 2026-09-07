@@ -1991,23 +1991,47 @@ pub async fn plan_merges(account: Arc<dyn Account>) -> Result<Vec<Vec<Hash>>> {
 /// exactly where they were (founder report, 2026-09-06).
 pub async fn merge_held_notes(account: Arc<dyn Account>, wallet_secret: Secret, limit: usize) -> Result<(usize, Option<String>)> {
     let mut merged = 0usize;
+    // Serials this call has already spent. A plan is computed up front, but
+    // `rotate_notes` sources its fee from the smallest spare it can find —
+    // and that spare is very often a 0.01 stamp belonging to a group later in
+    // the SAME plan. Merging the 10s would quietly eat a stamp out of the
+    // stamp group, and by the time the plan reached it the chain had confirmed
+    // the spend, so the node answered "consumed serial ... does not exist in
+    // the pool" (founder report, 2026-09-06). Fee sourcing is deliberately
+    // free to take any spare; the planner is what has to keep up.
+    let mut spent: HashSet<Hash> = HashSet::new();
     // Re-plan after each pass so the merge carries up the ladder in one call:
     // ten 0.1s become a 1, and that new 1 may complete a group of ten 1s that
     // becomes a 10. Planning once would climb a single rung per run.
     while merged < limit {
-        let plans = plan_merges(account.clone()).await?;
+        let plans: Vec<Vec<Hash>> = plan_merges(account.clone())
+            .await?
+            .into_iter()
+            .filter(|group| group.iter().all(|sn| !spent.contains(sn)))
+            .collect();
         if plans.is_empty() {
             break;
         }
+        let before = merged;
         // The reason a merge stopped is reported, not swallowed. A silent
         // `Ok(0)` is indistinguishable from "nothing to do", and that is
         // precisely how a wallet sat with 22 notes of 1 MAGLD unmerged
         // without ever saying why.
         for group in plans.into_iter().take(limit - merged) {
+            if group.iter().any(|sn| spent.contains(sn)) {
+                continue;
+            }
             match rotate_notes(account.clone(), wallet_secret.clone(), group).await {
-                Ok(_) => merged += 1,
+                Ok(result) => {
+                    merged += 1;
+                    // Both the group and whatever spare paid its fee.
+                    spent.extend(result.consumed_serials.iter().copied());
+                }
                 Err(err) => return Ok((merged, Some(err.to_string()))),
             }
+        }
+        if merged == before {
+            break;
         }
     }
     Ok((merged, None))
