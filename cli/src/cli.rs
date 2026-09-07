@@ -121,7 +121,14 @@ impl KaspaCli {
                     std::println!("halt");
                     1
                 });
-                kaspa_core::log::init_logger(None, "info");
+                // NOT kaspa_core::log::init_logger: that installs log4rs with a
+                // console appender writing straight to stdout, terminating lines
+                // with a bare LF. In a raw-mode terminal the cursor never returns
+                // to column zero, so every line starts where the last one ended
+                // and the node's output cascades diagonally down the screen
+                // (founder report, 2026-09-07). Route it through the terminal
+                // instead, which knows to emit CRLF and to redraw the prompt.
+                crate::log_sink::install();
             } else {
                 kaspa_core::log::set_log_level(LevelFilter::Info);
             }
@@ -1806,6 +1813,9 @@ pub async fn kaspa_cli(terminal_options: TerminalOptions, banner: Option<String>
     // redirect the global log output to terminal
     #[cfg(not(target_arch = "wasm32"))]
     workflow_log::pipe(Some(cli.clone()));
+    // ...and the `log` crate's, which is what everything inside the node uses.
+    #[cfg(not(target_arch = "wasm32"))]
+    crate::log_sink::attach(&cli);
 
     cli.register_handlers()?;
 

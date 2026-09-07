@@ -4,6 +4,7 @@ mod cli;
 #[cfg(feature = "embedded-node")]
 pub mod embedded;
 pub mod error;
+pub(crate) mod log_sink;
 pub mod extensions;
 mod helpers;
 mod imports;

@@ -50,6 +50,7 @@ kaspa-bip32.workspace = true
 kaspa-consensus-core.workspace = true
 kaspad = { workspace = true, optional = true }
 kaspa-core.workspace = true
+chrono.workspace = true
 log.workspace = true
 kaspa-daemon.workspace = true
 kaspa-metrics-core.workspace = true
