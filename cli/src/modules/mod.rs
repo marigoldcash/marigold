@@ -26,10 +26,14 @@ pub mod miner;
 pub mod monitor;
 pub mod mute;
 pub mod network;
+// The upstream `node` module drives a kaspad child process through the NW.js
+// daemon runtime; it is inert here (its verb() returns None without a Daemons
+// handle) and the embedded node takes the name.
+#[cfg(not(feature = "embedded-node"))]
 pub mod node;
 #[cfg(feature = "embedded-node")]
-#[path = "mynode.rs"]
-pub mod mynode;
+#[path = "embnode.rs"]
+pub mod node;
 pub mod note;
 pub mod open;
 pub mod ping;
@@ -76,8 +80,6 @@ pub fn register_handlers(cli: &Arc<KaspaCli>) -> Result<()> {
     // Registered separately so the everyday command list is identical whether
     // or not the node is compiled in: a build without the feature simply has no
     // `mynode` verb, rather than one that reports itself unavailable.
-    #[cfg(feature = "embedded-node")]
-    register_handlers!(cli, cli.handlers(), [mynode]);
 
     Ok(())
 }

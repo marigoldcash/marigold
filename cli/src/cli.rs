@@ -2,6 +2,7 @@ use crate::error::Error;
 use crate::helpers::*;
 use crate::imports::*;
 use crate::modules::miner::Miner;
+#[cfg(not(feature = "embedded-node"))]
 use crate::modules::node::Node;
 use crate::notifier::{Notification, Notifier};
 use crate::result::Result;
@@ -41,6 +42,7 @@ pub struct KaspaCli {
     daemons: Arc<Daemons>,
     handlers: Arc<HandlerCli>,
     shutdown: Arc<AtomicBool>,
+    #[cfg(not(feature = "embedded-node"))]
     node: Mutex<Option<Arc<Node>>>,
     miner: Mutex<Option<Arc<Miner>>>,
     notifier: Notifier,
@@ -141,6 +143,7 @@ impl KaspaCli {
             handlers: Arc::new(HandlerCli::default()),
             daemons: options.daemons.unwrap_or_default(),
             shutdown: Arc::new(AtomicBool::new(false)),
+            #[cfg(not(feature = "embedded-node"))]
             node: Mutex::new(None),
             miner: Mutex::new(None),
             notifier: Notifier::try_new()?,
@@ -220,7 +223,16 @@ impl KaspaCli {
         tprintln!(self, "");
 
         let (node, rpc) = crate::embedded::EmbeddedNode::start(network_id, &appdir)?;
+
+        // The utxo processor subscribes to its RpcCtl's multiplexer once, when
+        // it starts. Binding a new Rpc swaps the api but leaves that task
+        // listening to the OLD ctl, so signalling the new one reaches nobody
+        // and the wallet sits at DISCONNECTED with a working node inside it.
+        // Stop it, bind, start again — then the subscription is to the ctl we
+        // are about to signal.
+        self.wallet.utxo_processor().stop().await?;
         self.wallet.bind_rpc(Some(rpc)).await?;
+        self.wallet.utxo_processor().start().await?;
         node.signal_connected().await?;
         self.embedded_node.lock().unwrap().replace(node);
         tprintln!(self, "Your node is running. It will catch up with the network in the background.");
@@ -787,6 +799,7 @@ impl KaspaCli {
     pub fn register_handlers(self: &Arc<Self>) -> Result<()> {
         crate::modules::register_handlers(self)?;
 
+        #[cfg(not(feature = "embedded-node"))]
         if let Some(node) = self.handlers().get("node") {
             let node = node.downcast_arc::<crate::modules::node::Node>().ok();
             *self.node.lock().unwrap() = node;
@@ -805,11 +818,16 @@ impl KaspaCli {
     pub async fn handle_daemon_event(self: &Arc<Self>, event: DaemonEvent) -> Result<()> {
         match event.kind() {
             DaemonKind::Kaspad => {
-                let node = self.node.lock().unwrap().clone();
-                if let Some(node) = node {
-                    node.handle_event(self, event.into()).await?;
-                } else {
-                    panic!("Stdio handler: node module is not initialized");
+                // Only the child-process node produces daemon events; the
+                // embedded one runs in this process and has none.
+                #[cfg(not(feature = "embedded-node"))]
+                {
+                    let node = self.node.lock().unwrap().clone();
+                    if let Some(node) = node {
+                        node.handle_event(self, event.into()).await?;
+                    } else {
+                        panic!("Stdio handler: node module is not initialized");
+                    }
                 }
             }
             DaemonKind::CpuMiner => {
@@ -1614,7 +1632,10 @@ impl Cli for KaspaCli {
 
         let mut prompt = vec![];
 
+        #[cfg(not(feature = "embedded-node"))]
         let node_running = if let Some(node) = self.node.lock().unwrap().as_ref() { node.is_running() } else { false };
+        #[cfg(feature = "embedded-node")]
+        let node_running = self.embedded_node_running();
 
         let _miner_running = if let Some(miner) = self.miner.lock().unwrap().as_ref() { miner.is_running() } else { false };
 

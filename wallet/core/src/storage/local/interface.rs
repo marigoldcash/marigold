@@ -56,6 +56,50 @@ impl Store {
     }
 }
 
+/// An exclusive lock on one wallet file, held for as long as it is open.
+///
+/// Two processes with the same wallet open is a corruption risk, not a
+/// theoretical one: both cache the whole wallet in memory and write it back
+/// whole, so the second to save silently discards everything the first did —
+/// including notes it never knew about. The note vault is worse, since each
+/// side would rotate serials the other still believes it holds.
+///
+/// `flock` rather than a pid file: the kernel drops it when the process exits,
+/// however it exits, so a crash can never leave a wallet permanently unopenable.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) struct WalletLock {
+    _file: std::fs::File,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl WalletLock {
+    pub(crate) fn acquire(wallet_file: &std::path::Path) -> Result<Self> {
+        use fs4::fs_std::FileExt;
+        let path = wallet_file.with_extension("wallet.lock");
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .open(&path)
+            .map_err(|err| Error::Custom(format!("cannot create the wallet lock file: {err}")))?;
+        // NOTE the bool. fs4 returns Ok(false) when the lock is held, and only
+        // Err for an actual I/O failure — so `.map_err(...)?` alone silently
+        // accepted contention as success and the lock did nothing at all.
+        let taken = file
+            .try_lock_exclusive()
+            .map_err(|err| Error::Custom(format!("cannot lock the wallet file: {err}")))?;
+        if !taken {
+            return Err(Error::Custom(
+                "that wallet is already open in another Marigold program. Close it there first — two \
+                 programs writing one wallet would lose whichever of them saved second."
+                    .to_string(),
+            ));
+        }
+        Ok(Self { _file: file })
+    }
+}
+
 pub(crate) struct LocalStoreInner {
     pub cache: Arc<RwLock<Cache>>,
     pub store: RwLock<Arc<Store>>,
@@ -69,6 +113,9 @@ pub(crate) struct LocalStoreInner {
     /// "resident" wallet still gets real file-backed storage for this data.
     pub notevault: Arc<NoteVault>,
     pub is_modified: AtomicBool,
+    /// Released on drop, which is when the wallet closes or the process ends.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub _lock: Option<WalletLock>,
 }
 
 impl LocalStoreInner {
@@ -124,7 +171,20 @@ impl LocalStoreInner {
         notevault.reset().await?;
         let notevault = Arc::new(notevault);
 
-        Ok(Self { cache, store: RwLock::new(Arc::new(store)), is_modified, transactions, notevault })
+        #[cfg(not(target_arch = "wasm32"))]
+        let _lock = match &store {
+            Store::Storage(storage) => Some(WalletLock::acquire(storage.filename())?),
+            Store::Resident => None,
+        };
+        Ok(Self {
+            cache,
+            store: RwLock::new(Arc::new(store)),
+            is_modified,
+            transactions,
+            notevault,
+            #[cfg(not(target_arch = "wasm32"))]
+            _lock,
+        })
     }
 
     async fn try_load(wallet_secret: &Secret, folder: &str, args: OpenArgs) -> Result<Self> {
@@ -142,7 +202,17 @@ impl LocalStoreInner {
         };
         let notevault = Arc::new(NoteVault::new(folder, &filename));
 
-        Ok(Self { cache, store: RwLock::new(Arc::new(Store::Storage(storage))), is_modified, transactions, notevault })
+        #[cfg(not(target_arch = "wasm32"))]
+        let _lock = Some(WalletLock::acquire(storage.filename())?);
+        Ok(Self {
+            cache,
+            store: RwLock::new(Arc::new(Store::Storage(storage))),
+            is_modified,
+            transactions,
+            notevault,
+            #[cfg(not(target_arch = "wasm32"))]
+            _lock,
+        })
     }
 
     async fn try_import(wallet_secret: &Secret, folder: &str, serialized_wallet_storage: &[u8]) -> Result<Self> {
@@ -171,7 +241,17 @@ impl LocalStoreInner {
         notevault.reset().await?;
         let notevault = Arc::new(notevault);
 
-        Ok(Self { cache, store: RwLock::new(Arc::new(Store::Storage(storage))), is_modified, transactions, notevault })
+        #[cfg(not(target_arch = "wasm32"))]
+        let _lock = Some(WalletLock::acquire(storage.filename())?);
+        Ok(Self {
+            cache,
+            store: RwLock::new(Arc::new(Store::Storage(storage))),
+            is_modified,
+            transactions,
+            notevault,
+            #[cfg(not(target_arch = "wasm32"))]
+            _lock,
+        })
     }
 
     async fn try_export(&self, wallet_secret: &Secret, _options: WalletExportOptions) -> Result<Vec<u8>> {

@@ -23,7 +23,8 @@ default = []
 # ~55 second CLI rebuild into a full node build; release builds for users turn
 # it on. Nothing about the wallet changes when it is off — the node is opt-in at
 # runtime too, via `node start`.
-embedded-node = ["dep:kaspad"]
+embedded-node = ["dep:kaspad", "dep:fs4"]
+fs4 = ["dep:fs4"]
 
 [[bin]]
 name = "marigold-cli"
@@ -76,6 +77,7 @@ workflow-nw.workspace = true
 workflow-store.workspace = true
 workflow-terminal.workspace = true
 workflow-wasm.workspace = true
+fs4 = { version = "0.13", default-features = false, features = ["sync"], optional = true }
 
 [dependencies.web-sys]
 workspace = true

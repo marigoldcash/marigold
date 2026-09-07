@@ -35,6 +35,11 @@ pub fn default_appdir(network_id: NetworkId) -> Result<std::path::PathBuf> {
 /// A running in-process node. Dropping this does NOT stop it — call
 /// [`EmbeddedNode::stop`], which signals the core and joins its workers.
 pub struct EmbeddedNode {
+    /// Held for the node's lifetime. Two nodes on one data directory is a
+    /// corrupted database: rocksdb has its own LOCK and would refuse the
+    /// second, but from inside a background thread, as a panic that takes the
+    /// wallet with it. Refusing here turns that into a sentence.
+    _lock: std::fs::File,
     core: Arc<Core>,
     workers: Mutex<Option<Vec<JoinHandle<()>>>>,
     ctl: RpcCtl,
@@ -103,6 +108,23 @@ impl EmbeddedNode {
         // Not `create_core`: that builds a Runtime via `Runtime::from_args`,
         // which installs a global logger and panics with SetLoggerError when
         // one already exists — and the wallet installs one at startup.
+        // Claim the data directory before anything opens it.
+        use fs4::fs_std::FileExt;
+        std::fs::create_dir_all(appdir).map_err(|err| Error::custom(format!("cannot create {}: {err}", appdir.display())))?;
+        let lock_path = appdir.join("node.lock");
+        let lock = std::fs::OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .open(&lock_path)
+            .map_err(|err| Error::custom(format!("cannot create the node lock file: {err}")))?;
+        lock.try_lock_exclusive().map_err(|_| {
+            Error::custom(
+                "another Marigold wallet is already running a node on this data directory.                  Use that one, or stop it first — two nodes sharing a database would corrupt it.",
+            )
+        })?;
+
         let runtime = Runtime::from_args_without_logger(&args);
         // The node logs at INFO once a second. The wallet talks to its user
         // through the terminal, not the log crate, so clamping the global level
@@ -119,7 +141,7 @@ impl EmbeddedNode {
 
         let ctl = RpcCtl::new();
         let rpc = Rpc::new(rpc_service, ctl.clone());
-        let node = Arc::new(Self { core, workers: Mutex::new(Some(workers)), ctl });
+        let node = Arc::new(Self { _lock: lock, core, workers: Mutex::new(Some(workers)), ctl });
         Ok((node, rpc))
     }
 
