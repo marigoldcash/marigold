@@ -29,6 +29,20 @@ pub struct ResolverGroup {
     pub enable: Option<bool>,
 }
 
+/// A node this project runs and offers to wallets directly — as opposed to a
+/// [`ResolverRecord`], which is a *resolver service* answering "which node
+/// should I use". Marigold has no resolver deployed and, at three seeds, no
+/// need of one: a short list load-balances well enough by being shuffled.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PublicNode {
+    /// Full wRPC URL, e.g. `wss://rpc1.example.cash`.
+    pub address: String,
+    /// Network id string this node serves, e.g. `testnet-10`. A wallet on a
+    /// different network must never be handed it.
+    pub network: String,
+    pub enable: Option<bool>,
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ResolverConfig {
     // Both default to empty. A config listing no endpoints is a legitimate
@@ -40,6 +54,29 @@ pub struct ResolverConfig {
     groups: Vec<ResolverGroup>,
     #[serde(rename = "resolver", default)]
     resolvers: Vec<ResolverRecord>,
+    #[serde(rename = "node", default)]
+    nodes: Vec<PublicNode>,
+}
+
+/// Nodes this project offers to wallets on `network_id`, shuffled.
+///
+/// Used when the user has named no node: without it, "connect me to the
+/// network" has no answer but a resolver service we do not run. The list is
+/// filtered by network on purpose — handing a wallet a node on the wrong chain
+/// is the failure this fork nearly shipped by inheriting Kaspa's resolver list.
+pub fn public_nodes(network_id: NetworkId) -> Vec<String> {
+    let wanted = network_id.to_string();
+    let Ok(config) = toml::from_str::<ResolverConfig>(RESOLVER_CONFIG) else {
+        return Vec::new();
+    };
+    let mut nodes = config
+        .nodes
+        .into_iter()
+        .filter(|node| node.enable.unwrap_or(true) && node.network == wanted)
+        .map(|node| node.address)
+        .collect::<Vec<_>>();
+    nodes.shuffle(&mut thread_rng());
+    nodes
 }
 
 fn try_parse_resolvers(toml: &str) -> Result<Vec<Arc<String>>> {

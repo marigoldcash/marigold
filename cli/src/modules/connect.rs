@@ -10,7 +10,12 @@ impl Connect {
         if let Some(wrpc_client) = ctx.wallet().try_wrpc_client().as_ref() {
             let network_id = ctx.wallet().network_id()?;
 
-            let arg_or_server_address = argv.first().cloned().or_else(|| ctx.wallet().settings().get(WalletSettings::Server));
+            // A cleared setting is stored as an empty string; treat it as absent,
+            // or `connect` would try to dial "" instead of a public node.
+            let arg_or_server_address = argv
+                .first()
+                .cloned()
+                .or_else(|| ctx.wallet().settings().get::<String>(WalletSettings::Server).filter(|s| !s.trim().is_empty()));
             let (is_public, url) = match arg_or_server_address.as_deref() {
                 // No public nodes exist for Marigold yet, so say that rather
                 // than fail against an empty list — and certainly rather than
@@ -18,6 +23,16 @@ impl Connect {
                 // to inherit wholesale. Marigold's testnet-10 answers to the
                 // same network-id string as Kaspa's, so being handed one of
                 // their nodes would attach the wallet to a different chain.
+                // A node we run, offered directly. Not a resolver: Marigold
+                // has none deployed and at this scale needs none — the list is
+                // shuffled, which load-balances well enough across a handful.
+                Some("public") | None
+                    if !kaspa_wrpc_client::resolver::public_nodes(network_id).is_empty() =>
+                {
+                    let node = kaspa_wrpc_client::resolver::public_nodes(network_id).remove(0);
+                    tprintln!(ctx, "Connecting to a public Marigold node");
+                    (true, wrpc_client.parse_url_with_network_type(node, network_id.into()).map_err(|e| e.to_string())?)
+                }
                 Some("public") | None if !Resolver::default().is_configured() => {
                     tprintln!(ctx, "");
                     tprintln!(ctx, "Marigold has no public nodes yet — there is nowhere to connect you automatically.");
@@ -48,16 +63,24 @@ impl Connect {
                 if !WARNING.load(Ordering::Relaxed) {
                     WARNING.store(true, Ordering::Relaxed);
 
+                    // Kaspa's wording said this infrastructure is run by
+                    // contributors and load-balanced, and asked you not to
+                    // connect directly. None of that is true here: this is one
+                    // node the project runs, and connecting directly is exactly
+                    // what happens. Saying so matters more for Marigold than it
+                    // would for a transparent chain — the node sees which notes
+                    // a wallet asks after, which is the one linkage the design
+                    // otherwise never records.
                     tprintln!(ctx);
-
                     tpara!(
                         ctx,
-                        "Please note that public node infrastructure is operated by contributors and \
-                        accessing it may expose your IP address to different node providers. \
+                        "This is a node the Marigold project runs, offered so you can use a wallet without \
+                        setting one up. Whoever runs a node sees the address you connect from and which notes \
+                        your wallet asks about — the chain itself never records that, so a node you do not \
+                        control is the one place it exists. For anything you care about, run your own and \
+                        'connect 127.0.0.1:27210'. \
                         ",
                     );
-                    tprintln!(ctx);
-                    tpara!(ctx, "Please do not connect to public nodes directly as they are load-balanced.");
                     tprintln!(ctx);
                 }
             }

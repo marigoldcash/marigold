@@ -31,3 +31,19 @@
 # Exposing a node publicly is a security decision, not a config change: it puts
 # the RPC surface on the internet. Keep --unsaferpc off, and see
 # docs/marigold/TESTNET.md for what else it needs.
+
+# ---------------------------------------------------------------------------
+# Public nodes this project runs, offered directly when the user names none.
+#
+# Not resolvers — actual wRPC endpoints. `network` is matched exactly against
+# the wallet's network id, so a wallet can never be handed a node on another
+# chain; that is the failure this fork nearly shipped by inheriting Kaspa's
+# resolver list, and filtering here is what makes a bare list safe.
+#
+# rpc1 is the big rig. marigoldd binds wRPC to loopback and nginx terminates
+# TLS on 443 in front of it, so the node is not directly reachable. The p2p
+# name for the same machine (tn-seed1) is separate and must stay that way.
+
+[[node]]
+address = "wss://rpc1.marigold.cash"
+network = "testnet-10"
