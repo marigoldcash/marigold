@@ -98,6 +98,15 @@ impl EmbeddedNode {
             NetworkType::Mainnet => {}
         }
 
+        // marigoldd's main() raises the soft file-descriptor limit before
+        // computing its budget, and a node wants far more handles than a shell
+        // hands out by default. Skipping it left the node with whatever the
+        // terminal happened to allow — commonly 1024, against a daemon that
+        // asks for far more.
+        if let Err(err) = kaspa_utils::fd_budget::try_set_fd_limit(kaspad_lib::daemon::DESIRED_DAEMON_SOFT_FD_LIMIT) {
+            log::warn!("could not raise the file descriptor limit for the node: {err}");
+        }
+
         // Same budget arithmetic as marigoldd's own main(): whatever the
         // process is allowed, less what the node's own listeners will take.
         let fd_total_budget = kaspa_utils::fd_budget::limit()

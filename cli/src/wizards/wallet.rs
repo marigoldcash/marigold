@@ -221,30 +221,24 @@ pub(crate) async fn create(
 
     notifier.hide();
 
+    // The account's own bip39 phrase is deliberately NOT shown.
+    //
+    // It lives inside the wallet file, encrypted under the wallet password, and
+    // recovering that file recovers it — so it is not a second thing to write
+    // down, it is the same thing. Printing it here put a third secret in front
+    // of someone who had just been given two, and every extra secret shown is
+    // one more that gets photographed, pasted, or written on the wrong piece of
+    // paper. 'export mnemonic' produces it from an open wallet on the rare
+    // occasion something outside Marigold needs it.
     if !import_with_mnemonic {
         tprintln!(ctx, "");
-        tprintln!(ctx, "---");
-        tprintln!(ctx, "");
-        tprintln!(ctx, "{}", style("IMPORTANT:").red());
-        tprintln!(ctx, "");
-
         tpara!(
             ctx,
-            "Your mnemonic phrase allows you to re-create your private key. \
-            The person who has access to this mnemonic will have full control of \
-            the Marigold stored in it. Keep your mnemonic safe. Write it down and \
-            store it in a safe, preferably in a fire-resistant location. Do not \
-            store your mnemonic on this computer or a mobile device. This wallet \
-            will never ask you for this mnemonic phrase unless you manually \
-            initiate a private key recovery. \
+            "This wallet also holds an ordinary account key for the transparent ledger. It is kept \
+            inside the wallet file and comes back with it — there is nothing separate to write down \
+            for it. If you ever need it in another program, 'export mnemonic' will show it. \
             ",
         );
-
-        // descriptor
-
-        ["", "Never share your mnemonic with anyone!", "---", "", "Your default wallet account mnemonic:", mnemonic_phrase.as_str()?]
-            .into_iter()
-            .for_each(|line| term.writeln(line));
     }
 
     // Note-vault ceremony — at wallet creation, where it belongs, not as a
@@ -255,10 +249,9 @@ pub(crate) async fn create(
     tpara!(
         ctx,
         "\
-        Your note vault holds the keys to your bearer notes. It has its own \
-        24-word recovery phrase — a second, independent secret from the \
-        account mnemonic above. You can supply your own 24 words or have \
-        them generated now.\
+        Your note vault holds the keys to your bearer notes — your money. It has \
+        a 24-word recovery phrase, and this is the one to write down. You can \
+        supply your own 24 words or have them generated now.\
         ",
     );
     tprintln!(ctx, "");

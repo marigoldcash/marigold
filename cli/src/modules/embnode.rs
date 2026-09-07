@@ -10,12 +10,23 @@ impl Node {
         match argv.first().map(|s| s.as_str()) {
             Some("start") => ctx.start_embedded_node().await,
             Some("stop") => ctx.stop_embedded_node().await,
+            Some("logs") => {
+                // The node's own logging is clamped to warnings so it does not
+                // scroll a wallet's terminal once a second. That also made a
+                // node that would not sync completely undiagnosable, so it can
+                // be turned back on.
+                let on = !matches!(argv.get(1).map(|s| s.as_str()), Some("off"));
+                kaspa_core::log::set_log_level(if on { log::LevelFilter::Info } else { log::LevelFilter::Warn });
+                log::set_max_level(if on { log::LevelFilter::Info } else { log::LevelFilter::Warn });
+                tprintln!(ctx, "Node logs are {}.", if on { "on — 'node logs off' to silence them" } else { "off" });
+                Ok(())
+            }
             Some("status") | None => {
                 self.status(&ctx).await;
                 Ok(())
             }
             Some(other) => {
-                tprintln!(ctx, "usage: 'node start' | 'node stop' | 'node status'  (got '{other}')");
+                tprintln!(ctx, "usage: 'node start' | 'node stop' | 'node status' | 'node logs [off]'  (got '{other}')");
                 Ok(())
             }
         }
@@ -70,6 +81,23 @@ impl Node {
             tprintln!(ctx, "Status: {}", style("caught up with the network").green());
         } else {
             tprintln!(ctx, "Status: {}", style("still catching up — balances are incomplete until it finishes").yellow());
+        }
+
+        // Peers first: a node with none will sit at zero blocks for ever, and
+        // that is a different problem from a node that is downloading slowly.
+        // Without this the two look identical from outside.
+        match ctx.wallet().rpc_api().get_connected_peer_info().await {
+            Ok(info) => {
+                let n = info.peer_info.len();
+                if n == 0 {
+                    tprintln!(ctx, "Peers:  {}", style("none — it cannot sync without them").red());
+                    tprintln!(ctx, "{}", style("Check outbound connections to port 26211 are not blocked.").dim());
+                    tprintln!(ctx, "{}", style("'node logs' shows what it is doing.").dim());
+                } else {
+                    tprintln!(ctx, "Peers:  {n}");
+                }
+            }
+            Err(err) => tprintln!(ctx, "{}", style(format!("(could not read peers: {err})")).dim()),
         }
 
         match ctx.wallet().rpc_api().get_block_dag_info().await {
