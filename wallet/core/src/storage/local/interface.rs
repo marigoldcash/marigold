@@ -510,6 +510,14 @@ impl Interface for LocalStore {
 
         let location = self.location.lock().unwrap().clone().unwrap();
         let inner = Arc::new(LocalStoreInner::try_load(wallet_secret, &location.folder, args).await?);
+        // Touch the note vault key while the password is in hand. This is what
+        // upgrades a `vault.key` written under the old password-derived salt;
+        // it otherwise happens only when something needs to decrypt a note, so
+        // a wallet that is opened and merely read would keep the weak
+        // derivation indefinitely — and a wallet nobody spends from is exactly
+        // the one whose file sits around longest. Best effort by design: an
+        // absent vault or a wrong password is the caller's business to report.
+        inner.notevault.unlock(wallet_secret).await.ok();
         self.inner.lock().unwrap().replace(inner);
         Ok(())
     }

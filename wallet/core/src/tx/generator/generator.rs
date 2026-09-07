@@ -432,7 +432,12 @@ impl Generator {
         let final_transaction_payload = final_transaction_payload.unwrap_or_default();
         let final_transaction_payload_mass = mass_calculator.calc_compute_mass_for_payload(final_transaction_payload.len());
         let final_transaction_outputs_harmonic =
-            mass_calculator.calc_storage_mass_output_harmonic(&final_transaction_outputs).ok_or(Error::MassCalculationError)?;
+            mass_calculator.calc_storage_mass_output_harmonic(&final_transaction_outputs).ok_or_else(|| {
+                Error::MassCalculationFailed(format!(
+                    "an output of the final transaction has zero value ({} outputs)",
+                    final_transaction_outputs.len()
+                ))
+            })?;
 
         // reject transactions where the payload and outputs are more than 2/3rds of the maximum tx mass
         let final_transaction = final_transaction_amount.map(|amount| FinalTransaction {
@@ -1149,7 +1154,13 @@ impl Generator {
                 )?;
                 if transaction_mass > MAXIMUM_STANDARD_TRANSACTION_MASS {
                     // this should never occur as we should not produce transactions higher than the mass limit
-                    return Err(Error::MassCalculationError);
+                    return Err(Error::MassCalculationFailed(format!(
+                        "the final transaction came out at mass {transaction_mass}, over the {MAXIMUM_STANDARD_TRANSACTION_MASS} limit \
+                         ({} inputs, {} outputs, {} bytes of payload)",
+                        utxo_entry_references.len(),
+                        tx.outputs.len(),
+                        self.inner.final_transaction_payload.len(),
+                    )));
                 }
                 tx.set_storage_mass(transaction_mass);
 
@@ -1207,7 +1218,12 @@ impl Generator {
                 transaction_mass = transaction_mass.saturating_add(self.inner.network_params.additional_compound_transaction_mass());
                 if transaction_mass > MAXIMUM_STANDARD_TRANSACTION_MASS {
                     // this should never occur as we should not produce transactions higher than the mass limit
-                    return Err(Error::MassCalculationError);
+                    return Err(Error::MassCalculationFailed(format!(
+                        "an aggregation transaction came out at mass {transaction_mass}, over the {MAXIMUM_STANDARD_TRANSACTION_MASS} \
+                         limit ({} inputs, +{} compound allowance)",
+                        utxo_entry_references.len(),
+                        self.inner.network_params.additional_compound_transaction_mass(),
+                    )));
                 }
                 tx.set_storage_mass(transaction_mass);
 

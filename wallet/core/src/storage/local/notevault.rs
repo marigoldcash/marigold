@@ -45,6 +45,48 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use workflow_store::fs;
 
 const VAULT_KEY_FILE: &str = "vault.key";
+
+/// `vault.key` format marker. A v1 file is a bare
+/// `encrypt_xchacha20poly1305` blob whose Argon2 salt was `sha256(password)` —
+/// deterministic, therefore precomputable against every wallet at once. v2
+/// carries its own 32 random bytes of salt in the clear ahead of the
+/// ciphertext. A file that does not begin with this magic is v1 by definition,
+/// which is how every wallet written before this change is still readable.
+const VAULT_KEY_V2_MAGIC: &[u8; 4] = b"MGV2";
+const VAULT_KEY_SALT_LEN: usize = 32;
+
+/// Wrap `K` under the wallet secret in the v2 container: magic, random salt,
+/// then the XChaCha20-Poly1305 blob keyed by Argon2(password, salt).
+fn wrap_vault_key(k: &[u8; 32], wallet_secret: &Secret) -> Result<Vec<u8>> {
+    let mut salt = [0u8; VAULT_KEY_SALT_LEN];
+    rand::thread_rng().fill_bytes(&mut salt);
+    let body = crate::encryption::encrypt_xchacha20poly1305_with_salt(k, wallet_secret, &salt)?;
+    let mut out = Vec::with_capacity(VAULT_KEY_V2_MAGIC.len() + salt.len() + body.len());
+    out.extend_from_slice(VAULT_KEY_V2_MAGIC);
+    out.extend_from_slice(&salt);
+    out.extend_from_slice(&body);
+    Ok(out)
+}
+
+/// Unwrap either container. Returns `(K, needs_upgrade)` — `needs_upgrade` is
+/// true for a v1 file, so the caller can rewrite it while it still holds the
+/// password.
+fn unwrap_vault_key(wrapped: &[u8], wallet_secret: &Secret) -> Result<([u8; 32], bool)> {
+    let (secret, upgraded) = if wrapped.starts_with(VAULT_KEY_V2_MAGIC) {
+        let start = VAULT_KEY_V2_MAGIC.len();
+        let body = start + VAULT_KEY_SALT_LEN;
+        if wrapped.len() <= body {
+            return Err(Error::Custom("vault.key is truncated".to_string()));
+        }
+        let salt = &wrapped[start..body];
+        (crate::encryption::decrypt_xchacha20poly1305_with_salt(&wrapped[body..], wallet_secret, salt)?, false)
+    } else {
+        (crate::encryption::decrypt_xchacha20poly1305(wrapped, wallet_secret)?, true)
+    };
+    let k: [u8; 32] =
+        secret.as_ref().try_into().map_err(|_| Error::Custom("vault.key did not decrypt to a 32-byte key".to_string()))?;
+    Ok((k, upgraded))
+}
 const MANIFEST_FILE: &str = "manifest.tsv";
 
 fn status_subdir(status: NoteStatus) -> &'static str {
@@ -226,7 +268,7 @@ impl NoteVault {
         rand::thread_rng().fill_bytes(&mut k);
         let mnemonic = Mnemonic::from_entropy(k.to_vec(), Language::English)?;
         let words = mnemonic.phrase_string();
-        let wrapped = encrypt_xchacha20poly1305(&k, wallet_secret)?;
+        let wrapped = wrap_vault_key(&k, wallet_secret)?;
         fs::write(&key_path, &wrapped).await?;
         self.key.write().await.replace(k);
         if !fs::exists(&self.folder.join(MANIFEST_FILE)).await? {
@@ -267,7 +309,7 @@ impl NoteVault {
 
     /// Unwrap `K` from `vault.key` under `wallet_secret`, caching it for the
     /// session. Idempotent (returns the cached copy on later calls).
-    async fn unlock(&self, wallet_secret: &Secret) -> Result<[u8; 32]> {
+    pub(crate) async fn unlock(&self, wallet_secret: &Secret) -> Result<[u8; 32]> {
         if let Some(k) = *self.key.read().await {
             return Ok(k);
         }
@@ -275,9 +317,30 @@ impl NoteVault {
         let wrapped = fs::read(&key_path)
             .await
             .map_err(|_| Error::Custom("no note vault found (or vault.key is missing) — run vault creation first".to_string()))?;
-        let k_secret = crate::encryption::decrypt_xchacha20poly1305(&wrapped, wallet_secret)?;
-        let k: [u8; 32] =
-            k_secret.as_ref().try_into().map_err(|_| Error::Custom("vault.key did not decrypt to a 32-byte key".to_string()))?;
+        let (k, needs_upgrade) = unwrap_vault_key(&wrapped, wallet_secret)?;
+
+        // Migrate in place, once, while the password is in hand. Written to a
+        // temporary file and renamed over the original: a crash mid-write must
+        // never leave a half-written vault.key, because that file is the only
+        // way back to every note in the vault.
+        if needs_upgrade {
+            let upgraded = wrap_vault_key(&k, wallet_secret)?;
+            // Prove the new container round-trips under this very password
+            // before the old one is replaced. Cheap next to the cost of being
+            // wrong.
+            match unwrap_vault_key(&upgraded, wallet_secret) {
+                Ok((check, false)) if check == k => {
+                    let tmp = key_path.with_extension("key.new");
+                    fs::write(&tmp, &upgraded).await?;
+                    fs::rename(&tmp, &key_path).await?;
+                    log_info!("note vault: vault.key upgraded to a random per-vault salt");
+                }
+                _ => {
+                    log_warn!("note vault: vault.key salt upgrade failed its own check — left as it was");
+                }
+            }
+        }
+
         self.key.write().await.replace(k);
         Ok(k)
     }
@@ -301,7 +364,7 @@ impl NoteVault {
         let k: [u8; 32] =
             entropy.as_slice().try_into().map_err(|_| Error::Custom("recovery words must encode a 32-byte key (24 words)".to_string()))?;
         self.ensure_dirs().await?;
-        let wrapped = encrypt_xchacha20poly1305(&k, wallet_secret)?;
+        let wrapped = wrap_vault_key(&k, wallet_secret)?;
         fs::write(&self.folder.join(VAULT_KEY_FILE), &wrapped).await?;
         self.key.write().await.replace(k);
         *self.loaded.lock().await = false;
@@ -713,6 +776,66 @@ mod tests {
         // The key survived the round trip: a mirror never destroys the original.
         assert!(vault.load_key(&secret, &sn).await?.is_some());
 
+        Ok(())
+    }
+
+    /// The v1 container had a salt derived from the password, so two vaults
+    /// with the same password produced byte-identical key material. v2 must
+    /// not: same password, same K, different salt, different ciphertext.
+    #[test]
+    fn v2_wrapping_differs_per_vault_for_the_same_password() {
+        let secret = Secret::from("same-password-everywhere");
+        let k = [0x7au8; 32];
+        let a = wrap_vault_key(&k, &secret).unwrap();
+        let b = wrap_vault_key(&k, &secret).unwrap();
+        assert_ne!(a, b, "two wraps of the same key under the same password must differ");
+        assert!(a.starts_with(VAULT_KEY_V2_MAGIC));
+        assert_ne!(a[4..36], b[4..36], "the salts must differ");
+        assert_eq!(unwrap_vault_key(&a, &secret).unwrap(), (k, false));
+        assert_eq!(unwrap_vault_key(&b, &secret).unwrap(), (k, false));
+        // A wrong password does not open it.
+        assert!(unwrap_vault_key(&a, &Secret::from("wrong")).is_err());
+    }
+
+    /// A vault written before v2 existed must still open, and must report that
+    /// it wants upgrading.
+    #[test]
+    fn v1_vault_keys_still_open_and_ask_to_be_upgraded() {
+        let secret = Secret::from("legacy-password");
+        let k = [0x5cu8; 32];
+        let v1 = encrypt_xchacha20poly1305(&k, &secret).unwrap();
+        assert!(!v1.starts_with(VAULT_KEY_V2_MAGIC));
+        assert_eq!(unwrap_vault_key(&v1, &secret).unwrap(), (k, true));
+    }
+
+    /// The migration happens on unlock, in place, and the vault keeps working.
+    #[tokio::test]
+    async fn unlock_upgrades_a_v1_vault_key_in_place() -> Result<()> {
+        let dir = tempfile::tempdir().unwrap();
+        let secret = Secret::from("vault-test-secret");
+        let vault = make_vault(&dir);
+        vault.create(&secret).await?;
+
+        let key_path = dir.path().join("test.notes").join(VAULT_KEY_FILE);
+        let k = *vault.key.read().await.as_ref().unwrap();
+
+        // Roll it back to the old format and drop the cached key, so unlock
+        // has to read from disk exactly as an old wallet would.
+        std::fs::write(&key_path, encrypt_xchacha20poly1305(&k, &secret).unwrap()).unwrap();
+        assert!(!std::fs::read(&key_path).unwrap().starts_with(VAULT_KEY_V2_MAGIC));
+        vault.key.write().await.take();
+
+        assert_eq!(vault.unlock(&secret).await?, k);
+        let on_disk = std::fs::read(&key_path).unwrap();
+        assert!(on_disk.starts_with(VAULT_KEY_V2_MAGIC), "unlock should have rewritten it as v2");
+
+        // And it opens again from the upgraded file, with no upgrade wanted.
+        assert_eq!(unwrap_vault_key(&on_disk, &secret).unwrap(), (k, false));
+
+        // Notes stored before and after the migration both still decrypt.
+        let sn = Hash::from([0x91u8; 32]);
+        vault.store(&secret, NoteKeyEntry::new(sn, [0x92u8; 32], DenominationTag::D1, NoteProvenance::Cold)).await?;
+        assert!(vault.load_key(&secret, &sn).await?.is_some());
         Ok(())
     }
 

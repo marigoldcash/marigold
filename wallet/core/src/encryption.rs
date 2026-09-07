@@ -219,6 +219,49 @@ pub fn sha256d_hash(data: &[u8]) -> Secret {
     sha256_hash(sha256.finalize().as_slice())
 }
 
+/// Argon2 with an explicit, caller-supplied salt.
+///
+/// [`argon2_sha256iv_hash`] derives its salt from the password itself
+/// (`sha256(password)`), which makes the whole derivation deterministic: the
+/// same password yields the same key in every wallet on earth, so an attacker
+/// can precompute once and test against every vault ever made. A salt exists
+/// precisely to stop that, and a salt that is a function of the secret is not
+/// a salt. Callers pass 32 random bytes, stored in the clear beside the
+/// ciphertext — a salt is not secret, only unique.
+pub fn argon2_hash_with_salt(data: &[u8], salt: &[u8], byte_length: usize) -> Result<Secret> {
+    let mut key = vec![0u8; byte_length];
+    Argon2::default().hash_password_into(data, salt, &mut key)?;
+    Ok(Secret::new(key))
+}
+
+/// Encrypts under a password with an explicit random salt. The salt is NOT
+/// stored here — the caller owns the container format and writes it alongside.
+pub fn encrypt_xchacha20poly1305_with_salt(data: &[u8], secret: &Secret, salt: &[u8]) -> Result<Vec<u8>> {
+    let private_key_bytes = argon2_hash_with_salt(secret.as_ref(), salt, 32)?;
+    let key = Key::from_slice(private_key_bytes.as_ref());
+    let cipher = XChaCha20Poly1305::new(key);
+    let nonce = XChaCha20Poly1305::generate_nonce(&mut OsRng);
+    let mut buffer = data.to_vec();
+    buffer.reserve(16);
+    cipher.encrypt_in_place(&nonce, &[], &mut buffer)?;
+    buffer.splice(0..0, nonce.iter().cloned());
+    Ok(buffer)
+}
+
+/// Decrypts data produced by [`encrypt_xchacha20poly1305_with_salt`].
+pub fn decrypt_xchacha20poly1305_with_salt(data: &[u8], secret: &Secret, salt: &[u8]) -> Result<Secret> {
+    if data.len() < 24 {
+        return Err("ciphertext shorter than the nonce prefix".into());
+    }
+    let private_key_bytes = argon2_hash_with_salt(secret.as_ref(), salt, 32)?;
+    let key = Key::from_slice(private_key_bytes.as_ref());
+    let cipher = XChaCha20Poly1305::new(key);
+    let nonce = &data[0..24];
+    let mut buffer = data[24..].to_vec();
+    cipher.decrypt_in_place(nonce.into(), &[], &mut buffer)?;
+    Ok(Secret::new(buffer))
+}
+
 /// Produces `argon2sha256iv` hash of the given data.
 pub fn argon2_sha256iv_hash(data: &[u8], byte_length: usize) -> Result<Secret> {
     let salt = sha256_hash(data);

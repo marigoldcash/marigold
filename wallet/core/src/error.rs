@@ -310,6 +310,14 @@ pub enum Error {
     #[error("Mass calculation error")]
     MassCalculationError,
 
+    /// Same failure, but saying which calculation and with what numbers. The
+    /// bare variant above gives an operator nothing to act on: four separate
+    /// sites raise it, and "Mass calculation error" cannot distinguish a
+    /// zero-value output from a transaction that came out over the standard
+    /// mass limit.
+    #[error("Mass calculation failed: {0}")]
+    MassCalculationFailed(String),
+
     #[error("Transaction fees are too high")]
     TransactionFeesAreTooHigh,
 

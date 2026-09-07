@@ -1471,7 +1471,14 @@ impl Cli for KaspaCli {
             }
         }
         if let Err(err) = self.handlers.execute(&self, &cmd).await {
-            term.writeln(style(err.to_string()).red().to_string());
+            // Backing out of a prompt is a choice, not a fault. Ctrl+C at a
+            // picker printed "Cli error cancelled" in red, which reads as
+            // something having gone wrong when the user simply changed their
+            // mind. Say nothing and hand the prompt back.
+            let text = err.to_string();
+            if !matches!(text.as_str(), "Cli error cancelled" | "cancelled" | "Aborted") {
+                term.writeln(style(text).red().to_string());
+            }
         }
         Ok(())
     }
