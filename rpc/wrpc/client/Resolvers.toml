@@ -1,41 +1,33 @@
-[[resolver]]
-enable = false
-address = "http://127.0.0.1:8888"
-
-[[group]]
-template = "https://*.kaspa.stream"
-nodes = ["eric","maxim","sean","troy"]
-
-[[group]]
-template = "https://*.kaspa.red"
-nodes = ["john", "mike", "paul", "alex"]
-
-[[group]]
-template = "https://*.kaspa.green"
-nodes = ["jake", "mark", "adam", "liam"]
-
-[[group]]
-template = "https://*.kaspa.blue"
-nodes = ["noah", "ryan", "jack", "luke"]
-
-# [[group]]
-# enable = true
-# template = "https://*.kaspa-ng.org"
-# nodes = ["cole", "ivan", "oscar", "zane"]
-
-# [[group]]
-# enable = true
-# template = "https://*.kaspa-ng.io"
-# nodes = ["gary", "hugo", "finn", "evan"]
-
-# [[group]]
-# enable = true
-# template = "https://*.kaspa-ng.net"
-# nodes = ["neil", "dave", "kyle", "toby"]
-
-# ---
-
-# [[group]]
-# enable = false
-# template = "https://*."
-# nodes = ["rudy", "todd", "clay", "walt"]
+# Public wRPC endpoints for Marigold.
+#
+# This file is compiled into the client (`include_str!` in resolver.rs) and is
+# what `connect` consults when no node has been given. It USED to carry the
+# Kaspa Public Node Network's hosts — kaspa.stream, kaspa.red, kaspa.green,
+# kaspa.blue — inherited unchanged from rusty-kaspa. Those serve Kaspa, and
+# Marigold's testnet-10 answers to the same network-id string as Kaspa's, so a
+# Marigold wallet asking for "a public node" could be handed one and attach to
+# an entirely different chain. Emptied deliberately: no entry is far better
+# than an entry pointing at somebody else's network.
+#
+# Marigold has no public nodes yet. The seed hosts run with neither
+# --rpclisten-borsh nor --rpclisten, so wRPC does not start on them at all and
+# gRPC stays on loopback (see deploy/ansible/roles/kaspad/templates/
+# marigoldd.service.j2, which says so explicitly). Until that changes on
+# purpose, `connect` with no argument tells the user to name their own node
+# rather than pretending an endpoint exists.
+#
+# TO ADD ONE, once a host is deliberately serving wRPC to the internet:
+#
+#   [[resolver]]
+#   address = "https://<a kaspa-resolver instance>"
+#
+# or, for a fixed list without running a resolver service, a group whose
+# template expands over the named hosts:
+#
+#   [[group]]
+#   template = "https://*.marigold.cash"
+#   nodes = ["tn-seed1", "tn-seed2", "tn-seed3"]
+#
+# Exposing a node publicly is a security decision, not a config change: it puts
+# the RPC surface on the internet. Keep --unsaferpc off, and see
+# docs/marigold/TESTNET.md for what else it needs.

@@ -12,6 +12,24 @@ impl Connect {
 
             let arg_or_server_address = argv.first().cloned().or_else(|| ctx.wallet().settings().get(WalletSettings::Server));
             let (is_public, url) = match arg_or_server_address.as_deref() {
+                // No public nodes exist for Marigold yet, so say that rather
+                // than fail against an empty list — and certainly rather than
+                // reach for Kaspa's public node network, which this fork used
+                // to inherit wholesale. Marigold's testnet-10 answers to the
+                // same network-id string as Kaspa's, so being handed one of
+                // their nodes would attach the wallet to a different chain.
+                Some("public") | None if !Resolver::default().is_configured() => {
+                    tprintln!(ctx, "");
+                    tprintln!(ctx, "Marigold has no public nodes yet — there is nowhere to connect you automatically.");
+                    tprintln!(ctx, "");
+                    tprintln!(ctx, "Connect to a node by address:");
+                    tprintln!(ctx, "  connect 127.0.0.1:27210      a node running on this machine");
+                    tprintln!(ctx, "  connect <host>:27210         someone else's node");
+                    tprintln!(ctx, "");
+                    tprintln!(ctx, "{}", style("'server <address>' remembers one, so 'connect' alone works next time.").dim());
+                    tprintln!(ctx, "");
+                    return Ok(());
+                }
                 Some("public") => {
                     tprintln!(ctx, "Connecting to a public node");
                     (true, Resolver::default().get_url(WrpcEncoding::Borsh, network_id).await.map_err(|e| e.to_string())?)

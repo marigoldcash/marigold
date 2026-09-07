@@ -29,11 +29,16 @@ pub struct ResolverGroup {
     pub enable: Option<bool>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ResolverConfig {
-    #[serde(rename = "group")]
+    // Both default to empty. A config listing no endpoints is a legitimate
+    // state — it is Marigold's, having declined to inherit Kaspa's public node
+    // list — and without these the file fails to parse, which `Inner::new`
+    // turns into an `expect` and a panic before the CLI can even draw a
+    // prompt. A network with no public nodes must not be an unstartable one.
+    #[serde(rename = "group", default)]
     groups: Vec<ResolverGroup>,
-    #[serde(rename = "resolver")]
+    #[serde(rename = "resolver", default)]
     resolvers: Vec<ResolverRecord>,
 }
 
@@ -114,6 +119,16 @@ impl Resolver {
         if self.inner.public { None } else { Some(self.inner.urls.clone()) }
     }
 
+    /// Whether any public endpoint is configured at all.
+    ///
+    /// Marigold ships none: the fork emptied `Resolvers.toml` rather than
+    /// inherit Kaspa's public node list, which would have handed a Marigold
+    /// wallet a Kaspa node. Callers check this so they can say so plainly
+    /// instead of reporting a connection failure against an empty list.
+    pub fn is_configured(&self) -> bool {
+        !self.inner.urls.is_empty()
+    }
+
     /// Obtain the `tls` flag in the resolver client.
     pub fn tls(&self) -> bool {
         self.inner.tls
@@ -153,6 +168,11 @@ impl Resolver {
 
     // query multiple resolver services in random order
     async fn fetch(&self, encoding: Encoding, network_id: NetworkId) -> Result<NodeDescriptor> {
+        if self.inner.urls.is_empty() {
+            return Err(Error::Custom(
+                "no public nodes are configured for this network — connect to a node by address instead".to_string(),
+            ));
+        }
         let mut urls = self.inner.urls.clone();
         urls.shuffle(&mut thread_rng());
 
@@ -209,5 +229,33 @@ mod tests {
     fn test_resolver_config_2() {
         let _urls = try_parse_resolvers(RESOLVER_CONFIG).expect("TOML: Unable to parse RPC Resolver list");
         // println!("{:#?}", urls);
+    }
+}
+
+#[cfg(test)]
+mod config_tests {
+    use super::*;
+
+    /// The shipped config must parse. It is `include_str!`d and `Inner::new`
+    /// expects it, so a config that does not parse is a panic before the
+    /// process can print anything — which is exactly what an all-comments
+    /// Resolvers.toml did when Marigold emptied it (2026-09-07).
+    #[test]
+    fn the_built_in_config_parses() {
+        let urls = try_parse_resolvers(RESOLVER_CONFIG).expect("the shipped Resolvers.toml must parse");
+        // Marigold ships none. If this ever becomes non-empty, it must be
+        // because a Marigold node was deliberately exposed — never because
+        // Kaspa's list came back through an upstream merge.
+        for url in &urls {
+            assert!(!url.contains("kaspa"), "a Kaspa endpoint has reappeared in Resolvers.toml: {url}");
+        }
+    }
+
+    /// A resolver with nothing configured must report itself as such, so a
+    /// caller can say "this network has no public nodes" rather than surface a
+    /// failed connection against an empty list.
+    #[test]
+    fn an_empty_resolver_reports_itself_unconfigured() {
+        assert!(!Resolver::default().is_configured());
     }
 }
