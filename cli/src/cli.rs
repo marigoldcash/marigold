@@ -253,6 +253,12 @@ impl KaspaCli {
         let node = self.embedded_node.lock().unwrap().take();
         match node {
             Some(node) => {
+                if !self.wallet.utxo_processor().is_synced() {
+                    tprintln!(self, "");
+                    tprintln!(self, "{}", style("Note: this node has not finished its first sync, and that progress").yellow());
+                    tprintln!(self, "{}", style("is discarded — the next start begins again from scratch.").yellow());
+                    tprintln!(self, "");
+                }
                 tprintln!(self, "Stopping your node...");
                 node.stop().await?;
                 tprintln!(self, "Stopped.");
@@ -260,6 +266,13 @@ impl KaspaCli {
             None => tprintln!(self, "No node of yours is running."),
         }
         Ok(())
+    }
+
+    /// A node that is running but has not finished its first sync — the state
+    /// in which stopping throws the work away.
+    #[cfg(feature = "embedded-node")]
+    pub fn embedded_node_syncing(&self) -> bool {
+        self.embedded_node_running() && !self.wallet.utxo_processor().is_synced()
     }
 
     #[cfg(feature = "embedded-node")]
