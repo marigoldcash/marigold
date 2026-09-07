@@ -16,8 +16,7 @@ impl Node {
                 // node that would not sync completely undiagnosable, so it can
                 // be turned back on.
                 let on = !matches!(argv.get(1).map(|s| s.as_str()), Some("off"));
-                kaspa_core::log::set_log_level(if on { log::LevelFilter::Info } else { log::LevelFilter::Warn });
-                log::set_max_level(if on { log::LevelFilter::Info } else { log::LevelFilter::Warn });
+                crate::embedded::set_logs_wanted(on);
                 tprintln!(ctx, "Node logs are {}.", if on { "on — 'node logs off' to silence them" } else { "off" });
                 Ok(())
             }
@@ -77,10 +76,24 @@ impl Node {
 
         // is_synced is the node's own verdict on whether it has reached the tip.
         let wallet = ctx.wallet();
-        if wallet.utxo_processor().is_synced() {
+        let synced = wallet.utxo_processor().is_synced();
+        let dag = ctx.wallet().rpc_api().get_block_dag_info().await.ok();
+        let headers = dag.as_ref().map(|d| d.header_count).unwrap_or(0);
+
+        if synced {
             tprintln!(ctx, "Status: {}", style("caught up with the network").green());
+        } else if headers == 0 {
+            // A new node spends its first minutes verifying the proof of work
+            // behind the chain before it downloads any of it. Nothing moves in
+            // that phase — no blocks, no headers, no growth on disk — so
+            // reporting "still catching up" beside three zeroes made a healthy
+            // node look wedged (founder report, 2026-09-07). Say what it is
+            // doing instead.
+            tprintln!(ctx, "Status: {}", style("verifying the chain's history before downloading it").yellow());
+            tprintln!(ctx, "{}", style("This is the first phase and shows no progress by design — no blocks, no").dim());
+            tprintln!(ctx, "{}", style("headers, no growth on disk. It takes a few minutes. 'node logs' shows it.").dim());
         } else {
-            tprintln!(ctx, "Status: {}", style("still catching up — balances are incomplete until it finishes").yellow());
+            tprintln!(ctx, "Status: {}", style("downloading the chain — balances are incomplete until it finishes").yellow());
         }
 
         // Peers first: a node with none will sit at zero blocks for ever, and
@@ -100,8 +113,8 @@ impl Node {
             Err(err) => tprintln!(ctx, "{}", style(format!("(could not read peers: {err})")).dim()),
         }
 
-        match ctx.wallet().rpc_api().get_block_dag_info().await {
-            Ok(info) => {
+        match dag {
+            Some(info) => {
                 tprintln!(
                     ctx,
                     "{}",
@@ -114,7 +127,7 @@ impl Node {
                     .dim()
                 );
             }
-            Err(err) => tprintln!(ctx, "{}", style(format!("(could not read the node's chain state: {err})")).dim()),
+            None => tprintln!(ctx, "{}", style("(could not read the node's chain state)").dim()),
         }
         tprintln!(ctx, "");
     }

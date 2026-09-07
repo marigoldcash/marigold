@@ -23,6 +23,20 @@ use std::path::Path;
 use std::sync::Mutex;
 use std::thread::JoinHandle;
 
+/// Whether the user has asked to see the node's own log output.
+static LOGS_WANTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_logs_wanted(on: bool) {
+    LOGS_WANTED.store(on, std::sync::atomic::Ordering::SeqCst);
+    let level = if on { log::LevelFilter::Info } else { log::LevelFilter::Warn };
+    kaspa_core::log::set_log_level(level);
+    log::set_max_level(level);
+}
+
+pub fn logs_wanted() -> bool {
+    LOGS_WANTED.load(std::sync::atomic::Ordering::SeqCst)
+}
+
 /// Where an embedded node keeps its chain data: beside the wallet's own files,
 /// so a person who deletes their Marigold directory removes both and is not
 /// left with seven gigabytes they cannot account for.
@@ -142,8 +156,14 @@ impl EmbeddedNode {
         // wallet's own macros, and the `log` facade for everything inside the
         // node. Setting only the first left "Accepted N blocks" scrolling past
         // once a second.
-        kaspa_core::log::set_log_level(log::LevelFilter::Warn);
-        log::set_max_level(log::LevelFilter::Warn);
+        //
+        // Unless someone asked to see them: 'node logs' before 'node start' is
+        // exactly what a person debugging a node that will not sync does, and
+        // clamping here regardless silently undid it.
+        if !logs_wanted() {
+            kaspa_core::log::set_log_level(log::LevelFilter::Warn);
+            log::set_max_level(log::LevelFilter::Warn);
+        }
 
         let (core, rpc_service) = create_core_with_runtime(&runtime, &args, fd_total_budget);
         let workers = core.start();

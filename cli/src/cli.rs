@@ -218,7 +218,9 @@ impl KaspaCli {
         let appdir = crate::embedded::default_appdir(network_id)?;
 
         tprintln!(self, "");
-        tprintln!(self, "Starting your node. The first run downloads the chain, which takes a while.");
+        tprintln!(self, "Starting your node.");
+        tprintln!(self, "{}", style("The first run verifies the chain's history before downloading any of it —").dim());
+        tprintln!(self, "{}", style("several minutes with nothing visibly happening. 'node status' explains.").dim());
         tprintln!(self, "{}", style(format!("(data lives in {})", appdir.display())).dim());
         tprintln!(self, "");
 
