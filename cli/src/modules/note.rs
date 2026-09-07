@@ -33,9 +33,17 @@ fn copy_dir_recursive(from: &Path, to: &Path) -> std::io::Result<()> {
 /// Render a payload as a terminal QR code (dense unicode half-blocks). Falls back to
 /// nothing (text-only) if the payload somehow exceeds QR capacity — the text form
 /// printed alongside is always sufficient.
+///
+/// The CRLF conversion is not cosmetic. The terminal runs in raw mode, where a
+/// bare `\n` moves down a line without returning to column one, so a 29-line QR
+/// printed in one call comes out as a diagonal smear — unreadable by eye and
+/// unscannable by anything. `writeln` appends `\n\r` to the string it is given
+/// but does not touch the newlines inside it, so a multi-line payload has to
+/// arrive already converted. Done here rather than at the four call sites
+/// because the fifth one would forget.
 fn qr_string(text: &str) -> Option<String> {
     let code = qrcode::QrCode::new(text.as_bytes()).ok()?;
-    Some(code.render::<qrcode::render::unicode::Dense1x2>().build())
+    Some(code.render::<qrcode::render::unicode::Dense1x2>().build().crlf())
 }
 
 #[derive(Default, Handler)]
