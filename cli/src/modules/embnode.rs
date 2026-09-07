@@ -78,42 +78,68 @@ impl Node {
         let wallet = ctx.wallet();
         let synced = wallet.utxo_processor().is_synced();
         let dag = ctx.wallet().rpc_api().get_block_dag_info().await.ok();
-        let headers = dag.as_ref().map(|d| d.header_count).unwrap_or(0);
 
         if synced {
             tprintln!(ctx, "Status: {}", style("caught up with the network").green());
-        } else if headers == 0 {
-            // A new node spends its first minutes verifying the proof of work
-            // behind the chain before it downloads any of it. Nothing moves in
-            // that phase — no blocks, no headers, no growth on disk — so
-            // reporting "still catching up" beside three zeroes made a healthy
-            // node look wedged (founder report, 2026-09-07). Say what it is
-            // doing instead.
-            tprintln!(ctx, "Status: {}", style("verifying the chain's history before downloading it").yellow());
-            tprintln!(ctx, "{}", style("This is the first phase and shows no progress by design — no blocks, no").dim());
-            tprintln!(ctx, "{}", style("headers, no growth on disk. It takes a few minutes. 'node logs' shows it.").dim());
         } else {
-            tprintln!(ctx, "Status: {}", style("downloading the chain — balances are incomplete until it finishes").yellow());
-        }
-
-        // Peers first: a node with none will sit at zero blocks for ever, and
-        // that is a different problem from a node that is downloading slowly.
-        // Without this the two look identical from outside.
-        match ctx.wallet().rpc_api().get_connected_peer_info().await {
-            Ok(info) => {
-                let n = info.peer_info.len();
-                if n == 0 {
-                    tprintln!(ctx, "Peers:  {}", style("none — it cannot sync without them").red());
-                    tprintln!(ctx, "{}", style("Check outbound connections to port 26211 are not blocked.").dim());
-                    tprintln!(ctx, "{}", style("'node logs' shows what it is doing.").dim());
-                } else {
-                    tprintln!(ctx, "Peers:  {n}");
+            use crate::log_sink::SyncProgress;
+            match crate::log_sink::sync_progress() {
+                // Levels count DOWN from 250, so progress is how far it has come.
+                Some(SyncProgress::VerifyingProof { level }) => {
+                    let done = 250u32.saturating_sub(level);
+                    tprintln!(ctx, "Status: {}", style(format!("verifying the chain's history — level {level}, {done} of 250 done")).yellow());
+                    tprintln!(ctx, "{}", style("Nothing lands on disk during this phase; it is checking proof of work.").dim());
+                }
+                // Bounded by finality depth, so there is a real ceiling.
+                Some(SyncProgress::ChainSegment { headers }) => {
+                    let params = kaspa_consensus_core::config::params::Params::from(
+                        ctx.wallet().network_id().unwrap_or(NetworkId::with_suffix(NetworkType::Testnet, 10)),
+                    );
+                    let max = params.finality_depth() + 2 * params.ghostdag_k as u64 + 1;
+                    let pct = (headers as f64 / max as f64 * 100.0) as u32;
+                    tprintln!(
+                        ctx,
+                        "Status: {}",
+                        style(format!(
+                            "downloading the chain — {} headers, at most {} ({pct}% of the maximum)",
+                            headers.separated_string(),
+                            max.separated_string()
+                        ))
+                        .yellow()
+                    );
+                }
+                Some(SyncProgress::Headers { headers, percent, block_time }) => {
+                    tprintln!(
+                        ctx,
+                        "Status: {}",
+                        style(format!("checking the chain's headers — {} done, {percent}%", headers.separated_string())).yellow()
+                    );
+                    if let Some(t) = block_time {
+                        tprintln!(ctx, "{}", style(format!("reached blocks from {t}")).dim());
+                    }
+                }
+                Some(SyncProgress::Blocks { blocks, percent }) => {
+                    tprintln!(
+                        ctx,
+                        "Status: {}",
+                        style(format!("downloading blocks — {} done, {percent}%", blocks.separated_string())).yellow()
+                    );
+                }
+                None => {
+                    tprintln!(ctx, "Status: {}", style("starting its first sync").yellow());
                 }
             }
-            Err(err) => tprintln!(ctx, "{}", style(format!("(could not read peers: {err})")).dim()),
+            tprintln!(
+                ctx,
+                "{}",
+                style("A first sync takes anywhere from half an hour to a few hours. Leaving the").dim()
+            );
+            tprintln!(ctx, "{}", style("wallet before it finishes discards it — after that, restarts are free.").dim());
         }
 
-        match dag {
+        // Only once the first sync has committed: until then this reads the
+        // ACTIVE consensus while all the work is in staging, so it says zero.
+        match dag.filter(|info| info.block_count > 0) {
             Some(info) => {
                 tprintln!(
                     ctx,
@@ -127,7 +153,7 @@ impl Node {
                     .dim()
                 );
             }
-            None => tprintln!(ctx, "{}", style("(could not read the node's chain state)").dim()),
+            None => {}
         }
         tprintln!(ctx, "");
     }

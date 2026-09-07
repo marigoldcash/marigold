@@ -27,10 +27,9 @@ use std::thread::JoinHandle;
 static LOGS_WANTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 pub fn set_logs_wanted(on: bool) {
+    // Only the printing changes. The level stays at Info so records keep
+    // arriving at the logger, which reads sync progress out of them.
     LOGS_WANTED.store(on, std::sync::atomic::Ordering::SeqCst);
-    let level = if on { log::LevelFilter::Info } else { log::LevelFilter::Warn };
-    kaspa_core::log::set_log_level(level);
-    log::set_max_level(level);
 }
 
 pub fn logs_wanted() -> bool {
@@ -160,10 +159,6 @@ impl EmbeddedNode {
         // Unless someone asked to see them: 'node logs' before 'node start' is
         // exactly what a person debugging a node that will not sync does, and
         // clamping here regardless silently undid it.
-        if !logs_wanted() {
-            kaspa_core::log::set_log_level(log::LevelFilter::Warn);
-            log::set_max_level(log::LevelFilter::Warn);
-        }
 
         let (core, rpc_service) = create_core_with_runtime(&runtime, &args, fd_total_budget);
         let workers = core.start();

@@ -226,8 +226,9 @@ impl KaspaCli {
 
         tprintln!(self, "");
         tprintln!(self, "Starting your node.");
-        tprintln!(self, "{}", style("The first run verifies the chain's history before downloading any of it —").dim());
-        tprintln!(self, "{}", style("several minutes with nothing visibly happening. 'node status' explains.").dim());
+        tprintln!(self, "{}", style("The first sync takes anywhere from half an hour to a few hours, and begins").dim());
+        tprintln!(self, "{}", style("by verifying the chain's history before downloading any of it. 'node status'").dim());
+        tprintln!(self, "{}", style("shows how far along it is; leaving before it finishes discards the work.").dim());
         tprintln!(self, "{}", style(format!("(data lives in {})", appdir.display())).dim());
         tprintln!(self, "");
 
