@@ -49,7 +49,16 @@ pub(crate) async fn create(
             None => kaspa_wallet_core::storage::local::wallet_file_name(&make_filename(&name, &None)),
         };
         tprintln!(ctx);
+        // Say up front if that name is taken. The overwrite warning came later,
+        // after the name was accepted, so the wizard first announced where the
+        // wallet "will be stored" as though the path were free — and the path
+        // in question held a wallet with money in it.
+        let taken = ctx.store().exists(Some(file.trim_end_matches(".wallet"))).await.unwrap_or(false);
         tprintln!(ctx, "This wallet will be stored as: {}", style(format!("{folder}/{file}")).cyan());
+        if taken {
+            tprintln!(ctx, "{}", style("A wallet of that name is already there — continuing will overwrite it.").yellow());
+            tprintln!(ctx, "{}", style("Type a different name unless you are certain.").yellow());
+        }
         tprintln!(ctx, "(change the folder for all wallets with 'settings set folder <path>' before creating)");
         let input = term.ask(false, "Press <enter> to accept, or type a different wallet name: ").await?.trim().to_string();
         if input.is_empty() {
