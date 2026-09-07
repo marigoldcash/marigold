@@ -12,8 +12,11 @@
 #      so an underlay shows through exactly there. The opaque dark pages
 #      (cover/back) cover the frame entirely on their own.
 #
-# The HTML's TEXT mirrors marigold-litepaper.md, which stays the content
-# master — edit the markdown first, then keep the HTML in step.
+# The HTML's TEXT comes from marigold-litepaper.md, which is the content
+# master. Do not edit the words in the HTML: edit the markdown, then run
+# ./sync-litepaper.py, which rewrites the web page's prose and reports anything
+# in the brochure that a person needs to place by hand. ./sync-litepaper.py
+# --check exits non-zero if any copy has drifted; run it before publishing.
 set -eu
 cd "$(dirname "$0")"
 

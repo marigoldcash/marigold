@@ -1,0 +1,276 @@
+<!doctype html>
+<!--
+  TEXT MASTER: marigold-litepaper.md — do not edit the words in this file.
+  Edit the markdown, then run ./sync-litepaper.py. The design (classes,
+  plates, chips, kickers) IS this file's own; only the prose is synced.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Marigold Litepaper — digital cash with a fully auditable chain</title>
+<meta name="description" content="Marigold is digital cash: bearer notes on a fully auditable chain. The litepaper, readable on any device.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#141f19; --note:#18291f; --note-edge:#0f1813; --gold:#e4a33d;
+    --amber:#c9761f; --petal:#f3cf82; --cream:#efe7d3; --moss:#9aa894;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{background:var(--cream);color:var(--ink);font-family:"Fraunces",serif;font-weight:300;
+       font-size:1.0625rem;line-height:1.75;-webkit-font-smoothing:antialiased}
+  .kicker{font-family:"IBM Plex Mono",monospace;font-size:.68rem;letter-spacing:.32em;text-transform:uppercase}
+
+  header{background:var(--note);color:var(--cream);border-bottom:3px solid var(--gold);
+         padding:2.6rem 1.25rem 2.2rem;text-align:center}
+  header .rosette{width:84px;height:84px;display:block;margin:0 auto 1.1rem}
+  header .kicker{color:var(--gold);margin-bottom:.8rem}
+  header h1{font-weight:500;font-size:clamp(1.9rem,6vw,2.7rem);line-height:1.15;letter-spacing:.01em}
+  header p.tag{color:var(--moss);margin-top:.7rem;font-size:1rem;font-style:italic}
+  .actions{margin-top:1.5rem;display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap}
+  .btn{display:inline-block;font-family:"IBM Plex Mono",monospace;font-size:.78rem;letter-spacing:.12em;
+       text-transform:uppercase;text-decoration:none;padding:.7rem 1.25rem;border-radius:6px}
+  .btn.gold{background:var(--gold);color:var(--note-edge);border:1px solid var(--amber)}
+  .btn.line{color:var(--petal);border:1px solid rgba(228,163,61,.5)}
+  .btn:hover{filter:brightness(1.06)}
+
+  main{max-width:42rem;margin:0 auto;padding:2.5rem 1.25rem 4rem}
+  h2{font-weight:500;font-size:clamp(1.35rem,4.5vw,1.7rem);line-height:1.25;margin:2.8rem 0 .4rem}
+  h2 .kicker{display:block;color:var(--amber);margin-bottom:.55rem}
+  h3{font-weight:500;font-size:1.12rem;margin:1.9rem 0 .35rem}
+  p{margin:.85rem 0}
+  strong{font-weight:600}
+  em{font-style:italic}
+  ol,ul{margin:.85rem 0 .85rem 1.35rem}
+  li{margin:.45rem 0}
+  hr{border:0;height:1px;background:linear-gradient(90deg,transparent,var(--gold),transparent);margin:2.6rem auto;width:70%}
+  .rule{background:var(--note);color:var(--cream);border-radius:10px;border:1px solid var(--note-edge);
+        padding:1.1rem 1.2rem;margin:1.4rem 0;text-align:center}
+  .rule .kicker{color:var(--gold);margin-bottom:.5rem}
+  .rule p{margin:0;font-size:1.05rem}
+  code{font-family:"IBM Plex Mono",monospace;font-size:.85em;background:rgba(228,163,61,.16);
+       border-radius:4px;padding:.08em .35em}
+  .facts{list-style:none;margin:1.2rem 0;padding:0}
+  .facts li{border-top:1px solid rgba(20,31,25,.14);padding:.7rem 0;margin:0}
+  .facts li:last-child{border-bottom:1px solid rgba(20,31,25,.14)}
+  .facts b{font-weight:600}
+  .cansee{border-left:3px solid var(--gold);padding:.15rem 0 .15rem 1rem;margin:1rem 0}
+  .cannotsee{border-left:3px solid var(--note);padding:.15rem 0 .15rem 1rem;margin:1rem 0}
+  footer{background:var(--note);color:var(--moss);text-align:center;font-size:.9rem;
+         padding:2.2rem 1.25rem;line-height:1.9}
+  footer a{color:var(--petal);text-decoration:none}
+  .micro{font-family:"IBM Plex Mono",monospace;font-size:.55rem;letter-spacing:.3em;text-transform:uppercase;
+         color:rgba(201,118,31,.55);white-space:nowrap;overflow:hidden;text-align:center;padding:.5rem 0}
+</style>
+</head>
+<body>
+
+<header>
+  <svg class="rosette" viewBox="-60 -60 120 120" role="img" aria-label="Marigold flower">
+        <!-- engraved guide rings -->
+        <circle r="55" fill="none" stroke="rgba(228,163,61,.18)" stroke-width=".7"/>
+        <circle r="49" fill="none" stroke="rgba(228,163,61,.12)" stroke-width=".7"/>
+        <!-- outer petal ring -->
+        <g fill="#c9761f" stroke="#0f1813" stroke-width=".8">
+          <ellipse cx="0" cy="-38" rx="10.5" ry="17" transform="rotate(0)"/>
+          <ellipse cx="0" cy="-38" rx="10.5" ry="17" transform="rotate(30)"/>
+          <ellipse cx="0" cy="-38" rx="10.5" ry="17" transform="rotate(60)"/>
+          <ellipse cx="0" cy="-38" rx="10.5" ry="17" transform="rotate(90)"/>
+          <ellipse cx="0" cy="-38" rx="10.5" ry="17" transform="rotate(120)"/>
+          <ellipse cx="0" cy="-38" rx="10.5" ry="17" transform="rotate(150)"/>
+          <ellipse cx="0" cy="-38" rx="10.5" ry="17" transform="rotate(180)"/>
+          <ellipse cx="0" cy="-38" rx="10.5" ry="17" transform="rotate(210)"/>
+          <ellipse cx="0" cy="-38" rx="10.5" ry="17" transform="rotate(240)"/>
+          <ellipse cx="0" cy="-38" rx="10.5" ry="17" transform="rotate(270)"/>
+          <ellipse cx="0" cy="-38" rx="10.5" ry="17" transform="rotate(300)"/>
+          <ellipse cx="0" cy="-38" rx="10.5" ry="17" transform="rotate(330)"/>
+        </g>
+        <!-- middle petal ring, offset -->
+        <g fill="#e4a33d" stroke="#0f1813" stroke-width=".8">
+          <ellipse cx="0" cy="-26" rx="9" ry="14" transform="rotate(15)"/>
+          <ellipse cx="0" cy="-26" rx="9" ry="14" transform="rotate(45)"/>
+          <ellipse cx="0" cy="-26" rx="9" ry="14" transform="rotate(75)"/>
+          <ellipse cx="0" cy="-26" rx="9" ry="14" transform="rotate(105)"/>
+          <ellipse cx="0" cy="-26" rx="9" ry="14" transform="rotate(135)"/>
+          <ellipse cx="0" cy="-26" rx="9" ry="14" transform="rotate(165)"/>
+          <ellipse cx="0" cy="-26" rx="9" ry="14" transform="rotate(195)"/>
+          <ellipse cx="0" cy="-26" rx="9" ry="14" transform="rotate(225)"/>
+          <ellipse cx="0" cy="-26" rx="9" ry="14" transform="rotate(255)"/>
+          <ellipse cx="0" cy="-26" rx="9" ry="14" transform="rotate(285)"/>
+          <ellipse cx="0" cy="-26" rx="9" ry="14" transform="rotate(315)"/>
+          <ellipse cx="0" cy="-26" rx="9" ry="14" transform="rotate(345)"/>
+        </g>
+        <!-- inner petal ring -->
+        <g fill="#f3cf82" stroke="#0f1813" stroke-width=".7">
+          <ellipse cx="0" cy="-15" rx="7" ry="10.5" transform="rotate(0)"/>
+          <ellipse cx="0" cy="-15" rx="7" ry="10.5" transform="rotate(40)"/>
+          <ellipse cx="0" cy="-15" rx="7" ry="10.5" transform="rotate(80)"/>
+          <ellipse cx="0" cy="-15" rx="7" ry="10.5" transform="rotate(120)"/>
+          <ellipse cx="0" cy="-15" rx="7" ry="10.5" transform="rotate(160)"/>
+          <ellipse cx="0" cy="-15" rx="7" ry="10.5" transform="rotate(200)"/>
+          <ellipse cx="0" cy="-15" rx="7" ry="10.5" transform="rotate(240)"/>
+          <ellipse cx="0" cy="-15" rx="7" ry="10.5" transform="rotate(280)"/>
+          <ellipse cx="0" cy="-15" rx="7" ry="10.5" transform="rotate(320)"/>
+        </g>
+        <circle r="8.5" fill="#7a4212" stroke="#0f1813" stroke-width=".8"/>
+        <circle r="3" fill="#5a300c"/>
+      </svg>
+  <div class="kicker">marigold &middot; litepaper</div>
+  <h1>Digital cash with a fully auditable chain</h1>
+  <p class="tag">The paper you can actually read on your phone.</p>
+  <div class="actions">
+    <a class="btn gold" href="marigold-litepaper.pdf" download>Download PDF</a>
+    <a class="btn line" href="https://marigold.cash/">marigold.cash</a>
+  </div>
+</header>
+
+<div class="micro" aria-hidden="true">marigold · litepaper · marigold · litepaper · marigold · litepaper · marigold · litepaper · marigold · litepaper</div>
+
+<main>
+
+<h2 id="problem"><span class="kicker">the problem</span>Digital Money Forgot What Cash Got Right</h2>
+<p>Take a dollar bill out of your wallet. Notice three things:</p>
+<ol>
+  <li><strong>Whoever holds it owns it.</strong> There is no account, no login, no intermediary. Possession is ownership.</li>
+  <li><strong>It carries no memory.</strong> The bill does not remember who spent it last. There is no record tying you to the coffee you bought this morning.</li>
+  <li><strong>Anyone can check it is real.</strong> Hold it to the light, feel the paper. No special expertise required.</li>
+</ol>
+<p>No mainstream digital money reproduces all three of these properties at once.</p>
+<p>Bitcoin gives you the first and third: holding your keys means owning your coins, and anyone can verify the system is honest. But it fails badly on the second. Every Bitcoin ever mined carries its full history permanently and publicly. Every address you have ever sent from or received to is stitched together in a graph that anyone can analyze. Your coins remember everything you ever did with them.</p>
+<p>Privacy coins like Monero and Zcash try to fix this by encrypting the history. They succeed at hiding things — but the very cryptography that does the hiding creates two new problems. First, almost nobody can personally verify that the system is honest. You are trusting experts you have never met that the math contains no flaw, no backdoor. Second, regulators take one look at the complex cryptography and classify the coin accordingly — delistings, restrictions, and adversarial treatment follow not from what the coin does but from how it does it.</p>
+<p>The result is a landscape where you choose between transparency without privacy, or privacy without trust. Physical cash offered both, effortlessly. Digital money somehow forgot how.</p>
+
+<hr>
+
+<h2 id="insight"><span class="kicker">the insight</span>Don’t Hide the Trail — Don’t Make One</h2>
+<p>Imagine you are at a market stall. You hand a five-dollar bill to the vendor. The vendor puts it in the register. Later that day, the vendor spends that same bill at the bakery. The bakery gives it as change to the next customer.</p>
+<p>Now ask: who can trace that bill back to you? Nobody. Not because the bill’s journey was encrypted or hidden — the bill was in plain view every step of the way — but because the bill itself never recorded who handed it to whom. The connection between you and the vendor was never written down. It existed only in the moment of handover and then was gone.</p>
+<p>This is the difference between hiding information and never collecting it. Privacy coins hide. Marigold doesn’t collect.</p>
+
+<hr>
+
+<h2 id="how"><span class="kicker">how it works</span>Notes Instead of Accounts</h2>
+<p>Most cryptocurrencies work like bank accounts. You have an address (like an account number), and transactions move value between addresses. The addresses are public, and every movement between them is recorded forever. It is an accountant’s dream and a privacy nightmare.</p>
+<p>Marigold works like cash. There are no accounts. Instead, the system maintains a pool of <strong>notes</strong> — think of them as digital banknotes.</p>
+<p>Each note is a simple public record:</p>
+<ul>
+  <li>A <strong>serial number</strong> (like the serial number on a dollar bill)</li>
+  <li>A <strong>value</strong> (0.01, 0.1, 1, 10, 100, 1,000, 10,000, or 100,000 MAGLD)</li>
+  <li>A <strong>lock</strong> (a public key — whoever holds the matching key can spend it)</li>
+</ul>
+<p>That’s it. No owner name, no address, no identity. The note does not know who holds it. It knows only that a key exists, and that whoever can unlock it can spend it.</p>
+
+<h3>Making a Payment</h3>
+<p>Paying someone is like handing over a bill, with one extra step:</p>
+<ol>
+  <li><strong>You give the recipient the key</strong> to the note (via QR code, text message, or even verbally — the same way you’d share a photo).</li>
+  <li><strong>The recipient immediately swaps the lock</strong> — they record a transaction that replaces your key with a brand-new key that only they know. This is confirmed in under a second.</li>
+</ol>
+<p>Once that swap is confirmed, the note is irrevocably theirs. You no longer hold a key that works. Settlement is done.</p>
+<p>Alternatively, if the recipient can send you their new key ahead of time (say, via a payment request), you can swap the lock directly to their key. Your key never travels anywhere. Both methods produce the same result: the note moves from one key to another.</p>
+
+<h3>Splitting and Merging</h3>
+<p>Notes come in fixed values, just like physical currency. If you need to pay 30 MAGLD and you hold a 100-MAGLD note, you <strong>split</strong> it into ten 10-MAGLD notes. You hand over three of them. You keep seven. Making change — same as cash.</p>
+<p>Going the other way, ten 10-MAGLD notes can be <strong>merged</strong> into one 100-MAGLD note. The values move in factors of ten, so any amount is payable with a small handful of notes.</p>
+
+<h3>What the System Records</h3>
+<p>Every operation — creating, swapping locks, splitting, merging, redeeming — is public and in plain view. What no one can see is <strong>who</strong> did it, because the system has no concept of "who." There is no sender field. No receiver field. No address book. No account.</p>
+<p>The system records that a note changed hands. It does not record whose hands.</p>
+
+<hr>
+
+<h2 id="realworld"><span class="kicker">in practice</span>Using Marigold in the Real World</h2>
+<p>Because a Marigold note is nothing more than a key, using one in the real world is as simple as using physical cash. Here is how:</p>
+
+<h3>Print It, Spend It</h3>
+<p>Every note in your wallet app can be displayed as a <strong>QR code</strong>. You can print that QR code on a piece of paper, fold it up, and put it in your leather wallet — right next to your credit cards and your driver’s license. That piece of paper <em>is</em> the money. Hand it to someone, and they scan it, swap the lock, and the note is theirs. You no longer hold a working key. The paper in their pocket is now worthless — the value has moved.</p>
+<p>This is not a metaphor. The printed QR code holds the actual key. Losing it is like losing a hundred-dollar bill: whoever finds it can spend it. Keeping it safe is the same responsibility as keeping cash safe. There is no recovery hotline, no "report this stolen" button, no bank to reverse the transaction. That is what bearer means, and it is the entire point.</p>
+
+<h3>Gift It</h3>
+<p>A birthday card with a printed QR code inside is indistinguishable from a birthday card with a fifty-dollar bill inside. The recipient scans it, swaps the lock immediately, and the note is irrevocably theirs. No account to set up, no waiting period. They open the envelope, they hold the money.</p>
+
+<h3>Leave an Inheritance</h3>
+<p>A sealed envelope in a safe deposit box, containing printed QR codes for several notes, functions exactly like an envelope of cash. Whoever opens it holds the keys. Whoever holds the keys holds the notes. No executor, no probate court, no third-party permission is needed for the value to transfer — though, as with physical cash, the <em>legal</em> arrangements around inheritance are a separate matter the system does not and cannot address. The system guarantees only that possession of the key is possession of the note.</p>
+
+<h3>Pay at a Market Stall</h3>
+<p>You are buying tomatoes. The vendor displays a QR code — their payment request. You scan it with your wallet app, select the note you want to pay with, and your phone swaps the lock directly to the vendor’s key. Under one second later, the note is theirs. You pocket your tomatoes. The vendor never saw your name, your address, or your account. You never saw theirs. The transaction is settled, final, and forgettable — just like cash.</p>
+
+<h3>Store It Cold</h3>
+<p>Worried about hackers? Print your notes as QR codes, put them in a fireproof box, and delete the app. The notes exist on the blockchain. The keys exist on paper. No internet-connected device holds them. When you want to spend, scan the QR code back into a wallet app, swap the lock immediately (in case someone copied the paper while it was stored), and transact normally.</p>
+
+<h3>Move Between Wallets</h3>
+<p>Because notes are independent keys and not tied to any seed phrase or account, you can move a note from one wallet app to another at any time. Export the key from one app, import it into another. No on-chain transaction required, no fee paid, no interaction with the network at all. Your note works the same way in every wallet that supports Marigold — pick the app you like, switch whenever you want, your money comes with you.</p>
+<p>The common thread: a Marigold note is a key, and a key can be printed, texted, folded into an envelope, stuck on a refrigerator, or committed to memory. The system does not care how the key travels between people, because the system does not know that people exist. It knows only keys and notes — and that is why every way you can move a physical banknote has a direct digital equivalent here.</p>
+
+<hr>
+
+<h2 id="observer"><span class="kicker">honest boundaries</span>What an Observer Can and Cannot See</h2>
+<p>Marigold is not a privacy coin, and this litepaper will not pretend it is. Here is exactly what someone watching the system can figure out:</p>
+<div class="cansee"><p><strong>They can see:</strong> Every note, every value, every operation, the total supply, and the complete current state of the system. All of it is in plain view. Nothing is encrypted, ever.</p></div>
+<div class="cansee"><p><strong>They can see:</strong> The chain of operations — which note was swapped into which new note, when splits and merges happened, timing patterns. A determined analyst studying the public records can identify behavioral patterns: rapid successive payments, split-then-spend sequences, or a merchant’s daily accept-and-merge rhythm.</p></div>
+<div class="cansee"><p><strong>They can see:</strong> Who created and redeemed notes, if they can link a regular blockchain address to a real-world identity. The points where Marigold connects to the traditional blockchain world are fully visible.</p></div>
+<div class="cannotsee"><p><strong>They cannot see:</strong> Any identity attached to a payment within the system. There is nothing to see, because the data was never recorded.</p></div>
+<p>A note blends in with every other note of the same value — a 100-MAGLD note looks like every other 100-MAGLD note and nothing beyond that group. Wallet software can blur behavioral patterns (slightly randomizing timing, grouping operations together, varying which note sizes are used for fees), but this is good habits, not magic. Marigold makes no stronger claim.</p>
+
+<hr>
+
+<h2 id="honest"><span class="kicker">the arithmetic</span>Why It Is Honest Money</h2>
+<p>Every few seconds, every participant verifies a single rule:</p>
+<div class="rule">
+  <div class="kicker">the conservation rule</div>
+  <p>All notes in existence + all coins on the traditional side<br>= total coins ever mined.</p>
+</div>
+<p>If this does not hold, something is wrong and the network can see it immediately. Supply is accountable at every moment — not by trusting an auditor, not by trusting a complex proof system, but by the kind of arithmetic anyone can do.</p>
+<p>No value is ever created or destroyed within the system. Paying a fee removes a note from the pool, but its value is credited to the miner and can be recreated as a new note at any time. The conservation rule is absolute and universal.</p>
+
+<hr>
+
+<h2 id="chain"><span class="kicker">the chain</span>Fast Enough to Feel Like Cash</h2>
+<p>The settlement rule is simple: a note is yours when your lock swap is confirmed on the network. That means <strong>confirmation time is handover time.</strong> On Bitcoin, you would stand at the market stall for ten minutes. On Ethereum, about twelve seconds. On Marigold, under one second.</p>
+<p>Marigold runs on a proof-of-work blockchain that produces approximately 10 blocks per second, giving sub-second confirmation. The underlying technology was built by the Kaspa project — a fast, reliable, well-tested blockchain. Marigold adds the note system and its economics on top of that foundation, leaving the base layer intact because it does its job exceptionally well.</p>
+<p><strong>A note on energy.</strong> Marigold’s energy story is not that it uses little — a proof-of-work chain attracts as much mining as its rewards are worth, and a successful Marigold will be no exception. The story is that none of it buys waiting. A classical blockchain can accept only one block per round; blocks mined in parallel are thrown away, so the network stays secure only by staying slow. The chain Marigold runs on keeps every block — blocks found at the same moment are woven into the ledger together, all of them counting — which is how the same security budget delivers ten blocks per second and sub-second settlement instead of a ten-minute queue. Per payment, that is an enormous efficiency difference. In total, it is the same honest arithmetic as everything else here: energy spent in proportion to the value being protected.</p>
+
+<hr>
+
+<h2 id="economics"><span class="kicker">economics</span>Economics at a Glance</h2>
+<ul class="facts">
+  <li><b>Supply:</b> 210,000,000 MAGLD, hard cap. No premine, no dev fund, no allocation of any kind.</li>
+  <li><b>Launch:</b> Fair launch from day one. Software available to everyone in advance. Everyone starts on equal footing.</li>
+  <li><b>Emission:</b> Smooth and gradual — the mining reward halves every three years without sudden drops. About 21% is mined in year one, ~90% by year ten.</li>
+  <li><b>Base unit:</b> 1 MAGLD = 100,000,000 petals.</li>
+  <li><b>Cost to pay:</b> 0.01 MAGLD — one hundredth of a coin — for any everyday payment, however much you are sending. The fee is a single small note handed over with the payment, so a coffee and a car cost the same to move. Only unusually large operations, bundling dozens of notes at once, step up to two or three hundredths.</li>
+  <li><b>Fees:</b> All fees go to miners. Nothing is burned, nothing is diverted. A cash economy — where every payment is an on-chain transaction — produces steady fee income that store-of-value chains cannot match.</li>
+</ul>
+
+<hr>
+
+<h2 id="security"><span class="kicker">launch security</span>Training Wheels That Come Off</h2>
+<p>A new proof-of-work chain has low mining power, and low mining power invites attacks. Marigold launches with a temporary, fully disclosed safeguard called <strong>finality anchors</strong>: five publicly identified trustees periodically co-sign (requiring at least 3 of 5) a recent block, making it permanent and irreversible. No one can undo an anchored block.</p>
+<p>The trustees cannot censor transactions, create coins, move anyone’s funds, or produce blocks. Their only power is to prevent undoing completed transactions. If they go silent, the chain continues normally as a standard proof-of-work network — somewhat less protected, but fully operational.</p>
+<p>The safeguard is designed to retire. Once the network’s mining power grows strong enough that attacks are prohibitively expensive, anchors step down from mandatory to advisory to fully expired. Before that happens, the selection of successor trustees is intended to pass to note-holder governance — so even the training wheels' remnant transfers from founders to the community before they are removed entirely.</p>
+
+<hr>
+
+<h2 id="isandisnot"><span class="kicker">in one breath</span>What Marigold Is — and Is Not</h2>
+<p><strong>Marigold is</strong> digital cash. Notes are bearer instruments. Possession of the key is ownership. Transfer of the key is settlement. The chain is complete about value and silent about people — exactly like a dollar bill.</p>
+<p><strong>Marigold is not</strong> a privacy coin. Nothing is encrypted. Nothing is hidden. The distinction is not euphemism: privacy coins cryptographically conceal recorded data, and Marigold records no data to conceal. What it shares with cash is specific and honestly bounded — the system is complete about <em>value</em> by design, and silent about <em>people</em> by design.</p>
+<p><strong>Marigold is</strong> five operations, one conservation rule, plain-view state, ordinary digital signatures, a fixed supply checked by everyone at every moment, on a network fast enough that handing over a note feels like handing over a bill.</p>
+<p>Everything it does can be checked by the people it is for.</p>
+
+<div class="actions" style="margin-top:2.5rem">
+  <a class="btn gold" href="marigold-litepaper.pdf" download>Download the PDF</a>
+</div>
+
+</main>
+
+<footer>
+  <a href="https://marigold.cash/">marigold.cash</a> &middot; note@marigold.cash<br>
+  No token sale. No presale. Nothing to buy yet.<br>
+  When there is something real, it will be here.
+</footer>
+
+</body>
+</html>
