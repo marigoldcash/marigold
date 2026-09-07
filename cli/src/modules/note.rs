@@ -785,6 +785,7 @@ impl Note {
                     tprintln!(ctx, "Nothing is on your phone.");
                     tprintln!(ctx, "");
                     tprintln!(ctx, "  'note mirror <amount>'   put that much on the phone");
+                    tprintln!(ctx, "  'note mirror export'     produce the encrypted block for your phone");
                     tprintln!(ctx, "  'note mirror return'     take it all back");
                     tprintln!(ctx, "  'note mirror revoke'     kill the copies on a lost phone");
                     tprintln!(ctx, "");
@@ -824,6 +825,57 @@ impl Note {
                     style("Do this only when the phone no longer holds them — a copy still on the phone can still be spent there.").dim()
                 );
                 tprintln!(ctx, "Use 'note mirror revoke' instead if you are not sure.");
+            }
+            Some("export") => {
+                if mirrored.is_empty() {
+                    tprintln!(ctx, "Nothing is on your phone. 'note mirror <amount>' first.");
+                    return Ok(());
+                }
+                tprintln!(ctx, "");
+                tpara!(
+                    ctx,
+                    "This produces the encrypted block your phone reads. Choose a passphrase for it — \
+                    a DIFFERENT one from your wallet password. It never leaves this machine, and \
+                    whoever stores the block cannot read it without the passphrase. \
+                    ",
+                );
+                tprintln!(ctx, "");
+                tpara!(
+                    ctx,
+                    "Forgetting it costs nothing: these notes are still here. That is the point of \
+                    mirroring rather than moving — the copy is disposable. \
+                    ",
+                );
+                tprintln!(ctx, "");
+                let pass = ctx.term().ask(true, "Passphrase for the phone copy: ").await?.trim().to_string();
+                if pass.is_empty() {
+                    tprintln!(ctx, "No passphrase — nothing exported.");
+                    return Ok(());
+                }
+                let again = ctx.term().ask(true, "Again: ").await?.trim().to_string();
+                if pass != again {
+                    tprintln!(ctx, "Those did not match — nothing exported.");
+                    return Ok(());
+                }
+
+                let (wallet_secret, _) = ctx.ask_wallet_secret(None).await?;
+                let mut entries = Vec::with_capacity(mirrored.len());
+                for info in &mirrored {
+                    if let Some(entry) = store.load_key(&wallet_secret, &info.sn).await? {
+                        entries.push(entry);
+                    }
+                }
+                let pages = notepool::mirror_export_pages(&entries, &Secret::from(pass.as_bytes().to_vec()))?;
+                tprintln!(ctx, "");
+                tprintln!(ctx, "{} MAGLD in {} note(s), as {} block(s):", sompi_to_kaspa_string(total(&mirrored)), entries.len(), pages.len());
+                for (i, page) in pages.iter().enumerate() {
+                    tprintln!(ctx, "");
+                    tprintln!(ctx, "{}", style(format!("--- block {} of {} ---", i + 1, pages.len())).dim());
+                    ctx.term().writeln(page.clone());
+                }
+                tprintln!(ctx, "");
+                tprintln!(ctx, "{}", style("Every block is needed — one missing means the notes in it are unreadable.").dim());
+                tprintln!(ctx, "");
             }
             Some("revoke") => {
                 if mirrored.is_empty() {
@@ -1298,7 +1350,7 @@ impl Note {
                 ("balance", "Show note balance by denomination"),
                 ("list", "List the notes you hold"),
                 ("verify [clear]", "Check your notes against the pool — proves the balance is real"),
-                ("mirror [<amount>|return|revoke]", "Put notes on your phone, take them back, or kill a lost phone's copies"),
+                ("mirror [<amount>|export|return|revoke]", "Put notes on your phone, take them back, or kill a lost phone's copies"),
                 ("history", "List notes this wallet has spent"),
                 ("vault <cmd>", "Note vault: create/backup/verify/restore/export/import (see 'note vault')"),
             ],

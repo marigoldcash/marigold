@@ -1465,6 +1465,33 @@ pub fn paper_export_encode(entries: &[NoteKeyEntry], password: &Secret) -> Resul
     Ok(pages)
 }
 
+/// Encrypted pages of the given notes, base64 for text transport.
+///
+/// Same format as the paper backup — encrypted, chunked, each page carrying a
+/// backup id and its index — because it is the same problem: a set of note
+/// keys that has to survive somewhere other than this machine. Reusing it means
+/// one format to get right rather than two.
+///
+/// Sized for a phone's storage: forty notes a page comes to about 3,600
+/// characters encoded, inside Telegram CloudStorage's 4,096-character limit
+/// with room to spare.
+pub fn mirror_export_pages(entries: &[NoteKeyEntry], password: &Secret) -> Result<Vec<String>> {
+    use base64::Engine;
+    Ok(paper_export_encode(entries, password)?
+        .into_iter()
+        .map(|page| base64::engine::general_purpose::STANDARD.encode(page))
+        .collect())
+}
+
+/// Read back one page produced by [`mirror_export_pages`].
+pub fn mirror_import_page(page: &str, password: &Secret) -> Result<(QrPageHeader, Vec<BearerNote>)> {
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(page.trim())
+        .map_err(|err| Error::Custom(format!("that does not look like a mirror page: {err}")))?;
+    paper_export_decode_page(&bytes, password)
+}
+
 /// Peek a page's header without the password — enough to detect a missing page in
 /// a multi-page restore before ever asking for the password.
 pub fn paper_export_peek_header(page: &[u8]) -> Result<QrPageHeader> {
@@ -2306,5 +2333,52 @@ mod paper_export_salt_tests {
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].sn, note.sn);
         assert_eq!(notes[0].sk, note.sk);
+    }
+}
+
+#[cfg(test)]
+mod mirror_export_tests {
+    use super::*;
+
+    #[test]
+    fn a_page_round_trips_and_fits_a_phone() {
+        let entries: Vec<NoteKeyEntry> = (0..40u8)
+            .map(|i| NoteKeyEntry::new(Hash::from_bytes([i; 32]), [i.wrapping_add(1); 32], DenominationTag::D1, NoteProvenance::Cold))
+            .collect();
+        let password = Secret::from("the phone passphrase");
+        let pages = mirror_export_pages(&entries, &password).unwrap();
+        assert_eq!(pages.len(), 1, "forty notes should be one page");
+
+        // Telegram CloudStorage caps a value at 4096 characters. A page that
+        // does not fit cannot be stored at all, so this is a hard limit, not a
+        // preference.
+        assert!(pages[0].len() <= 4096, "page is {} chars, over the 4096 limit", pages[0].len());
+
+        let (header, notes) = mirror_import_page(&pages[0], &password).unwrap();
+        assert_eq!(header.chunk_count, 1);
+        assert_eq!(notes.len(), 40);
+        assert_eq!(notes[7].sn, entries[7].sn);
+        assert_eq!(notes[7].sk, entries[7].sk);
+
+        assert!(mirror_import_page(&pages[0], &Secret::from("wrong")).is_err());
+        assert!(mirror_import_page("not base64 at all !!", &password).is_err());
+    }
+
+    #[test]
+    fn more_than_a_page_of_notes_chunks() {
+        let entries: Vec<NoteKeyEntry> = (0..90u8)
+            .map(|i| NoteKeyEntry::new(Hash::from_bytes([i; 32]), [i.wrapping_add(1); 32], DenominationTag::D0_1, NoteProvenance::Cold))
+            .collect();
+        let password = Secret::from("pw");
+        let pages = mirror_export_pages(&entries, &password).unwrap();
+        assert_eq!(pages.len(), 3);
+        let mut total = 0;
+        for page in &pages {
+            assert!(page.len() <= 4096);
+            let (header, notes) = mirror_import_page(page, &password).unwrap();
+            assert_eq!(header.chunk_count, 3);
+            total += notes.len();
+        }
+        assert_eq!(total, 90);
     }
 }
