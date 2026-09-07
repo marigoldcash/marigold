@@ -588,10 +588,20 @@ fn estimate_transfer_mass(
     let payload = PoolOp::Transfer(TransferOp { consumed, produced: produced.to_vec(), freshness }).encode_payload();
     let tx = Transaction::new(TX_VERSION_TOCCATA, vec![], vec![], 0, SUBNETWORK_ID_NOTE_POOL, 0, payload);
     let populated = PopulatedTransaction::new(&tx, vec![]);
-    Ok(mass_calculator
+    // Storage mass ALONE is the wrong number here, and it silently made every
+    // transfer cost exactly one quantum no matter how large: a pool op has no
+    // transparent outputs, so its storage mass is structurally zero, and the
+    // fee fixpoint above was being fed a constant 0. Consensus charges
+    // max(compute, storage), and for a pool op it is compute — payload bytes —
+    // that carries the whole cost. Measured: a fifty-note transfer is 6,667
+    // bytes of payload, which the node prices at more than one quantum, so the
+    // wallet was underpaying and the node would refuse it.
+    let contextual = mass_calculator
         .calc_contextual_masses(&populated)
         .ok_or_else(|| Error::Custom("transfer: mass calculation failed".to_string()))?
-        .storage_mass)
+        .storage_mass;
+    let non_contextual = mass_calculator.calc_non_contextual_masses(&tx);
+    Ok(contextual.max(non_contextual.compute_mass).max(non_contextual.transient_mass))
 }
 
 pub struct TransferResult {
@@ -675,10 +685,17 @@ async fn submit_transfer(
 /// Shared fee/feerate plumbing: the estimated feerate (sompi per gram) to size a
 /// transfer's fee quanta against, mirroring `redeem`'s sourcing.
 async fn transfer_feerate(account: &Arc<dyn Account>) -> f64 {
-    match account.wallet().rpc_api().get_fee_estimate().await {
+    let estimated = match account.wallet().rpc_api().get_fee_estimate().await {
         Ok(estimate) => estimate.normal_buckets.first().map(|b| b.feerate).unwrap_or(1.0),
         Err(_) => 1.0,
-    }
+    };
+    // The node's fee ESTIMATE is a priority signal, typically 1 sompi/gram.
+    // The mempool's minimum RELAY fee is 100 sompi/gram, and a transaction
+    // below it is refused however unhurried its sender. Sizing on the estimate
+    // alone underprices every pool op by a factor of a hundred; small ones
+    // survived only because the 0.01 quantum floor happened to cover them.
+    // Same lesson POOL_FEE_RATE already encodes for minting.
+    estimated.max(POOL_FEE_RATE)
 }
 
 fn required_fee_quanta(mass: u64, feerate: f64) -> u64 {
@@ -2156,4 +2173,50 @@ pub async fn merge_held_notes(account: Arc<dyn Account>, wallet_secret: Secret, 
         }
     }
     Ok((merged, None))
+}
+
+#[cfg(test)]
+mod fee_sizing {
+    use super::*;
+
+    /// A pool op's fee must cover what the node will charge for it. The node
+    /// prices payload bytes at `mass_per_tx_byte.max(2)` grams each and demands
+    /// at least 100 sompi per gram, so the fee has to track payload size — it
+    /// cannot be a constant. It was one, because the sizing read storage mass,
+    /// which is structurally zero for a transaction with no outputs.
+    #[test]
+    fn the_fee_covers_what_the_node_charges_at_every_size() {
+        const RELAY_SOMPI_PER_GRAM: u64 = 100;
+        let calculator = MassCalculator::new_with_consensus_params(&Params::from(NetworkId::with_suffix(
+            kaspa_consensus_core::network::NetworkType::Testnet,
+            10,
+        )));
+        for n in [1usize, 10, 25, 50, 100, 200] {
+            let groups: Vec<Vec<Hash>> = (0..n).map(|i| vec![Hash::from_u64_word(i as u64)]).collect();
+            let produced: Vec<NewNote> = (0..n).map(|_| NewNote { d: DenominationTag::D1, pk: [0u8; 32] }).collect();
+            let freshness = FreshnessAnchor { anchor_daa_score: 1 };
+            let mass = estimate_transfer_mass(&calculator, &groups, &produced, freshness).unwrap();
+            let quanta = required_fee_quanta(mass, POOL_FEE_RATE);
+            let we_pay = quanta * FEE_QUANTUM_PETALS;
+            let node_wants = mass * RELAY_SOMPI_PER_GRAM;
+            assert!(
+                we_pay >= node_wants,
+                "{n} notes: mass {mass}, node wants {node_wants} sompi, we offer {we_pay} ({quanta} quanta)"
+            );
+        }
+    }
+
+    /// The everyday case stays one penny. A ten-note merge is what housekeeping
+    /// runs constantly, and it must not creep up to two quanta.
+    #[test]
+    fn a_ten_note_merge_still_costs_one_quantum() {
+        let calculator = MassCalculator::new_with_consensus_params(&Params::from(NetworkId::with_suffix(
+            kaspa_consensus_core::network::NetworkType::Testnet,
+            10,
+        )));
+        let groups: Vec<Vec<Hash>> = (0..10).map(|i| vec![Hash::from_u64_word(i as u64)]).collect();
+        let produced = vec![NewNote { d: DenominationTag::D10, pk: [0u8; 32] }];
+        let mass = estimate_transfer_mass(&calculator, &groups, &produced, FreshnessAnchor { anchor_daa_score: 1 }).unwrap();
+        assert_eq!(required_fee_quanta(mass, POOL_FEE_RATE), 1, "a ten-note merge should cost 0.01, mass was {mass}");
+    }
 }

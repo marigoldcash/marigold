@@ -262,11 +262,25 @@ not representable in it. Notes-per-transaction is still capped, by payload
 size against the 100,000-gram limit; that cap is a limit, not a fee, and a
 flat fee underneath it gives nothing away.
 
-**It is flat, not fixed.** `required_fee_quanta` multiplies mass by the
-network's current feerate before rounding. At any normal feerate that is one
-quantum; if the feerate rises far enough the fee steps up in whole quanta.
-A fee market under congestion survives, while the everyday price stays one
-penny.
+**It is flat for everyday sizes, not fixed at every size.** The fee is
+`ceil(mass x feerate)` rounded up to whole quanta, and for a pool op the mass
+is compute mass: payload bytes at two grams each. Small operations round to
+one quantum with room to spare — a ten-note merge is about 1,300 bytes, which
+the node prices at roughly a quarter of a quantum. Large ones step up in whole
+pennies: fifty notes in one transfer is 6,667 bytes, which costs two.
+
+An earlier draft of this entry claimed the fee was one quantum regardless of
+size, stepping up only with the network feerate. That was wrong, and it was
+wrong because the code was wrong: `estimate_transfer_mass` returned storage
+mass, which is structurally zero for a transaction with no outputs, so the fee
+sizing was fed a constant zero and always floored to one quantum. Transfers
+above roughly thirty-three notes were therefore offering the node less than
+its minimum relay fee and would have been refused. Fixed 2026-09-07 by sizing
+on `max(compute, transient, storage)` and by flooring the feerate at the
+mempool's 100 sompi/gram relay minimum rather than trusting the node's
+priority estimate, which reports 1. Locked in by tests that assert the offered
+fee covers the node's charge from one note to two hundred, and that a ten-note
+merge still costs exactly one quantum.
 
 **Four things this rests on. Changing any of them breaks it:**
 
