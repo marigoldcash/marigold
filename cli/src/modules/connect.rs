@@ -77,8 +77,8 @@ impl Connect {
                         "This is a node the Marigold project runs, offered so you can use a wallet without \
                         setting one up. Whoever runs a node sees the address you connect from and which notes \
                         your wallet asks about — the chain itself never records that, so a node you do not \
-                        control is the one place it exists. For anything you care about, run your own and \
-                        'connect 127.0.0.1:27210'. \
+                        control is the one place it exists. For anything you care about, run your own — \
+                        'mynode start', or see marigold.cash/faq. \
                         ",
                     );
                     tprintln!(ctx);

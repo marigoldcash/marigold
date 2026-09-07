@@ -234,7 +234,7 @@ impl Wallet {
                         tprintln!(ctx, "  {}   {server}", style("saved").bold());
                         tprintln!(ctx, "");
                     }
-                    tprintln!(ctx, "{}", style("See marigold.cash for what this trade-off means.").dim());
+                    tprintln!(ctx, "{}", style("marigold.cash/faq explains what this choice costs.").dim());
                     tprintln!(ctx, "");
 
                     let default = if target.is_some() { "saved" } else { "public" };
