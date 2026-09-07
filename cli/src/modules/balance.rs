@@ -17,10 +17,23 @@ impl Balance {
         let mut stream = note_key_store.iter().await?;
         let mut counts = [0u64; DENOMINATION_PETALS.len()];
         let mut total = 0u64;
+        let mut mirrored = 0u64;
+        let mut mirrored_count = 0usize;
         while let Some(info) = stream.try_next().await? {
-            if info.status == NoteStatus::Active {
-                counts[info.d as usize] += 1;
-                total += DENOMINATION_PETALS[info.d as usize];
+            match info.status {
+                NoteStatus::Active => {
+                    counts[info.d as usize] += 1;
+                    total += DENOMINATION_PETALS[info.d as usize];
+                }
+                // Still yours — this wallet holds the key — but carried on the
+                // phone and untouchable here. Listing it separately rather than
+                // omitting it: money that silently disappears from the balance
+                // when you fund a phone reads as money lost.
+                NoteStatus::Mirrored => {
+                    mirrored += DENOMINATION_PETALS[info.d as usize];
+                    mirrored_count += 1;
+                }
+                _ => {}
             }
         }
         tprintln!(ctx, "notes:  {} MAGLD", sompi_to_kaspa_string(total));
@@ -28,6 +41,17 @@ impl Balance {
             if *count > 0 {
                 tprintln!(ctx, "  {} x {} MAGLD", count, sompi_to_kaspa_string(DENOMINATION_PETALS[index]));
             }
+        }
+
+        if mirrored > 0 {
+            tprintln!(ctx, "");
+            tprintln!(
+                ctx,
+                "on your phone:  {} MAGLD  ({} note{})",
+                sompi_to_kaspa_string(mirrored),
+                mirrored_count,
+                if mirrored_count == 1 { "" } else { "s" }
+            );
         }
 
         // The ledger comes last and only when it holds something — for anyone

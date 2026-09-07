@@ -18,6 +18,7 @@
 //!     active/<value>_<sn>.note
 //!     handed-over/<value>_<sn>.note
 //!     superseded/<value>_<sn>.note
+//!     mirrored/<value>_<sn>.note
 //! ```
 //!
 //! `manifest.tsv` deliberately does double duty as both DECISIONS.md's
@@ -51,6 +52,7 @@ fn status_subdir(status: NoteStatus) -> &'static str {
         NoteStatus::Active => "active",
         NoteStatus::HandedOver => "handed-over",
         NoteStatus::Superseded => "superseded",
+        NoteStatus::Mirrored => "mirrored",
     }
 }
 
@@ -63,6 +65,7 @@ fn status_from_str(s: &str) -> Option<NoteStatus> {
         "active" => Some(NoteStatus::Active),
         "handed-over" => Some(NoteStatus::HandedOver),
         "superseded" => Some(NoteStatus::Superseded),
+        "mirrored" => Some(NoteStatus::Mirrored),
         _ => None,
     }
 }
@@ -203,7 +206,7 @@ impl NoteVault {
 
     async fn ensure_dirs(&self) -> Result<()> {
         fs::create_dir_all(&self.folder).await?;
-        for status in [NoteStatus::Active, NoteStatus::HandedOver, NoteStatus::Superseded] {
+        for status in [NoteStatus::Active, NoteStatus::HandedOver, NoteStatus::Superseded, NoteStatus::Mirrored] {
             fs::create_dir_all(self.subdir(status)).await?;
         }
         Ok(())
@@ -397,8 +400,12 @@ impl NoteVault {
         }
         let name = note_file_name(sn, d);
         let from_path = self.subdir(from).join(&name);
-        let to_path = self.subdir(to).join(&name);
-        fs::rename(&from_path, &to_path).await?;
+        let to_dir = self.subdir(to);
+        // A vault created before this status existed has no directory for it,
+        // and rename into a missing directory fails. Creating it on demand also
+        // means a future status needs no migration step.
+        fs::create_dir_all(&to_dir).await?;
+        fs::rename(&from_path, &to_dir.join(&name)).await?;
         Ok(())
     }
 
@@ -409,7 +416,7 @@ impl NoteVault {
     pub async fn rebuild_manifest(&self, wallet_secret: &Secret) -> Result<usize> {
         let k = self.unlock(wallet_secret).await?;
         let mut rows = HashMap::new();
-        for status in [NoteStatus::Active, NoteStatus::HandedOver, NoteStatus::Superseded] {
+        for status in [NoteStatus::Active, NoteStatus::HandedOver, NoteStatus::Superseded, NoteStatus::Mirrored] {
             let dir = self.subdir(status);
             let entries = match fs::readdir(dir.clone(), false).await {
                 Ok(entries) => entries,
@@ -544,7 +551,15 @@ impl NoteVault {
             }
         };
         if let Some((old_status, d)) = old {
-            self.move_note_file(sn, d, old_status, status).await?;
+            // The index was updated first, so undo it if the file will not
+            // move — otherwise this session believes a note is somewhere it
+            // is not, and the next reader trusts the index over the disk.
+            if let Err(err) = self.move_note_file(sn, d, old_status, status).await {
+                if let Some(row) = self.index.write().await.get_mut(sn) {
+                    row.info.status = old_status;
+                }
+                return Err(err);
+            }
             self.persist_manifest().await?;
         }
         Ok(())
@@ -662,6 +677,41 @@ mod tests {
         assert!(!fs::exists(&active_path).await?);
         assert!(fs::exists(&superseded_path).await?);
         assert_eq!(vault.load_info(&sn).await?.unwrap().status, NoteStatus::Superseded);
+
+        Ok(())
+    }
+
+    /// A vault created before a status existed has no directory for it. Every
+    /// wallet in the wild is such a vault the moment a status is added, so the
+    /// move has to create the directory rather than assume `create()` did.
+    #[tokio::test]
+    async fn mark_status_creates_a_status_directory_that_predates_it() -> Result<()> {
+        let dir = tempfile::tempdir().unwrap();
+        let secret = Secret::from("vault-test-secret");
+        let vault = make_vault(&dir);
+        vault.create(&secret).await?;
+
+        // Simulate the older layout: remove the directory create() just made.
+        let mirrored_dir = dir.path().join("test.notes/mirrored");
+        std::fs::remove_dir_all(&mirrored_dir).unwrap();
+        assert!(!fs::exists(&mirrored_dir).await?);
+
+        let sn = Hash::from([0x55u8; 32]);
+        let entry = NoteKeyEntry::new(sn, [0x66u8; 32], DenominationTag::D1, NoteProvenance::Cold);
+        vault.store(&secret, entry).await?;
+
+        vault.mark_status(&sn, NoteStatus::Mirrored).await?;
+
+        let mirrored_path = mirrored_dir.join(note_file_name(&sn, DenominationTag::D1));
+        assert!(fs::exists(&mirrored_path).await?);
+        assert_eq!(vault.load_info(&sn).await?.unwrap().status, NoteStatus::Mirrored);
+
+        // And back again — a mirrored note returns to spendable in place.
+        vault.mark_status(&sn, NoteStatus::Active).await?;
+        assert!(!fs::exists(&mirrored_path).await?);
+        assert_eq!(vault.load_info(&sn).await?.unwrap().status, NoteStatus::Active);
+        // The key survived the round trip: a mirror never destroys the original.
+        assert!(vault.load_key(&secret, &sn).await?.is_some());
 
         Ok(())
     }

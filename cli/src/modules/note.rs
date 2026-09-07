@@ -8,7 +8,7 @@ use kaspa_wallet_core::account::notepool::{
     paper_export_peek_header, plan_restore_rotation,
 };
 use kaspa_wallet_core::storage::local::notevault::NoteVault;
-use kaspa_wallet_core::storage::{NoteKeyEntry, NoteProvenance, NoteStatus};
+use kaspa_wallet_core::storage::{NoteKeyEntry, NoteKeyInfo, NoteProvenance, NoteStatus};
 use std::path::Path;
 use std::time::Duration;
 use workflow_core::abortable::Abortable;
@@ -62,6 +62,7 @@ impl Note {
             "export" => self.export(&ctx, argv).await,
             "pos" => self.pos(&ctx, argv).await,
             "balance" => self.balance(&ctx).await,
+            "mirror" => self.mirror(&ctx, argv).await,
             "list" => self.list(&ctx).await,
             "history" => self.history(&ctx).await,
             "vault" => self.vault(&ctx, argv).await,
@@ -672,6 +673,156 @@ impl Note {
         Ok(())
     }
 
+    /// `note mirror` — the notes that are also on your phone.
+    ///
+    /// A mirrored note stays in this vault, key and all: that is what makes it
+    /// a mirror rather than a move, and what lets `note mirror revoke` kill the
+    /// copies on a lost device. What changes is that nothing here will spend
+    /// it — every spend, fee-source and merge selector filters on `Active`, so
+    /// marking a note `Mirrored` takes it out of all of them at once.
+    async fn mirror(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
+        let store = ctx.wallet().store().as_note_key_store()?;
+        let mut mirrored: Vec<Arc<NoteKeyInfo>> = Vec::new();
+        let mut spendable: Vec<Arc<NoteKeyInfo>> = Vec::new();
+        let mut stream = store.iter().await?;
+        while let Some(info) = stream.try_next().await? {
+            match info.status {
+                NoteStatus::Mirrored => mirrored.push(info),
+                NoteStatus::Active => spendable.push(info),
+                _ => {}
+            }
+        }
+        let total = |notes: &[Arc<NoteKeyInfo>]| -> u64 { notes.iter().map(|i| DENOMINATION_PETALS[i.d as usize]).sum() };
+
+        let arg = argv.first().map(|s| s.as_str());
+        match arg {
+            None | Some("list") => {
+                if mirrored.is_empty() {
+                    tprintln!(ctx, "");
+                    tprintln!(ctx, "Nothing is on your phone.");
+                    tprintln!(ctx, "");
+                    tprintln!(ctx, "  'note mirror <amount>'   put that much on the phone");
+                    tprintln!(ctx, "  'note mirror return'     take it all back");
+                    tprintln!(ctx, "  'note mirror revoke'     kill the copies on a lost phone");
+                    tprintln!(ctx, "");
+                    tprintln!(
+                        ctx,
+                        "{}",
+                        style("Notes on your phone stay here too — this wallet keeps the key, which is what lets you revoke.").dim()
+                    );
+                    tprintln!(ctx, "");
+                    return Ok(());
+                }
+                mirrored.sort_by(|a, b| b.d.cmp(&a.d));
+                tprintln!(ctx, "");
+                tprintln!(ctx, "On your phone: {} MAGLD", sompi_to_kaspa_string(total(&mirrored)));
+                for info in &mirrored {
+                    tprintln!(ctx, "  {} - {} MAGLD", info.sn, sompi_to_kaspa_string(DENOMINATION_PETALS[info.d as usize]));
+                }
+                tprintln!(ctx, "");
+                tprintln!(ctx, "{}", style("This wallet will not spend or merge these. 'note mirror revoke' if the phone is lost.").dim());
+                tprintln!(ctx, "");
+            }
+            Some("return") => {
+                if mirrored.is_empty() {
+                    tprintln!(ctx, "Nothing is on your phone.");
+                    return Ok(());
+                }
+                let amount = total(&mirrored);
+                let count = mirrored.len();
+                for info in &mirrored {
+                    store.mark_status(&info.sn, NoteStatus::Active).await?;
+                }
+                tprintln!(ctx, "Took back {count} note(s), {} MAGLD.", sompi_to_kaspa_string(amount));
+                tprintln!(ctx, "");
+                tprintln!(
+                    ctx,
+                    "{}",
+                    style("Do this only when the phone no longer holds them — a copy still on the phone can still be spent there.").dim()
+                );
+                tprintln!(ctx, "Use 'note mirror revoke' instead if you are not sure.");
+            }
+            Some("revoke") => {
+                if mirrored.is_empty() {
+                    tprintln!(ctx, "Nothing is on your phone.");
+                    return Ok(());
+                }
+                let amount = total(&mirrored);
+                tprintln!(ctx, "");
+                tprintln!(ctx, "This rotates {} MAGLD onto fresh keys.", sompi_to_kaspa_string(amount));
+                tprintln!(ctx, "Every copy on the phone dies the moment it lands — including any a thief has.");
+                tprintln!(ctx, "The money comes back here.");
+                tprintln!(ctx, "");
+                let answer = ctx.term().ask(false, "Revoke? [y/N]: ").await?.trim().to_lowercase();
+                if !answer.starts_with('y') {
+                    tprintln!(ctx, "Left alone.");
+                    return Ok(());
+                }
+                let (wallet_secret, _) = ctx.ask_wallet_secret(None).await?;
+                let account = ctx.wallet().account()?;
+                let serials: Vec<Hash> = mirrored.iter().map(|i| i.sn).collect();
+                match notepool::rotate_notes(account, wallet_secret, serials).await {
+                    Ok(result) => {
+                        tprintln!(ctx, "");
+                        tprintln!(ctx, "Revoked. {} MAGLD is back on fresh keys here.", sompi_to_kaspa_string(amount));
+                        tprintln!(ctx, "{} note(s), transaction {}", result.own_notes.len(), result.transaction_id);
+                    }
+                    Err(err) => {
+                        tprintln!(ctx, "Could not revoke: {err}");
+                        tprintln!(ctx, "Nothing changed — the notes are still marked as being on the phone.");
+                    }
+                }
+            }
+            Some(amount) => {
+                let target = try_parse_required_nonzero_kaspa_as_sompi_u64(Some(&amount.to_string()))?;
+                // Largest first, never going over: mirroring more than asked
+                // would put more at risk than the user chose to carry.
+                spendable.sort_by(|a, b| b.d.cmp(&a.d));
+                let mut chosen = Vec::new();
+                let mut sum = 0u64;
+                for info in &spendable {
+                    let value = DENOMINATION_PETALS[info.d as usize];
+                    if sum + value <= target {
+                        sum += value;
+                        chosen.push(info.clone());
+                    }
+                }
+                if chosen.is_empty() {
+                    tprintln!(ctx, "");
+                    if spendable.is_empty() {
+                        tprintln!(ctx, "You hold no notes to put on the phone.");
+                    } else {
+                        let smallest = spendable.iter().map(|i| DENOMINATION_PETALS[i.d as usize]).min().unwrap_or(0);
+                        tprintln!(ctx, "No note here is small enough to make up {} MAGLD.", sompi_to_kaspa_string(target));
+                        tprintln!(ctx, "Your smallest is {} MAGLD — mint or split one first.", sompi_to_kaspa_string(smallest));
+                    }
+                    tprintln!(ctx, "");
+                    return Ok(());
+                }
+                for info in &chosen {
+                    store.mark_status(&info.sn, NoteStatus::Mirrored).await?;
+                }
+                tprintln!(ctx, "");
+                tprintln!(ctx, "On your phone: {} MAGLD in {} note(s).", sompi_to_kaspa_string(sum), chosen.len());
+                if sum < target {
+                    tprintln!(
+                        ctx,
+                        "{}",
+                        style(format!(
+                            "(you asked for {} — notes come in fixed sizes, so this is the closest without going over)",
+                            sompi_to_kaspa_string(target)
+                        ))
+                        .dim()
+                    );
+                }
+                tprintln!(ctx, "");
+                tprintln!(ctx, "{}", style("This wallet keeps the keys and will not spend these. If the phone is lost, 'note mirror revoke'.").dim());
+                tprintln!(ctx, "");
+            }
+        }
+        Ok(())
+    }
+
     /// `note list` — what you hold. Superseded notes are history, not
     /// holdings, and on an active wallet they pile up quickly; they live in
     /// `note history` instead.
@@ -700,6 +851,14 @@ impl Note {
                 sompi_to_kaspa_string(DENOMINATION_PETALS[info.d as usize]),
                 info.provenance
             );
+        }
+        let mut phone_header = false;
+        for info in notes.iter().filter(|i| i.status == NoteStatus::Mirrored) {
+            if !phone_header {
+                tprintln!(ctx, "{}", style("on your phone:").dim());
+                phone_header = true;
+            }
+            tprintln!(ctx, "  {} - {} MAGLD", info.sn, sompi_to_kaspa_string(DENOMINATION_PETALS[info.d as usize]));
         }
         for info in notes.iter().filter(|i| i.status == NoteStatus::HandedOver) {
             if !handed_over_header {
@@ -1055,6 +1214,7 @@ impl Note {
                 ("pos <amount>", "One POS checkout: fresh landing-pad pk, wait for payment, auto-sweep"),
                 ("balance", "Show note balance by denomination"),
                 ("list", "List the notes you hold"),
+                ("mirror [<amount>|return|revoke]", "Put notes on your phone, take them back, or kill a lost phone's copies"),
                 ("history", "List notes this wallet has spent"),
                 ("vault <cmd>", "Note vault: create/backup/verify/restore/export/import (see 'note vault')"),
             ],

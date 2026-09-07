@@ -49,6 +49,16 @@ pub enum NoteStatus {
     /// flips to [`Self::Superseded`] when the receiver's rotation is observed
     /// on-chain (the ordinary `NotesChanged` removal path).
     HandedOver,
+    /// A copy of this key is on a phone (DECISIONS.md: "Mobile custody: mirror
+    /// plus rotation"). The home wallet keeps the key — that is what makes this
+    /// a mirror rather than a move, and what preserves the ability to revoke by
+    /// rotating the serial — but will not spend it, source a fee from it, or
+    /// merge it. Housekeeping that consumed a note the holder was carrying
+    /// would make their money vanish at the till with nothing to explain it.
+    ///
+    /// Distinct from [`Self::HandedOver`], which means given away for good, and
+    /// from [`Self::Active`], which means free to spend here.
+    Mirrored,
 }
 
 /// One row of the note key database (POOL-SPEC.md P5.6's `KeyDbEntry`, flattened to

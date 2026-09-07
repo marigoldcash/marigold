@@ -361,7 +361,12 @@ impl KaspaCli {
         if let Ok(store) = self.wallet.store().as_note_key_store() {
             if let Ok(mut stream) = store.iter().await {
                 while let Ok(Some(info)) = stream.try_next().await {
-                    if info.status == kaspa_wallet_core::storage::NoteStatus::Active {
+                    // Mirrored notes count: they are the user's money, merely
+                    // carried elsewhere, and this wallet still holds their keys.
+                    if matches!(
+                        info.status,
+                        kaspa_wallet_core::storage::NoteStatus::Active | kaspa_wallet_core::storage::NoteStatus::Mirrored
+                    ) {
                         notes += kaspa_consensus_core::notepool::DENOMINATION_PETALS[info.d as usize];
                     }
                 }
@@ -1461,7 +1466,7 @@ impl Cli for KaspaCli {
             match (verb, sub) {
                 ("note", "vault") => Some(vec!["create", "backup", "verify", "restore", "export", "import"]),
                 ("note", _) => Some(vec![
-                    "mint", "rotate", "move", "redeem", "request", "pay", "import", "export", "pos", "balance", "list", "history", "vault",
+                    "mint", "rotate", "move", "mirror", "redeem", "request", "pay", "import", "export", "pos", "balance", "list", "history", "vault",
                     "help",
                 ]),
                 ("wallet", _) => Some(vec![
