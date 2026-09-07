@@ -748,6 +748,21 @@ pub async fn rotate_notes(account: Arc<dyn Account>, wallet_secret: Secret, seri
             source_infos.push(spare.clone());
         }
 
+        // Refuse to shred a large note to pay a small fee. Spares are taken
+        // smallest-first, but "smallest" is smallest *confirmed in the pool* —
+        // and on a wallet minting every minute the fresh 0.01 stamps are still
+        // unconfirmed, so the selector can reach past fifty of them to a 10
+        // MAGLD note and spend it on a 0.01 fee (founder report, 2026-09-07:
+        // two 10s gone, one stamp gone, nothing back). Housekeeping that can
+        // wait should wait.
+        if source_total >= fee_petals && source_total > fee_petals.saturating_mul(FEE_SOURCE_MAX_OVERSHOOT) {
+            return Err(Error::Custom(format!(
+                "no small note is confirmed yet to pay the {} petal fee — the smallest available is {} petals; \
+                 retry once the fee stamps have landed",
+                fee_petals, source_total
+            )));
+        }
+
         let (produced_denoms, consumed_serial_count) = if source_total >= fee_petals {
             let mut denoms = decompose_amount(rotate_value).expect("rotate value is a sum of denominations");
             denoms.extend(decompose_amount_allow_zero(source_total - fee_petals).expect("change is denomination-quantized"));
@@ -1900,6 +1915,13 @@ pub async fn send_combined(
 /// one, so a wallet needs a working supply — merging the supply away would
 /// force later rotations into slack mode, where the fee comes out of a note's
 /// own value and breaks its denomination.
+/// How far above the fee a fee-source may reach before the operation is
+/// refused. A fee is normally paid with one 0.01 stamp; overshooting by a
+/// hundredfold means no stamp is available and something much larger is about
+/// to be broken up for it. Waiting a minute for stamps to confirm is always
+/// the better trade.
+pub const FEE_SOURCE_MAX_OVERSHOOT: u64 = 100;
+
 pub const STAMP_RESERVE: usize = 50;
 
 /// Don't touch the stamps until there are clearly too many. Merging as soon as
@@ -1908,6 +1930,39 @@ pub const STAMP_RESERVE: usize = 50;
 /// two would chase each other forever. A gap between the trigger and the
 /// reserve is what makes the cycle terminate.
 pub const STAMP_MERGE_TRIGGER: usize = 100;
+
+/// Reconcile the vault against the pool: which notes this wallet believes it
+/// holds actually exist on chain. Returns (present, phantom).
+///
+/// The wallet stores a note the moment its creating transaction is submitted,
+/// so a transaction that never lands leaves a note in the vault that exists
+/// nowhere else. Balance cannot detect that on its own — it reports belief, not
+/// fact — so this asks the node directly.
+pub async fn verify_held_notes(account: Arc<dyn Account>) -> Result<(Vec<Arc<NoteKeyInfo>>, Vec<Arc<NoteKeyInfo>>)> {
+    let note_key_store = account.wallet().store().as_note_key_store()?;
+    let mut held: Vec<Arc<NoteKeyInfo>> = Vec::new();
+    let mut stream = note_key_store.iter().await?;
+    while let Some(info) = stream.try_next().await? {
+        if matches!(info.status, NoteStatus::Active | NoteStatus::Mirrored) {
+            held.push(info);
+        }
+    }
+    let mut present = Vec::new();
+    let mut phantom = Vec::new();
+    // Chunked: a mining wallet can hold thousands of notes, and one query
+    // carrying every serial is a needlessly large request to build and parse.
+    for chunk in held.chunks(500) {
+        let confirmed = pool_confirmed(&account, chunk.iter().map(|i| i.sn).collect()).await?;
+        for info in chunk {
+            if confirmed.contains(&info.sn) {
+                present.push(info.clone());
+            } else {
+                phantom.push(info.clone());
+            }
+        }
+    }
+    Ok((present, phantom))
+}
 
 /// Which of `serials` the node actually holds in the pool. A wallet stores a
 /// note as `Active` the moment its creating transaction is submitted — the

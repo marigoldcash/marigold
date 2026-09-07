@@ -1466,7 +1466,7 @@ impl Cli for KaspaCli {
             match (verb, sub) {
                 ("note", "vault") => Some(vec!["create", "backup", "verify", "restore", "export", "import"]),
                 ("note", _) => Some(vec![
-                    "mint", "rotate", "move", "mirror", "redeem", "request", "pay", "import", "export", "pos", "balance", "list", "history", "vault",
+                    "mint", "rotate", "move", "mirror", "redeem", "request", "pay", "import", "export", "pos", "balance", "list", "history", "verify", "vault",
                     "help",
                 ]),
                 ("wallet", _) => Some(vec![

@@ -63,6 +63,7 @@ impl Note {
             "pos" => self.pos(&ctx, argv).await,
             "balance" => self.balance(&ctx).await,
             "mirror" => self.mirror(&ctx, argv).await,
+            "verify" => self.verify(&ctx, argv).await,
             "list" => self.list(&ctx).await,
             "history" => self.history(&ctx).await,
             "vault" => self.vault(&ctx, argv).await,
@@ -673,6 +674,73 @@ impl Note {
         Ok(())
     }
 
+    /// `note verify` — check the vault against the pool.
+    ///
+    /// `balance` reports what this wallet believes it holds. Belief and fact
+    /// diverge when a transaction is submitted, its notes recorded locally, and
+    /// the transaction then fails to land: the note stays in the vault and
+    /// exists nowhere else. This is the command that tells the difference.
+    async fn verify(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
+        if !ctx.wallet().is_connected() {
+            tprintln!(ctx, "Connect to a node first — this checks your notes against the network.");
+            return Ok(());
+        }
+        let account = ctx.wallet().account()?;
+        tprintln!(ctx, "");
+        tprintln!(ctx, "Checking your notes against the pool...");
+        let (present, phantom) = notepool::verify_held_notes(account).await?;
+        let value = |notes: &[Arc<NoteKeyInfo>]| -> u64 { notes.iter().map(|i| DENOMINATION_PETALS[i.d as usize]).sum() };
+
+        tprintln!(ctx, "");
+        tprintln!(ctx, "confirmed on chain:  {} MAGLD in {} note(s)", sompi_to_kaspa_string(value(&present)), present.len());
+        if phantom.is_empty() {
+            tprintln!(ctx, "");
+            tprintln!(ctx, "Every note you hold exists in the pool. Your balance is real.");
+            tprintln!(ctx, "");
+            return Ok(());
+        }
+
+        let lost = value(&phantom);
+        tprintln!(ctx, "not in the pool:     {} MAGLD in {} note(s)", sompi_to_kaspa_string(lost), phantom.len());
+        tprintln!(ctx, "");
+        tprintln!(ctx, "These notes are in your vault but not on chain. That happens when a");
+        tprintln!(ctx, "transaction was submitted, its notes recorded here, and the transaction");
+        tprintln!(ctx, "then failed to land. They are not spendable and never will be.");
+        tprintln!(ctx, "");
+        let mut phantom = phantom;
+        phantom.sort_by(|a, b| b.d.cmp(&a.d));
+        for info in phantom.iter().take(20) {
+            tprintln!(ctx, "  {} - {} MAGLD", info.sn, sompi_to_kaspa_string(DENOMINATION_PETALS[info.d as usize]));
+        }
+        if phantom.len() > 20 {
+            tprintln!(ctx, "  ... and {} more", phantom.len() - 20);
+        }
+        tprintln!(ctx, "");
+
+        // Clearing is opt-in. A note missing because the node is mid-sync, or
+        // answering from a pruned view, is not a lost note — and writing off
+        // real money on a bad answer is worse than leaving a wrong number up.
+        if argv.first().map(|s| s.as_str()) != Some("clear") {
+            tprintln!(ctx, "'note verify clear' writes them off, once you are sure the node is fully synced.");
+            tprintln!(ctx, "");
+            return Ok(());
+        }
+        let answer = ctx.term().ask(false, &format!("Write off {} MAGLD as unrecoverable? [y/N]: ", sompi_to_kaspa_string(lost)))
+            .await?
+            .trim()
+            .to_lowercase();
+        if !answer.starts_with('y') {
+            tprintln!(ctx, "Left alone.");
+            return Ok(());
+        }
+        let store = ctx.wallet().store().as_note_key_store()?;
+        for info in &phantom {
+            store.mark_status(&info.sn, NoteStatus::Superseded).await?;
+        }
+        tprintln!(ctx, "Wrote off {} note(s). They are in 'note history' now.", phantom.len());
+        Ok(())
+    }
+
     /// `note mirror` — the notes that are also on your phone.
     ///
     /// A mirrored note stays in this vault, key and all: that is what makes it
@@ -1214,6 +1282,7 @@ impl Note {
                 ("pos <amount>", "One POS checkout: fresh landing-pad pk, wait for payment, auto-sweep"),
                 ("balance", "Show note balance by denomination"),
                 ("list", "List the notes you hold"),
+                ("verify [clear]", "Check your notes against the pool — proves the balance is real"),
                 ("mirror [<amount>|return|revoke]", "Put notes on your phone, take them back, or kill a lost phone's copies"),
                 ("history", "List notes this wallet has spent"),
                 ("vault <cmd>", "Note vault: create/backup/verify/restore/export/import (see 'note vault')"),
