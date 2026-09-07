@@ -1,5 +1,6 @@
 use crate::imports::*;
 use crate::wizards;
+use kaspa_wallet_core::wallet::WalletGuard;
 use std::str::FromStr;
 
 #[derive(Default, Handler)]
@@ -641,7 +642,7 @@ impl Wallet {
                 return self.backup(&ctx, argv).await;
             }
             "restore" => {
-                return self.restore(&ctx, argv).await;
+                return self.restore(&ctx, argv, &guard).await;
             }
             "help" => {
                 return self.display_help(ctx, argv).await;
@@ -869,7 +870,7 @@ impl Wallet {
     /// nothing at all, and says which file stopped it: restoring an old backup
     /// over a live wallet is the one way this command could cost somebody
     /// money, so it is not possible by accident.
-    async fn restore(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
+    async fn restore(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>, guard: &WalletGuard<'_>) -> Result<()> {
         use crate::backup as archive;
 
         let Some(path) = argv.first() else {
@@ -908,19 +909,79 @@ impl Wallet {
 
         tprintln!(ctx, "");
         tprintln!(ctx, "Restored {written} files into {}", style(folder.display().to_string()).bold());
-        if name != original {
-            // The title lives inside the wallet file, under the wallet
-            // password. Changing it here would mean asking for a second secret
-            // in a command whose whole point is that it needs only one — and
-            // failing on a mistyped password after the files were already
-            // written. So the file is '<name>' and the wallet still calls
-            // itself '<original>' until someone renames it properly.
-            tprintln!(ctx, "The backup called it '{original}'; the files are '{name}' here.");
-            tprintln!(ctx, "{}", style(format!("It still calls itself '{original}' in 'wallet list' — 'wallet rename' changes that.")).dim());
+        if name == original {
+            tprintln!(ctx, "");
+            tprintln!(ctx, "Open it with 'open {name}' — it wants the wallet password it had when the backup was made.");
+            tprintln!(ctx, "");
+            return Ok(());
         }
+
+        // The restore itself is finished and on disk. Everything below is
+        // tidying: the title lives inside the wallet file under the wallet
+        // password, so correcting it needs a second secret and an open wallet.
+        // Doing it here rather than as part of the restore means a wrong
+        // password, a refusal, or a crash costs nothing — the files are
+        // already safe, and 'wallet rename' can finish the job any time.
+        tprintln!(ctx, "The backup called it '{original}'; the files are '{name}' here.");
         tprintln!(ctx, "");
-        tprintln!(ctx, "Open it with 'open {name}' — it wants the wallet password it had when the backup was made.");
+        tpara!(
+            ctx,
+            "Inside, it still calls itself '{original}' — that is the name 'wallet list' shows and the \
+            one on the prompt. Correcting it means opening the wallet, which needs the password it had \
+            when the backup was made. "
+        );
         tprintln!(ctx, "");
+        if ctx.wallet().is_open() {
+            tprintln!(ctx, "{}", style("This will close the wallet you have open.").dim());
+        }
+        let answer = ctx.term().ask(false, &format!("Fix the name to '{name}' now? [Y/n]: ")).await?.trim().to_lowercase();
+        if answer.starts_with('n') {
+            tprintln!(ctx, "");
+            tprintln!(ctx, "Left as it is. 'open {name}' works either way; 'wallet rename' fixes the name later.");
+            tprintln!(ctx, "");
+            return Ok(());
+        }
+
+        let secret = Secret::new(ctx.term().ask(true, "Wallet password: ").await?.trim().as_bytes().to_vec());
+        if secret.as_ref().is_empty() {
+            tprintln!(ctx, "");
+            tprintln!(ctx, "No password — left as '{original}'. 'wallet rename' fixes it later.");
+            tprintln!(ctx, "");
+            return Ok(());
+        }
+
+        // Automation holds the previous wallet's keys; disarm before swapping,
+        // exactly as 'wallet rename' does.
+        ctx.disarm_automation();
+        if ctx.wallet().is_open() {
+            ctx.wallet().close().await?;
+        }
+        let opened = ctx
+            .wallet()
+            .open(&secret, Some(name.clone()), WalletOpenArgs::default_with_legacy_accounts(), guard)
+            .await;
+        if let Err(err) = opened {
+            tprintln!(ctx, "");
+            tprintln!(ctx, "Could not open it: {err}");
+            tprintln!(ctx, "The restore stands — the files are in place. 'open {name}' when you have the password.");
+            tprintln!(ctx, "");
+            return Ok(());
+        }
+        ctx.wallet().activate_accounts(None, guard).await?;
+
+        match ctx.store().rename(&secret, Some(&name), None).await {
+            Ok(()) => {
+                tprintln!(ctx, "");
+                tprintln!(ctx, "{}", style(format!("Restored and open as '{name}'.")).green());
+                tprintln!(ctx, "");
+            }
+            Err(err) => {
+                tprintln!(ctx, "");
+                tprintln!(ctx, "Opened, but the name inside is still '{original}': {err}");
+                tprintln!(ctx, "'wallet rename {name}' fixes it.");
+                tprintln!(ctx, "");
+            }
+        }
         Ok(())
     }
 
