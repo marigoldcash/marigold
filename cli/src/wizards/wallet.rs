@@ -56,12 +56,22 @@ pub(crate) async fn create(
         let taken = ctx.store().exists(Some(file.trim_end_matches(".wallet"))).await.unwrap_or(false);
         tprintln!(ctx, "This wallet will be stored as: {}", style(format!("{folder}/{file}")).cyan());
         if taken {
-            tprintln!(ctx, "{}", style("A wallet of that name is already there — continuing will overwrite it.").yellow());
-            tprintln!(ctx, "{}", style("Type a different name unless you are certain.").yellow());
+            tprintln!(ctx, "{}", style("That name is taken. Type a different one — a wallet is never overwritten.").yellow());
         }
         tprintln!(ctx, "(change the folder for all wallets with 'settings set folder <path>' before creating)");
         let input = term.ask(false, "Press <enter> to accept, or type a different wallet name: ").await?.trim().to_string();
         if input.is_empty() {
+            if taken {
+                // Nothing here overwrites a wallet. The file it would replace
+                // can hold the only copy of somebody's notes, and there is no
+                // undo — so the wizard has no path to it at all, deliberately.
+                // Deleting a wallet is 'wallet destroy', which checks the
+                // balance first and makes you type the name.
+                tprintln!(ctx, "");
+                tprintln!(ctx, "{}", style("That name is taken, and a wallet is never overwritten.").red());
+                tprintln!(ctx, "Pick another name, or remove the old one first with 'wallet destroy <name>'.");
+                continue;
+            }
             break;
         }
         if input.to_lowercase() == "wallet" {
@@ -89,17 +99,15 @@ pub(crate) async fn create(
     }
     let name = name.as_deref();
 
+    // Belt and braces: the loop above will not let a taken name through, but a
+    // caller reaching here by some other route must still not destroy a wallet.
     let filename = make_filename(&name.map(String::from), &custom_filename);
     if wallet.exists(Some(&filename)).await? {
-        tprintln!(ctx, "{}", style("WARNING - A previously created wallet already exists!").red().to_string());
-        tprintln!(ctx, "NOTE: You can create a differently named wallet by using 'wallet create <name>'");
-        tprintln!(ctx);
-
-        let overwrite =
-            term.ask(false, "Are you sure you want to overwrite it (type 'y' to approve)?: ").await?.trim().to_string().to_lowercase();
-        if overwrite.ne("y") {
-            return Ok(());
-        }
+        tprintln!(ctx, "");
+        tprintln!(ctx, "{}", style(format!("A wallet named '{filename}' already exists, and is never overwritten.")).red());
+        tprintln!(ctx, "Choose another name, or remove that one first with 'wallet destroy {filename}'.");
+        tprintln!(ctx, "");
+        return Ok(());
     }
 
     let account_name = term.ask(false, "Default account title: ").await?.trim().to_string();
