@@ -40,6 +40,21 @@ marigold_grpc_ports:
   simnet: 26510
   devnet: 26610
 
+# wRPC (borsh) port per network — the wallet-facing RPC. Bound to LOOPBACK only,
+# never opened in the firewall: nginx terminates TLS on 443 and proxies the
+# WebSocket to it, and Cloudflare fronts nginx. The node itself is never
+# directly reachable, which is the whole point of the arrangement.
+marigold_wrpc_ports:
+  mainnet: 27110
+  testnet: 27210
+  simnet: 27510
+  devnet: 27610
+
+# Off by default, and deliberately so: see the marigoldd defaults note below.
+# Set per host (currently seed1) for a node that is to serve wallets through
+# nginx + Cloudflare.
+marigold_wrpc_enabled: false
+
 marigold_user: "marigold"
 marigold_install_root: "/opt/marigold"
 marigold_data_root: "/var/lib/marigold"
@@ -54,11 +69,21 @@ marigold_config_root: "/etc/marigold"
 marigold_build_checkout: "/opt/marigold-build/marigold-node"
 marigold_fetch_cache: "{{ playbook_dir }}/.fetched"
 
-# marigoldd defaults — a public seed node deliberately passes NONE of
-# --rpclisten/--rpclisten-borsh/--rpclisten-json/--unsaferpc: gRPC then defaults to
-# loopback-only and wRPC doesn't start at all (see docs/marigold/WALLET.md's and
-# SMOKE.md's P7.7/P7.8 findings) — the safest possible posture is simply never
-# passing those flags on a host reachable from the internet.
+# marigoldd defaults — a public seed node passes NONE of --rpclisten /
+# --rpclisten-json / --unsaferpc: gRPC then defaults to loopback-only (see
+# docs/marigold/WALLET.md's and SMOKE.md's P7.7/P7.8 findings). The safest
+# posture is simply never passing those flags on a host reachable from the
+# internet, and that stands.
+#
+# The one exception, opt-in per host via marigold_wrpc_enabled: --rpclisten-borsh
+# bound to 127.0.0.1. That is not "exposing RPC" — nothing outside the machine
+# can reach it. nginx terminates TLS on 443 for a SEPARATE hostname and proxies
+# the WebSocket in; Cloudflare fronts that hostname. --unsaferpc stays off, so
+# the surface is the ordinary read/submit API.
+#
+# The p2p hostname (tn-seedN) must stay unproxied on its real IP: peer gossip
+# carries raw IPs with no hostname field, so a proxied seed cannot be dialled
+# and cannot advertise itself. Two names, one machine, one orange cloud.
 kaspad_archival: false
 kaspad_addpeers: ""            # comma-separated "ip:port" list, or empty
 kaspad_extra_args: ""          # escape hatch for anything not modeled below

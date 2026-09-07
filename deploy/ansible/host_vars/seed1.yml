@@ -1,0 +1,12 @@
+---
+# seed1 also serves wallets.
+#
+# --rpclisten-borsh on loopback only; nginx terminates TLS for rpc1.marigold.cash
+# on 443 and proxies the WebSocket in; Cloudflare fronts that hostname, giving
+# DDoS absorption and a valid certificate (browsers refuse ws:// from an https://
+# page, so this is also the prerequisite for any web or mobile wallet).
+#
+# tn-seed1.marigold.cash stays a plain DNS record on the real IP for p2p. Peer
+# gossip carries raw IPs with no hostname field, so a proxied seed could neither
+# be dialled nor advertise itself — the two roles need two names.
+marigold_wrpc_enabled: true

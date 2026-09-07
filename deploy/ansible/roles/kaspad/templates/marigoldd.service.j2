@@ -17,6 +17,9 @@ ExecStart={{ marigold_install_root }}/bin/marigoldd \
   --simnet \
 {% endif %}
   --utxoindex \
+{% if marigold_wrpc_enabled | default(false) | bool %}
+  --rpclisten-borsh=127.0.0.1:{{ marigold_wrpc_ports[marigold_network] }} \
+{% endif %}
   --disable-upnp \
   --appdir={{ marigold_data_root }}/marigoldd-{{ marigold_network }} \
 {% if kaspad_external_ip is defined and kaspad_external_ip %}
@@ -35,9 +38,11 @@ ExecStart={{ marigold_install_root }}/bin/marigoldd \
   {{ kaspad_extra_args }} \
 {% endif %}
   --loglevel=info
-# Deliberately no --rpclisten / --rpclisten-borsh / --rpclisten-json / --unsaferpc:
-# gRPC then defaults to loopback-only and wRPC doesn't start at all. A local
-# stratum-bridge instance still reaches this node fine over
+# Deliberately no --rpclisten / --rpclisten-json / --unsaferpc: gRPC then
+# defaults to loopback-only. --rpclisten-borsh appears above only where
+# marigold_wrpc_enabled is set, and then only on 127.0.0.1 — nginx proxies to it
+# from a separate, Cloudflare-fronted hostname; nothing off-box reaches it
+# directly. A local stratum-bridge instance still reaches this node fine over
 # 127.0.0.1:{{ marigold_grpc_ports[marigold_network] }} — see docs/marigold/TESTNET.md.
 Restart=on-failure
 RestartSec=5
