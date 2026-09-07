@@ -21,3 +21,4 @@ rustbridge_*.log
 # Generated whitepaper artifacts (build with whitepaper/build-pdf.sh)
 whitepaper/*.pdf
 whitepaper/.build-src.md
+__pycache__/
