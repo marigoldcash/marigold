@@ -634,6 +634,15 @@ impl Wallet {
                     tprintln!(ctx, "usage:\n'wallet hint <text>' or 'wallet hint remove' to remove the hint");
                 }
             }
+            "backup" => {
+                if argv.first().map(|s| s.as_str()) == Some("verify") {
+                    return self.backup_verify(&ctx, argv[1..].to_vec()).await;
+                }
+                return self.backup(&ctx, argv).await;
+            }
+            "restore" => {
+                return self.restore(&ctx, argv).await;
+            }
             "help" => {
                 return self.display_help(ctx, argv).await;
             }
@@ -661,10 +670,317 @@ impl Wallet {
                 ("forget <name>", "Hide a wallet from the open picker (it is NOT deleted; 'wallet show <name>' undoes it)"),
                 ("show <name>", "Un-hide a wallet previously hidden with 'wallet forget'"),
                 ("hint", "Change the wallet phishing hint"),
+                ("backup [<file-or-folder>]", "Write the whole wallet — keys, notes and all — to one encrypted file"),
+                ("backup verify <file>", "Check that a backup file still opens and what is inside it"),
+                ("restore <file> [<name>]", "Rebuild a wallet from a backup file"),
             ],
             None,
         )?;
 
+        Ok(())
+    }
+
+    /// `wallet backup [<file-or-folder>]` — the whole wallet in one encrypted
+    /// file: the wallet file, the vault key, every note key, the manifest.
+    ///
+    /// This is the copy you can put somewhere you do not control. `note vault
+    /// backup` writes the vault as loose files, which is right for a USB stick
+    /// in a drawer and wrong for anywhere else: `manifest.tsv` is plaintext and
+    /// lists every note you hold. The archive passphrase is what makes the
+    /// difference, which is why this command insists on one and will not reuse
+    /// the wallet password for it.
+    async fn backup(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
+        use crate::backup as archive;
+
+        if !ctx.wallet().is_open() {
+            tprintln!(ctx, "Open a wallet first — 'wallet backup' backs up the wallet you have open.");
+            return Ok(());
+        }
+        let descriptor = ctx.store().descriptor().ok_or_else(|| Error::custom("no wallet is open"))?;
+        let name = descriptor.filename.clone();
+
+        // vault_folder() is the resolved on-disk path, so its parent is the
+        // real storage folder — no second guess at where '~' points.
+        let vault_folder = ctx.wallet().store().as_note_key_store()?.vault_folder().await?;
+        let folder = vault_folder
+            .parent()
+            .ok_or_else(|| Error::custom("cannot work out the wallet folder"))?
+            .to_path_buf();
+        let wallet_file = folder.join(kaspa_wallet_core::storage::local::wallet_file_name(&name));
+        if !wallet_file.exists() {
+            return Err(Error::custom(format!("{} is missing — nothing to back up", wallet_file.display())));
+        }
+
+        let target = Self::backup_target(argv.first().map(|s| s.as_str()))?;
+        if target.exists() {
+            tprintln!(ctx, "{} already exists. Choose another name — a backup never overwrites one.", target.display());
+            return Ok(());
+        }
+
+        tprintln!(ctx, "");
+        tpara!(
+            ctx,
+            "This writes your whole wallet — the keys, every note, the lot — into one file, \
+            encrypted under a passphrase you choose now. It is safe to keep somewhere you do \
+            not control: a cloud drive, a chat with yourself, a stranger's USB stick. \
+            "
+        );
+        tprintln!(ctx, "");
+        tpara!(
+            ctx,
+            "Choose a passphrase you do not use anywhere else, and write it down. Nobody can \
+            reset it and nobody keeps a copy: lose it and this file is noise, however much \
+            money it holds. \
+            "
+        );
+        tprintln!(ctx, "");
+
+        let pass = ctx.term().ask(true, "Passphrase for this backup: ").await?.trim().to_string();
+        if pass.is_empty() {
+            tprintln!(ctx, "No passphrase — nothing written.");
+            return Ok(());
+        }
+        // Short enough to brute-force is the same as no passphrase, for a file
+        // whose whole purpose is to sit somewhere you do not control.
+        if pass.len() < 8 {
+            tprintln!(ctx, "That is under 8 characters. This file may sit on someone else's server — nothing written.");
+            return Ok(());
+        }
+        let again = ctx.term().ask(true, "Again: ").await?.trim().to_string();
+        if pass != again {
+            tprintln!(ctx, "Those did not match — nothing written.");
+            return Ok(());
+        }
+        let passphrase = Secret::from(pass.as_bytes().to_vec());
+
+        let mut entries = vec![archive::ArchiveEntry {
+            path: kaspa_wallet_core::storage::local::wallet_file_name(&name),
+            data: std::fs::read(&wallet_file).map_err(|e| Error::custom(format!("cannot read the wallet file: {e}")))?,
+        }];
+        // The transactions folder is deliberately left out: it is a record of
+        // what happened, not a means of getting anything back, and it is by far
+        // the largest thing in the directory.
+        if vault_folder.exists() {
+            let prefix = vault_folder
+                .file_name()
+                .ok_or_else(|| Error::custom("cannot work out the vault folder name"))?
+                .to_string_lossy()
+                .to_string();
+            archive::collect_tree(&vault_folder, &prefix, &mut entries)?;
+        }
+
+        let file_count = entries.len();
+        let packed = archive::pack(&entries, &passphrase)?;
+        Self::write_private(&target, &packed)?;
+
+        // Read it back and open it. A backup that was never opened is a guess,
+        // and this is the cheapest moment to find out it is a bad one.
+        let reread = archive::read_file(&target)?;
+        let restored = archive::unpack(&reread, &passphrase)?;
+        if restored.len() != file_count {
+            return Err(Error::custom("the backup did not read back correctly — do not rely on it"));
+        }
+        for (a, b) in entries.iter().zip(restored.iter()) {
+            if a.path != b.path || a.data != b.data {
+                return Err(Error::custom("the backup did not read back correctly — do not rely on it"));
+            }
+        }
+
+        let (active, retired) = Self::note_counts(&entries);
+        tprintln!(ctx, "");
+        tprintln!(ctx, "Wrote {}", style(target.display().to_string()).bold());
+        tprintln!(
+            ctx,
+            "{} files, {} — opened again to check it.",
+            file_count.separated_string(),
+            archive::human_size(packed.len())
+        );
+        tprintln!(ctx, "{} note keys you can spend, {} retired.", active.separated_string(), retired.separated_string());
+        if retired > active.saturating_mul(4) {
+            tprintln!(ctx, "");
+            // Retired keys are the bulk of every mature vault, and leaving them
+            // out is not an option: a note is marked retired when its spending
+            // transaction is SENT, not when it lands, and nothing ever marks one
+            // back. A backup without them could be a backup without your money.
+            tpara!(
+                ctx,
+                "Most of that is retired notes — spent, but kept, because a note is written off \
+                when its payment is sent rather than when it confirms. Dropping them to save \
+                space is how a backup quietly stops being one. \
+                "
+            );
+        }
+        tprintln!(ctx, "");
+        tpara!(
+            ctx,
+            "Restore it with 'wallet restore <file>' on any machine. It needs this passphrase \
+            and nothing else — not your 24 words, not your wallet password, though the wallet \
+            password is still what opens the wallet afterwards. \
+            "
+        );
+        tprintln!(ctx, "");
+        tprintln!(ctx, "{}", style("This one file is enough to spend your money. Treat it as cash.").red());
+        tprintln!(ctx, "");
+        Ok(())
+    }
+
+    /// `wallet backup verify <file>` — open an archive and say what is in it,
+    /// without writing anything.
+    ///
+    /// The point is to be able to answer "is that old file still good?" at a
+    /// moment of your choosing rather than the moment you need it.
+    async fn backup_verify(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
+        use crate::backup as archive;
+
+        let Some(path) = argv.first() else {
+            tprintln!(ctx, "usage: 'wallet backup verify <file>'");
+            return Ok(());
+        };
+        let path = std::path::PathBuf::from(path);
+        let bytes = archive::read_file(&path)?;
+
+        let pass = ctx.term().ask(true, "Passphrase for this backup: ").await?.trim().to_string();
+        if pass.is_empty() {
+            tprintln!(ctx, "No passphrase — nothing checked.");
+            return Ok(());
+        }
+        let entries = archive::unpack(&bytes, &Secret::from(pass.as_bytes().to_vec()))?;
+
+        let name = Self::wallet_name_in(&entries)?;
+        let (active, retired) = Self::note_counts(&entries);
+        let total: usize = entries.iter().map(|e| e.data.len()).sum();
+
+        tprintln!(ctx, "");
+        tprintln!(ctx, "{}", style("The passphrase is right and the file is intact.").green());
+        tprintln!(ctx, "");
+        tprintln!(ctx, "  Wallet:  {name}");
+        tprintln!(ctx, "  Files:   {}", entries.len().separated_string());
+        tprintln!(ctx, "  Notes:   {} spendable, {} retired", active.separated_string(), retired.separated_string());
+        tprintln!(ctx, "  Size:    {} on disk, {} inside", archive::human_size(bytes.len()), archive::human_size(total));
+        tprintln!(ctx, "");
+        tprintln!(ctx, "'wallet restore {}' would rebuild it.", path.display());
+        tprintln!(ctx, "");
+        Ok(())
+    }
+
+    /// `wallet restore <file> [<name>]` — rebuild a wallet from an archive.
+    ///
+    /// Never overwrites. If anything it would write is already there it writes
+    /// nothing at all, and says which file stopped it: restoring an old backup
+    /// over a live wallet is the one way this command could cost somebody
+    /// money, so it is not possible by accident.
+    async fn restore(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
+        use crate::backup as archive;
+
+        let Some(path) = argv.first() else {
+            tprintln!(ctx, "usage: 'wallet restore <file> [<name>]'");
+            tprintln!(ctx, "(<name> restores it under a different name, so it can sit beside a wallet you already have)");
+            return Ok(());
+        };
+        let path = std::path::PathBuf::from(path);
+        let bytes = archive::read_file(&path)?;
+
+        let pass = ctx.term().ask(true, "Passphrase for this backup: ").await?.trim().to_string();
+        if pass.is_empty() {
+            tprintln!(ctx, "No passphrase — nothing restored.");
+            return Ok(());
+        }
+        let entries = archive::unpack(&bytes, &Secret::from(pass.as_bytes().to_vec()))?;
+
+        let original = Self::wallet_name_in(&entries)?;
+        let name = argv.get(1).cloned().unwrap_or_else(|| original.clone());
+        if name.to_lowercase() == "wallet" {
+            return Err(Error::custom("a wallet cannot be named 'wallet'"));
+        }
+        // Renaming a wallet is a file move and nothing else — no path is stored
+        // inside any of these files — so restoring under a new name is the same
+        // operation done a moment earlier.
+        let entries = if name == original { entries } else { archive::rename_entries(entries, &original, &name)? };
+
+        let folder: String = ctx
+            .wallet()
+            .settings()
+            .get(WalletSettings::Folder)
+            .unwrap_or_else(|| kaspa_wallet_core::storage::local::default_storage_folder().to_string());
+        let folder = workflow_store::fs::resolve_path(&folder)?;
+
+        let written = archive::extract(&entries, &folder)?;
+
+        tprintln!(ctx, "");
+        tprintln!(ctx, "Restored {written} files into {}", style(folder.display().to_string()).bold());
+        if name != original {
+            // The title lives inside the wallet file, under the wallet
+            // password. Changing it here would mean asking for a second secret
+            // in a command whose whole point is that it needs only one — and
+            // failing on a mistyped password after the files were already
+            // written. So the file is '<name>' and the wallet still calls
+            // itself '<original>' until someone renames it properly.
+            tprintln!(ctx, "The backup called it '{original}'; the files are '{name}' here.");
+            tprintln!(ctx, "{}", style(format!("It still calls itself '{original}' in 'wallet list' — 'wallet rename' changes that.")).dim());
+        }
+        tprintln!(ctx, "");
+        tprintln!(ctx, "Open it with 'open {name}' — it wants the wallet password it had when the backup was made.");
+        tprintln!(ctx, "");
+        Ok(())
+    }
+
+    /// Spendable and retired note keys in an archive, counted by which folder
+    /// of the vault they came from. Read off the paths rather than the manifest
+    /// so it works on an archive without parsing anything inside it.
+    fn note_counts(entries: &[crate::backup::ArchiveEntry]) -> (usize, usize) {
+        let mut active = 0;
+        let mut retired = 0;
+        for entry in entries.iter().filter(|e| e.path.ends_with(".note")) {
+            if entry.path.contains("/active/") || entry.path.contains("/mirrored/") {
+                active += 1;
+            } else {
+                retired += 1;
+            }
+        }
+        (active, retired)
+    }
+
+    /// The wallet's name, read off the one top-level `.wallet` entry.
+    fn wallet_name_in(entries: &[crate::backup::ArchiveEntry]) -> Result<String> {
+        let mut found = entries.iter().filter(|e| !e.path.contains('/') && e.path.ends_with(".wallet"));
+        let entry = found.next().ok_or_else(|| Error::custom("that archive holds no wallet file"))?;
+        if found.next().is_some() {
+            return Err(Error::custom("that archive holds more than one wallet file"));
+        }
+        Ok(entry.path.trim_end_matches(".wallet").to_string())
+    }
+
+    /// Work out where to write. A folder gets a dated filename; anything else
+    /// is taken literally.
+    ///
+    /// The default name carries no wallet name, because the filename is the one
+    /// part of a backup that whoever stores it can read.
+    fn backup_target(arg: Option<&str>) -> Result<std::path::PathBuf> {
+        let stamp = chrono::Local::now().format("%Y%m%d-%H%M").to_string();
+        let generated = format!("marigold-backup-{stamp}.mgb");
+        Ok(match arg {
+            None => std::path::PathBuf::from(generated),
+            Some(arg) => {
+                let path = std::path::PathBuf::from(arg);
+                if path.is_dir() { path.join(generated) } else { path }
+            }
+        })
+    }
+
+    /// Write with owner-only permissions from the start, rather than creating
+    /// a world-readable file and narrowing it afterwards.
+    fn write_private(path: &std::path::Path, bytes: &[u8]) -> Result<()> {
+        use std::io::Write;
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(path).map_err(|e| Error::custom(format!("cannot create {}: {e}", path.display())))?;
+        file.write_all(bytes).map_err(|e| Error::custom(format!("cannot write {}: {e}", path.display())))?;
+        file.sync_all().map_err(|e| Error::custom(format!("cannot flush {}: {e}", path.display())))?;
         Ok(())
     }
 }

@@ -42,6 +42,7 @@ convert_case.workspace = true
 dashmap.workspace = true
 downcast.workspace = true
 faster-hex.workspace = true
+flate2.workspace = true
 futures.workspace = true
 js-sys.workspace = true
 hex.workspace = true
