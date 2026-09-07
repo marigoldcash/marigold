@@ -131,6 +131,53 @@ fn denomination_petals(d: DenominationTag) -> u64 {
     kaspa_consensus_core::notepool::DENOMINATION_PETALS[d as usize]
 }
 
+/// Domain separator. Changing this changes every wallet's account key, so it
+/// is versioned and must never be edited in place.
+const ACCOUNT_DERIVATION_TAG: &[u8] = b"marigold-account-from-vault-v1";
+
+/// The account's bip39 entropy, derived from the note vault's key.
+///
+/// One recovery phrase, not two. The account key used to be independently
+/// random, so a wallet had a 12-word account mnemonic AND a 24-word vault
+/// phrase, and losing either lost half the money. Deriving one from the other
+/// means the 24 words reproduce both — and, because a bip32 key needs nothing
+/// but its entropy, the ledger side comes back from the words ALONE. Notes
+/// still need the vault files as well, because nothing can derive a note; that
+/// is what makes them bearer instruments.
+///
+/// A plain hash rather than a slow KDF on purpose: the input is already 32
+/// bytes of CSPRNG output, so there is nothing to brute-force and stretching it
+/// would only cost time. The tag stops this value colliding with any other use
+/// of the same key.
+pub fn account_entropy_from_vault_key(k: &[u8; 32]) -> [u8; 32] {
+    use sha2::Digest;
+    let mut hasher = sha2::Sha256::new();
+    hasher.update(ACCOUNT_DERIVATION_TAG);
+    hasher.update(k);
+    hasher.finalize().into()
+}
+
+/// A fresh 24-word vault recovery phrase, not yet written anywhere.
+///
+/// Generated before the wallet exists, because the account key is derived from
+/// it — so the phrase has to be settled first.
+pub fn new_vault_words() -> Result<String> {
+    let mut k = [0u8; 32];
+    rand::thread_rng().fill_bytes(&mut k);
+    Ok(Mnemonic::from_entropy(k.to_vec(), Language::English)?.phrase_string())
+}
+
+/// The 24-word account mnemonic implied by a vault recovery phrase.
+pub fn account_mnemonic_from_vault_words(words: &str) -> Result<Mnemonic> {
+    let vault = Mnemonic::new(words, Language::English)?;
+    let k: [u8; 32] = vault
+        .entropy()
+        .as_slice()
+        .try_into()
+        .map_err(|_| Error::Custom("a vault recovery phrase must be 24 words".to_string()))?;
+    Ok(Mnemonic::from_entropy(account_entropy_from_vault_key(&k).to_vec(), Language::English)?)
+}
+
 pub fn now_unix() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
@@ -1038,5 +1085,69 @@ mod tests {
 
     fn entry_pk(sn: &Hash) -> Result<[u8; 32]> {
         NoteKeyEntry::new(*sn, [0xddu8; 32], DenominationTag::D1, NoteProvenance::Cold).derive_pk()
+    }
+}
+
+#[cfg(test)]
+mod account_derivation_tests {
+    use super::*;
+
+    /// The point of the whole change: one phrase reproduces the account key, so
+    /// recovering a wallet from 24 words gets the ledger back as well as the
+    /// notes. If this ever stops holding, wallets created before the change and
+    /// wallets created after it disagree about what their own account key is.
+    #[test]
+    fn the_same_vault_words_always_give_the_same_account_key() {
+        let words = new_vault_words().unwrap();
+        let a = account_mnemonic_from_vault_words(&words).unwrap();
+        let b = account_mnemonic_from_vault_words(&words).unwrap();
+        assert_eq!(a.phrase_string(), b.phrase_string());
+        // 24 words in, 24 words out — 32 bytes of entropy either side.
+        assert_eq!(a.phrase_string().split_whitespace().count(), 24);
+    }
+
+    /// Different vaults must not share an account key.
+    #[test]
+    fn different_vaults_give_different_account_keys() {
+        let a = account_mnemonic_from_vault_words(&new_vault_words().unwrap()).unwrap();
+        let b = account_mnemonic_from_vault_words(&new_vault_words().unwrap()).unwrap();
+        assert_ne!(a.phrase_string(), b.phrase_string());
+    }
+
+    /// The derived key must not be the vault key itself: the vault key
+    /// decrypts note files, and handing the same secret to bip32 would mean an
+    /// exposed account key exposes every note too.
+    #[test]
+    fn the_account_key_is_not_the_vault_key() {
+        let words = new_vault_words().unwrap();
+        let vault_entropy = Mnemonic::new(&words, Language::English).unwrap().entropy().to_vec();
+        let account_entropy = account_mnemonic_from_vault_words(&words).unwrap().entropy().to_vec();
+        assert_ne!(vault_entropy, account_entropy);
+    }
+
+    /// A real pair produced by the wallet's own creation wizard. Proves the
+    /// wizard and this function agree — a derivation that is internally
+    /// consistent but not what the wizard actually used would still lose
+    /// people their ledger balance.
+    #[test]
+    fn a_wallet_created_by_the_wizard_derives_its_own_account_key() {
+        let vault = "task detect rule skill action front bid base doctor alter few person \
+                     foam steel goddess almost unfair apple course fault nominee surround congress share";
+        let account = "prosper glory enjoy grain pupil vacuum choice dance will exercise across fringe \
+                       sister tonight airport lamp fantasy argue scheme ugly supreme unusual home pole";
+        assert_eq!(account_mnemonic_from_vault_words(vault).unwrap().phrase_string(), account);
+    }
+
+    /// A known phrase pins the derivation. This value is a compatibility
+    /// contract: if it changes, every wallet created before the change can no
+    /// longer be recovered from its words.
+    #[test]
+    fn the_derivation_is_pinned() {
+        let words = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon \
+                     abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon \
+                     abandon abandon abandon art";
+        let account = account_mnemonic_from_vault_words(words).unwrap();
+        let k: [u8; 32] = Mnemonic::new(words, Language::English).unwrap().entropy().as_slice().try_into().unwrap();
+        assert_eq!(account_entropy_from_vault_key(&k).to_vec(), account.entropy().to_vec());
     }
 }

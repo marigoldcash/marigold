@@ -190,57 +190,6 @@ pub(crate) async fn create(
 
     tprintln!(ctx, "");
 
-    let prv_key_data_args = if import_with_mnemonic {
-        let words = crate::wizards::import::prompt_for_mnemonic(&term).await?;
-        PrvKeyDataCreateArgs::new(None, payment_secret.clone(), Secret::from(words.join(" ")), PrvKeyDataVariantKind::Mnemonic)
-    } else {
-        PrvKeyDataCreateArgs::new(
-            None,
-            payment_secret.clone(),
-            Secret::from(Mnemonic::random(word_count, Language::default())?.phrase()),
-            PrvKeyDataVariantKind::Mnemonic,
-        )
-    };
-
-    let mnemonic_phrase = prv_key_data_args.secret.clone();
-
-    let notifier = ctx.notifier().show(Notification::Processing).await;
-
-    // suspend commits for multiple operations
-    wallet.store().batch().await?;
-
-    let wallet_args = WalletCreateArgs::new(name.map(String::from), custom_filename.clone(), EncryptionKind::XChaCha20Poly1305, hint, true);
-    let (wallet_descriptor, storage_descriptor) = ctx.wallet().create_wallet(&wallet_secret, wallet_args).await?;
-    let prv_key_data_id = wallet.create_prv_key_data(&wallet_secret, prv_key_data_args).await?;
-
-    let account_args = AccountCreateArgsBip32::new(account_name, None);
-    let account = wallet.create_account_bip32(&wallet_secret, prv_key_data_id, payment_secret.as_ref(), account_args).await?;
-
-    // flush data to storage
-    wallet.store().flush(&wallet_secret).await?;
-
-    notifier.hide();
-
-    // The account's own bip39 phrase is deliberately NOT shown.
-    //
-    // It lives inside the wallet file, encrypted under the wallet password, and
-    // recovering that file recovers it — so it is not a second thing to write
-    // down, it is the same thing. Printing it here put a third secret in front
-    // of someone who had just been given two, and every extra secret shown is
-    // one more that gets photographed, pasted, or written on the wrong piece of
-    // paper. 'export mnemonic' produces it from an open wallet on the rare
-    // occasion something outside Marigold needs it.
-    if !import_with_mnemonic {
-        tprintln!(ctx, "");
-        tpara!(
-            ctx,
-            "This wallet also holds an ordinary account key for the transparent ledger. It is kept \
-            inside the wallet file and comes back with it — there is nothing separate to write down \
-            for it. If you ever need it in another program, 'export mnemonic' will show it. \
-            ",
-        );
-    }
-
     // Note-vault ceremony — at wallet creation, where it belongs, not as a
     // lazy auto-create that logs the 24 words mid-command (which is exactly
     // how the founder's vault words ended up in scrollback, 2026-09-05).
@@ -277,14 +226,69 @@ pub(crate) async fn create(
             }
         }
     };
+    // The vault phrase is settled BEFORE any key is made, because the account
+    // key is now derived from it: one phrase recovers both sides. Choosing it
+    // afterwards would mean generating an account key that the phrase could not
+    // reproduce.
+    let vault_words = match vault_words {
+        Some(words) => words,
+        None => kaspa_wallet_core::storage::local::notevault::new_vault_words()?,
+    };
+
+    let prv_key_data_args = if import_with_mnemonic {
+        let words = crate::wizards::import::prompt_for_mnemonic(&term).await?;
+        PrvKeyDataCreateArgs::new(None, payment_secret.clone(), Secret::from(words.join(" ")), PrvKeyDataVariantKind::Mnemonic)
+    } else {
+        // Derived, not random: the vault phrase reproduces it, so there is one
+        // phrase to keep rather than two.
+        let account = kaspa_wallet_core::storage::local::notevault::account_mnemonic_from_vault_words(&vault_words)?;
+        PrvKeyDataCreateArgs::new(None, payment_secret.clone(), Secret::from(account.phrase_string()), PrvKeyDataVariantKind::Mnemonic)
+    };
+
+    let mnemonic_phrase = prv_key_data_args.secret.clone();
+
+    let notifier = ctx.notifier().show(Notification::Processing).await;
+
+    // suspend commits for multiple operations
+    wallet.store().batch().await?;
+
+    let wallet_args = WalletCreateArgs::new(name.map(String::from), custom_filename.clone(), EncryptionKind::XChaCha20Poly1305, hint, true);
+    let (wallet_descriptor, storage_descriptor) = ctx.wallet().create_wallet(&wallet_secret, wallet_args).await?;
+    let prv_key_data_id = wallet.create_prv_key_data(&wallet_secret, prv_key_data_args).await?;
+
+    let account_args = AccountCreateArgsBip32::new(account_name, None);
+    let account = wallet.create_account_bip32(&wallet_secret, prv_key_data_id, payment_secret.as_ref(), account_args).await?;
+
+    // flush data to storage
+    wallet.store().flush(&wallet_secret).await?;
+
+    notifier.hide();
+
+    // The account's own bip39 phrase is deliberately NOT shown.
+    //
+    // It lives inside the wallet file, encrypted under the wallet password, and
+    // recovering that file recovers it — so it is not a second thing to write
+    // down, it is the same thing. Printing it here put a third secret in front
+    // of someone who had just been given two, and every extra secret shown is
+    // one more that gets photographed, pasted, or written on the wrong piece of
+    // paper. 'export mnemonic' produces it from an open wallet on the rare
+    // occasion something outside Marigold needs it.
+    if !import_with_mnemonic {
+        tprintln!(ctx, "");
+        tpara!(
+            ctx,
+            "This wallet also holds an ordinary account key for the transparent ledger. It is \
+            derived from the 24 words below, so those words bring it back too — there is nothing \
+            separate to write down. If another program ever needs it, 'export mnemonic' shows it. \
+            ",
+        );
+    }
+
     let store = wallet.store().as_note_key_store()?;
-    match vault_words {
-        Some(words) => {
+    {
+        {
+            let words = vault_words.clone();
             store.vault_restore_from_words(&words, &wallet_secret).await?;
-            tprintln!(ctx, "Note vault created from your recovery phrase.");
-        }
-        None => {
-            let words = store.vault_create(&wallet_secret).await?;
             tprintln!(ctx, "");
             tprintln!(ctx, "{}", style("Your note vault recovery phrase — write these 24 words down NOW:").red());
             tprintln!(ctx, "");
@@ -293,9 +297,10 @@ pub(crate) async fn create(
             tpara!(
                 ctx,
                 "\
-                Recovering your notes on another machine requires BOTH these 24 words \
-                AND the vault files ('note vault backup <dir>' copies them). The words \
-                will not be shown again.\
+                These words bring back your ledger balance on their own. Your NOTES need \
+                the words AND a copy of the vault files ('note vault backup <dir>' makes \
+                one) — nothing can derive a note, which is exactly what makes it cash. \
+                The words will not be shown again.\
                 ",
             );
             term.ask(false, "Press <enter> once you have written them down: ").await?;
