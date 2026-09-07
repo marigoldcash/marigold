@@ -9,7 +9,7 @@ Every parameter Phase 1+ code will encode, recorded here before it's implemented
 | Address prefix (mainnet) | `marigold` | Matches the coin name; lowercase, short, human-readable as the bech32 address prefix (e.g. `marigold:qq...`). | 2026-08-14 |
 | Address prefix (testnet) | `marigoldtest` | Mirrors upstream's `kaspa`/`kaspatest` convention (mainnet prefix + `test` suffix). | 2026-08-14 |
 | Decimal precision | 8 decimals (1 marigold = 10⁸ base units) | Keep Kaspa's precision unchanged — no reason to diverge; simplifies porting wallet/RPC display code (amount formatting, `SOMPI_PER_KASPA`-style constants) with only a rename, no rescaling logic. | 2026-08-14 |
-| Base unit name | `petal` | Fits the marigold/flower branding (a flower's petals are its smallest, most numerous parts — mirrors how sompi are Kaspa's smallest unit); short, pronounceable, not already a unit name in this codebase or in wallet/RPC display code elsewhere. | 2026-08-14 |
+| Base unit name | `petal` | Fits the marigold/flower branding (a flower's petals are its smallest, most numerous parts — mirrors how petals are Kaspa's smallest unit); short, pronounceable, not already a unit name in this codebase or in wallet/RPC display code elsewhere. | 2026-08-14 |
 | Supply cap | 210,000,000 MAGLD — hard cap, **no tail emission** | 10× Bitcoin's cap. At any given market cap the unit is 10× cheaper than a 21M cap would make it, keeping the smallest pool note (0.01, per the P1.6 recommended set) usable for sub-dollar private payments and letting prices read in whole marigolds — granularity matters more for an everyday-cash coin than maximum scarcity branding. Hard cap kept for fair-launch credibility; a Dogecoin-style tail could only ever be added by explicit future hard fork if circulation fees demonstrably fail to carry security (recorded openly here so it's never a quiet change). | 2026-08-14 |
 | Emission curve | Smooth geometric decay from genesis: reward halves every **3 years** via monthly steps (monthly factor 2^(−1/36)); **no pre-deflationary phase** | No cliff moments ever — fee share grows as subsidy fades. ~20.6% of supply mined in year 1 (Bitcoin-comparable front-loading; Kaspa's 1-yr halving shape would have mined ~50% in year 1 into a tiny launch hashrate — stealth-premine optics), ~90% by year 10, per-block reward quantizes below 1 petal around **year ~72**, so subsidy outlives the P5.8 finality-anchor sunset by decades. Deflationary from genesis is also the simplest P3.2 implementation. **Mechanically applied (not re-decided) at P2.6**: `deflationary_phase_daa_score` set to `0` for mainnet/testnet in `params.rs`, since leaving it at real Kaspa's legacy checkpoint value produced a genuine bug (10×-too-high flat subsidy — see NOTES.md's P2.6 writeup). The real subsidy table/curve numbers above remain P3.2's job. | 2026-08-14 |
 | Initial block reward | **152,280,842.63 petals/sec ≈ 1.5228084263 MAGLD/sec** (15,228,085 petals/block at 10 BPS, `div_ceil`). Locked in by P3.2's generator: 1016-month table, total emission 20,999,999,999,644,200 petals — **355,800 petals (~0.0036 MAGLD) under the 210,000,000 MAGLD cap**, table tapers to an exact 0 at month 1015 (~84.6 years). Per-block reward reaches its final 1-petal floor at month 862 (~71.8 years), matching the original ~year-72 estimate. | Derived, not independently chosen: found by bisecting for the largest base subsidy whose discrete, rounded monthly table still sums to ≤ cap (not the closed-form continuous estimate, which would slightly overshoot after rounding). P3.2's generator (`consensus/src/processes/coinbase.rs::tests::generate_subsidy_table`, `#[ignore]`d, rerunnable) computes this exactly; `total_emission_stays_under_cap` enforces it permanently. | 2026-08-15 |
@@ -19,7 +19,7 @@ Every parameter Phase 1+ code will encode, recorded here before it's implemented
 | Transparent tier policy | Confirmed as-is: fork launches **transparent-only** (Phases 2-4), pool added later (Phases 5-7) | No change from the plan's existing phase structure — confirming it here just makes it an explicit recorded decision rather than an implicit one baked into the phase ordering. | 2026-08-14 |
 | Fee destination | **The including block's miner**, via normal coinbase fee accounting — never burned, no dev fund | Per-block collection is statistically hashrate-proportional at 10 BPS (a miner with X% of hashrate collects ~X% of fees), which was the stated goal, with zero new machinery. A fee-funded dev fund was considered and rejected: it would reverse P1.5's fair-launch decision through the side door, convert the legal posture from "published software" to "operates a paid service" and drain the P1.4 endgame mechanism (circulation fees fund security). A community treasury remains possible later only via explicit DAO-voted hard fork (same pattern as the tail-emission reserve option). Supply cap unaffected: fees are recycled value, not emission. | 2026-08-14 |
 | Send spends both sides at once | **When neither the ledger nor the notes alone cover a payment, one transaction spends both.** Consensus already unifies them — a pool op's consumed value counts alongside transparent input value against outputs plus fee (`tx_validation_in_utxo_context`, POOL-SPEC P5.2/P5.3) — so 300 on the ledger plus 300 in notes pays 500 in a single transaction instead of reporting "insufficient". Signing order is forced and non-circular: outputs fixed, note signatures cover `tx.outputs`, payload finalized, transparent inputs signed over the whole transaction including that payload. | 2026-09-05 |
-| Notes consolidate themselves | **Ten notes of one size become one of the next**, on receipt and as part of armed automation. Needs no new operation: denominations are powers of ten and `decompose_amount` is greedy largest-first, so rotating ten 0.1 notes re-produces them as a single 1-MAGLD note. Two denominations are deliberately excluded — the top one (nothing larger) and the 0.01 stamps, which every pure-pool operation spends as its fee; merging those away would force later rotations into slack mode, where the fee comes out of a note's own value and breaks its denomination. The fixed 0.01 fee also stays proportionate this way: 1% when consolidating 0.1s into a whole MAGLD, a tenth of that against 1s. | 2026-09-05 |
+| Notes consolidate themselves | **Ten notes of one size become one of the next**, on receipt and as part of armed automation. Needs no new operation: denominations are powers of ten and `decompose_amount` is greedy largest-first, so rotating ten 0.1 notes re-produces them as a single 1-MAGLD note. Two denominations are deliberately excluded — the top one (nothing larger) and the 0.01 stamps, which every pure-pool operation spends as its fee; merging those away would force later rotations into slack mode, where the fee comes out of a note's own value and breaks its denomination. The usual 0.01 fee also stays proportionate this way: 1% when consolidating 0.1s into a whole MAGLD, a tenth of that against 1s. | 2026-09-05 |
 | Send pays from notes in one transaction | **`send <address> <amount>` falls back to notes when ledger balance is short**, redeeming them straight to the recipient — one transaction destroys the notes and pays the address, with change returning to this account's ledger address. The user thinks "send 500", not "redeem, wait, then send". Consensus already permitted it: a pool op's consumed value funds transparent outputs whose count is unconstrained, and every pool-op signature covers `tx.outputs` (POOL-SPEC P5.2, review-1 fix), so the destination is signature-bound and cannot be rewritten in flight. | 2026-09-05 |
 | Auto-mint (ledger dust never accumulates) | **Opt-in automation that turns arriving ledger balance into notes.** `auto on` (default threshold 1 MAGLD, `auto <amount>` to change) mints matured ledger balance into notes whenever it crosses the threshold, rate-limited to once a minute and one at a time. Because a mint consumes the coinbase outputs it spends, this also keeps UTXO fragmentation from ever building up — a mining wallet stops needing manual `sweep` entirely; if the ledger is already fragmented enough to hit the storage-mass ceiling, it consolidates first and mints on the next tick. **Security posture, stated plainly:** signing on the user's behalf means the wallet password is held in memory for as long as the wallet is open and auto-mint is armed. It is never written to disk, arms with the password already typed at `open` (no extra prompt, no new place to phish), and is dropped on `auto off` or `close`. Off by default; the preference (not the secret) lives in the wallet file's plaintext metadata. | 2026-09-05 |
 | Auto-sweep, independent of auto-mint | **`auto sweep [<n>]` consolidates ledger coins on its own trigger** (default: more than 2,000 mature coins), separate from auto-mint and armed the same way. A holder who deliberately keeps plain ledger balance — an exchange receiving many deposits, say — still wants its dust controlled without having its balance converted to notes. It also runs its check immediately at `open`, so a wallet returned to after a long absence consolidates on the spot rather than waiting for the next balance event. | 2026-09-05 |
@@ -228,8 +228,15 @@ identity is needed alongside the account.
 
 ## Note transactions cost one fee quantum (2026-09-07)
 
-**Decision.** A pure pool operation — rotate, merge, split, pay, any
-`TransferOp` — costs one fee quantum, 0.01 MAGLD. Operations that touch the
+**Decision.** A *usual* pool operation — rotate, merge, split, pay, any
+ordinary `TransferOp` — costs one fee quantum, 0.01 MAGLD. Not *every*
+operation: the fee tracks payload size, and one quantum covers roughly
+thirty-three consumed plus thirty-three produced notes, about 5,000 bytes.
+Everyday payments sit far below that (a 137 MAGLD payment is eleven produced
+notes and a handful consumed; a ten-note merge is eleven in total), so the
+everyday price is a penny and stays a penny. Large operations step up in whole
+pennies. Say "a usual transaction costs 0.01", never "all transactions cost
+0.01" — the second is false and would be found false. Operations that touch the
 transparent ledger — mint and redeem — stay priced by Kaspa's mass rules.
 This is already what the code does; recording it because it is a property
 worth defending, not an accident of the constants.
@@ -241,7 +248,7 @@ larger — `combine_mass` is `max`, not a sum. Compute mass is size-based
 `C x sum(1/output_value) - C x (n_inputs / mean_input_value)` with
 `C = 10^12`, which prices permanent UTXO-set growth: many small outputs from
 few large inputs is the expensive direction, consolidation is nearly free.
-The fee is then `mass x 100_000 / 1000`, i.e. 100 sompi per gram, and a
+The fee is then `mass x 100_000 / 1000`, i.e. 100 petals per gram, and a
 transaction may not exceed 100,000 grams.
 
 **Why a pool op lands on the quantum.** Its transaction carries zero
@@ -255,8 +262,8 @@ what the mass demands, which is comfortable headroom rather than a
 coincidence to be trimmed.
 
 **Why this is sound and not a hole.** The reason KIP-9 must price dust is
-that a UTXO can be one sompi. A note cannot: the smallest denomination is
-0.01 MAGLD, a million sompi. **Fixed denominations do structurally what
+that a UTXO can be one petals. A note cannot: the smallest denomination is
+0.01 MAGLD, a million petals. **Fixed denominations do structurally what
 KIP-9 does with pricing** — the pool cannot be dust-bloated because dust is
 not representable in it. Notes-per-transaction is still capped, by payload
 size against the 100,000-gram limit; that cap is a limit, not a fee, and a
@@ -277,7 +284,7 @@ sizing was fed a constant zero and always floored to one quantum. Transfers
 above roughly thirty-three notes were therefore offering the node less than
 its minimum relay fee and would have been refused. Fixed 2026-09-07 by sizing
 on `max(compute, transient, storage)` and by flooring the feerate at the
-mempool's 100 sompi/gram relay minimum rather than trusting the node's
+mempool's 100 petals/gram relay minimum rather than trusting the node's
 priority estimate, which reports 1. Locked in by tests that assert the offered
 fee covers the node's charge from one note to two hundred, and that a ten-note
 merge still costs exactly one quantum.

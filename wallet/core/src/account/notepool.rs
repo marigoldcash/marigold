@@ -207,7 +207,7 @@ pub enum RedeemSelection {
 pub struct RedeemResult {
     pub transaction_id: Hash,
     pub redeemed_value_petals: u64,
-    pub fee_sompi: u64,
+    pub fee_petals: u64,
     pub serials: Vec<Hash>,
 }
 
@@ -331,23 +331,33 @@ pub async fn redeem_to(
     let placeholder_tx =
         Transaction::new(TX_VERSION_TOCCATA, vec![], placeholder_outputs, 0, SUBNETWORK_ID_NOTE_POOL, 0, placeholder_payload);
     let populated = PopulatedTransaction::new(&placeholder_tx, vec![]);
-    let storage_mass = mass_calculator
+    // Same sizing rule as a transfer, and for the same reasons: the node
+    // charges max(compute, transient, storage), and a redeem carries a note
+    // payload whose compute mass can exceed the storage mass of its single
+    // output. Reading storage mass alone underprices a redeem of many notes.
+    let contextual = mass_calculator
         .calc_contextual_masses(&populated)
         .ok_or_else(|| Error::Custom("redeem: mass calculation failed".to_string()))?
         .storage_mass;
+    let non_contextual = mass_calculator.calc_non_contextual_masses(&placeholder_tx);
+    let mass = contextual.max(non_contextual.compute_mass).max(non_contextual.transient_mass);
 
+    // And the same feerate floor: the node's estimate is a priority signal
+    // reporting 1 petal per gram, while the mempool refuses anything under its
+    // 100-per-gram relay minimum however patient the sender.
     let feerate = match account.wallet().rpc_api().get_fee_estimate().await {
         Ok(estimate) => estimate.normal_buckets.first().map(|b| b.feerate).unwrap_or(1.0),
         Err(_) => 1.0,
-    };
-    let fee_sompi = (storage_mass as f64 * feerate).ceil() as u64;
+    }
+    .max(POOL_FEE_RATE);
+    let fee_petals = (mass as f64 * feerate).ceil() as u64;
 
-    if redeemed_value_petals <= fee_sompi {
+    if redeemed_value_petals <= fee_petals {
         return Err(Error::Custom(format!(
-            "redeemed value ({redeemed_value_petals} petals) does not cover the estimated fee ({fee_sompi} sompi)"
+            "redeemed value ({redeemed_value_petals} petals) does not cover the estimated fee ({fee_petals} petals)"
         )));
     }
-    let output_value = redeemed_value_petals - fee_sompi;
+    let output_value = redeemed_value_petals - fee_petals;
     let outputs = match &destination {
         None => vec![TransactionOutput::new(output_value, script_public_key)],
         Some((address, petals)) => {
@@ -380,7 +390,7 @@ pub async fn redeem_to(
 
     let redeem_payload = PoolOp::Redeem(RedeemOp { consumed: signed_groups, freshness }).encode_payload();
     let tx = Transaction::new(TX_VERSION_TOCCATA, vec![], outputs, 0, SUBNETWORK_ID_NOTE_POOL, 0, redeem_payload);
-    tx.set_storage_mass(storage_mass);
+    tx.set_storage_mass(contextual);
 
     let rpc_tx: kaspa_rpc_core::RpcTransaction = (&tx).into();
     let transaction_id = account.wallet().rpc_api().submit_transaction(rpc_tx, false).await?;
@@ -392,7 +402,7 @@ pub async fn redeem_to(
         note_key_store.mark_status(sn, NoteStatus::Superseded).await?;
     }
 
-    Ok(RedeemResult { transaction_id, redeemed_value_petals, fee_sompi, serials })
+    Ok(RedeemResult { transaction_id, redeemed_value_petals, fee_petals, serials })
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1935,16 +1945,21 @@ pub async fn send_combined(
     let compute_mass = mass_calculator.calc_non_contextual_masses(&placeholder_tx).compute_mass;
     let total_mass = masses.storage_mass.max(compute_mass);
 
+    // The mass here was already right; the feerate was not. The node's
+    // estimate reports 1 petal per gram, the mempool relay minimum is 100, and
+    // the old 1,000-petal floor was three orders of magnitude too small to
+    // paper over the gap.
     let feerate = match account.wallet().rpc_api().get_fee_estimate().await {
         Ok(estimate) => estimate.normal_buckets.first().map(|b| b.feerate).unwrap_or(1.0),
         Err(_) => 1.0,
-    };
-    let fee_sompi = ((total_mass as f64 * feerate).ceil() as u64).max(1_000);
-    if available_total <= amount_petals + fee_sompi {
+    }
+    .max(POOL_FEE_RATE);
+    let fee_petals = (total_mass as f64 * feerate).ceil() as u64;
+    if available_total <= amount_petals + fee_petals {
         return Err(Error::Custom("insufficient funds once the fee is included".to_string()));
     }
 
-    let change = available_total - amount_petals - fee_sompi;
+    let change = available_total - amount_petals - fee_petals;
     let mut outputs = vec![TransactionOutput::new(amount_petals, recipient_script)];
     if change >= DENOMINATION_PETALS[0] {
         outputs.push(TransactionOutput::new(change, change_script));
@@ -1978,7 +1993,7 @@ pub async fn send_combined(
         note_key_store.mark_status(sn, NoteStatus::Superseded).await?;
     }
 
-    Ok((transaction_id, fee_sompi, mature.len(), selected_serials.len()))
+    Ok((transaction_id, fee_petals, mature.len(), selected_serials.len()))
 }
 
 /// Groups of ten same-denomination notes that would consolidate into one note
@@ -2201,7 +2216,7 @@ mod fee_sizing {
             let node_wants = mass * RELAY_SOMPI_PER_GRAM;
             assert!(
                 we_pay >= node_wants,
-                "{n} notes: mass {mass}, node wants {node_wants} sompi, we offer {we_pay} ({quanta} quanta)"
+                "{n} notes: mass {mass}, node wants {node_wants} petals, we offer {we_pay} ({quanta} quanta)"
             );
         }
     }

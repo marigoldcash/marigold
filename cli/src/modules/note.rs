@@ -658,8 +658,8 @@ impl Note {
             "redeemed {} note(s) worth {} MAGLD (fee {} MAGLD); transparent balance +{} MAGLD",
             result.serials.len(),
             sompi_to_kaspa_string(result.redeemed_value_petals),
-            sompi_to_kaspa_string(result.fee_sompi),
-            sompi_to_kaspa_string(result.redeemed_value_petals.saturating_sub(result.fee_sompi)),
+            sompi_to_kaspa_string(result.fee_petals),
+            sompi_to_kaspa_string(result.redeemed_value_petals.saturating_sub(result.fee_petals)),
         );
         tprintln!(ctx, "tx: {}\r\n", result.transaction_id);
 

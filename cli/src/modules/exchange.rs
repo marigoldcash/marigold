@@ -91,7 +91,7 @@ impl Exchange {
                     "\nSent {} MAGLD to {address} from {} note(s) (fee {} MAGLD); tx: {}\n",
                     sompi_to_kaspa_string(amount_sompi),
                     result.serials.len(),
-                    sompi_to_kaspa_string(result.fee_sompi),
+                    sompi_to_kaspa_string(result.fee_petals),
                     result.transaction_id
                 );
                 return Ok(());
