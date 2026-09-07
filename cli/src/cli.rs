@@ -396,6 +396,29 @@ impl KaspaCli {
                 if pieces == 1 { "" } else { "s" }
             );
         }
+        // Same check the `balance` command runs, at the moment a wallet opens
+        // and after each announced housekeeping pass — which is exactly when a
+        // failed submission would have left a note behind that is not on chain.
+        if notes > 0 && self.wallet.is_connected() {
+            if let Ok(account) = self.wallet.account() {
+                if let Ok((_, phantom)) = kaspa_wallet_core::account::notepool::verify_held_notes(account).await {
+                    if !phantom.is_empty() {
+                        let lost: u64 =
+                            phantom.iter().map(|i| kaspa_consensus_core::notepool::DENOMINATION_PETALS[i.d as usize]).sum();
+                        tprintln!(
+                            self,
+                            "{}",
+                            style(format!(
+                                "{} MAGLD of that is NOT on chain ({} note(s)) — 'note verify' shows which.",
+                                kaspa_wallet_core::utils::sompi_to_kaspa_string(lost),
+                                phantom.len()
+                            ))
+                            .red()
+                        );
+                    }
+                }
+            }
+        }
         tprintln!(self, "");
     }
 

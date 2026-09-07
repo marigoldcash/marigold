@@ -54,6 +54,41 @@ impl Balance {
             );
         }
 
+        // Every balance is checked against the pool, and says so only when
+        // there is something to say. A figure the wallet merely believes is
+        // worth no more than the belief — but a line confirming the obvious on
+        // every call trains people to stop reading it, so silence means good.
+        if total > 0 || mirrored > 0 {
+            if ctx.wallet().is_connected() {
+                match kaspa_wallet_core::account::notepool::verify_held_notes(account.clone()).await {
+                    Ok((_, phantom)) if !phantom.is_empty() => {
+                        let lost: u64 = phantom.iter().map(|i| DENOMINATION_PETALS[i.d as usize]).sum();
+                        tprintln!(ctx, "");
+                        tprintln!(
+                            ctx,
+                            "{}",
+                            style(format!(
+                                "{} MAGLD of the above is NOT on chain ({} note(s)) — counted here but not spendable.",
+                                sompi_to_kaspa_string(lost),
+                                phantom.len()
+                            ))
+                            .red()
+                        );
+                        tprintln!(ctx, "{}", style("'note verify' shows which. Check the node is fully synced before writing them off.").dim());
+                    }
+                    Ok(_) => {}
+                    Err(err) => {
+                        tprintln!(ctx, "");
+                        tprintln!(ctx, "{}", style(format!("(could not check these against the chain: {err})")).dim());
+                    }
+                }
+            } else {
+                tprintln!(ctx, "");
+                tprintln!(ctx, "{}", style("Not verified on chain — this is what your vault says it holds, unchecked.").dim());
+                tprintln!(ctx, "{}", style("Connect a node and run 'balance' again to confirm the notes really exist.").dim());
+            }
+        }
+
         // The ledger comes last and only when it holds something — for anyone
         // but an exchange it should be empty most of the time.
         let network_id = ctx.wallet().network_id()?;
