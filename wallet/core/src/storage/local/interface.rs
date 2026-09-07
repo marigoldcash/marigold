@@ -68,14 +68,45 @@ impl Store {
 /// however it exits, so a crash can never leave a wallet permanently unopenable.
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) struct WalletLock {
-    _file: std::fs::File,
+    /// Which entry in [`HELD_LOCKS`] this handle owns a share of.
+    path: std::path::PathBuf,
 }
+
+/// Wallet lock files this process already holds, and how many handles want
+/// each one.
+///
+/// `flock` is owned by the open file description, not the process, so opening
+/// the same wallet twice in one program contends with itself exactly as if a
+/// second program had it. That is not theoretical: `wallet create` holds a
+/// lock and then opens the wallet it just made, and `LocalStore::open`
+/// acquires the new lock before dropping the old one — deliberately, so a
+/// failed open leaves the current wallet alone. The result was a create that
+/// finished by announcing the wallet was already open elsewhere.
+///
+/// Refcounting here keeps the guarantee that matters — one OS lock per wallet
+/// file, so no *other* process can get in — while letting this process hold
+/// several handles to it. The file is closed, and the lock released, when the
+/// last handle goes.
+#[cfg(not(target_arch = "wasm32"))]
+static HELD_LOCKS: std::sync::Mutex<Option<std::collections::HashMap<std::path::PathBuf, (std::fs::File, usize)>>> =
+    std::sync::Mutex::new(None);
 
 #[cfg(not(target_arch = "wasm32"))]
 impl WalletLock {
     pub(crate) fn acquire(wallet_file: &std::path::Path) -> Result<Self> {
         use fs4::fs_std::FileExt;
+        // `wallet_file` comes from `Storage::filename()`, which has already been
+        // through `resolve_path`, so it is absolute and every call site derives
+        // the same key for the same wallet.
         let path = wallet_file.with_extension("wallet.lock");
+
+        let mut guard = HELD_LOCKS.lock().unwrap();
+        let held = guard.get_or_insert_with(std::collections::HashMap::new);
+        if let Some((_, count)) = held.get_mut(&path) {
+            *count += 1;
+            return Ok(Self { path });
+        }
+
         let file = std::fs::OpenOptions::new()
             .create(true)
             .read(true)
@@ -96,7 +127,30 @@ impl WalletLock {
                     .to_string(),
             ));
         }
-        Ok(Self { _file: file })
+        held.insert(path.clone(), (file, 1));
+        Ok(Self { path })
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Drop for WalletLock {
+    fn drop(&mut self) {
+        let mut guard = match HELD_LOCKS.lock() {
+            Ok(guard) => guard,
+            // A panic elsewhere poisoned the registry. Releasing the lock still
+            // matters more than the poisoning does, and the process is on its
+            // way out either way.
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let Some(held) = guard.as_mut() else { return };
+        if let Some((_, count)) = held.get_mut(&self.path) {
+            *count -= 1;
+            if *count == 0 {
+                // Dropping the File closes the descriptor, which is what
+                // releases the flock.
+                held.remove(&self.path);
+            }
+        }
     }
 }
 
