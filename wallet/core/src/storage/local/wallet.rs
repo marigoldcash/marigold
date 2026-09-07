@@ -109,10 +109,22 @@ impl WalletStorage {
                 let serialized = borsh::to_vec(self)?;
                 fs::write(store.filename(), serialized.as_slice()).await?;
             } else {
-                // make this platform-specific to avoid creating
-                // a buffer containing serialization
-                let mut file = std::fs::File::create(store.filename(), )?;
-                BorshSerialize::serialize(self, &mut file)?;
+                // Written to a temporary file and renamed over the original.
+                // `File::create` truncates in place, so a failure part way
+                // through — a full disk, a crash — left a half-written wallet
+                // where the keys used to be. Rename is atomic on every
+                // filesystem this runs on, so the old file stands until the
+                // new one is complete on disk.
+                let target = store.filename();
+                let tmp = target.with_extension("wallet.tmp");
+                {
+                    let mut file = std::fs::File::create(&tmp)?;
+                    BorshSerialize::serialize(self, &mut file)?;
+                    // fsync before the rename: a rename that lands ahead of
+                    // the data is how a crash produces an empty wallet.
+                    file.sync_all()?;
+                }
+                std::fs::rename(&tmp, target)?;
             }
         }
         Ok(())

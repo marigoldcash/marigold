@@ -518,6 +518,34 @@ impl Interface for LocalStore {
         // the one whose file sits around longest. Best effort by design: an
         // absent vault or a wrong password is the caller's business to report.
         inner.notevault.unlock(wallet_secret).await.ok();
+
+        // Upgrade the wallet file's own encryption while the password is here.
+        // Its Argon2 salt used to be sha256(password) — a function of the very
+        // secret it protects, so the derivation is identical in every wallet
+        // sharing a password and can be precomputed once and tried against all
+        // of them. Rewriting needs the password, and the only other moment
+        // that has it is a save; a wallet that is opened and merely read would
+        // otherwise keep the weak derivation for ever.
+        //
+        // The write is atomic (temp file, fsync, rename), so a failure here
+        // leaves the original file exactly as it was.
+        // Read the FILE, not the cache: building the cache decrypts the
+        // payload and re-encrypts it (cache.rs), so by then it is always in
+        // the current format and would report nothing to do while the bytes on
+        // disk stayed legacy for ever.
+        let legacy = match &*inner.storage() {
+            Store::Storage(storage) => {
+                WalletStorage::try_load(storage).await.map(|wallet| wallet.payload.is_legacy()).unwrap_or(false)
+            }
+            Store::Resident => false,
+        };
+        if legacy {
+            match inner.store(wallet_secret).await {
+                Ok(()) => log_info!("wallet: encryption upgraded to a random per-wallet salt"),
+                Err(err) => log_warn!("wallet: could not upgrade encryption ({err}) — left as it was"),
+            }
+        }
+
         self.inner.lock().unwrap().replace(inner);
         Ok(())
     }

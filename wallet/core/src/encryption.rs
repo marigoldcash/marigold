@@ -9,6 +9,7 @@ use chacha20poly1305::{
     Key, XChaCha20Poly1305,
     aead::{AeadCore, AeadInPlace, KeyInit, OsRng},
 };
+use rand::RngCore;
 use sha2::{Digest, Sha256};
 use std::ops::{Deref, DerefMut};
 use zeroize::Zeroize;
@@ -148,7 +149,7 @@ where
     pub fn encrypt(&self, secret: &Secret, encryption_kind: EncryptionKind) -> Result<Encrypted> {
         let bytes = borsh::to_vec(&self.0)?;
         let encrypted = match encryption_kind {
-            EncryptionKind::XChaCha20Poly1305 => encrypt_xchacha20poly1305(bytes.as_slice(), secret)?,
+            EncryptionKind::XChaCha20Poly1305 => encrypt_salted(bytes.as_slice(), secret)?,
         };
         Ok(Encrypted::new(encryption_kind, encrypted))
     }
@@ -190,13 +191,18 @@ impl Encrypted {
         self.encryption_kind
     }
 
+    /// True while this payload still uses the password-derived Argon2 salt.
+    pub fn is_legacy(&self) -> bool {
+        is_legacy_encryption(&self.payload)
+    }
+
     pub fn decrypt<T>(&self, secret: &Secret) -> Result<Decrypted<T>>
     where
         T: BorshSerialize + BorshDeserialize,
     {
         match self.encryption_kind {
             EncryptionKind::XChaCha20Poly1305 => {
-                let decrypted = decrypt_xchacha20poly1305(&self.payload, secret)?;
+                let (decrypted, _legacy) = decrypt_salted_or_legacy(&self.payload, secret)?;
                 Ok(Decrypted(T::try_from_slice(decrypted.as_ref())?))
             }
         }
@@ -294,6 +300,50 @@ pub fn decrypt_xchacha20poly1305(data: &[u8], secret: &Secret) -> Result<Secret>
     Ok(Secret::new(buffer))
 }
 
+/// Marker for the salted container. A payload that does not begin with it was
+/// written by software that derived its Argon2 salt from the password itself
+/// (`sha256(password)`) — deterministic, so one precomputation attacks every
+/// wallet ever made with that password. The bytes are opaque to Borsh, so
+/// versioning them here needs no change to any file format that carries them:
+/// the wallet payload, its transaction records, and the private key data
+/// wrapped under a bip39 passphrase all pass through this one container.
+const SALTED_MAGIC: &[u8; 4] = b"MGS2";
+const SALT_LEN: usize = 32;
+
+/// Wrap `data` under `secret` with a fresh random salt: magic, salt in the
+/// clear, then the XChaCha20-Poly1305 blob keyed by Argon2(secret, salt).
+/// A salt is not secret — only unique.
+pub fn encrypt_salted(data: &[u8], secret: &Secret) -> Result<Vec<u8>> {
+    let mut salt = [0u8; SALT_LEN];
+    rand::thread_rng().fill_bytes(&mut salt);
+    let body = encrypt_xchacha20poly1305_with_salt(data, secret, &salt)?;
+    let mut out = Vec::with_capacity(SALTED_MAGIC.len() + SALT_LEN + body.len());
+    out.extend_from_slice(SALTED_MAGIC);
+    out.extend_from_slice(&salt);
+    out.extend_from_slice(&body);
+    Ok(out)
+}
+
+/// Unwrap either container, reporting whether the input was the legacy one so
+/// a caller holding the password can rewrite it.
+pub fn decrypt_salted_or_legacy(data: &[u8], secret: &Secret) -> Result<(Secret, bool)> {
+    if data.starts_with(SALTED_MAGIC) {
+        let body = SALTED_MAGIC.len() + SALT_LEN;
+        if data.len() <= body {
+            return Err("encrypted payload is truncated".into());
+        }
+        let salt = &data[SALTED_MAGIC.len()..body];
+        Ok((decrypt_xchacha20poly1305_with_salt(&data[body..], secret, salt)?, false))
+    } else {
+        Ok((decrypt_xchacha20poly1305(data, secret)?, true))
+    }
+}
+
+/// True if these bytes still use the password-derived salt.
+pub fn is_legacy_encryption(data: &[u8]) -> bool {
+    !data.starts_with(SALTED_MAGIC)
+}
+
 /// Encrypts with `XChaCha20Poly1305` using `key` directly as the cipher key — no
 /// Argon2 stretching (FORK-PLAN P7.6, DECISIONS.md's "Note vault" entry). Argon2
 /// exists in [`encrypt_xchacha20poly1305`] to slow down brute-forcing a *human*
@@ -353,5 +403,63 @@ mod tests {
         assert_eq!(decrypted.as_ref(), original);
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod salted_container_tests {
+    use super::*;
+
+    /// Two wallets with the same password must not produce the same key
+    /// material. The old derivation did exactly that: salt = sha256(password),
+    /// so one precomputation attacked every wallet sharing a password.
+    #[test]
+    fn the_same_password_wraps_differently_every_time() {
+        let secret = Secret::from("same-password-everywhere");
+        let data = b"the private key data";
+        let a = encrypt_salted(data, &secret).unwrap();
+        let b = encrypt_salted(data, &secret).unwrap();
+        assert_ne!(a, b, "two wraps under one password must differ");
+        assert_ne!(a[4..36], b[4..36], "the salts must differ");
+        assert!(a.starts_with(SALTED_MAGIC));
+        assert!(!is_legacy_encryption(&a));
+
+        for wrapped in [&a, &b] {
+            let (plain, legacy) = decrypt_salted_or_legacy(wrapped, &secret).unwrap();
+            assert_eq!(plain.as_ref(), data);
+            assert!(!legacy);
+        }
+        assert!(decrypt_salted_or_legacy(&a, &Secret::from("wrong")).is_err());
+    }
+
+    /// Every wallet in the wild is the old format. It must still open, and it
+    /// must say that it wants rewriting.
+    #[test]
+    fn legacy_payloads_still_open_and_ask_to_be_upgraded() {
+        let secret = Secret::from("legacy-password");
+        let data = b"the private key data";
+        let old = encrypt_xchacha20poly1305(data, &secret).unwrap();
+        assert!(is_legacy_encryption(&old));
+        let (plain, legacy) = decrypt_salted_or_legacy(&old, &secret).unwrap();
+        assert_eq!(plain.as_ref(), data);
+        assert!(legacy, "a legacy payload must report itself as one");
+    }
+
+    /// The container is what `Encrypted` uses, so anything stored through it
+    /// — the wallet payload, its transaction records, key data wrapped under a
+    /// bip39 passphrase — is salted without knowing about it.
+    #[test]
+    fn the_encrypted_container_round_trips_through_the_new_format() {
+        let secret = Secret::from("wallet-password");
+        let value: Vec<u8> = b"payload".to_vec();
+        let encrypted = Decrypted::new(value.clone()).encrypt(&secret, EncryptionKind::XChaCha20Poly1305).unwrap();
+        assert!(!encrypted.is_legacy(), "a freshly encrypted payload must be salted");
+        assert_eq!(encrypted.decrypt::<Vec<u8>>(&secret).unwrap().unwrap(), value);
+
+        // ...and an Encrypted built from bytes written by older software still
+        // decrypts through the same call, reporting itself as legacy.
+        let old = Encrypted::new(EncryptionKind::XChaCha20Poly1305, encrypt_xchacha20poly1305(&borsh::to_vec(&value).unwrap(), &secret).unwrap());
+        assert!(old.is_legacy());
+        assert_eq!(old.decrypt::<Vec<u8>>(&secret).unwrap().unwrap(), value);
     }
 }
