@@ -333,16 +333,31 @@ impl Note {
             sompi_to_kaspa_string(amount_petals)
         );
         let progress = Self::progress_printer(ctx);
-        let result = notepool::mint_with_progress(
-            account.clone(),
-            wallet_secret,
-            payment_secret,
-            amount_petals,
-            None,
-            &abortable,
-            Some(progress),
-        )
-        .await?;
+        // "All" goes through mint_max, which retries with a larger change
+        // reserve when the transaction comes out too heavy — the estimate is
+        // shaped differently from the real mint and cannot be made exact. An
+        // explicit amount is taken literally: the user asked for a number.
+        let (amount_petals, result) = if all.is_some() {
+            match notepool::mint_max(account.clone(), wallet_secret, payment_secret, None, &abortable, Some(progress)).await? {
+                Some((amount, result)) => (amount, result),
+                None => {
+                    tprintln!(ctx, "Nothing could be minted — the fee would exceed what is on the ledger.\r\n");
+                    return Ok(());
+                }
+            }
+        } else {
+            let result = notepool::mint_with_progress(
+                account.clone(),
+                wallet_secret,
+                payment_secret,
+                amount_petals,
+                None,
+                &abortable,
+                Some(progress),
+            )
+            .await?;
+            (amount_petals, result)
+        };
 
         tprintln!(ctx, "minted {} MAGLD into {} note(s):", sompi_to_kaspa_string(amount_petals), result.notes.len());
         for entry in &result.notes {

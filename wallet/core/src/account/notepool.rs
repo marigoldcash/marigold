@@ -1741,6 +1741,72 @@ pub async fn max_mintable_petals(
     Ok(0)
 }
 
+/// Mint as much as the ledger allows, retrying with a larger reserve when the
+/// transaction comes out too heavy.
+///
+/// [`max_mintable_petals`] can only estimate. It dry-runs a sweep — one payment
+/// output, `ReceiverPays`, no payload — while the real mint has no outputs at
+/// all, pays `SenderPays`, and carries a note payload of several hundred bytes.
+/// Different shape, different fees, and on a fragmented ledger the difference
+/// runs to more than the 2% margin: a mint of 58.81 out of 60 left 0.03 MAGLD
+/// of change, and KIP-9 prices a dust output at 318,000 mass against a 100,000
+/// limit (founder report, 2026-09-07). The estimate said yes; the chain said no.
+///
+/// The old back-off shed one 0.01 quantum per attempt, four attempts — three
+/// orders of magnitude short of the MAGLD it needed, and driven by the same
+/// estimate that had already been fooled. This reserves real change instead,
+/// and quadruples the reserve on each rejection. Leaving a whole MAGLD behind
+/// puts the output harmonic at 10,000, comfortably inside the limit, and the
+/// remainder is not lost — it is minted on the next pass.
+pub async fn mint_max(
+    account: Arc<dyn Account>,
+    wallet_secret: Secret,
+    payment_secret: Option<Secret>,
+    fee_rate: Option<f64>,
+    abortable: &Abortable,
+    progress: Option<NoteProgress>,
+) -> Result<Option<(u64, MintResult)>> {
+    let quantum = DENOMINATION_PETALS[0];
+    let mintable = max_mintable_petals(account.clone(), fee_rate, abortable, progress.clone()).await?;
+    if mintable == 0 {
+        return Ok(None);
+    }
+    // One whole MAGLD of change keeps the output harmonic at 10,000 — an order
+    // of magnitude inside the standard limit even before the inputs' credit.
+    let mut reserve = 0u64;
+    for attempt in 0..5 {
+        let amount = mintable.saturating_sub(reserve) / quantum * quantum;
+        if amount == 0 {
+            return Ok(None);
+        }
+        match mint(account.clone(), wallet_secret.clone(), payment_secret.clone(), amount, fee_rate, abortable).await {
+            Ok(result) => return Ok(Some((amount, result))),
+            Err(err) if attempt < 4 && is_transaction_sizing_error(&err) => {
+                reserve = if reserve == 0 { DENOMINATION_PETALS[2] } else { reserve.saturating_mul(4) };
+                if let Some(progress) = &progress {
+                    progress(format!(
+                        "too heavy — retrying with {} MAGLD left on the ledger...",
+                        crate::utils::sompi_to_kaspa_string(reserve)
+                    ));
+                }
+            }
+            Err(err) => return Err(err),
+        }
+    }
+    Ok(None)
+}
+
+/// Whether an error means "this transaction was shaped wrong" — worth retrying
+/// with different numbers — as opposed to a wrong password or a dead node,
+/// where retrying just fails again more slowly.
+fn is_transaction_sizing_error(err: &Error) -> bool {
+    matches!(err, Error::MassCalculationError | Error::MassCalculationFailed(_))
+        || {
+            let text = err.to_string();
+            text.contains("storage mass") || text.contains("mass") && text.contains("limit")
+        }
+}
+
 /// Pay `amount_petals` to `address` using BOTH sides of the wallet in one
 /// transaction: transparent inputs and consumed notes fund the same outputs.
 /// This is the case an ordinary holder hits constantly — 300 on the ledger,

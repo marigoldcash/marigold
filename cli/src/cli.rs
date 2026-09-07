@@ -510,41 +510,19 @@ impl KaspaCli {
             }
             if mature >= threshold {
                 let minted = async {
-                    let mintable =
-                        kaspa_wallet_core::account::notepool::max_mintable_petals(account.clone(), None, &abortable, None).await?;
-                    // No ceiling on the amount. Amounts decompose greedily
-                    // from the largest denomination down, so a big mint makes
-                    // FEW notes (143,000 MAGLD is about thirty) while a small
-                    // one makes dust — 1.32 MAGLD is six notes, two of them
-                    // 0.01. The old 100 MAGLD-per-run cap therefore produced
-                    // exactly the fragmentation it was meant to avoid, and
-                    // took a day to drain a mining wallet besides. What is
-                    // actually expensive is the number of input coins, and
-                    // that is what consolidation below is for.
-                    // Round down to whole MAGLD once the stamp reserve is
-                    // full. Minting an exact remainder like 1.32 mints two
-                    // 0.01 notes with it, and 0.01s are the fee stamps every
-                    // pool operation spends — plan_merges deliberately refuses
-                    // to merge them away, so they only ever accumulate. 125 of
-                    // them on a wallet that needs a handful is not tidy, it is
-                    // a leak (founder report, 2026-09-06). The remainder stays
-                    // on the ledger and joins the next whole MAGLD.
-                    let whole = kaspa_consensus_core::notepool::DENOMINATION_PETALS[2];
-                    let stamps = self.stamp_count().await;
-                    let amount = if stamps >= kaspa_wallet_core::account::notepool::STAMP_RESERVE { mintable / whole * whole } else { mintable };
-                    if amount == 0 {
-                        return Ok(None);
-                    }
-                    let result = kaspa_wallet_core::account::notepool::mint(
+                    // mint_max owns the sizing: the estimate cannot predict the
+                    // real transaction's shape, so it retries with a larger
+                    // change reserve rather than trusting a margin.
+                    let result = kaspa_wallet_core::account::notepool::mint_max(
                         account.clone(),
                         secret.clone(),
                         payment_secret.clone(),
-                        amount,
                         None,
                         &abortable,
+                        None,
                     )
                     .await?;
-                    Ok::<_, kaspa_wallet_core::error::Error>(Some((amount, result.notes.len())))
+                    Ok::<_, kaspa_wallet_core::error::Error>(result.map(|(amount, result)| (amount, result.notes.len())))
                 }
                 .await;
                 match minted {
