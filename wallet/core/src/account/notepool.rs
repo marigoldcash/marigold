@@ -1451,7 +1451,12 @@ pub fn paper_export_encode(entries: &[NoteKeyEntry], password: &Secret) -> Resul
         for entry in *chunk {
             plaintext.extend_from_slice(&entry.encode());
         }
-        let ciphertext = crate::encryption::encrypt_xchacha20poly1305(&plaintext, password)?;
+        // Salted, like the vault key and the wallet file. This used the old
+        // path whose Argon2 salt was sha256(password) — deterministic, so one
+        // precomputation attacks every paper backup ever made under a given
+        // password. A paper backup is a page someone keeps in a drawer for
+        // years; it is the last thing that should have the weakest wrapping.
+        let ciphertext = crate::encryption::encrypt_salted(&plaintext, password)?;
 
         let mut page = header.encode().to_vec();
         page.extend_from_slice(&ciphertext);
@@ -1470,7 +1475,8 @@ pub fn paper_export_peek_header(page: &[u8]) -> Result<QrPageHeader> {
 pub fn paper_export_decode_page(page: &[u8], password: &Secret) -> Result<(QrPageHeader, Vec<BearerNote>)> {
     let header = QrPageHeader::decode(page)?;
     let ciphertext = &page[QR_HEADER_LEN..];
-    let plaintext = crate::encryption::decrypt_xchacha20poly1305(ciphertext, password)?;
+    // Reads both containers: pages printed before this change still decode.
+    let (plaintext, _legacy) = crate::encryption::decrypt_salted_or_legacy(ciphertext, password)?;
     let plaintext = plaintext.as_ref();
     if plaintext.len() < 2 {
         return Err(Error::Custom("paper backup page payload is too short".to_string()));
@@ -2249,5 +2255,56 @@ mod fee_sizing {
         let produced = vec![NewNote { d: DenominationTag::D10, pk: [0u8; 32] }];
         let mass = estimate_transfer_mass(&calculator, &groups, &produced, FreshnessAnchor { anchor_daa_score: 1 }).unwrap();
         assert_eq!(required_fee_quanta(mass, POOL_FEE_RATE), 1, "a ten-note merge should cost 0.01, mass was {mass}");
+    }
+}
+
+#[cfg(test)]
+mod paper_export_salt_tests {
+    use super::*;
+
+    /// Two backups of the same notes under the same password must not produce
+    /// the same bytes. Before the salt fix they did, because the Argon2 salt
+    /// was derived from the password itself.
+    #[test]
+    fn two_backups_under_one_password_differ() {
+        let entries = vec![NoteKeyEntry::new(
+            Hash::from_bytes([0x11u8; 32]),
+            [0x22u8; 32],
+            DenominationTag::D1,
+            NoteProvenance::Cold,
+        )];
+        let password = Secret::from("the same password both times");
+        let a = paper_export_encode(&entries, &password).unwrap();
+        let b = paper_export_encode(&entries, &password).unwrap();
+        // The backup id differs by design; compare only the encrypted bodies.
+        assert_ne!(a[0][QR_HEADER_LEN..], b[0][QR_HEADER_LEN..], "same password must not give identical ciphertext");
+
+        for pages in [&a, &b] {
+            let (_, notes) = paper_export_decode_page(&pages[0], &password).unwrap();
+            assert_eq!(notes.len(), 1);
+            assert_eq!(notes[0].sn, entries[0].sn);
+        }
+        assert!(paper_export_decode_page(&a[0], &Secret::from("wrong")).is_err());
+    }
+
+    /// A page printed by older software must still decode, or someone's drawer
+    /// full of paper becomes worthless.
+    #[test]
+    fn pages_written_before_the_salt_still_decode() {
+        let password = Secret::from("old password");
+        let note = BearerNote { sn: Hash::from_bytes([0x33u8; 32]), sk: [0x44u8; 32], d: DenominationTag::D10 };
+        let mut plaintext = Vec::new();
+        plaintext.extend_from_slice(&1u16.to_le_bytes());
+        plaintext.extend_from_slice(&note.encode());
+        let legacy = crate::encryption::encrypt_xchacha20poly1305(&plaintext, &password).unwrap();
+
+        let header = QrPageHeader { backup_id: [7u8; 8], chunk_index: 0, chunk_count: 1, format_version: QR_PAGE_FORMAT_VERSION };
+        let mut page = header.encode().to_vec();
+        page.extend_from_slice(&legacy);
+
+        let (_, notes) = paper_export_decode_page(&page, &password).unwrap();
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].sn, note.sn);
+        assert_eq!(notes[0].sk, note.sk);
     }
 }
