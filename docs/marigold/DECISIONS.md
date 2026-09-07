@@ -163,3 +163,62 @@ Design worked out with the user before P7.6's implementation, replacing P5.6's o
 **Accepted trade-off, stated openly**: batching/spacing *reduces* the "entire wealth rotated at one timestamp" fingerprint, it does not eliminate linkage — each batch's own consumed-serials list is still an explicit on-chain link, and a patient observer correlating rotation-shaped transactions across the spacing window can still cluster them. This is a genuine improvement over one all-at-once sweep, not a privacy guarantee; documented as such rather than oversold.
 
 **Implementation note — this is the existing full self-sweep, not new machinery.** P5.6 already names "rotate everything" a deliberate full self-sweep ("a real recovery action, not just hygiene") for exactly this revocation purpose. Restore-time rotation should be built as that same `sweep` primitive with a confirmation dialog in front, giving the wallet a standalone panic button ("I think my backup leaked") for free alongside the restore flow, not a second implementation of the same idea.
+
+
+---
+
+## Mobile custody: mirror plus rotation (2026-09-07)
+
+**Decision.** A phone holds *copies* of note keys that the home wallet also
+keeps, not notes moved off it. Losing the phone is recoverable: the home
+wallet rotates the mirrored serials, retiring them and reissuing the value
+under fresh keys, and every copy on the lost device dies. Chosen over the
+partition model (move notes to the phone, home no longer has them), which has
+honest cash semantics but no remedy at all on loss.
+
+**What this buys.** Revocation is something physical cash cannot offer. The
+exposure is the window between losing the device and rotating, not the whole
+balance forever.
+
+**What it costs.** While a copy exists in two places, a Marigold note is not
+strictly bearer: the party holding the other copy can invalidate it. Stated
+openly rather than glossed — the same honesty the rotation-linkage note above
+applies to itself.
+
+**Two consequences that fall out, both load-bearing:**
+
+1. *Mirrored notes must be excluded from the home wallet's automatic
+   housekeeping.* Auto-merge and auto-mint spend notes freely. Merging a note
+   the phone is carrying would silently kill the phone's copy — the holder
+   would find their money gone with no explanation. Mirroring therefore needs
+   a marker the planner respects, distinct from `HandedOver` (which means
+   given away for good) and from `Active` (which means free to spend here).
+
+2. *Rotation is not routine hygiene once mirroring exists; it is a republish.*
+   Rotating invalidates the phone's copies along with any thief's, so a
+   rotation must be followed by re-publishing the fresh keys to the device.
+   The backup store doubles as that channel: rotate at home, re-encrypt,
+   re-upload, and the phone picks up the new keys on next open. A stolen copy
+   then expires on its own at the next scheduled rotation, without anyone
+   having to notice the theft.
+
+**Backup store: Telegram, encrypted client-side.** Mirrored notes are held in
+Telegram Mini App CloudStorage (1024 items per user per bot, 4096 characters
+per value; a bearer note encodes to 65 bytes, so capacity is not a
+constraint). Telegram bot chats and CloudStorage are **not** end-to-end
+encrypted, so the payload is encrypted on the device under a passphrase
+separate from the wallet password before it ever leaves. Telegram is dumb
+storage that never sees a key.
+
+Losing that passphrase costs nothing — the home wallet still holds every
+mirrored note. Mirroring makes the backup disposable, which is what allows the
+passphrase to be strict without being frightening.
+
+**Residual risk, stated:** this makes the user's Telegram account a money
+target, and Telegram accounts are SMS-recoverable by default. A 2FA password
+is a prerequisite we have to ask users for, not a nice-to-have.
+
+**Distribution.** A Telegram Mini App under the project's own bot — no app
+store, no review, no per-platform build. The `marigoldcash` presence is the
+distribution channel; the Mini App is registered against a bot, so a bot
+identity is needed alongside the account.
