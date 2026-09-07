@@ -222,3 +222,73 @@ is a prerequisite we have to ask users for, not a nice-to-have.
 store, no review, no per-platform build. The `marigoldcash` presence is the
 distribution channel; the Mini App is registered against a bot, so a bot
 identity is needed alongside the account.
+
+
+---
+
+## Note transactions cost one fee quantum (2026-09-07)
+
+**Decision.** A pure pool operation — rotate, merge, split, pay, any
+`TransferOp` — costs one fee quantum, 0.01 MAGLD. Operations that touch the
+transparent ledger — mint and redeem — stay priced by Kaspa's mass rules.
+This is already what the code does; recording it because it is a property
+worth defending, not an accident of the constants.
+
+**How Kaspa prices a transaction.** Two masses, and the fee comes from the
+larger — `combine_mass` is `max`, not a sum. Compute mass is size-based
+(`mass_per_tx_byte: 1`, `mass_per_script_pub_key_byte: 10`,
+`mass_per_sig_op: 1000`). Storage mass is KIP-9,
+`C x sum(1/output_value) - C x (n_inputs / mean_input_value)` with
+`C = 10^12`, which prices permanent UTXO-set growth: many small outputs from
+few large inputs is the expensive direction, consolidation is nearly free.
+The fee is then `mass x 100_000 / 1000`, i.e. 100 sompi per gram, and a
+transaction may not exceed 100,000 grams.
+
+**Why a pool op lands on the quantum.** Its transaction carries zero
+transparent inputs and zero outputs, so storage mass is structurally zero —
+KIP-9 never engages at all. Compute mass is the payload alone: a
+seven-hundred-byte note payload is on the order of a couple of thousand
+grams, so the mass-derived fee is a tenth of a quantum or less.
+`required_fee_quanta` then rounds up with `.max(1)`, and the quantum floor,
+not the mass calculation, sets the price. We pay roughly five to ten times
+what the mass demands, which is comfortable headroom rather than a
+coincidence to be trimmed.
+
+**Why this is sound and not a hole.** The reason KIP-9 must price dust is
+that a UTXO can be one sompi. A note cannot: the smallest denomination is
+0.01 MAGLD, a million sompi. **Fixed denominations do structurally what
+KIP-9 does with pricing** — the pool cannot be dust-bloated because dust is
+not representable in it. Notes-per-transaction is still capped, by payload
+size against the 100,000-gram limit; that cap is a limit, not a fee, and a
+flat fee underneath it gives nothing away.
+
+**It is flat, not fixed.** `required_fee_quanta` multiplies mass by the
+network's current feerate before rounding. At any normal feerate that is one
+quantum; if the feerate rises far enough the fee steps up in whole quanta.
+A fee market under congestion survives, while the everyday price stays one
+penny.
+
+**Four things this rests on. Changing any of them breaks it:**
+
+1. *No denomination below 0.01 MAGLD.* A smaller note reopens exactly the
+   dust-bloat vector KIP-9 exists to close, and the flat fee stops being
+   defensible.
+2. *Pool ops keep zero transparent outputs.* Give a `TransferOp` a real
+   output and storage mass re-engages immediately — which is precisely how a
+   mint leaving 0.03 MAGLD of change reached 314,202 grams against a 100,000
+   limit (2026-09-07).
+3. *The quantum stays well above the mass-derived minimum.* Today by five to
+   ten times. If the mass parameters or the minimum relay fee rise, this
+   needs re-checking rather than assuming.
+4. *The 100,000-gram transaction limit stays enforced.* It, not the fee, is
+   what caps pool growth per transaction.
+
+**Why mint and redeem stay variable.** They genuinely touch the UTXO set —
+mint consumes ledger coins, redeem creates a transparent output — so every
+argument for mass pricing applies to them at full strength. The variability
+is honest there: a mint fee scales with how fragmented the ledger is, which
+is real work being priced. A flat fee would make it free to hand the network
+six thousand dust inputs to chew through.
+
+This lands where the design story already points: the ledger is plumbing and
+is priced like plumbing; notes are money and cost a penny to move.
