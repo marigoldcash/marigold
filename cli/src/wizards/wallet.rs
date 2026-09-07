@@ -162,12 +162,16 @@ pub(crate) async fn create(
         tpara!(
             ctx,
             "\
-            PLEASE NOTE: The optional bip39 mnemonic passphrase, if provided, will be required to \
-            issue transactions. This passphrase will also be required when recovering your wallet \
-            in addition to your private key or mnemonic. If you lose this passphrase, you will not \
-            be able to use or recover your wallet! \
+            You can add an extra passphrase on top of the recovery phrase below. It is optional, \
+            and most people should press ENTER to skip it. \
             \
-            If you do not want to use bip39 recovery passphrase, press ENTER.\
+            If you do add one: it becomes part of the recovery phrase. You will be asked for it \
+            every time you spend from the ledger, and recovering that account needs BOTH the phrase \
+            and the passphrase. Lose it and the ledger side of this wallet is unrecoverable — your \
+            notes are unaffected, they are protected by your wallet password and the vault phrase, \
+            not by this. \
+            \
+            Press ENTER to skip it.\
             ",
         );
     }
