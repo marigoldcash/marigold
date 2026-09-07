@@ -209,6 +209,19 @@ impl KaspaCli {
         &self.daemons
     }
 
+    /// Run another command from inside a running one.
+    ///
+    /// NOT `term().exec()`: that draws a prompt when it finishes, which is
+    /// right for the top-level loop it was written for and wrong here — the
+    /// outer command then finishes and the loop draws a second, and the
+    /// housekeeping tick refreshes a third. That is where "DISCONNECTED $ $ $"
+    /// came from after accepting the connect offer, and the doubled "$ $"
+    /// after `close` (founder report, 2026-09-07).
+    pub async fn exec_within(self: &Arc<Self>, cmd: &str) -> Result<()> {
+        self.handlers.execute(self, cmd).await?;
+        Ok(())
+    }
+
     pub fn handlers(&self) -> Arc<HandlerCli> {
         self.handlers.clone()
     }

@@ -6,9 +6,10 @@ pub struct Stop;
 
 impl Stop {
     async fn main(self: Arc<Self>, ctx: &Arc<dyn Context>, _argv: Vec<String>, _cmd: &str) -> Result<()> {
-        ctx.term().exec("wallet close").await?;
-        ctx.term().exec("disconnect").await?;
-        ctx.term().exec("node stop").await?;
+        let ctx = ctx.clone().downcast_arc::<KaspaCli>()?;
+        ctx.exec_within("wallet close").await?;
+        ctx.exec_within("disconnect").await?;
+        ctx.exec_within("node stop").await?;
 
         Ok(())
     }

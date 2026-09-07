@@ -215,7 +215,7 @@ impl Wallet {
                         tprintln!(ctx, "");
                         let answer = ctx.term().ask(false, &format!("Connect to {server}? [Y/n]: ")).await?.trim().to_lowercase();
                         if answer.is_empty() || answer == "y" || answer == "yes" {
-                            ctx.term().exec(format!("connect {server}")).await?;
+                            ctx.exec_within(&format!("connect {server}")).await?;
                             ctx.request_open_housekeeping();
                         }
                     } else {

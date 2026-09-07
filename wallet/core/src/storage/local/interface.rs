@@ -741,6 +741,10 @@ impl NoteKeyStore for LocalStoreInner {
         self.notevault.load_key(wallet_secret, sn).await
     }
 
+    async fn recently_written(&self, within_secs: u64) -> Result<Vec<Hash>> {
+        self.notevault.recently_written(within_secs).await
+    }
+
     async fn store(&self, wallet_secret: &Secret, entry: NoteKeyEntry) -> Result<()> {
         self.ensure_note_vault(wallet_secret).await?;
         self.notevault.store(wallet_secret, entry).await?;

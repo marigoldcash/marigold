@@ -527,6 +527,15 @@ impl NoteVault {
         Ok(Box::pin(stream::iter(infos.into_iter().map(Ok))))
     }
 
+    /// Serials whose row was written within the last `within_secs` seconds.
+    /// `last_rotated_at` is stamped at store time, which is submit time.
+    pub async fn recently_written(&self, within_secs: u64) -> Result<Vec<Hash>> {
+        self.ensure_loaded().await?;
+        let cutoff = now_unix().saturating_sub(within_secs);
+        let index = self.index.read().await;
+        Ok(index.values().filter(|row| row.last_rotated_at >= cutoff).map(|row| row.info.sn).collect())
+    }
+
     pub async fn load_info(&self, sn: &Hash) -> Result<Option<Arc<NoteKeyInfo>>> {
         self.ensure_loaded().await?;
         Ok(self.index.read().await.get(sn).map(|row| Arc::new(row.info.clone())))

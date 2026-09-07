@@ -98,6 +98,15 @@ pub trait NoteKeyStore: Send + Sync {
     /// export, backup restore) — always recorded `Hot` regardless of the imported
     /// key's prior state (POOL-SPEC.md P5.6's same-key-in-two-wallets hazard).
     async fn import_bearer_key(&self, wallet_secret: &Secret, sn: Hash, sk: [u8; 32], d: DenominationTag) -> Result<()>;
+    /// Serials written within the last `within_secs` seconds.
+    ///
+    /// A note is stored the moment its creating transaction is SUBMITTED — the
+    /// serial comes from the transaction id, so the wallet knows it before the
+    /// chain has accepted it. A very young note the pool does not have yet is
+    /// therefore in flight, not lost, and reconciliation must not call it a
+    /// phantom.
+    async fn recently_written(&self, within_secs: u64) -> Result<Vec<Hash>>;
+
     /// Flip a row's `status` — plaintext-only, never needs the wallet secret.
     async fn mark_status(&self, sn: &Hash, status: NoteStatus) -> Result<()>;
     /// Apply a live `NotesChanged` notification (FORK-PLAN P6.9). See the trait-level

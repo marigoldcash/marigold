@@ -2020,6 +2020,11 @@ pub async fn send_combined(
 /// the better trade.
 pub const FEE_SOURCE_MAX_OVERSHOOT: u64 = 100;
 
+/// How long a note may be missing from the pool before reconciliation calls it
+/// a phantom. Covers the gap between submitting a transaction and the chain
+/// accepting it, with room for a node that is catching up.
+pub const IN_FLIGHT_SECS: u64 = 120;
+
 pub const STAMP_RESERVE: usize = 50;
 
 /// Don't touch the stamps until there are clearly too many. Merging as soon as
@@ -2038,10 +2043,21 @@ pub const STAMP_MERGE_TRIGGER: usize = 100;
 /// fact — so this asks the node directly.
 pub async fn verify_held_notes(account: Arc<dyn Account>) -> Result<(Vec<Arc<NoteKeyInfo>>, Vec<Arc<NoteKeyInfo>>)> {
     let note_key_store = account.wallet().store().as_note_key_store()?;
+
+    // Notes written in the last couple of minutes are in flight, not lost. A
+    // note is stored the instant its transaction is submitted, so a mint that
+    // has just run leaves a vault full of notes the pool has not accepted yet
+    // — and reporting those as "NOT on chain" the moment housekeeping finishes
+    // is how a healthy wallet was made to look like it had lost two thousand
+    // MAGLD (founder report, 2026-09-07). The window is generous on purpose:
+    // being slow to notice a real phantom costs nothing, and crying wolf about
+    // money costs trust.
+    let in_flight: HashSet<Hash> = note_key_store.recently_written(IN_FLIGHT_SECS).await?.into_iter().collect();
+
     let mut held: Vec<Arc<NoteKeyInfo>> = Vec::new();
     let mut stream = note_key_store.iter().await?;
     while let Some(info) = stream.try_next().await? {
-        if matches!(info.status, NoteStatus::Active | NoteStatus::Mirrored) {
+        if matches!(info.status, NoteStatus::Active | NoteStatus::Mirrored) && !in_flight.contains(&info.sn) {
             held.push(info);
         }
     }
