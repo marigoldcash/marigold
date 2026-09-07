@@ -35,7 +35,7 @@
 <div class="wrap">
   <div class="kicker">marigold · testnet faucet</div>
   <h1>Take a note.</h1>
-  <p class="lede">This faucet hands out real Marigold bearer notes — digital cash, not an account credit. One claim gives you a 10&nbsp;MAGLD note plus two 0.01&nbsp;MAGLD notes for fees. Testnet money: worthless by design, real in every other way.</p>
+  <p class="lede">This faucet hands out real Marigold bearer notes — digital cash, not an account credit. One claim gives you three notes — 10, 1 and 0.1&nbsp;MAGLD, 11.10 in all. Testnet money: worthless by design, real in every other way.</p>
 
   <button id="claim">Claim a note bundle</button>
   <div class="error" id="error"></div>
@@ -50,6 +50,52 @@
   <div class="status" id="status"></div>
 </div>
 <script>
+// navigator.clipboard.writeText is asynchronous and can reject — no permission,
+// not focused, an extension in the way — and the old code neither awaited it nor
+// noticed, so a failed copy still said "Copied" and the user pasted whatever was
+// in the clipboard before. Try the async API, fall back to the synchronous
+// execCommand path, and if both fail select the text and say so rather than
+// claiming success.
+function copyText(text, button, payloadEl) {
+  // Feedback has to reset. The label used to change to "Copied" and stay there,
+  // so a second click copied exactly as it should but looked like nothing had
+  // happened — which is how this got reported as "the button only works once"
+  // (founder, 2026-09-07). Flash it instead, so every click is visibly a copy.
+  const flash = (label) => {
+    button.textContent = label;
+    clearTimeout(button._resetTimer);
+    button._resetTimer = setTimeout(() => { button.textContent = 'Copy code'; }, 1400);
+  };
+  const ok = () => flash('Copied \u2713');
+  const manual = () => {
+    flash('Selected \u2014 press Ctrl+C');
+    const range = document.createRange();
+    range.selectNodeContents(payloadEl);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  };
+  const legacy = () => {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      const done = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return done;
+    } catch (_) { return false; }
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(ok, () => { legacy() ? ok() : manual(); });
+  } else {
+    legacy() ? ok() : manual();
+  }
+}
+
 const btn = document.getElementById('claim');
 const errBox = document.getElementById('error');
 const warn = document.getElementById('warn');
@@ -70,8 +116,7 @@ btn.addEventListener('click', async () => {
         '<div class="payload"></div><button class="copy">Copy code</button>';
       card.querySelector('.payload').textContent = n.payload;
       card.querySelector('.copy').addEventListener('click', (e) => {
-        navigator.clipboard.writeText(n.payload);
-        e.target.textContent = 'Copied';
+        copyText(n.payload, e.target, card.querySelector('.payload'));
       });
       notes.appendChild(card);
     }

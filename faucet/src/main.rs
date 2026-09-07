@@ -49,14 +49,19 @@ use tokio::sync::Mutex;
 use workflow_core::abortable::Abortable;
 
 const WALLET_FILENAME: &str = "marigold-faucet";
-/// One claim: 1 x 10-MAGLD + 2 x 0.01-MAGLD, minted together (10.02 MAGLD
-/// decomposes to exactly that shape, greedy largest-first). 10 rather than 1
-/// per the founder's call (2026-09-04): gives testers enough to genuinely
-/// exercise split/merge/rotate, not just hold a note.
-const BUNDLE_MINT_PETALS: u64 = 1_002_000_000;
-const HEADLINE_TAG: DenominationTag = DenominationTag::D10;
-const FEE_TAG: DenominationTag = DenominationTag::D0_01;
-const FEE_NOTES_PER_BUNDLE: usize = 2;
+/// One claim: 10 + 1 + 0.1 MAGLD, minted together — 11.10 decomposes to
+/// exactly that shape, greedy largest-first.
+///
+/// It used to be 10 + two 0.01 stamps, the idea being that a fresh vault needs
+/// stamps for its first rotations. But a 0.01 note costs 0.01 to rotate, so it
+/// arrives worth precisely nothing (founder's call, 2026-09-07). A 1 and a 0.1
+/// are both genuinely spendable AND serve the same bootstrapping purpose, since
+/// rotating either yields change in smaller denominations.
+///
+/// 10 rather than 1 for the headline, per the founder's earlier call
+/// (2026-09-04): enough to genuinely exercise split, merge and rotate.
+const BUNDLE_MINT_PETALS: u64 = 1_110_000_000;
+const BUNDLE_TAGS: [DenominationTag; 3] = [DenominationTag::D10, DenominationTag::D1, DenominationTag::D0_1];
 
 #[derive(Parser)]
 #[command(name = "marigold-faucet", about = "Marigold testnet faucet — dispenses real bearer notes")]
@@ -152,8 +157,20 @@ async fn cmd_init(network: &str, wrpc_url: &str) -> anyhow::Result<()> {
 }
 
 struct ReadyNotes {
-    headline: VecDeque<Hash>,
-    fee: VecDeque<Hash>,
+    /// One queue per denomination in [`BUNDLE_TAGS`], same order. A claim takes
+    /// the front of each, so a bundle is only "ready" when every queue has one.
+    by_tag: [VecDeque<Hash>; BUNDLE_TAGS.len()],
+}
+
+impl ReadyNotes {
+    fn new() -> Self {
+        Self { by_tag: std::array::from_fn(|_| VecDeque::new()) }
+    }
+
+    /// How many complete bundles can be handed out: the shortest queue.
+    fn bundles(&self) -> usize {
+        self.by_tag.iter().map(|q| q.len()).min().unwrap_or(0)
+    }
 }
 
 struct FaucetState {
@@ -180,15 +197,12 @@ async fn buffer_tick(state: &FaucetState) -> anyhow::Result<()> {
     let note_key_store = wallet.store().as_note_key_store()?;
 
     // Active notes by denomination, from the vault (survives restarts).
-    let mut active_headline: Vec<Hash> = Vec::new();
-    let mut active_fee: Vec<Hash> = Vec::new();
+    let mut active: [Vec<Hash>; BUNDLE_TAGS.len()] = std::array::from_fn(|_| Vec::new());
     let mut stream = note_key_store.iter().await?;
     while let Some(info) = stream.try_next().await? {
         if info.status == NoteStatus::Active {
-            match info.d {
-                d if d == HEADLINE_TAG => active_headline.push(info.sn),
-                d if d == FEE_TAG => active_fee.push(info.sn),
-                _ => {}
+            if let Some(slot) = BUNDLE_TAGS.iter().position(|t| *t == info.d) {
+                active[slot].push(info.sn);
             }
         }
     }
@@ -197,7 +211,7 @@ async fn buffer_tick(state: &FaucetState) -> anyhow::Result<()> {
     // `bearer_import` verifies on-chain and would reject an unconfirmed note.
     let unconfirmed: Vec<Hash> = {
         let confirmed = state.confirmed.lock().await;
-        active_headline.iter().chain(active_fee.iter()).filter(|sn| !confirmed.contains(sn)).copied().collect()
+        active.iter().flatten().filter(|sn| !confirmed.contains(sn)).copied().collect()
     };
     if !unconfirmed.is_empty() {
         let on_chain = wallet.rpc_api().get_notes_by_serial(unconfirmed).await?;
@@ -210,18 +224,15 @@ async fn buffer_tick(state: &FaucetState) -> anyhow::Result<()> {
     {
         let confirmed = state.confirmed.lock().await;
         let mut ready = state.ready.lock().await;
-        ready.headline = active_headline.iter().filter(|sn| confirmed.contains(sn)).copied().collect();
-        ready.fee = active_fee.iter().filter(|sn| confirmed.contains(sn)).copied().collect();
+        for (slot, serials) in active.iter().enumerate() {
+            ready.by_tag[slot] = serials.iter().filter(|sn| confirmed.contains(sn)).copied().collect();
+        }
     }
 
     // Mint one bundle per tick while below target and funded (mint waits for
     // nothing: minted serials are known instantly; confirmation is picked up by
     // the next tick's get_notes_by_serial pass).
-    let (ready_headline, ready_fee) = {
-        let ready = state.ready.lock().await;
-        (ready.headline.len(), ready.fee.len())
-    };
-    let bundles_ready = ready_headline.min(ready_fee / FEE_NOTES_PER_BUNDLE);
+    let bundles_ready = state.ready.lock().await.bundles();
     if bundles_ready < state.buffer_bundles {
         let mature = state.account.balance().map(|b| b.mature).unwrap_or(0);
         if mature > BUNDLE_MINT_PETALS * 2 {
@@ -319,25 +330,26 @@ async fn claim(
     }
 
     // Pop a bundle.
-    let (headline, fees) = {
+    let bundle: Vec<Hash> = {
         let mut ready = state.ready.lock().await;
-        if ready.headline.is_empty() || ready.fee.len() < FEE_NOTES_PER_BUNDLE {
+        if ready.bundles() == 0 {
             return (
                 StatusCode::SERVICE_UNAVAILABLE,
                 Json(serde_json::json!({"error": "The faucet is out of ready notes right now — more are being minted, try again in a minute."})),
             )
                 .into_response();
         }
-        let headline = ready.headline.pop_front().unwrap();
-        let fees: Vec<Hash> = (0..FEE_NOTES_PER_BUNDLE).map(|_| ready.fee.pop_front().unwrap()).collect();
-        (headline, fees)
+        // Largest first, so the page shows the 10 at the top — and so an
+        // importer working top to bottom rotates the big note while its vault
+        // still has the others to draw a fee from.
+        ready.by_tag.iter_mut().map(|q| q.pop_front().unwrap()).collect()
     };
 
     // Hand them over. Every minted note sits on a solo Cold key, so this is
     // instant (no isolation transaction) — it just reveals the key and marks
     // the row HandedOver.
     let mut notes = Vec::new();
-    for sn in std::iter::once(headline).chain(fees) {
+    for sn in bundle {
         match notepool::bearer_export(state.account.clone(), state.wallet_secret.clone(), sn).await {
             Ok(result) => {
                 let payload = result.bearer.to_text();
@@ -370,7 +382,7 @@ async fn claim(
 
 async fn status(State(state): State<Arc<FaucetState>>) -> impl IntoResponse {
     let ready = state.ready.lock().await;
-    let bundles = ready.headline.len().min(ready.fee.len() / FEE_NOTES_PER_BUNDLE);
+    let bundles = ready.bundles();
     let mature = state.account.balance().map(|b| b.mature).unwrap_or(0);
     Json(serde_json::json!({
         "ready_bundles": bundles,
@@ -408,7 +420,7 @@ async fn cmd_serve(
     let state = Arc::new(FaucetState {
         account,
         wallet_secret,
-        ready: Mutex::new(ReadyNotes { headline: VecDeque::new(), fee: VecDeque::new() }),
+        ready: Mutex::new(ReadyNotes::new()),
         confirmed: Mutex::new(HashSet::new()),
         last_claim_by_ip: Mutex::new(HashMap::new()),
         daily: Mutex::new((utc_day(), 0)),

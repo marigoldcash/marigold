@@ -24,7 +24,7 @@ testnet MAGLD.
 
 `select <account-name>` - Selects an active account. The <account-name> can be the first few letters of the name or id of the account.
 
-`account create bip32 [<name>]` - Allows you to create additional HD wallet accounts linked to the default private key of your wallet.
+`account create bip32 [<name>]` - Creates another account inside this wallet, sharing its recovery phrase. Every account is derived from that one phrase, so backing it up backs up all of them — you never need a second backup.
 
 `address` - shows your selected account address
 
