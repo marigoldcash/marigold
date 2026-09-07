@@ -211,16 +211,61 @@ impl Wallet {
                         .and_then(|m| m.server.clone())
                         .or_else(|| ctx.wallet().settings().get::<String>(WalletSettings::Server))
                         .filter(|server| server != "public");
-                    if let Some(server) = target {
+
+                    // Say what the choice actually costs before asking it. The
+                    // privacy difference is the whole point of running your own
+                    // node and is invisible otherwise: the chain never records
+                    // which notes belong together, so whoever answers your
+                    // wallet's queries is the one party who can see it.
+                    tprintln!(ctx, "");
+                    tprintln!(ctx, "How would you like to connect?");
+                    tprintln!(ctx, "");
+                    tprintln!(ctx, "  {}  a node the Marigold project runs. Ready at once — but whoever", style("public").bold());
+                    tprintln!(ctx, "          runs it sees the address you connect from and which notes your");
+                    tprintln!(ctx, "          wallet asks about.");
+                    tprintln!(ctx, "");
+                    if cfg!(feature = "embedded-node") {
+                        tprintln!(ctx, "  {}   your own node, inside this program. Nobody sees your notes or", style("local").bold());
+                        tprintln!(ctx, "          your address. It takes a while to catch up with the network");
+                        tprintln!(ctx, "          the first time, and uses several gigabytes of disk.");
                         tprintln!(ctx, "");
-                        let answer = ctx.term().ask(false, &format!("Connect to {server}? [Y/n]: ")).await?.trim().to_lowercase();
-                        if answer.is_empty() || answer == "y" || answer == "yes" {
-                            ctx.exec_within(&format!("connect {server}")).await?;
+                    }
+                    if let Some(server) = target.as_ref() {
+                        tprintln!(ctx, "  {}   {server}", style("saved").bold());
+                        tprintln!(ctx, "");
+                    }
+                    tprintln!(ctx, "{}", style("See marigold.cash for what this trade-off means.").dim());
+                    tprintln!(ctx, "");
+
+                    let default = if target.is_some() { "saved" } else { "public" };
+                    let choices = if cfg!(feature = "embedded-node") { "public/local" } else { "public" };
+                    let prompt = if target.is_some() {
+                        format!("[{choices}/saved] (default {default}): ")
+                    } else {
+                        format!("[{choices}] (default {default}): ")
+                    };
+                    let answer = ctx.term().ask(false, &prompt).await?.trim().to_lowercase();
+                    let answer = if answer.is_empty() { default.to_string() } else { answer };
+
+                    match answer.as_str() {
+                        #[cfg(feature = "embedded-node")]
+                        a if a.starts_with('l') => {
+                            ctx.start_embedded_node().await?;
                             ctx.request_open_housekeeping();
                         }
-                    } else {
-                        tprintln!(ctx, "('connect <node>' to connect — e.g. 'connect 127.0.0.1:27210' for a node on this machine)");
+                        a if a.starts_with('p') => {
+                            ctx.exec_within("connect public").await?;
+                            ctx.request_open_housekeeping();
+                        }
+                        a if a.starts_with('s') && target.is_some() => {
+                            ctx.exec_within(&format!("connect {}", target.unwrap())).await?;
+                            ctx.request_open_housekeeping();
+                        }
+                        _ => {
+                            tprintln!(ctx, "Not connected. 'connect' when you are ready.");
+                        }
                     }
+
                 }
 
                 if let Some(name) = &name {

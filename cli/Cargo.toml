@@ -18,6 +18,12 @@ include = [
 
 [features]
 default = []
+# Compile a full node into the wallet binary. Off by default because it pulls
+# the entire consensus tree (kaspa-consensus, rocksdb, mining) and turns a
+# ~55 second CLI rebuild into a full node build; release builds for users turn
+# it on. Nothing about the wallet changes when it is off — the node is opt-in at
+# runtime too, via `node start`.
+embedded-node = ["dep:kaspad"]
 
 [[bin]]
 name = "marigold-cli"
@@ -41,7 +47,9 @@ hex.workspace = true
 kaspa-addresses.workspace = true
 kaspa-bip32.workspace = true
 kaspa-consensus-core.workspace = true
+kaspad = { workspace = true, optional = true }
 kaspa-core.workspace = true
+log.workspace = true
 kaspa-daemon.workspace = true
 kaspa-metrics-core.workspace = true
 kaspa-rpc-core.workspace = true

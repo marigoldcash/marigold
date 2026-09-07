@@ -44,9 +44,17 @@ if [ -n "${CHECK:-}" ]; then
   exit 0
 fi
 
-echo "→ cargo build --release$BIN_ARGS"
+# The wallet ships with a node compiled in. It costs build time (the whole
+# consensus tree) and ~30 MB, and it is what lets a user hold their own notes
+# without telling anyone which they are. Pass NO_EMBEDDED_NODE=1 to skip it
+# while iterating on wallet code.
+FEATURES=""
+if [ -z "${NO_EMBEDDED_NODE:-}" ]; then
+  FEATURES="--features embedded-node"
+fi
+echo "→ cargo build --release$BIN_ARGS $FEATURES"
 # shellcheck disable=SC2029
-$SSH "$HOST" "cd $REMOTE_DIR && cargo build --release $BIN_ARGS 2>&1 | tail -30"
+$SSH "$HOST" "cd $REMOTE_DIR && cargo build --release $BIN_ARGS $FEATURES 2>&1 | tail -30"
 
 echo "→ fetching binaries"
 mkdir -p target/release

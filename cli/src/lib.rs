@@ -1,6 +1,8 @@
 extern crate self as kaspa_cli;
 
 mod cli;
+#[cfg(feature = "embedded-node")]
+pub mod embedded;
 pub mod error;
 pub mod extensions;
 mod helpers;

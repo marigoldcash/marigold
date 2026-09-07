@@ -182,6 +182,18 @@ pub fn get_log_dir(args: &Args) -> Option<String> {
 }
 
 impl Runtime {
+    /// Build a runtime WITHOUT installing a global logger.
+    ///
+    /// [`Self::from_args`] installs log4rs and panics if a logger already
+    /// exists. That is right for the daemon, which owns its process, and wrong
+    /// for anything embedding a node alongside its own logging — the wallet
+    /// sets a logger up long before the node exists, and `create_core` would
+    /// abort the whole program on `SetLoggerError`. The node's own log records
+    /// then flow to whatever logger the host installed.
+    pub fn from_args_without_logger(args: &Args) -> Self {
+        Self { log_dir: get_log_dir(args) }
+    }
+
     pub fn from_args(args: &Args) -> Self {
         let log_dir = get_log_dir(args);
 

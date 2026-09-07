@@ -3099,6 +3099,8 @@ dependencies = [
  "kaspa-wallet-keys",
  "kaspa-wallet-pskt",
  "kaspa-wrpc-client",
+ "kaspad",
+ "log",
  "nw-sys",
  "pad",
  "qrcode",

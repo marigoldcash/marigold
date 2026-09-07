@@ -49,6 +49,10 @@ pub struct KaspaCli {
     /// open and auto-mint is armed (a hot-wallet posture, entered knowingly);
     /// it is never written anywhere and is dropped on close/disarm.
     auto_secret: Mutex<Option<Secret>>,
+    /// The in-process node, once started. Held here so `node stop` and wallet
+    /// shutdown can reach it; `None` means we are talking to someone else's.
+    #[cfg(feature = "embedded-node")]
+    embedded_node: Mutex<Option<Arc<crate::embedded::EmbeddedNode>>>,
     auto_payment_secret: Mutex<Option<Secret>>,
     auto_threshold_petals: Arc<AtomicU64>,
     /// 0 disables auto-sweep; otherwise the UTXO count that triggers one.
@@ -142,6 +146,8 @@ impl KaspaCli {
             notifier: Notifier::try_new()?,
             sync_state: Mutex::new(None),
             auto_secret: Mutex::new(None),
+            #[cfg(feature = "embedded-node")]
+            embedded_node: Mutex::new(None),
             auto_payment_secret: Mutex::new(None),
             auto_threshold_petals: Arc::new(AtomicU64::new(0)),
             auto_sweep_utxos: Arc::new(AtomicU64::new(0)),
@@ -191,6 +197,53 @@ impl KaspaCli {
 
     pub fn rpc_api(&self) -> Arc<DynRpcApi> {
         self.wallet.rpc_api().clone()
+    }
+
+    /// Start a node inside this process and point the wallet at it.
+    ///
+    /// The wallet is bound to the node's `RpcCoreService` directly — no socket,
+    /// no port, nothing on the network between them. It must be bound BEFORE
+    /// the ctl is signalled open, or it handles the connect event with no api
+    /// to call.
+    #[cfg(feature = "embedded-node")]
+    pub async fn start_embedded_node(self: &Arc<Self>) -> Result<()> {
+        if self.embedded_node.lock().unwrap().is_some() {
+            tprintln!(self, "Your node is already running.");
+            return Ok(());
+        }
+        let network_id = self.wallet.network_id()?;
+        let appdir = crate::embedded::default_appdir(network_id)?;
+
+        tprintln!(self, "");
+        tprintln!(self, "Starting your node. The first run downloads the chain, which takes a while.");
+        tprintln!(self, "{}", style(format!("(data lives in {})", appdir.display())).dim());
+        tprintln!(self, "");
+
+        let (node, rpc) = crate::embedded::EmbeddedNode::start(network_id, &appdir)?;
+        self.wallet.bind_rpc(Some(rpc)).await?;
+        node.signal_connected().await?;
+        self.embedded_node.lock().unwrap().replace(node);
+        tprintln!(self, "Your node is running. It will catch up with the network in the background.");
+        Ok(())
+    }
+
+    #[cfg(feature = "embedded-node")]
+    pub async fn stop_embedded_node(self: &Arc<Self>) -> Result<()> {
+        let node = self.embedded_node.lock().unwrap().take();
+        match node {
+            Some(node) => {
+                tprintln!(self, "Stopping your node...");
+                node.stop().await?;
+                tprintln!(self, "Stopped.");
+            }
+            None => tprintln!(self, "No node of yours is running."),
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "embedded-node")]
+    pub fn embedded_node_running(&self) -> bool {
+        self.embedded_node.lock().unwrap().is_some()
     }
 
     pub fn try_rpc_api(&self) -> Option<Arc<DynRpcApi>> {

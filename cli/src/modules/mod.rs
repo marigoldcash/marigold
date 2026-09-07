@@ -27,6 +27,9 @@ pub mod monitor;
 pub mod mute;
 pub mod network;
 pub mod node;
+#[cfg(feature = "embedded-node")]
+#[path = "mynode.rs"]
+pub mod mynode;
 pub mod note;
 pub mod open;
 pub mod ping;
@@ -69,6 +72,12 @@ pub fn register_handlers(cli: &Arc<KaspaCli>) -> Result<()> {
             // theme,  start, stop
         ]
     );
+
+    // Registered separately so the everyday command list is identical whether
+    // or not the node is compiled in: a build without the feature simply has no
+    // `mynode` verb, rather than one that reports itself unavailable.
+    #[cfg(feature = "embedded-node")]
+    register_handlers!(cli, cli.handlers(), [mynode]);
 
     Ok(())
 }
