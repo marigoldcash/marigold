@@ -79,7 +79,7 @@ pub fn register_handlers(cli: &Arc<KaspaCli>) -> Result<()> {
 
     // Registered separately so the everyday command list is identical whether
     // or not the node is compiled in: a build without the feature simply has no
-    // `mynode` verb, rather than one that reports itself unavailable.
+    // `node` verb, rather than one that reports itself unavailable.
 
     Ok(())
 }

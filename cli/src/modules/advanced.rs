@@ -3,7 +3,7 @@ use crate::imports::*;
 /// Verbs shown by the plain `help`. Everything else lives behind `advanced` —
 /// the CLI's front page should read like a wallet, not like a node console.
 pub const EVERYDAY: &[&str] = &[
-    "balance", "note", "exchange", "mynode", "address", "list", "open", "close", "wallet", "connect", "network", "guide", "help", "advanced",
+    "balance", "note", "exchange", "node", "address", "list", "open", "close", "wallet", "connect", "network", "guide", "help", "advanced",
     "exit", "quit",
 ];
 

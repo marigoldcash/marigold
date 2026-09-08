@@ -78,7 +78,7 @@ impl Connect {
                         setting one up. Whoever runs a node sees the address you connect from and which notes \
                         your wallet asks about — the chain itself never records that, so a node you do not \
                         control is the one place it exists. For anything you care about, run your own — \
-                        'mynode start', or see marigold.cash/faq. \
+                        'node start', or see marigold.cash/faq. \
                         ",
                     );
                     tprintln!(ctx);
