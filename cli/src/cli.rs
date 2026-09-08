@@ -250,14 +250,8 @@ impl KaspaCli {
         let network_id = self.wallet.network_id()?;
         let appdir = crate::embedded::default_appdir(network_id)?;
 
-        tprintln!(self, "");
-        tprintln!(self, "Starting your node.");
-        tprintln!(self, "{}", style("The first sync takes anywhere from half an hour to a few hours, and begins").dim());
-        tprintln!(self, "{}", style("by verifying the chain's history before downloading any of it. 'node status'").dim());
-        tprintln!(self, "{}", style("shows how far along it is; leaving before it finishes discards the work.").dim());
-        tprintln!(self, "{}", style(format!("(data lives in {})", appdir.display())).dim());
-        tprintln!(self, "");
-
+        // Silent: the callers say different things about the same event, and a
+        // fixed paragraph here meant every one of them had to talk over it.
         let (node, rpc) = crate::embedded::EmbeddedNode::start(network_id, &appdir)?;
         self.embedded_node.lock().unwrap().replace(node);
         Ok(Some(rpc))
@@ -324,6 +318,18 @@ impl KaspaCli {
     /// queries would be precisely the wrong thing to be quiet about.
     #[cfg(feature = "embedded-node")]
     pub async fn start_node_with_handover(self: &Arc<Self>) -> Result<()> {
+        self.start_node_with_handover_inner(true).await
+    }
+
+    /// `ensure_connection` is false when the caller has just connected.
+    ///
+    /// `is_connected()` flips on an event, not when `connect` returns, so a
+    /// caller that has this instant connected still reads false here. Acting
+    /// on that would fire a second connect, which would in turn offer to start
+    /// a local node — the offer that got us here. It terminates, because by
+    /// then a node is running, but only by accident.
+    #[cfg(feature = "embedded-node")]
+    async fn start_node_with_handover_inner(self: &Arc<Self>, ensure_connection: bool) -> Result<()> {
         // A node that will not start must not cost you a working wallet. It
         // failed for real reasons — the p2p port taken by another Marigold, no
         // room on disk — and the answer to every one of them is the same: say
@@ -335,8 +341,14 @@ impl KaspaCli {
             Ok(None) => return Ok(()),
             Err(err) => {
                 tprintln!(self, "{}", style(format!("Your node could not start: {err}")).yellow());
-                if self.wallet.is_connected() {
-                    tprintln!(self, "The wallet is still using the node it was on.");
+                // Same reconnect trap as the success path below: a caller that
+                // has just connected reads is_connected() as false, and
+                // reconnecting here asked the "run your own node?" question a
+                // second time and dropped the socket that was already open.
+                if !ensure_connection || self.wallet.is_connected() {
+                    tprintln!(self, "The wallet is using a public node instead.");
+                    tprintln!(self, "{}", style("Whoever runs it sees which notes your wallet asks about. 'node start'").dim());
+                    tprintln!(self, "{}", style("tries yours again once the problem above is dealt with.").dim());
                 } else {
                     tprintln!(self, "Using a public node instead, so the wallet works meanwhile.");
                     tprintln!(self, "{}", style("Whoever runs it sees which notes your wallet asks about. 'node start'").dim());
@@ -357,22 +369,78 @@ impl KaspaCli {
             return Ok(());
         }
 
-        if !self.wallet.is_connected() {
-            tprintln!(self, "Your node is still catching up, so the wallet will use a public node meanwhile.");
+        if ensure_connection && !self.wallet.is_connected() {
             if let Err(err) = self.exec_within("connect public").await {
                 // No public node either: bind to our own anyway. An incomplete
                 // view beats none, and 'node status' explains what it is.
                 tprintln!(self, "Could not reach a public node ({err}) — using your own while it catches up.");
                 self.adopt_embedded_node(rpc.clone()).await?;
             }
-        } else {
-            tprintln!(self, "Your node is still catching up. Staying on the current node until it is ready.");
         }
 
-        tprintln!(self, "{}", style("Checking once a minute; the wallet will move across on its own and say so.").dim());
-        tprintln!(self, "");
+        self.announce_sync_started();
         self.start_node_handover_task(rpc);
         Ok(())
+    }
+
+    /// What we tell someone the moment their own node begins its first sync.
+    ///
+    /// Four lines, and every one of them earns its place: it started, it is
+    /// slow, quitting throws it away, and here is how to look. The data
+    /// directory, the phase names and the block counts are not in it — none of
+    /// them change what anybody does next.
+    #[cfg(feature = "embedded-node")]
+    pub fn announce_sync_started(self: &Arc<Self>) {
+        tprintln!(self, "");
+        tprintln!(self, "{}", style("Local node sync started!").green());
+        tprintln!(self, "A first sync takes anywhere from half an hour to a few hours. Leaving the");
+        tprintln!(self, "wallet before it finishes discards it — after that, restarts are free.");
+        tprintln!(self, "Type 'node status' for progress info.");
+        tprintln!(self, "");
+    }
+
+    /// The one thing to type next.
+    ///
+    /// Someone who has just connected is at a fork with exactly one sensible
+    /// exit, and which one depends on state they cannot see: whether a wallet
+    /// is open, and whether they have one at all. Printing all three and
+    /// letting them work it out is how a person decides this program is not
+    /// for them.
+    pub async fn print_next_step(self: &Arc<Self>) {
+        tprintln!(self, "");
+        if self.wallet.is_open() {
+            tprintln!(self, "Type 'balance' or 'help' for list of commands.");
+        } else if self.store().wallet_list().await.map(|w| !w.is_empty()).unwrap_or(false) {
+            tprintln!(self, "Type 'open' to open your wallet or 'help' for list of commands.");
+        } else {
+            tprintln!(self, "Type 'wallet create' to create a wallet or 'help' for list of commands.");
+        }
+        tprintln!(self, "");
+    }
+
+    /// Ask, once per public connection, whether they would rather not be on a
+    /// public node at all.
+    ///
+    /// Asked here because this is the moment it is true: they have just
+    /// connected to a node run by someone else, and that node can see which
+    /// notes their wallet asks after. A "no" is not recorded — the question
+    /// costs one keystroke and the answer may be different on a laptop that is
+    /// staying put than on one about to be closed.
+    #[cfg(feature = "embedded-node")]
+    pub async fn offer_local_node(self: &Arc<Self>) -> Result<()> {
+        if self.embedded_node_running() {
+            return Ok(());
+        }
+        tprintln!(self, "Do you want to run a local node so that your wallet notes stay private?");
+        tprintln!(self, "{}", style("(marigold.cash/faq explains what this choice costs)").dim());
+        let answer = self.term().ask(false, "[Y/n]: ").await?.trim().to_lowercase();
+        if answer.starts_with('n') {
+            tprintln!(self, "");
+            tprintln!(self, "Public node connected.");
+            return Ok(());
+        }
+        // We connected a moment ago; do not let it connect again.
+        self.start_node_with_handover_inner(false).await
     }
 
     /// Watch the node we started, and move the wallet over when it is ready.
@@ -1987,8 +2055,10 @@ pub async fn kaspa_cli(terminal_options: TerminalOptions, banner: Option<String>
     let options = Options::new(terminal_options, None);
     let cli = KaspaCli::try_new_arc(options).await?;
 
-    let banner =
-        banner.unwrap_or_else(|| format!("Marigold Cli Wallet v{} (type 'help' for list of commands)", env!("CARGO_PKG_VERSION")));
+    // 'connect' first, because it is: nothing works until the wallet can reach
+    // a node, and 'help' answers a question a new user has not formed yet.
+    let banner = banner
+        .unwrap_or_else(|| format!("Marigold Cli Wallet v{} (type 'connect' or 'help' for list of commands)", env!("CARGO_PKG_VERSION")));
     cli.term().writeln(banner);
 
     // redirect the global log output to terminal

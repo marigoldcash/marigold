@@ -203,85 +203,29 @@ impl Wallet {
                     ctx.report_holdings().await;
                     tprintln!(ctx, "The above are only your local notes in your vault, since the network is disconnected.");
                     tprintln!(ctx, "To see whether you hold anything more on the ledger, a network connection is needed.");
-                    // Offer whatever target we know: the wallet's own record
-                    // first, then the global setting. (Connecting before
-                    // opening the wallet means the wallet never recorded one,
-                    // which is why this prompt had stopped appearing.)
+                    // One dialog for this decision, not two. 'connect' owns
+                    // it — public node first, then the single question about
+                    // running your own — and this path just calls that, with
+                    // whatever server the wallet remembers. A menu here as
+                    // well meant the same choice was asked twice, in two
+                    // different shapes, depending on which command you reached
+                    // it through.
                     let target = meta
                         .as_ref()
                         .and_then(|m| m.server.clone())
                         .or_else(|| ctx.wallet().settings().get::<String>(WalletSettings::Server))
                         .filter(|server| server != "public");
-
-                    // Say what the choice actually costs before asking it. The
-                    // privacy difference is the whole point of running your own
-                    // node and is invisible otherwise: the chain never records
-                    // which notes belong together, so whoever answers your
-                    // wallet's queries is the one party who can see it.
                     tprintln!(ctx, "");
-                    tprintln!(ctx, "How would you like to connect?");
-                    tprintln!(ctx, "");
-                    if cfg!(feature = "embedded-node") {
-                        // The default, and first, because it is what someone
-                        // would pick if they understood the trade — and the
-                        // reason it used to be the harder choice (an hour of a
-                        // wallet you cannot trust) no longer applies: the
-                        // public node answers while your own catches up.
-                        tprintln!(ctx, "  {}   your own node, inside this program. Nobody sees your notes or", style("local").bold());
-                        tprintln!(ctx, "          your address. It uses a public node while it catches up, then");
-                        tprintln!(ctx, "          moves across on its own. Several gigabytes of disk.");
-                        tprintln!(ctx, "");
-                    }
-                    tprintln!(ctx, "  {}  a node the Marigold project runs, and only that. Ready at once —", style("public").bold());
-                    tprintln!(ctx, "          but whoever runs it sees the address you connect from and which");
-                    tprintln!(ctx, "          notes your wallet asks about.");
-                    tprintln!(ctx, "");
-                    if let Some(server) = target.as_ref() {
-                        tprintln!(ctx, "  {}   {server}", style("saved").bold());
-                        tprintln!(ctx, "");
-                    }
-                    tprintln!(ctx, "{}", style("marigold.cash/faq explains what this choice costs.").dim());
-                    tprintln!(ctx, "");
-
-                    let default = if target.is_some() {
-                        "saved"
-                    } else if cfg!(feature = "embedded-node") {
-                        "local"
+                    let answer = ctx.term().ask(false, "Connect now? [Y/n]: ").await?.trim().to_lowercase();
+                    if answer.starts_with('n') {
+                        tprintln!(ctx, "Not connected. Type 'connect' when you are ready.");
                     } else {
-                        "public"
-                    };
-                    let choices = if cfg!(feature = "embedded-node") { "local/public" } else { "public" };
-                    let prompt = if target.is_some() {
-                        format!("[{choices}/saved] (default {default}): ")
-                    } else {
-                        format!("[{choices}] (default {default}): ")
-                    };
-                    let answer = ctx.term().ask(false, &prompt).await?.trim().to_lowercase();
-                    let answer = if answer.is_empty() { default.to_string() } else { answer };
-
-                    match answer.as_str() {
-                        #[cfg(feature = "embedded-node")]
-                        a if a.starts_with('l') => {
-                            // Not start_embedded_node: that binds the wallet to
-                            // a node that has not read the chain yet, and a
-                            // wallet reporting a partial balance looks exactly
-                            // like money gone missing.
-                            ctx.start_node_with_handover().await?;
-                            ctx.request_open_housekeeping();
+                        match target {
+                            Some(server) => ctx.exec_within(&format!("connect {server}")).await?,
+                            None => ctx.exec_within("connect").await?,
                         }
-                        a if a.starts_with('p') => {
-                            ctx.exec_within("connect public").await?;
-                            ctx.request_open_housekeeping();
-                        }
-                        a if a.starts_with('s') && target.is_some() => {
-                            ctx.exec_within(&format!("connect {}", target.unwrap())).await?;
-                            ctx.request_open_housekeeping();
-                        }
-                        _ => {
-                            tprintln!(ctx, "Not connected. 'connect' when you are ready.");
-                        }
+                        ctx.request_open_housekeeping();
                     }
-
                 }
 
                 if let Some(name) = &name {

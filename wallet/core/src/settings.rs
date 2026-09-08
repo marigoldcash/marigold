@@ -30,7 +30,16 @@ pub enum WalletSettings {
 #[async_trait]
 impl DefaultSettings for WalletSettings {
     async fn defaults() -> Vec<(Self, Value)> {
-        vec![(Self::Server, to_value("public").unwrap()), (Self::Wallet, to_value("marigold").unwrap())]
+        // Testnet by default. Without a network the wallet refuses every
+        // command with "No network selected", which is a demand that a new
+        // user pick between two things they have no way to tell apart yet —
+        // and the answer, until launch, is always testnet. The mainnet build
+        // ships with this line changed and nothing else.
+        vec![
+            (Self::Network, to_value("testnet-10").unwrap()),
+            (Self::Server, to_value("public").unwrap()),
+            (Self::Wallet, to_value("marigold").unwrap()),
+        ]
     }
 }
 

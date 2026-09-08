@@ -107,6 +107,15 @@ impl WalletLock {
             return Ok(Self { path });
         }
 
+        // The lock is taken before the wallet file is written, so on a first
+        // ever run this is the first thing to touch the storage folder — and
+        // it does not exist yet. Creating a wallet on a clean machine failed
+        // here with "No such file or directory", after the user had already
+        // typed a password and been shown their recovery phrase.
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|err| Error::Custom(format!("cannot create the wallet folder {}: {err}", parent.display())))?;
+        }
         let file = std::fs::OpenOptions::new()
             .create(true)
             .read(true)

@@ -30,7 +30,12 @@ impl Connect {
                     if !kaspa_wrpc_client::resolver::public_nodes(network_id).is_empty() =>
                 {
                     let node = kaspa_wrpc_client::resolver::public_nodes(network_id).remove(0);
-                    tprintln!(ctx, "Connecting to a public Marigold node");
+                    // Name the network here. Until launch every build is a
+                    // testnet build, and someone who has read about Marigold
+                    // elsewhere should not have to wonder whether the coins
+                    // they are about to hold are the real ones.
+                    let which = if network_id.is_mainnet() { "" } else { " test" };
+                    tprintln!(ctx, "Connecting to a public Marigold{which} node.");
                     (true, wrpc_client.parse_url_with_network_type(node, network_id.into()).map_err(|e| e.to_string())?)
                 }
                 Some("public") | None if !Resolver::default().is_configured() => {
@@ -58,33 +63,6 @@ impl Connect {
                 }
             };
 
-            if is_public {
-                static WARNING: AtomicBool = AtomicBool::new(false);
-                if !WARNING.load(Ordering::Relaxed) {
-                    WARNING.store(true, Ordering::Relaxed);
-
-                    // Kaspa's wording said this infrastructure is run by
-                    // contributors and load-balanced, and asked you not to
-                    // connect directly. None of that is true here: this is one
-                    // node the project runs, and connecting directly is exactly
-                    // what happens. Saying so matters more for Marigold than it
-                    // would for a transparent chain — the node sees which notes
-                    // a wallet asks after, which is the one linkage the design
-                    // otherwise never records.
-                    tprintln!(ctx);
-                    tpara!(
-                        ctx,
-                        "This is a node the Marigold project runs, offered so you can use a wallet without \
-                        setting one up. Whoever runs a node sees the address you connect from and which notes \
-                        your wallet asks about — the chain itself never records that, so a node you do not \
-                        control is the one place it exists. For anything you care about, run your own — \
-                        'node start', or see marigold.cash/faq. \
-                        ",
-                    );
-                    tprintln!(ctx);
-                }
-            }
-
             let options = ConnectOptions {
                 block_async_connect: true,
                 strategy: ConnectStrategy::Fallback,
@@ -92,6 +70,33 @@ impl Connect {
                 ..Default::default()
             };
             wrpc_client.connect(Some(options)).await.map_err(|e| e.to_string())?;
+
+            // The socket is up when connect() returns, but the wallet only
+            // considers itself connected once the event reaches its utxo
+            // processor. Everything below reads better for the wait: the
+            // node's own greeting arrives before our question rather than
+            // interrupting it, "Public node connected" is true when we say it,
+            // and 'node status' typed straight afterwards does not answer
+            // "not connected to any node".
+            for _ in 0..40 {
+                if ctx.wallet().is_connected() {
+                    break;
+                }
+                workflow_core::task::sleep(std::time::Duration::from_millis(250)).await;
+            }
+
+            // Offered after the connection lands, not before: until it does,
+            // "run your own instead" is a question about a thing that might
+            // not have worked.
+            #[cfg(feature = "embedded-node")]
+            if is_public {
+                ctx.offer_local_node().await?;
+            }
+            #[cfg(not(feature = "embedded-node"))]
+            if is_public {
+                tprintln!(ctx, "Public node connected.");
+            }
+            ctx.print_next_step().await;
 
             // Connecting by hand, after opening a wallet offline, is a normal
             // way to start a session — and it should get the same loud opening

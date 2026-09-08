@@ -27,175 +27,105 @@ impl Node {
                 self.status(&ctx).await;
                 Ok(())
             }
+            Some("details") => {
+                self.details(&ctx).await;
+                Ok(())
+            }
             Some(other) => {
-                tprintln!(ctx, "usage: 'node start' | 'node stop' | 'node status' | 'node logs [off]'  (got '{other}')");
+                tprintln!(ctx, "usage: 'node start' | 'node stop' | 'node status' | 'node details' | 'node logs [off]'  (got '{other}')");
                 Ok(())
             }
         }
     }
 
-    /// How far our own node has got, in one line.
+    /// How far our own node has got, as a step out of three and a percentage.
     ///
-    /// Read out of the node's own log records rather than its RPC: during the
-    /// pruning-proof phase it reports zero blocks and zero headers however you
-    /// ask, because everything is going into a staging consensus that is not
-    /// committed until the very end. The log is the only place the progress
-    /// exists.
-    fn own_progress(ctx: &Arc<KaspaCli>) -> String {
+    /// Best effort, and read out of the node's own log records rather than its
+    /// RPC: during the first phase it reports zero blocks and zero headers
+    /// however you ask it, because the work is going into a staging consensus
+    /// that is not committed until the very end. The log is the only place the
+    /// progress exists at all.
+    ///
+    /// Three steps because there are three waits, not because the node has
+    /// three phases — it checks the chain's proof, fetches the headers in two
+    /// internal stages, then fetches the blocks. Someone watching a bar wants
+    /// to know how many more times it fills.
+    fn sync_step(ctx: &Arc<KaspaCli>) -> String {
         use crate::log_sink::SyncProgress;
-        match crate::log_sink::sync_progress() {
+        let (step, percent) = match crate::log_sink::sync_progress() {
             // Levels count DOWN from 250, so progress is how far it has come.
-            Some(SyncProgress::VerifyingProof { level }) => {
-                format!("verifying the chain's history — level {level}, {} of 250 done", 250u32.saturating_sub(level))
-            }
+            Some(SyncProgress::VerifyingProof { level }) => (1, 250u32.saturating_sub(level) * 100 / 250),
             Some(SyncProgress::ChainSegment { headers }) => {
                 let params = kaspa_consensus_core::config::params::Params::from(
                     ctx.wallet().network_id().unwrap_or(NetworkId::with_suffix(NetworkType::Testnet, 10)),
                 );
                 let max = params.finality_depth() + 2 * params.ghostdag_k as u64 + 1;
-                let pct = (headers as f64 / max as f64 * 100.0) as u32;
-                format!("downloading the chain — {} of at most {} headers ({pct}%)", headers.separated_string(), max.separated_string())
+                (2, ((headers as f64 / max as f64) * 100.0) as u32)
             }
-            Some(SyncProgress::Headers { headers, percent, .. }) => {
-                format!("checking headers — {} done, {percent}%", headers.separated_string())
-            }
-            Some(SyncProgress::Blocks { blocks, percent }) => {
-                format!("downloading blocks — {} done, {percent}%", blocks.separated_string())
-            }
-            None => "starting its first sync".to_string(),
-        }
+            Some(SyncProgress::Headers { percent, .. }) => (2, percent),
+            Some(SyncProgress::Blocks { percent, .. }) => (3, percent),
+            None => (1, 0),
+        };
+        format!("Step {step} of 3, {}% done", percent.min(100))
     }
 
-    /// Which node the wallet is talking to, and whether it has caught up.
+    /// Which node the wallet is talking to, and — if it is not yet your own —
+    /// how far off that is.
     ///
-    /// "Caught up" matters more than it looks: a node still syncing answers
-    /// every question truthfully about a chain it has not finished reading, so
-    /// balances and note checks are simply incomplete rather than wrong. Saying
-    /// so is the difference between a user waiting and a user thinking their
-    /// money is missing.
+    /// Two facts, in this order: which node is answering, and what that means
+    /// for who can see your notes. Everything else a node knows about itself
+    /// is behind 'node details', because block counts and DAA scores change
+    /// nobody's next move and reading them is a skill this wallet should not
+    /// require.
     async fn status(&self, ctx: &Arc<KaspaCli>) {
-        // Running and in use are different states now: a node that is still
-        // catching up is left running while the wallet talks to a public one.
-        // Saying "nobody sees your notes" in that window would be a lie.
         let mine = ctx.embedded_node_in_use();
         let pending = ctx.embedded_node_pending();
         let connected = ctx.wallet().is_connected();
 
         tprintln!(ctx, "");
+        if mine {
+            tprintln!(ctx, "Using: {}", style("your own local node, running inside this wallet, all in sync with the network.").bold());
+            tprintln!(ctx, "Your wallet notes are not announced to a public node.");
+            tprintln!(ctx, "");
+            return;
+        }
         if pending {
-            // Own branch, and it returns: the section below reports on the node
-            // the WALLET is bound to, which here is the public one. It is
-            // caught up by definition, so the generic path would print
-            // "caught up with the network" — true of a node, and the opposite
-            // of what someone asking this question wants to know.
-            let url = ctx.wallet().utxo_processor().rpc_url().unwrap_or_else(|| "another node".into());
-            tprintln!(ctx, "Using: {}", style(url).bold());
-            tprintln!(ctx, "{}", style("Your own node is running but has not caught up, so the wallet is still").dim());
-            tprintln!(ctx, "{}", style("asking this one — and whoever runs it can see what it asks.").dim());
-            tprintln!(ctx, "");
-            tprintln!(ctx, "Your node: {}", style(Self::own_progress(ctx)).yellow());
-            tprintln!(ctx, "{}", style("Checked once a minute. The wallet moves across on its own, and says so.").dim());
+            tprintln!(ctx, "Using: {} Syncing local node, {}.", style("public node.").bold(), Self::sync_step(ctx));
+            tprintln!(ctx, "Your wallet notes are still being announced through a public node until the");
+            tprintln!(ctx, "sync is complete.");
             tprintln!(ctx, "");
             return;
         }
-        match (mine, connected) {
-            (true, _) => {
-                tprintln!(ctx, "Using: {}", style("your own node, running inside this wallet").bold());
-                tprintln!(ctx, "{}", style("Nobody else sees your address or which notes you hold.").dim());
-            }
-            (false, true) => {
-                let wallet = ctx.wallet();
-                let url = wallet.utxo_processor().rpc_url().unwrap_or_else(|| "a node".into());
-                tprintln!(ctx, "Using: {}", style(url).bold());
-                tprintln!(ctx, "{}", style("Whoever runs it can see the address you connect from and which").dim());
-                tprintln!(ctx, "{}", style("notes your wallet asks about — 'node start' runs your own instead.").dim());
-            }
-            (false, false) => {
-                tprintln!(ctx, "Not connected to any node.");
-                tprintln!(ctx, "");
-                tprintln!(ctx, "  'node start'      run one here. Nobody sees your notes or your address.");
-                tprintln!(ctx, "                    Takes a while to catch up the first time, and several");
-                tprintln!(ctx, "                    gigabytes of disk.");
-                tprintln!(ctx, "  'connect public'  use a node the Marigold project runs — ready at once,");
-                tprintln!(ctx, "                    but they see what your wallet asks about.");
-                tprintln!(ctx, "");
-                return;
-            }
-        }
-
-        if !connected {
-            tprintln!(ctx, "Status: {}", style("starting up — not answering yet").yellow());
+        if connected {
+            tprintln!(ctx, "Using: {}", style("a public node.").bold());
+            tprintln!(ctx, "Whoever runs it can see which notes your wallet asks about.");
+            tprintln!(ctx, "Type 'node start' to run your own instead.");
             tprintln!(ctx, "");
             return;
         }
+        tprintln!(ctx, "Not connected to any node.");
+        tprintln!(ctx, "");
+        tprintln!(ctx, "Type 'connect' to get started.");
+        tprintln!(ctx, "");
+    }
 
-        // is_synced is the node's own verdict on whether it has reached the tip.
-        let wallet = ctx.wallet();
-        let synced = wallet.utxo_processor().is_synced();
-        let dag = ctx.wallet().rpc_api().get_block_dag_info().await.ok();
-
-        if synced {
-            tprintln!(ctx, "Status: {}", style("caught up with the network").green());
-        } else {
-            use crate::log_sink::SyncProgress;
-            match crate::log_sink::sync_progress() {
-                // Levels count DOWN from 250, so progress is how far it has come.
-                Some(SyncProgress::VerifyingProof { level }) => {
-                    let done = 250u32.saturating_sub(level);
-                    tprintln!(ctx, "Status: {}", style(format!("verifying the chain's history — level {level}, {done} of 250 done")).yellow());
-                    tprintln!(ctx, "{}", style("Nothing lands on disk during this phase; it is checking proof of work.").dim());
-                }
-                // Bounded by finality depth, so there is a real ceiling.
-                Some(SyncProgress::ChainSegment { headers }) => {
-                    let params = kaspa_consensus_core::config::params::Params::from(
-                        ctx.wallet().network_id().unwrap_or(NetworkId::with_suffix(NetworkType::Testnet, 10)),
-                    );
-                    let max = params.finality_depth() + 2 * params.ghostdag_k as u64 + 1;
-                    let pct = (headers as f64 / max as f64 * 100.0) as u32;
-                    tprintln!(
-                        ctx,
-                        "Status: {}",
-                        style(format!(
-                            "downloading the chain — {} headers, at most {} ({pct}% of the maximum)",
-                            headers.separated_string(),
-                            max.separated_string()
-                        ))
-                        .yellow()
-                    );
-                }
-                Some(SyncProgress::Headers { headers, percent, block_time }) => {
-                    tprintln!(
-                        ctx,
-                        "Status: {}",
-                        style(format!("checking the chain's headers — {} done, {percent}%", headers.separated_string())).yellow()
-                    );
-                    if let Some(t) = block_time {
-                        tprintln!(ctx, "{}", style(format!("reached blocks from {t}")).dim());
-                    }
-                }
-                Some(SyncProgress::Blocks { blocks, percent }) => {
-                    tprintln!(
-                        ctx,
-                        "Status: {}",
-                        style(format!("downloading blocks — {} done, {percent}%", blocks.separated_string())).yellow()
-                    );
-                }
-                None => {
-                    tprintln!(ctx, "Status: {}", style("starting its first sync").yellow());
-                }
-            }
-            tprintln!(
-                ctx,
-                "{}",
-                style("A first sync takes anywhere from half an hour to a few hours. Leaving the").dim()
-            );
-            tprintln!(ctx, "{}", style("wallet before it finishes discards it — after that, restarts are free.").dim());
+    /// The node's own figures. Kept out of 'node status' on purpose — see
+    /// there — but a node that will not sync cannot be diagnosed without them.
+    async fn details(&self, ctx: &Arc<KaspaCli>) {
+        tprintln!(ctx, "");
+        if !ctx.wallet().is_connected() {
+            tprintln!(ctx, "Not connected to any node.");
+            tprintln!(ctx, "");
+            return;
         }
-
-        // Only once the first sync has committed: until then this reads the
-        // ACTIVE consensus while all the work is in staging, so it says zero.
-        match dag.filter(|info| info.block_count > 0) {
-            Some(info) => {
+        let synced = ctx.wallet().utxo_processor().is_synced();
+        tprintln!(ctx, "Node reports: {}", if synced { "caught up" } else { "not caught up" });
+        if ctx.embedded_node_running() {
+            tprintln!(ctx, "Your node:    {}", Self::sync_step(ctx));
+            tprintln!(ctx, "Adopted:      {}", if ctx.embedded_node_in_use() { "yes" } else { "not yet" });
+        }
+        match ctx.wallet().rpc_api().get_block_dag_info().await {
+            Ok(info) => {
                 tprintln!(
                     ctx,
                     "{}",
@@ -208,7 +138,7 @@ impl Node {
                     .dim()
                 );
             }
-            None => {}
+            Err(err) => tprintln!(ctx, "{}", style(format!("(could not read the node's figures: {err})")).dim()),
         }
         tprintln!(ctx, "");
     }
