@@ -221,16 +221,21 @@ impl Wallet {
                     tprintln!(ctx, "");
                     tprintln!(ctx, "How would you like to connect?");
                     tprintln!(ctx, "");
-                    tprintln!(ctx, "  {}  a node the Marigold project runs. Ready at once — but whoever", style("public").bold());
-                    tprintln!(ctx, "          runs it sees the address you connect from and which notes your");
-                    tprintln!(ctx, "          wallet asks about.");
-                    tprintln!(ctx, "");
                     if cfg!(feature = "embedded-node") {
+                        // The default, and first, because it is what someone
+                        // would pick if they understood the trade — and the
+                        // reason it used to be the harder choice (an hour of a
+                        // wallet you cannot trust) no longer applies: the
+                        // public node answers while your own catches up.
                         tprintln!(ctx, "  {}   your own node, inside this program. Nobody sees your notes or", style("local").bold());
-                        tprintln!(ctx, "          your address. It takes a while to catch up with the network");
-                        tprintln!(ctx, "          the first time, and uses several gigabytes of disk.");
+                        tprintln!(ctx, "          your address. It uses a public node while it catches up, then");
+                        tprintln!(ctx, "          moves across on its own. Several gigabytes of disk.");
                         tprintln!(ctx, "");
                     }
+                    tprintln!(ctx, "  {}  a node the Marigold project runs, and only that. Ready at once —", style("public").bold());
+                    tprintln!(ctx, "          but whoever runs it sees the address you connect from and which");
+                    tprintln!(ctx, "          notes your wallet asks about.");
+                    tprintln!(ctx, "");
                     if let Some(server) = target.as_ref() {
                         tprintln!(ctx, "  {}   {server}", style("saved").bold());
                         tprintln!(ctx, "");
@@ -238,8 +243,14 @@ impl Wallet {
                     tprintln!(ctx, "{}", style("marigold.cash/faq explains what this choice costs.").dim());
                     tprintln!(ctx, "");
 
-                    let default = if target.is_some() { "saved" } else { "public" };
-                    let choices = if cfg!(feature = "embedded-node") { "public/local" } else { "public" };
+                    let default = if target.is_some() {
+                        "saved"
+                    } else if cfg!(feature = "embedded-node") {
+                        "local"
+                    } else {
+                        "public"
+                    };
+                    let choices = if cfg!(feature = "embedded-node") { "local/public" } else { "public" };
                     let prompt = if target.is_some() {
                         format!("[{choices}/saved] (default {default}): ")
                     } else {
@@ -251,7 +262,11 @@ impl Wallet {
                     match answer.as_str() {
                         #[cfg(feature = "embedded-node")]
                         a if a.starts_with('l') => {
-                            ctx.start_embedded_node().await?;
+                            // Not start_embedded_node: that binds the wallet to
+                            // a node that has not read the chain yet, and a
+                            // wallet reporting a partial balance looks exactly
+                            // like money gone missing.
+                            ctx.start_node_with_handover().await?;
                             ctx.request_open_housekeeping();
                         }
                         a if a.starts_with('p') => {

@@ -9,6 +9,8 @@ use crate::result::Result;
 use kaspa_daemon::{DaemonEvent, DaemonKind, Daemons};
 use kaspa_wallet_core::account::Account;
 use kaspa_wallet_core::rpc::DynRpcApi;
+#[cfg(feature = "embedded-node")]
+use kaspa_wallet_core::rpc::Rpc;
 use kaspa_wallet_core::storage::{IdT, PrvKeyDataInfo};
 use kaspa_wrpc_client::{KaspaRpcClient, Resolver};
 use workflow_core::channel::*;
@@ -55,6 +57,14 @@ pub struct KaspaCli {
     /// shutdown can reach it; `None` means we are talking to someone else's.
     #[cfg(feature = "embedded-node")]
     embedded_node: Mutex<Option<Arc<crate::embedded::EmbeddedNode>>>,
+    /// Whether the wallet is actually *using* that node.
+    ///
+    /// Running and using it are no longer the same thing: a node that is still
+    /// catching up is left running while the wallet talks to a public one. Any
+    /// claim about who can see your notes has to key off this, not off whether
+    /// a node exists.
+    #[cfg(feature = "embedded-node")]
+    embedded_node_adopted: Arc<AtomicBool>,
     auto_payment_secret: Mutex<Option<Secret>>,
     auto_threshold_petals: Arc<AtomicU64>,
     /// 0 disables auto-sweep; otherwise the UTXO count that triggers one.
@@ -158,6 +168,8 @@ impl KaspaCli {
             auto_secret: Mutex::new(None),
             #[cfg(feature = "embedded-node")]
             embedded_node: Mutex::new(None),
+            #[cfg(feature = "embedded-node")]
+            embedded_node_adopted: Arc::new(AtomicBool::new(false)),
             auto_payment_secret: Mutex::new(None),
             auto_threshold_petals: Arc::new(AtomicU64::new(0)),
             auto_sweep_utxos: Arc::new(AtomicU64::new(0)),
@@ -217,9 +229,23 @@ impl KaspaCli {
     /// to call.
     #[cfg(feature = "embedded-node")]
     pub async fn start_embedded_node(self: &Arc<Self>) -> Result<()> {
+        let Some(rpc) = self.spawn_embedded_node().await? else {
+            return Ok(());
+        };
+        self.adopt_embedded_node(rpc).await?;
+        tprintln!(self, "Your node is running. It will catch up with the network in the background.");
+        Ok(())
+    }
+
+    /// Start the node, but leave the wallet pointed wherever it is.
+    ///
+    /// Returns the node's `Rpc` so the caller can decide when — or whether —
+    /// to hand the wallet over to it. `Ok(None)` means one was already running.
+    #[cfg(feature = "embedded-node")]
+    pub async fn spawn_embedded_node(self: &Arc<Self>) -> Result<Option<Rpc>> {
         if self.embedded_node.lock().unwrap().is_some() {
             tprintln!(self, "Your node is already running.");
-            return Ok(());
+            return Ok(None);
         }
         let network_id = self.wallet.network_id()?;
         let appdir = crate::embedded::default_appdir(network_id)?;
@@ -233,7 +259,13 @@ impl KaspaCli {
         tprintln!(self, "");
 
         let (node, rpc) = crate::embedded::EmbeddedNode::start(network_id, &appdir)?;
+        self.embedded_node.lock().unwrap().replace(node);
+        Ok(Some(rpc))
+    }
 
+    /// Point the wallet at the node we started.
+    #[cfg(feature = "embedded-node")]
+    pub async fn adopt_embedded_node(self: &Arc<Self>, rpc: Rpc) -> Result<()> {
         // The utxo processor subscribes to its RpcCtl's multiplexer once, when
         // it starts. Binding a new Rpc swaps the api but leaves that task
         // listening to the OLD ctl, so signalling the new one reaches nobody
@@ -243,15 +275,150 @@ impl KaspaCli {
         self.wallet.utxo_processor().stop().await?;
         self.wallet.bind_rpc(Some(rpc)).await?;
         self.wallet.utxo_processor().start().await?;
-        node.signal_connected().await?;
-        self.embedded_node.lock().unwrap().replace(node);
-        tprintln!(self, "Your node is running. It will catch up with the network in the background.");
+        // Bound to a local first: `if let Some(x) = guard...` keeps the
+        // MutexGuard alive for the whole block, and a std guard held across an
+        // await makes the future !Send, which this one has to be.
+        let node = self.embedded_node.lock().unwrap().as_ref().cloned();
+        if let Some(node) = node {
+            node.signal_connected().await?;
+        }
+        self.embedded_node_adopted.store(true, Ordering::SeqCst);
         Ok(())
+    }
+
+    /// True only when the wallet's questions are going to the node we started.
+    #[cfg(feature = "embedded-node")]
+    pub fn embedded_node_in_use(&self) -> bool {
+        self.embedded_node_running() && self.embedded_node_adopted.load(Ordering::SeqCst)
+    }
+
+    /// A node of ours is running, but the wallet is still on someone else's
+    /// while it catches up.
+    #[cfg(feature = "embedded-node")]
+    pub fn embedded_node_pending(&self) -> bool {
+        self.embedded_node_running() && !self.embedded_node_adopted.load(Ordering::SeqCst)
+    }
+
+    /// Ask a node — any node — whether it considers itself caught up.
+    ///
+    /// This is the node's own verdict, read straight off its RPC rather than
+    /// off the wallet's utxo processor, because the whole point here is to ask
+    /// a node the wallet is *not* currently using.
+    #[cfg(feature = "embedded-node")]
+    async fn node_is_synced(rpc: &Rpc) -> bool {
+        matches!(rpc.rpc_api().get_server_info().await, Ok(info) if info.is_synced)
+    }
+
+    /// Start your own node without making anyone wait for it.
+    ///
+    /// A node that has not finished its first sync answers every question
+    /// truthfully about a chain it has not finished reading, so a wallet bound
+    /// to one shows balances that are merely incomplete — which reads exactly
+    /// like money having gone missing. The old choice was therefore a real one:
+    /// privacy now and a wallet you cannot trust for an hour, or a working
+    /// wallet and a stranger who can see which notes are yours.
+    ///
+    /// It does not have to be a choice. The public node answers while your own
+    /// catches up, and the wallet moves across the moment yours is ready. Every
+    /// step says so out loud, because silently changing which node sees your
+    /// queries would be precisely the wrong thing to be quiet about.
+    #[cfg(feature = "embedded-node")]
+    pub async fn start_node_with_handover(self: &Arc<Self>) -> Result<()> {
+        // A node that will not start must not cost you a working wallet. It
+        // failed for real reasons — the p2p port taken by another Marigold, no
+        // room on disk — and the answer to every one of them is the same: say
+        // what happened, then connect to something that answers. Letting the
+        // error out of here left a wallet that had chosen 'local' sitting at
+        // DISCONNECTED with no node at all.
+        let rpc = match self.spawn_embedded_node().await {
+            Ok(Some(rpc)) => rpc,
+            Ok(None) => return Ok(()),
+            Err(err) => {
+                tprintln!(self, "{}", style(format!("Your node could not start: {err}")).yellow());
+                if self.wallet.is_connected() {
+                    tprintln!(self, "The wallet is still using the node it was on.");
+                } else {
+                    tprintln!(self, "Using a public node instead, so the wallet works meanwhile.");
+                    tprintln!(self, "{}", style("Whoever runs it sees which notes your wallet asks about. 'node start'").dim());
+                    tprintln!(self, "{}", style("tries yours again once the problem above is dealt with.").dim());
+                    self.exec_within("connect public").await?;
+                }
+                tprintln!(self, "");
+                return Ok(());
+            }
+        };
+
+        // A node that is already caught up — the second and every later run —
+        // needs no public node at all.
+        if Self::node_is_synced(&rpc).await {
+            self.adopt_embedded_node(rpc).await?;
+            tprintln!(self, "{}", style("Your node is caught up. Using it — nobody else sees your notes.").green());
+            tprintln!(self, "");
+            return Ok(());
+        }
+
+        if !self.wallet.is_connected() {
+            tprintln!(self, "Your node is still catching up, so the wallet will use a public node meanwhile.");
+            if let Err(err) = self.exec_within("connect public").await {
+                // No public node either: bind to our own anyway. An incomplete
+                // view beats none, and 'node status' explains what it is.
+                tprintln!(self, "Could not reach a public node ({err}) — using your own while it catches up.");
+                self.adopt_embedded_node(rpc.clone()).await?;
+            }
+        } else {
+            tprintln!(self, "Your node is still catching up. Staying on the current node until it is ready.");
+        }
+
+        tprintln!(self, "{}", style("Checking once a minute; the wallet will move across on its own and say so.").dim());
+        tprintln!(self, "");
+        self.start_node_handover_task(rpc);
+        Ok(())
+    }
+
+    /// Watch the node we started, and move the wallet over when it is ready.
+    #[cfg(feature = "embedded-node")]
+    fn start_node_handover_task(self: &Arc<Self>, rpc: Rpc) {
+        let this = self.clone();
+        workflow_core::task::spawn(async move {
+            loop {
+                workflow_core::task::sleep(Duration::from_secs(60)).await;
+                if this.shutdown.load(Ordering::SeqCst) {
+                    break;
+                }
+                // Stopped by hand, or never took: nothing left to hand over to.
+                if !this.embedded_node_running() {
+                    break;
+                }
+                if this.wallet.try_rpc_api().map(|api| Arc::ptr_eq(&api, rpc.rpc_api())).unwrap_or(false) {
+                    // Already ours — someone ran 'node start' in the meantime.
+                    break;
+                }
+                if !Self::node_is_synced(&rpc).await {
+                    continue;
+                }
+                match this.adopt_embedded_node(rpc.clone()).await {
+                    Ok(()) => {
+                        tprintln!(this, "");
+                        tprintln!(this, "{}", style("Your node has caught up. The wallet is now using it —").green());
+                        tprintln!(this, "{}", style("nobody else sees your address or which notes you hold.").green());
+                        tprintln!(this, "");
+                        this.term().refresh_prompt();
+                        this.request_open_housekeeping();
+                    }
+                    Err(err) => {
+                        tprintln!(this, "Your node is ready, but the wallet could not switch to it: {err}");
+                        tprintln!(this, "'node start' moves it across by hand.");
+                    }
+                }
+                break;
+            }
+        });
     }
 
     #[cfg(feature = "embedded-node")]
     pub async fn stop_embedded_node(self: &Arc<Self>) -> Result<()> {
         let node = self.embedded_node.lock().unwrap().take();
+        self.embedded_node_adopted.store(false, Ordering::SeqCst);
         match node {
             Some(node) => {
                 if !self.wallet.utxo_processor().is_synced() {
