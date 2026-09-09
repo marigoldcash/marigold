@@ -44,12 +44,39 @@ fn progress_slot() -> &'static RwLock<Option<SyncProgress>> {
     PROGRESS.get_or_init(|| RwLock::new(None))
 }
 
+/// Node warnings and errors held back since the last time logs were on.
+static SUPPRESSED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Unix seconds when the sync last moved. Zero means it never has.
+static LAST_PROGRESS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// How many node warnings have been kept off the screen.
+pub fn suppressed_count() -> usize {
+    SUPPRESSED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Seconds since the sync last advanced, or None if it has not started.
+///
+/// This is the honest version of "is anything wrong?". A node with a stalled
+/// IBD looks exactly like a node that is working, and the difference is
+/// visible only in whether the numbers move.
+pub fn seconds_since_progress() -> Option<u64> {
+    let last = LAST_PROGRESS.load(std::sync::atomic::Ordering::Relaxed);
+    if last == 0 {
+        return None;
+    }
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok()?.as_secs();
+    Some(now.saturating_sub(last))
+}
+
 pub fn sync_progress() -> Option<SyncProgress> {
     progress_slot().read().unwrap().clone()
 }
 
 pub fn clear_sync_progress() {
     *progress_slot().write().unwrap() = None;
+    LAST_PROGRESS.store(0, std::sync::atomic::Ordering::Relaxed);
+    SUPPRESSED.store(0, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// Pull progress out of a node log line, if it carries any.
@@ -115,11 +142,28 @@ impl log::Log for TerminalLogger {
         // this is a wallet, not a server log.
         if let Some(progress) = parse_progress(&record.args().to_string()) {
             *progress_slot().write().unwrap() = Some(progress);
+            if let Ok(now) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+                LAST_PROGRESS.store(now.as_secs(), std::sync::atomic::Ordering::Relaxed);
+            }
         }
 
-        // Warnings and errors always show. Info is the node narrating itself,
-        // which is only wanted when someone asked for it.
-        if record.level() > log::Level::Warn && !crate::embedded_logs_wanted() {
+        // Nothing from the node reaches the screen unless it was asked for.
+        //
+        // Warnings used to be exempt, on the reasoning that a warning is worth
+        // seeing. It is not, here: a peer timing out and being dropped is
+        // ordinary p2p churn, and "SendPingsFlow flow error: timeout expired
+        // after 120s, disconnecting from peer 49.12.37.83:26211" landed in the
+        // middle of a new user creating their first wallet — between the
+        // phishing-hint prompt and the password prompt. It reads like the
+        // program breaking. It is the program working.
+        //
+        // Real trouble is reported as trouble instead: the node's progress is
+        // timestamped below, and 'node status' says so when it stops moving.
+        // The count is kept so 'node details' can point at 'node logs'.
+        if !crate::embedded_logs_wanted() {
+            if record.level() <= log::Level::Warn {
+                SUPPRESSED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
             return;
         }
 

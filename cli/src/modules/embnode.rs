@@ -69,6 +69,22 @@ impl Node {
         format!("Step {step} of 3, {}% done", percent.min(100))
     }
 
+    /// How long the sync has been stuck, if long enough to be worth saying.
+    ///
+    /// Ten minutes: header and block batches land far more often than that
+    /// when a node is healthy, and the proof phase logs each level as it goes.
+    /// Anything quieter is either a peer problem or a wedged IBD, and either
+    /// way the person watching deserves to be told rather than left guessing
+    /// at a percentage that has stopped.
+    fn stalled_for(_ctx: &Arc<KaspaCli>) -> Option<String> {
+        let seconds = crate::log_sink::seconds_since_progress()?;
+        if seconds < 600 {
+            return None;
+        }
+        let minutes = seconds / 60;
+        Some(if minutes < 120 { format!("{minutes} minutes") } else { format!("{} hours", minutes / 60) })
+    }
+
     /// Which node the wallet is talking to, and — if it is not yet your own —
     /// how far off that is.
     ///
@@ -90,9 +106,28 @@ impl Node {
             return;
         }
         if pending {
-            tprintln!(ctx, "Using: {} Syncing local node, {}.", style("public node.").bold(), Self::sync_step(ctx));
-            tprintln!(ctx, "Your wallet notes are still being announced through a public node until the");
-            tprintln!(ctx, "sync is complete.");
+            // Two different situations, and calling both of them "using a
+            // public node" was a lie in the second: the public node may have
+            // refused us, in which case there is no ledger connection at all
+            // until our own node is ready.
+            if connected {
+                tprintln!(ctx, "Using: {} Syncing local node, {}.", style("public node.").bold(), Self::sync_step(ctx));
+                tprintln!(ctx, "Your wallet notes are still being announced through a public node until the");
+                tprintln!(ctx, "sync is complete.");
+            } else {
+                tprintln!(ctx, "Using: {} Syncing local node, {}.", style("no node yet.").bold(), Self::sync_step(ctx));
+                tprintln!(ctx, "Your notes are safe on this disk, but the ledger cannot be read until your");
+                tprintln!(ctx, "node has caught up. Nothing is being announced to anyone in the meantime.");
+            }
+            // The one thing worth interrupting for. A stalled sync looks
+            // identical to a working one — the numbers simply stop — and
+            // without this the node's own warnings were the only clue, which
+            // is why they used to be printed at everybody all the time.
+            if let Some(stalled) = Self::stalled_for(ctx) {
+                tprintln!(ctx, "");
+                tprintln!(ctx, "{}", style(format!("It has not moved for {stalled}. That is longer than expected.")).yellow());
+                tprintln!(ctx, "{}", style("Leaving it running usually recovers; 'node logs' shows what it is doing.").dim());
+            }
             tprintln!(ctx, "");
             return;
         }
@@ -113,13 +148,20 @@ impl Node {
     /// there — but a node that will not sync cannot be diagnosed without them.
     async fn details(&self, ctx: &Arc<KaspaCli>) {
         tprintln!(ctx, "");
-        if !ctx.wallet().is_connected() {
-            tprintln!(ctx, "Not connected to any node.");
+        let connected = ctx.wallet().is_connected();
+        if !connected && !ctx.embedded_node_running() {
+            tprintln!(ctx, "Not connected to any node, and no node of your own is running.");
             tprintln!(ctx, "");
             return;
         }
-        let synced = ctx.wallet().utxo_processor().is_synced();
-        tprintln!(ctx, "Node reports: {}", if synced { "caught up" } else { "not caught up" });
+        if connected {
+            let synced = ctx.wallet().utxo_processor().is_synced();
+            tprintln!(ctx, "Node reports: {}", if synced { "caught up" } else { "not caught up" });
+        } else {
+            // The interesting case: our own node is running and is the only
+            // thing there is to report on.
+            tprintln!(ctx, "Wallet:       not connected to any node yet");
+        }
         if ctx.embedded_node_running() {
             tprintln!(ctx, "Your node:    {}", Self::sync_step(ctx));
             tprintln!(ctx, "Adopted:      {}", if ctx.embedded_node_in_use() { "yes" } else { "not yet" });
@@ -144,6 +186,18 @@ impl Node {
                 }
                 None => {}
             }
+        }
+        let suppressed = crate::log_sink::suppressed_count();
+        if suppressed > 0 {
+            tprintln!(
+                ctx,
+                "{}",
+                style(format!("Hidden:       {suppressed} node warnings — 'node logs' shows them as they arrive")).dim()
+            );
+        }
+        if !connected {
+            tprintln!(ctx, "");
+            return;
         }
         match ctx.wallet().rpc_api().get_block_dag_info().await {
             Ok(info) => {

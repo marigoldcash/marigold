@@ -446,6 +446,17 @@ impl KaspaCli {
         self.start_node_with_handover_inner(false).await
     }
 
+    /// Start the node without touching the wallet's connection.
+    ///
+    /// For callers that are themselves inside the connect command: routing
+    /// back through `exec_within("connect public")` from there re-enters the
+    /// handler that is still on the stack and the whole CLI stops dead — no
+    /// echo, no prompt, nothing.
+    #[cfg(feature = "embedded-node")]
+    pub async fn start_local_node_now(self: &Arc<Self>) -> Result<()> {
+        self.start_node_with_handover_inner(false).await
+    }
+
     /// Watch the node we started, and move the wallet over when it is ready.
     #[cfg(feature = "embedded-node")]
     fn start_node_handover_task(self: &Arc<Self>, rpc: Rpc) {
