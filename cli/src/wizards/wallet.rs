@@ -1,7 +1,7 @@
 use crate::cli::KaspaCli;
 use crate::imports::*;
 use crate::result::Result;
-use kaspa_bip32::{Language, Mnemonic, WordCount};
+use kaspa_bip32::{Language, Mnemonic};
 use kaspa_wallet_core::storage::keydata::PrvKeyDataVariantKind;
 use kaspa_wallet_core::{
     storage::{Hint, make_filename},
@@ -22,9 +22,6 @@ pub(crate) async fn create(
         Some(locked_guard) => locked_guard,
         None => local_guard.lock().await,
     };
-    // TODO @aspect
-    let word_count = WordCount::Words12;
-
     if let Err(err) = wallet.network_id() {
         tprintln!(ctx);
         tprintln!(ctx, "Before creating a wallet, you need to select a Marigold network.");
@@ -244,8 +241,6 @@ pub(crate) async fn create(
         let account = kaspa_wallet_core::storage::local::notevault::account_mnemonic_from_vault_words(&vault_words)?;
         PrvKeyDataCreateArgs::new(None, payment_secret.clone(), Secret::from(account.phrase_string()), PrvKeyDataVariantKind::Mnemonic)
     };
-
-    let mnemonic_phrase = prv_key_data_args.secret.clone();
 
     let notifier = ctx.notifier().show(Notification::Processing).await;
 

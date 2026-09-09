@@ -31,7 +31,7 @@
 //! public on-chain, and `provenance`/`status` are wallet-internal hygiene, not
 //! secrets (only `sk`, inside the per-note encrypted files, is).
 
-use crate::encryption::{decrypt_xchacha20poly1305_raw_key, encrypt_xchacha20poly1305, encrypt_xchacha20poly1305_raw_key};
+use crate::encryption::{decrypt_xchacha20poly1305_raw_key, encrypt_xchacha20poly1305_raw_key};
 use crate::imports::*;
 use crate::storage::interface::StorageStream;
 use crate::storage::notekeys::{NoteKeyEntry, NoteKeyInfo, NoteProvenance, NoteStatus, NotesChangedApplyResult};
@@ -733,6 +733,9 @@ impl NoteVault {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Only the v1-vault-key tests still write the legacy container, so the
+    // import lives here rather than at module scope, where it read as unused.
+    use crate::encryption::encrypt_xchacha20poly1305;
     use kaspa_rpc_core::message::RpcNoteEntry;
 
     fn make_vault(dir: &tempfile::TempDir) -> NoteVault {

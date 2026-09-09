@@ -123,6 +123,27 @@ impl Node {
         if ctx.embedded_node_running() {
             tprintln!(ctx, "Your node:    {}", Self::sync_step(ctx));
             tprintln!(ctx, "Adopted:      {}", if ctx.embedded_node_in_use() { "yes" } else { "not yet" });
+            // The raw figures behind the step-of-three. 'node status' does not
+            // carry them because they answer nothing anyone asks; here they are
+            // the whole point, since a node that will not sync is diagnosed by
+            // watching which of these stops moving.
+            use crate::log_sink::SyncProgress;
+            match crate::log_sink::sync_progress() {
+                Some(SyncProgress::VerifyingProof { level }) => {
+                    tprintln!(ctx, "{}", style(format!("              proof level {level} of 250, counting down")).dim())
+                }
+                Some(SyncProgress::ChainSegment { headers }) => {
+                    tprintln!(ctx, "{}", style(format!("              {} chain headers", headers.separated_string())).dim())
+                }
+                Some(SyncProgress::Headers { headers, block_time, .. }) => {
+                    let at = block_time.map(|t| format!(", reached blocks from {t}")).unwrap_or_default();
+                    tprintln!(ctx, "{}", style(format!("              {} headers{at}", headers.separated_string())).dim())
+                }
+                Some(SyncProgress::Blocks { blocks, .. }) => {
+                    tprintln!(ctx, "{}", style(format!("              {} blocks", blocks.separated_string())).dim())
+                }
+                None => {}
+            }
         }
         match ctx.wallet().rpc_api().get_block_dag_info().await {
             Ok(info) => {

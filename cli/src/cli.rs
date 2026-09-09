@@ -252,6 +252,9 @@ impl KaspaCli {
 
         // Silent: the callers say different things about the same event, and a
         // fixed paragraph here meant every one of them had to talk over it.
+        // Wipe any progress left by a previous node in this session, or the
+        // first 'node status' reports the old run's step.
+        crate::log_sink::clear_sync_progress();
         let (node, rpc) = crate::embedded::EmbeddedNode::start(network_id, &appdir)?;
         self.embedded_node.lock().unwrap().replace(node);
         Ok(Some(rpc))
@@ -487,6 +490,7 @@ impl KaspaCli {
     pub async fn stop_embedded_node(self: &Arc<Self>) -> Result<()> {
         let node = self.embedded_node.lock().unwrap().take();
         self.embedded_node_adopted.store(false, Ordering::SeqCst);
+        crate::log_sink::clear_sync_progress();
         match node {
             Some(node) => {
                 if !self.wallet.utxo_processor().is_synced() {

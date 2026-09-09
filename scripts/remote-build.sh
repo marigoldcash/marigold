@@ -26,6 +26,19 @@ cd "$(git rev-parse --show-toplevel)"
 BINS=("$@")
 [ ${#BINS[@]} -eq 0 ] && BINS=(marigold-cli)
 
+# Every build gets its own version. The point is that any binary in anyone's
+# hands can be traced back to the source it came from — we have already once
+# shipped an image and been unable to say whether it predated a given commit
+# without hashing it. NO_BUMP=1 skips it when you are rebuilding the same
+# source deliberately.
+#
+# It costs a full rebuild: the version is baked into every crate's fingerprint,
+# so bumping invalidates the whole workspace. That is the trade being made, and
+# it is why this runs on 96 cores rather than here.
+if [ -z "${NO_BUMP:-}" ]; then
+  echo "→ $(./bump-version.sh)"
+fi
+
 echo "→ syncing working tree to $HOST:$REMOTE_DIR"
 $SSH "$HOST" "mkdir -p $REMOTE_DIR"
 rsync -a --delete --info=stats1 \
@@ -40,7 +53,7 @@ for bin in "${BINS[@]}"; do BIN_ARGS="$BIN_ARGS --bin $bin"; done
 if [ -n "${CHECK:-}" ]; then
   echo "→ cargo check on $(basename "$HOST") (96 cores)"
   # shellcheck disable=SC2029
-  $SSH "$HOST" "cd $REMOTE_DIR && cargo check --release $BIN_ARGS 2>&1 | tail -30"
+  $SSH "$HOST" "cd $REMOTE_DIR && cargo check --release --jobs \$(nproc) $BIN_ARGS 2>&1 | tail -30"
   exit 0
 fi
 
@@ -54,11 +67,11 @@ if [ -z "${NO_EMBEDDED_NODE:-}" ]; then
 fi
 echo "→ cargo build --release$BIN_ARGS $FEATURES"
 # shellcheck disable=SC2029
-$SSH "$HOST" "cd $REMOTE_DIR && cargo build --release $BIN_ARGS $FEATURES 2>&1 | tail -30"
+$SSH "$HOST" "cd $REMOTE_DIR && cargo build --release --jobs \$(nproc) $BIN_ARGS $FEATURES 2>&1 | tail -30"
 
 echo "→ fetching binaries"
 mkdir -p target/release
 for bin in "${BINS[@]}"; do
   rsync -a --info=name -e "$SSH" "$HOST:$REMOTE_DIR/target/release/$bin" "target/release/$bin"
 done
-echo "✓ done — target/release/${BINS[*]}"
+echo "✓ done — target/release/${BINS[*]}  ($(awk '/^\[workspace\.package\]/{f=1} f && /^version = "/{print $3; exit}' Cargo.toml))"
