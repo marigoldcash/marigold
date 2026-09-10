@@ -65,6 +65,10 @@ pub struct KaspaCli {
     /// a node exists.
     #[cfg(feature = "embedded-node")]
     embedded_node_adopted: Arc<AtomicBool>,
+    /// The CPU miner, while it is running. Only ever set when the wallet is on
+    /// its own node — see `start_mining`.
+    #[cfg(feature = "embedded-node")]
+    cpu_miner: Mutex<Option<Arc<crate::miner::Miner>>>,
     auto_payment_secret: Mutex<Option<Secret>>,
     auto_threshold_petals: Arc<AtomicU64>,
     /// 0 disables auto-sweep; otherwise the UTXO count that triggers one.
@@ -170,6 +174,8 @@ impl KaspaCli {
             embedded_node: Mutex::new(None),
             #[cfg(feature = "embedded-node")]
             embedded_node_adopted: Arc::new(AtomicBool::new(false)),
+            #[cfg(feature = "embedded-node")]
+            cpu_miner: Mutex::new(None),
             auto_payment_secret: Mutex::new(None),
             auto_threshold_petals: Arc::new(AtomicU64::new(0)),
             auto_sweep_utxos: Arc::new(AtomicU64::new(0)),
@@ -369,6 +375,8 @@ impl KaspaCli {
             self.adopt_embedded_node(rpc).await?;
             tprintln!(self, "{}", style("Your node is caught up. Using it — nobody else sees your notes.").green());
             tprintln!(self, "");
+            tprintln!(self, "You can mine with spare CPU — 'mine start'.");
+            tprintln!(self, "");
             return Ok(());
         }
 
@@ -484,6 +492,11 @@ impl KaspaCli {
                         tprintln!(this, "{}", style("Your node has caught up. The wallet is now using it —").green());
                         tprintln!(this, "{}", style("nobody else sees your address or which notes you hold.").green());
                         tprintln!(this, "");
+                        // The moment this becomes true is the moment to say
+                        // it: mining needs your own synced node, and this is
+                        // the only point at which the wallet knows it has one.
+                        tprintln!(this, "You can now mine with spare CPU — 'mine start'.");
+                        tprintln!(this, "");
                         this.term().refresh_prompt();
                         this.request_open_housekeeping();
                     }
@@ -495,6 +508,213 @@ impl KaspaCli {
                 break;
             }
         });
+    }
+
+
+    /// `mine start [percent]` — lend the machine's spare CPU to the network.
+    ///
+    /// Asks for a percentage rather than a thread count because that is the
+    /// question people can actually answer about their own computer. The
+    /// threads run under SCHED_IDLE, so the honest description of what they
+    /// take is "whatever nothing else wanted".
+    #[cfg(feature = "embedded-node")]
+    pub async fn start_mining(self: &Arc<Self>, arg: Option<String>) -> Result<()> {
+        if self.cpu_miner.lock().unwrap().is_some() {
+            tprintln!(self, "Already mining — 'mine status' for how it is going.");
+            return Ok(());
+        }
+        // Mining against somebody else's node would hand them the address your
+        // rewards are paid to, which is the one thing this wallet works to keep
+        // off other people's machines.
+        if !self.embedded_node_in_use() {
+            tprintln!(self, "");
+            if self.embedded_node_pending() {
+                tprintln!(self, "Your node is still catching up. Mining starts once it is ready —");
+                tprintln!(self, "'node status' shows how far along it is.");
+            } else {
+                tprintln!(self, "Mining needs your own node. Type 'node start' to run one.");
+                tprintln!(self, "{}", style("Asking a public node for work would tell its operator which address").dim());
+                tprintln!(self, "{}", style("your coins are paid to, which is the one thing worth not sharing.").dim());
+            }
+            tprintln!(self, "");
+            return Ok(());
+        }
+        let account = match self.wallet.account() {
+            Ok(account) => account,
+            Err(_) => {
+                tprintln!(self, "Open a wallet first — mined coins have to be paid to an address.");
+                return Ok(());
+            }
+        };
+        let address = account.receive_address()?;
+
+        let cores = crate::miner::cores();
+        let percent = match arg {
+            Some(text) => match text.trim().trim_end_matches('%').parse::<u32>() {
+                Ok(value) if (1..=100).contains(&value) => value,
+                _ => {
+                    tprintln!(self, "'{text}' is not a percentage between 1 and 100.");
+                    return Ok(());
+                }
+            },
+            None => {
+                tprintln!(self, "");
+                tpara!(
+                    self,
+                    "Mining runs on whatever your machine is not otherwise using. It is set to the \
+                    lowest priority the system has, so it steps aside the moment anything else wants \
+                    the processor — you should not be able to feel it. "
+                );
+                tprintln!(self, "");
+                let answer = self
+                    .term()
+                    .ask(false, &format!("How much of this machine may it use? [1-100%, default 50]: "))
+                    .await?
+                    .trim()
+                    .trim_end_matches('%')
+                    .to_string();
+                if answer.is_empty() {
+                    50
+                } else {
+                    match answer.parse::<u32>() {
+                        Ok(value) if (1..=100).contains(&value) => value,
+                        _ => {
+                            tprintln!(self, "'{answer}' is not a percentage between 1 and 100 — nothing started.");
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+        };
+
+        let (miner, solutions) = crate::miner::Miner::start(percent);
+        self.cpu_miner.lock().unwrap().replace(miner.clone());
+
+        tprintln!(self, "");
+        tprintln!(
+            self,
+            "{}",
+            style(format!("Mining started — {percent}% of this machine ({} of {cores} cores).", miner.thread_count())).green()
+        );
+        tprintln!(self, "{}", style("It yields to anything else that needs the processor.").dim());
+        tprintln!(self, "Rewards are paid to this wallet and become notes on their own.");
+        tprintln!(self, "'mine status' to check, 'mine stop' to stop.");
+        tprintln!(self, "");
+
+        // One task owns both halves: fetching work and submitting what comes
+        // back. Keeping them together means there is a single place where the
+        // job generation is advanced, so a solution can never be matched
+        // against a template that has already been replaced.
+        let this = self.clone();
+        let miner_task = miner.clone();
+        workflow_core::task::spawn(async move {
+            let extra = format!("marigold-wallet/{}", env!("CARGO_PKG_VERSION")).into_bytes();
+            let mut last_refresh = std::time::Instant::now() - std::time::Duration::from_secs(60);
+            loop {
+                if !miner_task.is_running() || this.shutdown.load(Ordering::SeqCst) {
+                    break;
+                }
+                if last_refresh.elapsed() >= std::time::Duration::from_millis(crate::miner::TEMPLATE_REFRESH_MS) {
+                    last_refresh = std::time::Instant::now();
+                    match this.wallet.rpc_api().get_block_template(address.clone(), extra.clone()).await {
+                        Ok(response) => {
+                            // Building on a chain the node has not finished
+                            // reading produces blocks nobody will accept.
+                            if response.is_synced {
+                                match kaspa_consensus_core::block::Block::try_from(response.block) {
+                                    Ok(block) => miner_task.set_job(block),
+                                    Err(err) => log_warn!("mine: unusable block template ({err})"),
+                                }
+                            }
+                        }
+                        Err(err) => log_warn!("mine: could not get work ({err})"),
+                    }
+                }
+                // Drain whatever the threads found since the last pass.
+                while let Ok(solution) = solutions.try_recv() {
+                    let Some(rpc_block) = miner_task.block_for(&solution) else { continue };
+                    match this.wallet.rpc_api().submit_block(rpc_block, false).await {
+                        Ok(_) => {
+                            miner_task.record_accepted();
+                            tprintln!(this, "");
+                            tprintln!(this, "{}", style("You mined a block.").green());
+                            tprintln!(this, "{}", style("The reward lands in this wallet and becomes notes on its own.").dim());
+                            tprintln!(this, "");
+                            this.term().refresh_prompt();
+                        }
+                        Err(err) => {
+                            miner_task.record_rejected();
+                            log_warn!("mine: block not accepted ({err})");
+                        }
+                    }
+                }
+                workflow_core::task::sleep(Duration::from_millis(100)).await;
+            }
+        });
+        Ok(())
+    }
+
+    #[cfg(feature = "embedded-node")]
+    pub async fn stop_mining(self: &Arc<Self>) -> Result<()> {
+        let miner = self.cpu_miner.lock().unwrap().take();
+        match miner {
+            Some(miner) => {
+                let found = miner.blocks_found();
+                miner.stop();
+                tprintln!(self, "Mining stopped.");
+                if found > 0 {
+                    tprintln!(self, "Found {} block(s) this run.", found.separated_string());
+                }
+                Ok(())
+            }
+            None => {
+                tprintln!(self, "Not mining.");
+                Ok(())
+            }
+        }
+    }
+
+    #[cfg(feature = "embedded-node")]
+    pub async fn mining_status(self: &Arc<Self>) {
+        let miner = self.cpu_miner.lock().unwrap().clone();
+        tprintln!(self, "");
+        match miner {
+            Some(miner) => {
+                tprintln!(
+                    self,
+                    "Mining: {} of {} cores ({}% of this machine)",
+                    miner.thread_count(),
+                    crate::miner::cores(),
+                    miner.percent()
+                );
+                tprintln!(self, "Speed:  {}", crate::miner::format_hashrate(miner.hashrate()));
+                let found = miner.blocks_found();
+                if found == 0 {
+                    tprintln!(self, "Blocks: none yet");
+                    tprintln!(self, "{}", style("Finding one is luck. Leaving it running is the whole technique.").dim());
+                } else {
+                    tprintln!(
+                        self,
+                        "Blocks: {} found, {} accepted{}",
+                        found.separated_string(),
+                        miner.blocks_accepted().separated_string(),
+                        match miner.blocks_rejected() {
+                            0 => String::new(),
+                            n => format!(", {} not accepted", n.separated_string()),
+                        }
+                    );
+                }
+            }
+            None => {
+                tprintln!(self, "Not mining.");
+                if self.embedded_node_in_use() {
+                    tprintln!(self, "'mine start' begins, using whatever CPU nothing else wants.");
+                } else {
+                    tprintln!(self, "Mining needs your own node — 'node start'.");
+                }
+            }
+        }
+        tprintln!(self, "");
     }
 
     #[cfg(feature = "embedded-node")]

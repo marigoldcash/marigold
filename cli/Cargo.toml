@@ -35,6 +35,7 @@ name = "kaspa_cli_lib"
 crate-type = ["cdylib", "lib"]
 
 [dependencies]
+arc-swap.workspace = true
 async-trait.workspace = true
 borsh.workspace = true
 cfg-if.workspace = true
@@ -55,6 +56,7 @@ chrono.workspace = true
 log.workspace = true
 kaspa-daemon.workspace = true
 kaspa-metrics-core.workspace = true
+kaspa-pow.workspace = true
 kaspa-rpc-core.workspace = true
 kaspa-utils.workspace = true
 kaspa-wallet-core.workspace = true
@@ -62,6 +64,8 @@ kaspa-wallet-keys.workspace = true
 kaspa-wallet-pskt.workspace = true
 kaspa-wrpc-client.workspace = true
 nw-sys.workspace = true
+num_cpus.workspace = true
+rand.workspace = true
 pad.workspace = true
 qrcode.workspace = true
 regex.workspace = true
@@ -79,6 +83,7 @@ workflow-nw.workspace = true
 workflow-store.workspace = true
 workflow-terminal.workspace = true
 workflow-wasm.workspace = true
+libc = "0.2"
 fs4 = { version = "0.13", default-features = false, features = ["sync"], optional = true }
 
 [dependencies.web-sys]

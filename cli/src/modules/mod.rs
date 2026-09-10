@@ -34,6 +34,8 @@ pub mod node;
 #[cfg(feature = "embedded-node")]
 #[path = "embnode.rs"]
 pub mod node;
+#[cfg(feature = "embedded-node")]
+pub mod mine;
 pub mod note;
 pub mod open;
 pub mod ping;
@@ -80,6 +82,13 @@ pub fn register_handlers(cli: &Arc<KaspaCli>) -> Result<()> {
     // Registered separately so the everyday command list is identical whether
     // or not the node is compiled in: a build without the feature simply has no
     // `node` verb, rather than one that reports itself unavailable.
+    //
+    // The same for `mine`. It hashes in this process against this process's
+    // node, so without the node compiled in there is nothing for it to mine
+    // against. (The older `miner` verb is a different thing entirely — it
+    // configures an external kaspa-miner binary — and stays under 'advanced'.)
+    #[cfg(feature = "embedded-node")]
+    register_handlers!(cli, cli.handlers(), [mine]);
 
     Ok(())
 }

@@ -10,6 +10,8 @@ pub mod extensions;
 mod helpers;
 mod imports;
 mod matchers;
+#[cfg(feature = "embedded-node")]
+pub mod miner;
 pub mod modules;
 mod notifier;
 pub mod result;
