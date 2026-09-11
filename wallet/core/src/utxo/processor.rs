@@ -490,7 +490,7 @@ impl UtxoProcessor {
                     utxo_context.handle_utxo_removed(entries, current_daa_score).await?;
                 }
             } else {
-                log_error!("receiving UTXO Changed 'removed' notification for an unknown address: {}", address);
+                log_trace!("ignoring UTXO Changed 'removed' notification for an address this wallet does not track: {}", address);
             }
         }
 
@@ -503,7 +503,7 @@ impl UtxoProcessor {
                     utxo_context.handle_utxo_added(entries, current_daa_score).await?;
                 }
             } else {
-                log_error!("receiving UTXO Changed 'added' notification for an unknown address: {}", address);
+                log_trace!("ignoring UTXO Changed 'added' notification for an address this wallet does not track: {}", address);
             }
         }
 

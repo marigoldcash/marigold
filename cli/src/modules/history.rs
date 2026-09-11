@@ -18,6 +18,38 @@ impl History {
             return Ok(());
         }
 
+        // Handled before an account is required: this is a setting, not a
+        // query, and it should work whether or not a wallet is open.
+        if argv[0] == "detail" {
+            let current: bool = ctx.wallet().settings().get(WalletSettings::HistoryDetail).unwrap_or(false);
+            match argv.get(1).map(|s| s.as_str()) {
+                Some("on") => {
+                    ctx.wallet().settings().set(WalletSettings::HistoryDetail, true).await?;
+                    tprintln!(ctx, "History detail is on — the wallet's internal bookkeeping is recorded too.");
+                    tprintln!(ctx, "{}", style("Reorgs, change and batch entries. Useful for diagnosis, noisy otherwise.").dim());
+                }
+                Some("off") => {
+                    ctx.wallet().settings().set(WalletSettings::HistoryDetail, false).await?;
+                    tprintln!(ctx, "History detail is off — only money arriving and leaving is recorded.");
+                }
+                _ => {
+                    tprintln!(ctx, "History detail is {}.", if current { "on" } else { "off" });
+                    tprintln!(ctx, "");
+                    tprintln!(ctx, "Off records only what you would recognise as a transaction: money in,");
+                    tprintln!(ctx, "money out, transfers between your own accounts.");
+                    tprintln!(ctx, "On also records the wallet's own bookkeeping — reorgs, change and the");
+                    tprintln!(ctx, "batches a large payment is assembled from. Diagnosis only; it is a lot.");
+                    tprintln!(ctx, "");
+                    tprintln!(ctx, "usage: 'history detail on' | 'history detail off'");
+                }
+            }
+            return Ok(());
+        }
+
+        if argv[0] == "clear" {
+            return Self::clear(&ctx, argv.get(1).map(|s| s.as_str()) == Some("all")).await;
+        }
+
         let account = ctx.account().await?;
         let network_id = ctx.wallet().network_id()?;
         let binding = Binding::from(&account);
@@ -139,12 +171,83 @@ impl History {
         Ok(())
     }
 
+    /// `history clear [all]` — delete transaction records.
+    ///
+    /// Records are history, never money: a restore needs the wallet file and
+    /// the note vault and nothing from here. Deleting them costs you the
+    /// ability to look back, and nothing else.
+    async fn clear(ctx: &Arc<KaspaCli>, all: bool) -> Result<()> {
+        let configured: String = ctx
+            .wallet()
+            .settings()
+            .get(WalletSettings::Folder)
+            .unwrap_or_else(|| kaspa_wallet_core::storage::local::default_storage_folder().to_string());
+        let folder = workflow_store::fs::resolve_path(&configured)?;
+
+        // Which .transactions folders to remove: this wallet's, or every one.
+        let mut targets: Vec<std::path::PathBuf> = Vec::new();
+        if all {
+            if let Ok(entries) = std::fs::read_dir(&folder) {
+                for entry in entries.flatten() {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    if name.ends_with(".transactions") && entry.path().is_dir() {
+                        targets.push(entry.path());
+                    }
+                }
+            }
+        } else {
+            let Some(descriptor) = ctx.store().descriptor() else {
+                tprintln!(ctx, "Open a wallet first, or use 'history clear all'.");
+                return Ok(());
+            };
+            let path = folder.join(format!("{}.transactions", descriptor.filename));
+            if path.is_dir() {
+                targets.push(path);
+            }
+        }
+
+        if targets.is_empty() {
+            tprintln!(ctx, "No history to clear.");
+            return Ok(());
+        }
+
+        // Counting five million files takes long enough to look like a hang,
+        // so report size rather than count and get on with it.
+        tprintln!(ctx, "");
+        for path in &targets {
+            tprintln!(ctx, "  {}", path.display());
+        }
+        tprintln!(ctx, "");
+        tprintln!(ctx, "{}", style("This deletes transaction history only. Your wallet and your notes are").dim());
+        tprintln!(ctx, "{}", style("untouched — history is not needed to restore anything.").dim());
+        let answer = ctx.term().ask(false, &format!("Delete {} history folder(s)? [y/N]: ", targets.len())).await?;
+        if !answer.trim().to_lowercase().starts_with('y') {
+            tprintln!(ctx, "Left alone.");
+            return Ok(());
+        }
+
+        let mut removed = 0usize;
+        for path in &targets {
+            match std::fs::remove_dir_all(path) {
+                Ok(()) => removed += 1,
+                Err(err) => tprintln!(ctx, "Could not remove {}: {err}", path.display()),
+            }
+        }
+        tprintln!(ctx, "");
+        tprintln!(ctx, "Cleared {removed} history folder(s).");
+        tprintln!(ctx, "");
+        Ok(())
+    }
+
     async fn display_help(self: Arc<Self>, ctx: Arc<KaspaCli>, _argv: Vec<String>) -> Result<()> {
         ctx.term().help(
             &[
                 ("list [<last N transactions>]", "List transactions"),
                 ("details [<last N transactions>]", "List transactions with UTXO details"),
                 ("lookup <transaction id>", "Lookup transaction in the history"),
+                ("detail [on|off]", "Whether the wallet's own bookkeeping is recorded too (default off)"),
+                ("clear", "Delete this wallet's transaction history (not your notes)"),
+                ("clear all", "Delete the transaction history of every wallet in the folder"),
             ],
             None,
         )?;

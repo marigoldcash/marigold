@@ -697,6 +697,13 @@ impl Interface for LocalStore {
         let location = self.location.lock().unwrap().clone().unwrap();
 
         let folder = fs::resolve_path(&location.folder)?;
+        // A storage folder that does not exist yet holds no wallets — it is
+        // not an error. Before this, a first-ever run answered 'open' with
+        // "I/O error: No such file or directory", which is true and useless:
+        // the folder is created when the first wallet is.
+        if !folder.exists() {
+            return Ok(vec![]);
+        }
         let files = fs::readdir(folder.clone(), false).await?;
         let wallets = files
             .iter()

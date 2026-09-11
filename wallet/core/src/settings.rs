@@ -25,6 +25,8 @@ pub enum WalletSettings {
     Wallet,
     #[describe("Wallet storage folder (default ~/.marigold; this settings file itself always stays in ~/.marigold)")]
     Folder,
+    #[describe("Record the wallet's internal bookkeeping in history too (default off; see 'history detail')")]
+    HistoryDetail,
 }
 
 #[async_trait]

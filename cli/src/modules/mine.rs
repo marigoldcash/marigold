@@ -10,8 +10,21 @@ impl Mine {
         match argv.first().map(|s| s.as_str()) {
             Some("start") => ctx.start_mining(argv.get(1).cloned()).await,
             Some("stop") => ctx.stop_mining().await,
-            Some("status") | None => {
+            Some("status") => {
                 ctx.mining_status().await;
+                Ok(())
+            }
+            // Bare 'mine' asks what this does, so answer that rather than
+            // silently running one of its subcommands.
+            None => {
+                ctx.term().help(
+                    &[
+                        ("start [<percent>]", "Mine with spare CPU (asks how much of the machine; default 50%)"),
+                        ("stop", "Stop mining"),
+                        ("status", "Speed, how much of the machine, and blocks found"),
+                    ],
+                    None,
+                )?;
                 Ok(())
             }
             Some(other) => {

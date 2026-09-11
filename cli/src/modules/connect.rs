@@ -32,11 +32,12 @@ impl Connect {
 
             // A cleared setting is stored as an empty string; treat it as absent,
             // or `connect` would try to dial "" instead of a public node.
+            let typed_a_target = argv.first().is_some();
             let arg_or_server_address = argv
                 .first()
                 .cloned()
                 .or_else(|| ctx.wallet().settings().get::<String>(WalletSettings::Server).filter(|s| !s.trim().is_empty()));
-            let (is_public, url) = match arg_or_server_address.as_deref() {
+            let (mut is_public, url) = match arg_or_server_address.as_deref() {
                 // No public nodes exist for Marigold yet, so say that rather
                 // than fail against an empty list — and certainly rather than
                 // reach for Kaspa's public node network, which this fork used
@@ -84,13 +85,37 @@ impl Connect {
             };
 
             let url_label = url.clone();
-            let options = ConnectOptions {
+            let dial = |target: String| ConnectOptions {
                 block_async_connect: true,
                 strategy: ConnectStrategy::Fallback,
-                url: Some(url),
+                url: Some(target),
                 ..Default::default()
             };
-            if let Err(err) = wrpc_client.connect(Some(options)).await {
+            let mut outcome = wrpc_client.connect(Some(dial(url))).await;
+
+            // A remembered node that is not answering should not leave the
+            // wallet with nothing. Typing an address is a statement of intent
+            // and is reported as-is; a saved default is just a preference, so
+            // fall back to a public node and bring your own up behind it.
+            let mut fell_back = false;
+            if outcome.is_err() && !is_public && !typed_a_target {
+                let public = kaspa_wrpc_client::resolver::public_nodes(network_id);
+                if let Some(node) = public.into_iter().next() {
+                    tprintln!(ctx, "");
+                    tprintln!(ctx, "{}", style(format!("{url_label} is not answering.")).yellow());
+                    tprintln!(ctx, "Using a public node for now, and starting your own behind it.");
+                    tprintln!(ctx, "");
+                    if let Ok(target) = wrpc_client.parse_url_with_network_type(node, network_id.into()) {
+                        outcome = wrpc_client.connect(Some(dial(target))).await;
+                        if outcome.is_ok() {
+                            is_public = true;
+                            fell_back = true;
+                        }
+                    }
+                }
+            }
+
+            if let Err(err) = outcome {
                 tprintln!(ctx, "");
                 if is_public {
                     tprintln!(ctx, "{}", style("Could not reach the public node.").yellow());
@@ -137,7 +162,7 @@ impl Connect {
             // "run your own instead" is a question about a thing that might
             // not have worked.
             #[cfg(feature = "embedded-node")]
-            if want_local {
+            if want_local || fell_back {
                 ctx.start_local_node_now().await?;
             } else if is_public {
                 ctx.offer_local_node().await?;

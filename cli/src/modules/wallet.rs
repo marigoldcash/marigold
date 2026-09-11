@@ -89,8 +89,23 @@ impl Wallet {
                     }
                     match wallets.len() {
                         0 => {
-                            tprintln!(ctx, "No wallets to show — create one with 'wallet create <name>' (hidden ones: 'wallet list')");
-                            return Ok(());
+                            // Someone who types 'open' with no wallet is at the
+                            // very start, and the useful thing is to take them
+                            // to the next step rather than name a command and
+                            // leave them to type it.
+                            tprintln!(ctx, "");
+                            tprintln!(ctx, "You do not have a wallet yet.");
+                            tprintln!(ctx, "");
+                            let answer = ctx.term().ask(false, "Create one now? [Y/n]: ").await?.trim().to_lowercase();
+                            if answer.starts_with('n') {
+                                tprintln!(ctx, "");
+                                tprintln!(ctx, "Nothing opened. 'wallet create' when you are ready.");
+                                tprintln!(ctx, "{}", style("(a wallet you have hidden with 'wallet forget' still shows in 'wallet list')").dim());
+                                tprintln!(ctx, "");
+                                return Ok(());
+                            }
+                            tprintln!(ctx, "");
+                            return wizards::wallet::create(&ctx, guard.into(), None, false).await;
                         }
                         1 => Some(wallets[0].filename.clone()),
                         _ => {
@@ -369,11 +384,22 @@ impl Wallet {
                 tprintln!(ctx, "'{name}' destroyed.");
             }
             "where" => {
-                let folder: String = ctx
+                // Absolute paths, always. "~/.marigold" is a true answer that
+                // helps nobody inside a container, where it means a directory
+                // in a Docker volume the person has never seen — and this
+                // command exists precisely so somebody can find their money.
+                let configured: String = ctx
                     .wallet()
                     .settings()
                     .get(WalletSettings::Folder)
                     .unwrap_or_else(|| kaspa_wallet_core::storage::local::default_storage_folder().to_string());
+                let folder = workflow_store::fs::resolve_path(&configured)
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|_| configured.clone());
+                let settings_folder = workflow_store::fs::resolve_path(kaspa_wallet_core::storage::local::default_storage_folder())
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|_| kaspa_wallet_core::storage::local::default_storage_folder().to_string());
+
                 tprintln!(ctx, "");
                 if ctx.wallet().is_open() {
                     if let Some(descriptor) = ctx.store().descriptor() {
@@ -384,13 +410,19 @@ impl Wallet {
                 } else {
                     tprintln!(ctx, "Wallet folder:  {folder}  (no wallet open — 'wallet list' shows the files)");
                 }
-                tprintln!(
-                    ctx,
-                    "Settings file:  {}/marigold.settings",
-                    kaspa_wallet_core::storage::local::default_storage_folder()
-                );
+                tprintln!(ctx, "Settings file:  {settings_folder}/marigold.settings");
                 tprintln!(ctx, "");
-                tprintln!(ctx, "These files ARE your money and your keys — back them up accordingly.");
+                tprintln!(ctx, "Your money is the wallet file and the note vault. The transactions folder is");
+                tprintln!(ctx, "history only — 'wallet backup <file>' takes exactly what a restore needs.");
+
+                // In a container that path is inside the image unless somebody
+                // mounted something over it, and saying so is the difference
+                // between a person finding their keys and losing them.
+                if std::path::Path::new("/.dockerenv").exists() {
+                    tprintln!(ctx, "");
+                    tprintln!(ctx, "{}", style("This wallet is running inside a container. That path is only real on").yellow());
+                    tprintln!(ctx, "{}", style("the host if a folder was mounted over it — check your compose file.").yellow());
+                }
                 tprintln!(ctx, "");
             }
             "autoconnect" => {

@@ -1063,11 +1063,33 @@ impl Wallet {
         Ok(())
     }
 
+    /// Whether a record describes money moving, as opposed to the wallet
+    /// talking to itself.
+    ///
+    /// The four excluded kinds are the machinery: a reorg is the DAG changing
+    /// its mind, stasis is a coinbase waiting, change and batch are artefacts
+    /// of how a payment had to be assembled. Three of them carry a note in
+    /// their own definition saying clients should ignore them — and yet every
+    /// one was being written to disk as a permanent record, one file each.
+    ///
+    /// On a ten-blocks-per-second DAG that came to roughly 750,000 records a
+    /// day, 21 GB and five million files in a week, which made `history list`
+    /// unusable and would have filled the disk inside a year. Nothing ever
+    /// pruned them, because nothing ever called the store's remove().
+    ///
+    /// 'history detail on' puts them back for anyone diagnosing the wallet
+    /// itself.
+    fn is_worth_recording(record: &TransactionRecord) -> bool {
+        use crate::storage::transaction::TransactionKind::*;
+        !matches!(record.kind(), Reorg | Stasis | Change | Batch)
+    }
+
     async fn handle_event(self: &Arc<Self>, event: Box<Events>) -> Result<()> {
-        if let Events::Pending { record } | Events::Maturity { record } | Events::Reorg { record } = &*event
-            && !record.is_change()
-        {
-            self.store().as_transaction_record_store()?.store(&[record]).await?;
+        if let Events::Pending { record } | Events::Maturity { record } | Events::Reorg { record } = &*event {
+            let detailed = self.settings().get::<bool>(WalletSettings::HistoryDetail).unwrap_or(false);
+            if detailed || Self::is_worth_recording(record) {
+                self.store().as_transaction_record_store()?.store(&[record]).await?;
+            }
         }
 
         Ok(())

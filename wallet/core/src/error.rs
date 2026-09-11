@@ -28,7 +28,7 @@ pub enum Error {
     #[error(transparent)]
     WalletKeys(#[from] kaspa_wallet_keys::error::Error),
 
-    #[error("please select an account")]
+    #[error("Please open your wallet, then try again.")]
     AccountSelection,
 
     #[error("{0}")]

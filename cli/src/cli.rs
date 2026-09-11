@@ -635,12 +635,11 @@ impl KaspaCli {
                     let Some(rpc_block) = miner_task.block_for(&solution) else { continue };
                     match this.wallet.rpc_api().submit_block(rpc_block, false).await {
                         Ok(_) => {
+                            // Deliberately silent. Announcing each block put a
+                            // three-line interruption on the terminal every
+                            // time one landed, on top of whatever the person
+                            // was typing. 'mine status' reports the total.
                             miner_task.record_accepted();
-                            tprintln!(this, "");
-                            tprintln!(this, "{}", style("You mined a block.").green());
-                            tprintln!(this, "{}", style("The reward lands in this wallet and becomes notes on its own.").dim());
-                            tprintln!(this, "");
-                            this.term().refresh_prompt();
                         }
                         Err(err) => {
                             miner_task.record_rejected();

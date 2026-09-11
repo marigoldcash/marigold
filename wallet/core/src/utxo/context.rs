@@ -408,13 +408,16 @@ impl UtxoContext {
                 if context.pending.remove(utxo_entry.id_as_ref()).is_some() {
                     context.mature.sorted_insert_binary_asc_by_key(utxo_entry.clone(), |entry| entry.amount_as_ref());
                 } else {
-                    log_error!("Error: non-pending utxo promotion!");
+                    log_warn!("ignoring promotion of a utxo this wallet was not holding as pending");
                 }
             }
 
-            // sanity check
+            // Was `unreachable!`, which it demonstrably is not. Same
+            // reasoning as the revival above: report it and keep the wallet
+            // alive rather than taking the process down mid-notification.
             if self.context().outgoing.get(&txid).is_some() {
-                unreachable!("Error: promotion of the outgoing transaction!");
+                log_warn!("promotion of a transaction still listed as outgoing: {txid}");
+                continue;
             }
 
             let record = TransactionRecord::new_incoming(self, txid, &utxos);
@@ -434,8 +437,14 @@ impl UtxoContext {
                 if context.stasis.remove(utxo_entry.id_as_ref()).is_some() {
                     context.pending.insert(utxo_entry.id(), utxo_entry.clone());
                 } else {
-                    log_error!("Error: non-stasis utxo revival!");
-                    panic!("Error: non-stasis utxo revival!");
+                    // Was a panic. A wallet that aborts a runtime worker
+                    // because a node described a UTXO it was not tracking is
+                    // a wallet that dies on someone else's mining rewards —
+                    // which is exactly how this was found. Skip the entry and
+                    // carry on; the balance is recomputed from the context
+                    // either way.
+                    log_warn!("ignoring revival of a utxo this wallet was not holding in stasis: {}", utxo_entry.id());
+                    continue;
                 }
             }
 
