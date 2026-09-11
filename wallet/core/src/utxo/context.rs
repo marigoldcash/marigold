@@ -408,7 +408,7 @@ impl UtxoContext {
                 if context.pending.remove(utxo_entry.id_as_ref()).is_some() {
                     context.mature.sorted_insert_binary_asc_by_key(utxo_entry.clone(), |entry| entry.amount_as_ref());
                 } else {
-                    log_warn!("ignoring promotion of a utxo this wallet was not holding as pending");
+                    log_trace!("ignoring promotion of a utxo this wallet was not holding as pending");
                 }
             }
 
@@ -416,7 +416,7 @@ impl UtxoContext {
             // reasoning as the revival above: report it and keep the wallet
             // alive rather than taking the process down mid-notification.
             if self.context().outgoing.get(&txid).is_some() {
-                log_warn!("promotion of a transaction still listed as outgoing: {txid}");
+                log_trace!("promotion of a transaction still listed as outgoing: {txid}");
                 continue;
             }
 
@@ -443,7 +443,7 @@ impl UtxoContext {
                     // which is exactly how this was found. Skip the entry and
                     // carry on; the balance is recomputed from the context
                     // either way.
-                    log_warn!("ignoring revival of a utxo this wallet was not holding in stasis: {}", utxo_entry.id());
+                    log_trace!("ignoring revival of a utxo this wallet was not holding in stasis: {}", utxo_entry.id());
                     continue;
                 }
             }

@@ -69,6 +69,9 @@ pub struct KaspaCli {
     /// its own node — see `start_mining`.
     #[cfg(feature = "embedded-node")]
     cpu_miner: Mutex<Option<Arc<crate::miner::Miner>>>,
+    /// True while the UTXO set is being read in, which on a wallet that has
+    /// been mined into is minutes of work with nothing to show for it.
+    loading: Arc<AtomicBool>,
     auto_payment_secret: Mutex<Option<Secret>>,
     auto_threshold_petals: Arc<AtomicU64>,
     /// 0 disables auto-sweep; otherwise the UTXO count that triggers one.
@@ -176,6 +179,7 @@ impl KaspaCli {
             embedded_node_adopted: Arc::new(AtomicBool::new(false)),
             #[cfg(feature = "embedded-node")]
             cpu_miner: Mutex::new(None),
+            loading: Arc::new(AtomicBool::new(false)),
             auto_payment_secret: Mutex::new(None),
             auto_threshold_petals: Arc::new(AtomicU64::new(0)),
             auto_sweep_utxos: Arc::new(AtomicU64::new(0)),
@@ -948,8 +952,55 @@ impl KaspaCli {
     /// Show what the wallet holds: notes, then the ledger — and the ledger
     /// only when it holds something, because for anyone but an exchange it
     /// should be empty most of the time.
-    pub async fn report_holdings(self: &Arc<Self>) {
+    /// Count the UTXO set in as it is read, so a long load looks like work.
+    ///
+    /// A wallet that has been mined into holds millions of coinbase outputs —
+    /// this one had 2.9 million — and reading them takes a minute during which
+    /// the only output was the word "Loading". A number that climbs is the
+    /// difference between waiting and wondering whether it has hung.
+    ///
+    /// Counted rather than given as a percentage: the total is known inside
+    /// the scanner and is not reported out of it, so a percentage here would
+    /// have to be invented.
+    fn start_loading_progress(self: &Arc<Self>) {
+        if self.loading.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let this = self.clone();
+        workflow_core::task::spawn(async move {
+            let term = this.term();
+            term.writeln("Loading...");
+            let mut last = 0usize;
+            while this.loading.load(Ordering::SeqCst) && !this.shutdown.load(Ordering::SeqCst) {
+                workflow_core::task::sleep(Duration::from_millis(700)).await;
+                if !this.loading.load(Ordering::SeqCst) {
+                    break;
+                }
+                let Ok(account) = this.wallet.account() else { continue };
+                let context = account.utxo_context();
+                let count = context.mature_utxo_size() + context.pending_utxo_size();
+                if count != last {
+                    last = count;
+                    // \r rather than a new line: one line that is rewritten,
+                    // not a minute of scrollback.
+                    term.write(format!("\r  {} coins read...", count.separated_string()));
+                }
+            }
+            if last > 0 {
+                term.writeln(format!("\r  {} coins read.   ", last.separated_string()));
+            }
+        });
+    }
+
+    /// Stop the counter. Called when the figures are about to be printed,
+    /// which is the moment the load has finished mattering.
+    fn finish_loading_progress(&self) {
+        self.loading.store(false, Ordering::SeqCst);
+    }
+
+    pub async fn report_holdings(self: &Arc<Self>) -> u64 {
         self.wait_for_account().await;
+        self.finish_loading_progress();
         let (notes, ledger, pieces) = self.total_holdings().await;
         // Keep the prompt's figure in step, so it is right from the moment a
         // wallet opens rather than after the first minute tick.
@@ -990,6 +1041,7 @@ impl KaspaCli {
             }
         }
         tprintln!(self, "");
+        notes
     }
 
     /// The ledger housekeeping sequence, in order and never overlapping:
@@ -1014,6 +1066,13 @@ impl KaspaCli {
     }
 
     pub async fn run_housekeeping(self: &Arc<Self>, announce: bool) {
+        // Nothing housekeeping has to say during shutdown is worth hearing.
+        // The wallet is going away, the node connection goes first, and every
+        // message it then produces describes that — printed after "bye!", over
+        // a shell prompt that has already come back.
+        if self.shutdown.load(Ordering::SeqCst) {
+            return;
+        }
         let loud = announce || self.auto_verbose();
         // "Armed" means something is actually configured to run — holding the
         // secret is not the same thing, and conflating them made a wallet with
@@ -1261,9 +1320,13 @@ impl KaspaCli {
                 // ran to 42,605 coins (founder report, 2026-09-06).
                 if this.open_housekeeping_pending.swap(false, Ordering::SeqCst) {
                     last_run = Instant::now();
-                    this.report_holdings().await;
+                    let before = this.report_holdings().await;
                     this.run_housekeeping(true).await;
-                    this.report_holdings().await;
+                    // Only say it twice if it changed. Printing the same
+                    // figure again reads as a stutter, not as a report.
+                    if this.total_holdings().await.0 != before {
+                        this.report_holdings().await;
+                    }
                     this.term().refresh_prompt();
                 } else if last_run.elapsed().as_secs() >= 60 {
                     last_run = Instant::now();
@@ -1470,8 +1533,7 @@ impl KaspaCli {
                                     // lands after the hint: the hint arrives
                                     // as an event and would otherwise overtake
                                     // it.
-                                    tprintln!(this, "Loading...");
-
+                                    this.start_loading_progress();
                                 },
                                 Events::AccountSelection { .. } => { },
                                 Events::WalletCreate { .. } => { },

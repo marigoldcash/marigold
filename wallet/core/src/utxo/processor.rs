@@ -517,7 +517,7 @@ impl UtxoProcessor {
 
                 utxo_context.update_utxos(added_utxos, current_daa_score).await?;
             } else {
-                log_error!("receiving UTXO Changed 'added' notification for an unknown address: {}", address);
+                log_trace!("ignoring UTXO Changed 'added' notification for an address this wallet does not track: {}", address);
             }
         }
 
