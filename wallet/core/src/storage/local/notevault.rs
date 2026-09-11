@@ -89,12 +89,18 @@ fn unwrap_vault_key(wrapped: &[u8], wallet_secret: &Secret) -> Result<([u8; 32],
 }
 const MANIFEST_FILE: &str = "manifest.tsv";
 
+/// Every status that owns a directory on disk. A rebuild walks this list, so a
+/// status missing from it is a note the recovery path would silently drop.
+const ALL_STATUSES: [NoteStatus; 5] =
+    [NoteStatus::Active, NoteStatus::HandedOver, NoteStatus::Superseded, NoteStatus::Mirrored, NoteStatus::Unknown];
+
 fn status_subdir(status: NoteStatus) -> &'static str {
     match status {
         NoteStatus::Active => "active",
         NoteStatus::HandedOver => "handed-over",
         NoteStatus::Superseded => "superseded",
         NoteStatus::Mirrored => "mirrored",
+        NoteStatus::Unknown => "unknown",
     }
 }
 
@@ -108,6 +114,7 @@ fn status_from_str(s: &str) -> Option<NoteStatus> {
         "handed-over" => Some(NoteStatus::HandedOver),
         "superseded" => Some(NoteStatus::Superseded),
         "mirrored" => Some(NoteStatus::Mirrored),
+        "unknown" => Some(NoteStatus::Unknown),
         _ => None,
     }
 }
@@ -216,17 +223,25 @@ fn note_file_name(sn: &Hash, d: DenominationTag) -> String {
 struct ManifestRow {
     info: NoteKeyInfo,
     last_rotated_at: u64,
+    /// How many times a *synced* node has said this serial is not in the pool.
+    ///
+    /// Counted rather than timed. Time measures the wrong thing: a note absent
+    /// for six hours while the node was catching up means nothing, whereas a
+    /// node that has three separate times declared itself caught up and still
+    /// not had the serial is saying something.
+    missing_strikes: u32,
 }
 
 fn manifest_line(row: &ManifestRow) -> String {
     format!(
-        "{}\t{}\t{}\t{}\t{}\t{}",
+        "{}\t{}\t{}\t{}\t{}\t{}\t{}",
         row.info.sn.to_hex(),
         denomination_petals(row.info.d),
         row.info.pk.as_slice().to_hex(),
         provenance_to_str(row.info.provenance),
         status_to_str(row.info.status),
         row.last_rotated_at,
+        row.missing_strikes,
     )
 }
 
@@ -241,7 +256,10 @@ fn parse_manifest_line(line: &str) -> Option<ManifestRow> {
     let provenance = provenance_from_str(fields.next()?)?;
     let status = status_from_str(fields.next()?)?;
     let last_rotated_at: u64 = fields.next()?.parse().ok()?;
-    Some(ManifestRow { info: NoteKeyInfo { sn, pk, d, provenance, status }, last_rotated_at })
+    // Added after the fact, so a manifest written by an older wallet has six
+    // fields and no strikes. Absent means none, which is the right default.
+    let missing_strikes: u32 = fields.next().and_then(|f| f.parse().ok()).unwrap_or(0);
+    Some(ManifestRow { info: NoteKeyInfo { sn, pk, d, provenance, status }, last_rotated_at, missing_strikes })
 }
 
 pub struct NoteVault {
@@ -295,7 +313,7 @@ impl NoteVault {
 
     async fn ensure_dirs(&self) -> Result<()> {
         fs::create_dir_all(&self.folder).await?;
-        for status in [NoteStatus::Active, NoteStatus::HandedOver, NoteStatus::Superseded, NoteStatus::Mirrored] {
+        for status in ALL_STATUSES {
             fs::create_dir_all(self.subdir(status)).await?;
         }
         Ok(())
@@ -526,7 +544,7 @@ impl NoteVault {
     pub async fn rebuild_manifest(&self, wallet_secret: &Secret) -> Result<usize> {
         let k = self.unlock(wallet_secret).await?;
         let mut rows = HashMap::new();
-        for status in [NoteStatus::Active, NoteStatus::HandedOver, NoteStatus::Superseded, NoteStatus::Mirrored] {
+        for status in ALL_STATUSES {
             let dir = self.subdir(status);
             let entries = match fs::readdir(dir.clone(), false).await {
                 Ok(entries) => entries,
@@ -543,7 +561,7 @@ impl NoteVault {
                 let Ok(file) = VaultNoteFile::try_from_slice(plaintext.as_ref()) else { continue };
                 let pk = NoteKeyEntry::new(file.sn, file.sk, file.d, file.provenance).derive_pk()?;
                 let info = NoteKeyInfo { sn: file.sn, pk, d: file.d, provenance: file.provenance, status };
-                rows.insert(file.sn, ManifestRow { info, last_rotated_at: file.last_rotated_at });
+                rows.insert(file.sn, ManifestRow { info, last_rotated_at: file.last_rotated_at, missing_strikes: 0 });
             }
         }
         let count = rows.len();
@@ -607,7 +625,8 @@ impl NoteVault {
         let file = VaultNoteFile { sn: entry.sn, sk: entry.sk, d: entry.d, provenance: entry.provenance, last_rotated_at };
         self.write_note_file(&file, NoteStatus::Active, &k).await?;
         let info = NoteKeyInfo { sn: entry.sn, pk, d: entry.d, provenance: entry.provenance, status: NoteStatus::Active };
-        self.index.write().await.insert(entry.sn, ManifestRow { info, last_rotated_at });
+        // A freshly stored note starts with a clean slate.
+        self.index.write().await.insert(entry.sn, ManifestRow { info, last_rotated_at, missing_strikes: 0 });
         self.persist_manifest().await?;
         Ok(())
     }
@@ -651,6 +670,44 @@ impl NoteVault {
         // P5.6) — this entry point never accepts a caller-supplied provenance.
         let entry = NoteKeyEntry::new(sn, sk, d, NoteProvenance::Hot);
         self.store(wallet_secret, entry).await
+    }
+
+    /// A synced node has just said this serial is not in the pool. Returns the
+    /// new strike count.
+    ///
+    /// Only ever called with a node that reported itself caught up — an
+    /// unsynced node reports every note as missing, and counting those would
+    /// write off a wallet within minutes of a fresh sync.
+    pub async fn record_missing(&self, sn: &Hash) -> Result<u32> {
+        self.ensure_loaded().await?;
+        let strikes = {
+            let mut index = self.index.write().await;
+            let Some(row) = index.get_mut(sn) else { return Ok(0) };
+            row.missing_strikes = row.missing_strikes.saturating_add(1);
+            row.missing_strikes
+        };
+        self.persist_manifest().await?;
+        Ok(strikes)
+    }
+
+    /// The serial was seen in the pool after all. Forget the strikes — three
+    /// have to be consecutive to mean anything.
+    pub async fn clear_missing(&self, sn: &Hash) -> Result<()> {
+        self.ensure_loaded().await?;
+        let changed = {
+            let mut index = self.index.write().await;
+            match index.get_mut(sn) {
+                Some(row) if row.missing_strikes != 0 => {
+                    row.missing_strikes = 0;
+                    true
+                }
+                _ => false,
+            }
+        };
+        if changed {
+            self.persist_manifest().await?;
+        }
+        Ok(())
     }
 
     pub async fn mark_status(&self, sn: &Hash, status: NoteStatus) -> Result<()> {
@@ -740,6 +797,60 @@ mod tests {
 
     fn make_vault(dir: &tempfile::TempDir) -> NoteVault {
         NoteVault::new(dir.path(), "test")
+    }
+
+    /// A rebuild walks the status directories, so a note written off as
+    /// unknown has to come back as unknown — coming back active would put
+    /// money the chain has not got back into a spendable balance.
+    #[tokio::test]
+    async fn rebuild_manifest_keeps_a_note_that_was_written_off() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let vault = make_vault(&dir);
+        let secret = Secret::from("pw".as_bytes().to_vec());
+        vault.create(&secret).await?;
+
+        let sn = Hash::from_bytes([11; 32]);
+        vault.store(&secret, NoteKeyEntry::new(sn, [4; 32], DenominationTag::D1, NoteProvenance::Hot)).await?;
+        vault.mark_status(&sn, NoteStatus::Unknown).await?;
+
+        std::fs::remove_file(dir.path().join("test.wallet/notes/manifest.tsv"))?;
+        let reopened = NoteVault::new(dir.path(), "test");
+        assert_eq!(reopened.rebuild_manifest(&secret).await?, 1);
+        assert_eq!(reopened.load_info(&sn).await?.expect("recovered").status, NoteStatus::Unknown);
+        Ok(())
+    }
+
+    /// Strikes have to be consecutive, and a manifest written before they
+    /// existed has to keep parsing.
+    #[tokio::test]
+    async fn strikes_accumulate_reset_and_survive_an_old_manifest() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let vault = make_vault(&dir);
+        let secret = Secret::from("pw".as_bytes().to_vec());
+        vault.create(&secret).await?;
+
+        let sn = Hash::from_bytes([9; 32]);
+        vault.store(&secret, NoteKeyEntry::new(sn, [3; 32], DenominationTag::D1, NoteProvenance::Hot)).await?;
+
+        assert_eq!(vault.record_missing(&sn).await?, 1);
+        assert_eq!(vault.record_missing(&sn).await?, 2);
+        // Seen in the pool once: the count has to start again, or three
+        // unrelated blips across a week would write the note off.
+        vault.clear_missing(&sn).await?;
+        assert_eq!(vault.record_missing(&sn).await?, 1, "a sighting must reset the count");
+
+        // A six-field manifest is what every wallet wrote before this existed.
+        let manifest = dir.path().join("test.wallet/notes/manifest.tsv");
+        let line = fs::read(&manifest).await?;
+        let text = String::from_utf8(line).unwrap();
+        let six: Vec<&str> = text.trim().split('\t').take(6).collect();
+        fs::write(&manifest, six.join("\t").as_bytes()).await?;
+
+        let reopened = NoteVault::new(dir.path(), "test");
+        let info = reopened.load_info(&sn).await?.expect("note survives an old manifest");
+        assert_eq!(info.sn, sn);
+        assert_eq!(reopened.record_missing(&sn).await?, 1, "a manifest with no strike column starts at zero");
+        Ok(())
     }
 
     #[tokio::test]

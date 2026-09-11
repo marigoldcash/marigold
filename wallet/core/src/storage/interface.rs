@@ -109,6 +109,13 @@ pub trait NoteKeyStore: Send + Sync {
 
     /// Flip a row's `status` — plaintext-only, never needs the wallet secret.
     async fn mark_status(&self, sn: &Hash, status: NoteStatus) -> Result<()>;
+
+    /// Record that a synced node reported this serial missing. Returns the new
+    /// consecutive-strike count.
+    async fn record_missing(&self, sn: &Hash) -> Result<u32>;
+
+    /// The serial turned up after all — reset its strikes.
+    async fn clear_missing(&self, sn: &Hash) -> Result<()>;
     /// Apply a live `NotesChanged` notification (FORK-PLAN P6.9). See the trait-level
     /// doc on [`crate::storage::notekeys::NotesChangedApplyResult`] for the split
     /// between what always applies (status) and what needs `wallet_secret` (new rows).

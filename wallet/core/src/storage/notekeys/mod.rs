@@ -37,6 +37,17 @@ pub enum NoteProvenance {
 pub enum NoteStatus {
     /// Still believed to be a live, spendable note under this row's key.
     Active,
+    /// The pool does not have this serial, and a synced node has said so three
+    /// separate times. Something happened to it and this wallet cannot tell
+    /// what: either the transaction that would have created it never landed —
+    /// in which case no money ever moved and the balance is still on the
+    /// ledger — or it was consumed by a wallet sharing the key.
+    ///
+    /// Deliberately not [`Self::Superseded`], which asserts the note was
+    /// spent. Saying that without evidence would misstate what happened to
+    /// somebody's money. Excluded from the balance, kept for a later archival
+    /// lookup that can say which of the two it was.
+    Unknown,
     /// The serial was consumed on-chain (spent by us via rotation/split/merge, spent
     /// elsewhere by a wallet sharing this key, or redeemed) — kept as a tombstone
     /// rather than deleted immediately, so a caller with the wallet secret can later

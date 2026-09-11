@@ -74,6 +74,7 @@ impl Note {
             "verify" => self.verify(&ctx, argv).await,
             "list" => self.list(&ctx).await,
             "history" => self.history(&ctx).await,
+            "unknown" => self.unknown(&ctx).await,
             "vault" => self.vault(&ctx, argv).await,
             "help" => self.display_help(ctx, argv).await,
             v => {
@@ -694,6 +695,59 @@ impl Note {
         }
         tprintln!(ctx, "");
 
+        Ok(())
+    }
+
+    /// `note unknown` — notes a synced node has repeatedly said it has not got.
+    ///
+    /// They stopped being counted after three separate checks against a node
+    /// that reported itself caught up. This wallet cannot say which of two
+    /// things happened, and does not pretend to: either the transaction that
+    /// would have created the note never landed — in which case the money
+    /// never left the ledger and nothing was lost — or something holding the
+    /// same key spent it.
+    async fn unknown(&self, ctx: &Arc<KaspaCli>) -> Result<()> {
+        let store = ctx.wallet().store().as_note_key_store()?;
+        let mut unknown: Vec<Arc<NoteKeyInfo>> = Vec::new();
+        let mut stream = store.iter().await?;
+        while let Some(info) = stream.try_next().await? {
+            if info.status == NoteStatus::Unknown {
+                unknown.push(info);
+            }
+        }
+
+        tprintln!(ctx, "");
+        if unknown.is_empty() {
+            tprintln!(ctx, "Nothing unaccounted for — every note you hold is on chain.");
+            tprintln!(ctx, "");
+            return Ok(());
+        }
+
+        let total: u64 = unknown.iter().map(|i| DENOMINATION_PETALS[i.d as usize]).sum();
+        tprintln!(ctx, "{} note(s), {} MAGLD, not on chain:", unknown.len(), sompi_to_kaspa_string(total));
+        tprintln!(ctx, "");
+        for info in unknown.iter().take(30) {
+            tprintln!(ctx, "  {} MAGLD   {}", sompi_to_kaspa_string(DENOMINATION_PETALS[info.d as usize]), info.sn);
+        }
+        if unknown.len() > 30 {
+            tprintln!(ctx, "  ... and {} more", unknown.len() - 30);
+        }
+        tprintln!(ctx, "");
+        tpara!(
+            ctx,
+            "A synced node has said three separate times that it does not have these. \
+            That usually means the payment which would have created them never landed, in \
+            which case the money never left your ledger balance and nothing is missing — \
+            check 'balance' against what you expect. "
+        );
+        tprintln!(ctx, "");
+        tpara!(
+            ctx,
+            "The alternative is that something else holding the same keys spent them. \
+            Telling the two apart needs a node that keeps history rather than only the \
+            current pool, which is not something this wallet can ask for yet. "
+        );
+        tprintln!(ctx, "");
         Ok(())
     }
 
@@ -1360,6 +1414,7 @@ impl Note {
                 ("verify [clear]", "Check your notes against the pool — proves the balance is real"),
                 ("mirror [<amount>|export|return|revoke]", "Put notes on your phone, take them back, or kill a lost phone's copies"),
                 ("history", "List notes this wallet has spent"),
+                ("unknown", "Notes a synced node says it has not got, and what that means"),
                 ("vault <cmd>", "Note vault: create/backup/verify/restore/export/import (see 'note vault')"),
             ],
             None,

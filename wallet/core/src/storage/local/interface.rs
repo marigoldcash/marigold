@@ -926,6 +926,14 @@ impl NoteKeyStore for LocalStoreInner {
         Ok(())
     }
 
+    async fn record_missing(&self, sn: &Hash) -> Result<u32> {
+        self.notevault.record_missing(sn).await
+    }
+
+    async fn clear_missing(&self, sn: &Hash) -> Result<()> {
+        self.notevault.clear_missing(sn).await
+    }
+
     async fn mark_status(&self, sn: &Hash, status: NoteStatus) -> Result<()> {
         self.notevault.mark_status(sn, status).await?;
         self.set_modified(true);

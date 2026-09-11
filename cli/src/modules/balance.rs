@@ -60,21 +60,22 @@ impl Balance {
         // every call trains people to stop reading it, so silence means good.
         if total > 0 || mirrored > 0 {
             if ctx.wallet().is_connected() {
-                match kaspa_wallet_core::account::notepool::verify_held_notes(account.clone()).await {
-                    Ok((_, phantom)) if !phantom.is_empty() => {
-                        let lost: u64 = phantom.iter().map(|i| DENOMINATION_PETALS[i.d as usize]).sum();
+                match kaspa_wallet_core::account::notepool::reconcile_held_notes(account.clone()).await {
+                    Ok(Some(result)) if !result.moved_to_unknown.is_empty() => {
+                        let value: u64 = result.moved_to_unknown.iter().map(|i| DENOMINATION_PETALS[i.d as usize]).sum();
                         tprintln!(ctx, "");
                         tprintln!(
                             ctx,
                             "{}",
                             style(format!(
-                                "{} MAGLD of the above is NOT on chain ({} note(s)) — counted here but not spendable.",
-                                sompi_to_kaspa_string(lost),
-                                phantom.len()
+                                "{} note(s) worth {} MAGLD are not on chain and have stopped being counted.",
+                                result.moved_to_unknown.len(),
+                                sompi_to_kaspa_string(value)
                             ))
-                            .red()
+                            .yellow()
                         );
-                        tprintln!(ctx, "{}", style("'note verify' shows which. Check the node is fully synced before writing them off.").dim());
+                        tprintln!(ctx, "{}", style("Most often a payment that never landed, in which case the money never").dim());
+                        tprintln!(ctx, "{}", style("left your ledger balance. 'note unknown' lists them.").dim());
                     }
                     Ok(_) => {}
                     Err(err) => {

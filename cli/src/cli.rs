@@ -1020,22 +1020,32 @@ impl KaspaCli {
         // Same check the `balance` command runs, at the moment a wallet opens
         // and after each announced housekeeping pass — which is exactly when a
         // failed submission would have left a note behind that is not on chain.
+        // Reconcile quietly. A note the pool has not got is usually a mint
+        // that has not landed yet, and shouting about it every time a balance
+        // is printed taught people to ignore a line that one day will matter.
+        // Nothing is said until a synced node has said so three times, at
+        // which point it has stopped being counted and that is worth one line.
         if notes > 0 && self.wallet.is_connected() {
             if let Ok(account) = self.wallet.account() {
-                if let Ok((_, phantom)) = kaspa_wallet_core::account::notepool::verify_held_notes(account).await {
-                    if !phantom.is_empty() {
-                        let lost: u64 =
-                            phantom.iter().map(|i| kaspa_consensus_core::notepool::DENOMINATION_PETALS[i.d as usize]).sum();
+                if let Ok(Some(result)) = kaspa_wallet_core::account::notepool::reconcile_held_notes(account).await {
+                    if !result.moved_to_unknown.is_empty() {
+                        let value: u64 = result
+                            .moved_to_unknown
+                            .iter()
+                            .map(|i| kaspa_consensus_core::notepool::DENOMINATION_PETALS[i.d as usize])
+                            .sum();
                         tprintln!(
                             self,
                             "{}",
                             style(format!(
-                                "{} MAGLD of that is NOT on chain ({} note(s)) — 'note verify' shows which.",
-                                kaspa_wallet_core::utils::sompi_to_kaspa_string(lost),
-                                phantom.len()
+                                "{} note(s) worth {} MAGLD are not on chain and have stopped being counted.",
+                                result.moved_to_unknown.len(),
+                                kaspa_wallet_core::utils::sompi_to_kaspa_string(value)
                             ))
-                            .red()
+                            .yellow()
                         );
+                        tprintln!(self, "{}", style("Most often a payment that never landed, in which case the money never").dim());
+                        tprintln!(self, "{}", style("left your ledger balance. 'note unknown' lists them.").dim());
                     }
                 }
             }

@@ -2111,6 +2111,67 @@ pub async fn verify_held_notes(account: Arc<dyn Account>) -> Result<(Vec<Arc<Not
     Ok((present, phantom))
 }
 
+/// Strikes before a note stops being counted as money.
+///
+/// Three, and they must be consecutive: a serial that turns up once resets to
+/// zero. Each strike costs a separate check against a node that declared
+/// itself caught up, so three is three independent statements that the pool
+/// does not have it.
+pub const MISSING_STRIKES_BEFORE_UNKNOWN: u32 = 3;
+
+/// What a reconciliation pass did.
+pub struct Reconciliation {
+    /// Notes the pool confirms, which is the normal case.
+    pub present: usize,
+    /// Missing, but not yet out of strikes — still counted as money.
+    pub pending: usize,
+    /// Moved to [`NoteStatus::Unknown`] by this pass.
+    pub moved_to_unknown: Vec<Arc<NoteKeyInfo>>,
+    /// Value of the notes still pending, in petals.
+    pub pending_petals: u64,
+}
+
+/// Check held notes against the pool and act on what is missing.
+///
+/// Does nothing unless the node says it is caught up. An unsynced node has not
+/// finished reading the chain, so it reports every note as absent — counting
+/// those would move a wallet's entire holdings to `Unknown` within three
+/// checks of a fresh sync starting.
+///
+/// A note that is missing is not yet a note that is gone. It gets a strike;
+/// three consecutive strikes and it stops being counted as money and moves to
+/// [`NoteStatus::Unknown`], where an archival lookup can later say whether the
+/// transaction that would have created it ever landed — and therefore whether
+/// this was money spent or money that never moved.
+pub async fn reconcile_held_notes(account: Arc<dyn Account>) -> Result<Option<Reconciliation>> {
+    if !account.wallet().utxo_processor().is_synced() {
+        return Ok(None);
+    }
+    let note_key_store = account.wallet().store().as_note_key_store()?;
+    let (present, phantom) = verify_held_notes(account.clone()).await?;
+
+    // A serial that turned up cancels whatever it had accumulated.
+    for info in &present {
+        note_key_store.clear_missing(&info.sn).await?;
+    }
+
+    let mut moved_to_unknown = Vec::new();
+    let mut pending = 0usize;
+    let mut pending_petals = 0u64;
+    for info in &phantom {
+        let strikes = note_key_store.record_missing(&info.sn).await?;
+        if strikes >= MISSING_STRIKES_BEFORE_UNKNOWN {
+            note_key_store.mark_status(&info.sn, NoteStatus::Unknown).await?;
+            moved_to_unknown.push(info.clone());
+        } else {
+            pending += 1;
+            pending_petals += DENOMINATION_PETALS[info.d as usize];
+        }
+    }
+
+    Ok(Some(Reconciliation { present: present.len(), pending, moved_to_unknown, pending_petals }))
+}
+
 /// Which of `serials` the node actually holds in the pool. A wallet stores a
 /// note as `Active` the moment its creating transaction is submitted — the
 /// serial is derived from the transaction id, so it is known before the chain
