@@ -98,7 +98,9 @@ impl WalletLock {
         // `wallet_file` comes from `Storage::filename()`, which has already been
         // through `resolve_path`, so it is absolute and every call site derives
         // the same key for the same wallet.
-        let path = wallet_file.with_extension("wallet.lock");
+        // Inside the wallet's directory, so that everything one wallet owns is
+        // in one place — including the thing that says it is open.
+        let path = wallet_file.with_file_name(".lock");
 
         let mut guard = HELD_LOCKS.lock().unwrap();
         let held = guard.get_or_insert_with(std::collections::HashMap::new);
@@ -251,6 +253,13 @@ impl LocalStoreInner {
     }
 
     async fn try_load(wallet_secret: &Secret, folder: &str, args: OpenArgs) -> Result<Self> {
+        // 'open <name>' never lists, so the conversion has to happen here too
+        // or a named open of an old-layout wallet would not find its keys.
+        if let Ok(resolved) = fs::resolve_path(folder) {
+            for name in super::migrate_wallet_layout(&resolved) {
+                log_info!("wallet '{name}' moved into {}", super::wallet_dir_name(&name));
+            }
+        }
         let filename = make_filename(&None, &args.filename);
         let storage = Storage::try_new_with_folder(folder, &super::wallet_file_name(&filename))?;
 
@@ -583,39 +592,31 @@ impl Interface for LocalStore {
         let location = self.location.lock().unwrap().clone().ok_or(Error::WalletNotOpen)?;
         let folder = fs::resolve_path(&location.folder)?;
 
-        let from_file = folder.join(super::wallet_file_name(from));
-        let to_file = folder.join(super::wallet_file_name(to));
-        if !fs::exists(&from_file).await? {
+        let from_dir = folder.join(super::wallet_dir_name(from));
+        let to_dir = folder.join(super::wallet_dir_name(to));
+        if !from_dir.is_dir() {
             return Err(Error::NoWalletInStorage(from.to_string()));
         }
-        if fs::exists(&to_file).await? {
+        if to_dir.exists() {
             return Err(Error::WalletAlreadyExists);
         }
 
-        // The companion folders are moved FIRST: if one of those fails the
-        // wallet file is still where it was and the wallet still opens. Moving
-        // the file first and then failing would leave a wallet that opens under
-        // the new name with an empty vault, which is the one outcome worth
-        // engineering against.
-        let mut moved: Vec<(std::path::PathBuf, std::path::PathBuf)> = Vec::new();
-        for suffix in ["notes", "transactions"] {
-            let src = folder.join(format!("{from}.{suffix}"));
-            let dst = folder.join(format!("{to}.{suffix}"));
-            if fs::exists(&src).await? {
-                if let Err(err) = std::fs::rename(&src, &dst) {
-                    for (a, b) in moved.iter().rev() {
-                        std::fs::rename(b, a).ok();
-                    }
-                    return Err(Error::Custom(format!("could not move {from}.{suffix}: {err}")));
-                }
-                moved.push((src, dst));
-            }
+        // One directory holds the lot, so renaming a wallet is one rename —
+        // where it used to be three, each of which could fail separately and
+        // leave a wallet whose vault had a different name from its keys.
+        if let Err(err) = std::fs::rename(&from_dir, &to_dir) {
+            return Err(Error::Custom(format!("could not rename the wallet directory: {err}")));
         }
-        if let Err(err) = std::fs::rename(&from_file, &to_file) {
-            for (a, b) in moved.iter().rev() {
-                std::fs::rename(b, a).ok();
-            }
-            return Err(Error::Custom(format!("could not move the wallet file: {err}")));
+        // Then the keys file within it, which carries the name too.
+        let from_keys = to_dir.join(super::keys_file_name(from));
+        let to_keys = to_dir.join(super::keys_file_name(to));
+        if from_keys.is_file()
+            && let Err(err) = std::fs::rename(&from_keys, &to_keys)
+        {
+            // Put it back rather than leave a directory whose name and
+            // contents disagree.
+            std::fs::rename(&to_dir, &from_dir).ok();
+            return Err(Error::Custom(format!("could not rename the keys file: {err}")));
         }
         Ok(())
     }
@@ -704,18 +705,28 @@ impl Interface for LocalStore {
         if !folder.exists() {
             return Ok(vec![]);
         }
+        // Anything still in the old file-and-two-siblings layout is moved into
+        // its own directory first, so listing never shows a half-converted
+        // picture. Idempotent, and a no-op once everything has moved.
+        for name in super::migrate_wallet_layout(&folder) {
+            log_info!("wallet '{name}' moved into {}", super::wallet_dir_name(&name));
+        }
+
         let files = fs::readdir(folder.clone(), false).await?;
         let wallets = files
             .iter()
             .filter_map(|de| {
                 let file_name = de.file_name();
-                file_name.ends_with(".wallet").then(|| file_name.trim_end_matches(".wallet").to_string())
+                // A wallet is a directory now. The keys file inside is what
+                // distinguishes it from any other directory someone has put here.
+                let name = file_name.strip_suffix(".wallet")?.to_string();
+                folder.join(&file_name).join(super::keys_file_name(&name)).is_file().then_some(name)
             })
             .collect::<Vec<_>>();
 
         let mut descriptors = vec![];
         for filename in wallets.into_iter() {
-            let path = folder.join(format!("{}.wallet", filename));
+            let path = folder.join(super::wallet_file_name(&filename));
             // TODO - refactor on native to read directly from file (skip temporary buffer creation)
             let wallet_data = fs::read(&path).await;
             let title =

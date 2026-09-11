@@ -213,11 +213,14 @@ pub fn rename_entries(entries: Vec<ArchiveEntry>, from: &str, to: &str) -> Resul
     entries
         .into_iter()
         .map(|entry| {
-            let renamed = if let Some(rest) = entry.path.strip_prefix(&format!("{from}.")) {
-                format!("{to}.{rest}")
-            } else {
+            // Every path is `<from>.wallet/...`; the keys file inside also
+            // carries the name, so both have to move together or the restored
+            // directory would not contain a keys file matching its own name.
+            let Some(rest) = entry.path.strip_prefix(&format!("{from}.wallet/")) else {
                 return Err(Error::custom(format!("'{}' does not belong to the wallet '{from}' — cannot rename", entry.path)));
             };
+            let rest = if rest == format!("{from}.keys") { format!("{to}.keys") } else { rest.to_string() };
+            let renamed = format!("{to}.wallet/{rest}");
             Ok(ArchiveEntry { path: renamed, data: entry.data })
         })
         .collect()
@@ -256,10 +259,10 @@ mod tests {
     fn round_trip_preserves_paths_and_bytes() {
         let pass = Secret::from(b"correct horse battery".to_vec());
         let entries = vec![
-            entry("marigold.wallet", &[0u8, 1, 2, 250]),
-            entry("marigold.notes/vault.key", b"MGV2 and then some"),
-            entry("marigold.notes/active/beef.note", &vec![7u8; 4096]),
-            entry("marigold.notes/manifest.tsv", b"sn\tpk\td\tactive\n"),
+            entry("marigold.wallet/marigold.keys", &[0u8, 1, 2, 250]),
+            entry("marigold.wallet/notes/vault.key", b"MGV2 and then some"),
+            entry("marigold.wallet/notes/active/beef.note", &vec![7u8; 4096]),
+            entry("marigold.wallet/notes/manifest.tsv", b"sn\tpk\td\tactive\n"),
         ];
         let packed = pack(&entries, &pass).unwrap();
         let out = unpack(&packed, &pass).unwrap();
@@ -272,14 +275,14 @@ mod tests {
 
     #[test]
     fn wrong_passphrase_is_rejected_not_garbled() {
-        let packed = pack(&[entry("marigold.wallet", b"secret")], &Secret::from(b"right one".to_vec())).unwrap();
+        let packed = pack(&[entry("marigold.wallet/marigold.keys", b"secret")], &Secret::from(b"right one".to_vec())).unwrap();
         assert!(unpack(&packed, &Secret::from(b"wrong one".to_vec())).is_err());
     }
 
     #[test]
     fn a_flipped_bit_is_caught() {
         let pass = Secret::from(b"correct horse battery".to_vec());
-        let mut packed = pack(&[entry("marigold.wallet", b"secret")], &pass).unwrap();
+        let mut packed = pack(&[entry("marigold.wallet/marigold.keys", b"secret")], &pass).unwrap();
         let last = packed.len() - 1;
         packed[last] ^= 0x01;
         assert!(unpack(&packed, &pass).is_err());
@@ -300,7 +303,7 @@ mod tests {
     #[test]
     fn nothing_leaks_outside_the_ciphertext() {
         let pass = Secret::from(b"correct horse battery".to_vec());
-        let packed = pack(&[entry("distinctive-wallet-name.wallet", b"payload")], &pass).unwrap();
+        let packed = pack(&[entry("distinctive-wallet-name.wallet/distinctive-wallet-name.keys", b"payload")], &pass).unwrap();
         assert!(!packed.windows(24).any(|w| w == b"distinctive-wallet-name."), "the wallet name is readable in the file");
         assert_eq!(&packed[..4], ARCHIVE_MAGIC);
         assert_eq!(packed[4], ARCHIVE_VERSION);
@@ -309,21 +312,21 @@ mod tests {
     #[test]
     fn collect_then_extract_reproduces_the_tree() {
         let root = scratch("tree");
-        let vault = root.join("src").join("marigold.notes");
+        let vault = root.join("src").join("marigold.wallet").join("notes");
         std::fs::create_dir_all(vault.join("active")).unwrap();
         std::fs::write(vault.join("vault.key"), b"key bytes").unwrap();
         std::fs::write(vault.join("manifest.tsv"), b"a\tb\n").unwrap();
         std::fs::write(vault.join("active").join("one.note"), b"note one").unwrap();
 
         let mut entries = vec![];
-        collect_tree(&vault, "marigold.notes", &mut entries).unwrap();
+        collect_tree(&vault, "marigold.wallet/notes", &mut entries).unwrap();
         assert_eq!(entries.len(), 3);
 
         let dest = root.join("dest");
         std::fs::create_dir_all(&dest).unwrap();
         extract(&entries, &dest).unwrap();
-        assert_eq!(std::fs::read(dest.join("marigold.notes/active/one.note")).unwrap(), b"note one");
-        assert_eq!(std::fs::read(dest.join("marigold.notes/vault.key")).unwrap(), b"key bytes");
+        assert_eq!(std::fs::read(dest.join("marigold.wallet/notes/active/one.note")).unwrap(), b"note one");
+        assert_eq!(std::fs::read(dest.join("marigold.wallet/notes/vault.key")).unwrap(), b"key bytes");
 
         // Twice must not silently merge into a live wallet.
         assert!(extract(&entries, &dest).is_err());
@@ -333,12 +336,13 @@ mod tests {
     #[test]
     fn extract_writes_nothing_when_one_file_is_in_the_way() {
         let root = scratch("collision");
-        std::fs::write(root.join("marigold.wallet"), b"the live one").unwrap();
-        let entries = vec![entry("marigold.notes/vault.key", b"new"), entry("marigold.wallet", b"old backup")];
+        std::fs::create_dir_all(root.join("marigold.wallet")).unwrap();
+        std::fs::write(root.join("marigold.wallet/marigold.keys"), b"the live one").unwrap();
+        let entries = vec![entry("marigold.wallet/notes/vault.key", b"new"), entry("marigold.wallet/marigold.keys", b"old backup")];
         assert!(extract(&entries, &root).is_err());
         // The collision was the second entry; the first must not have landed.
-        assert!(!root.join("marigold.notes").exists());
-        assert_eq!(std::fs::read(root.join("marigold.wallet")).unwrap(), b"the live one");
+        assert!(!root.join("marigold.wallet/notes").exists());
+        assert_eq!(std::fs::read(root.join("marigold.wallet/marigold.keys")).unwrap(), b"the live one");
         std::fs::remove_dir_all(&root).ok();
     }
 
@@ -346,19 +350,19 @@ mod tests {
     fn traversal_is_refused() {
         let root = scratch("traversal");
         assert!(extract(&[entry("../escaped.wallet", b"x")], &root).is_err());
-        assert!(extract(&[entry("marigold.notes/../../escaped", b"x")], &root).is_err());
+        assert!(extract(&[entry("marigold.wallet/../../escaped", b"x")], &root).is_err());
         assert!(!root.parent().unwrap().join("escaped.wallet").exists());
         std::fs::remove_dir_all(&root).ok();
     }
 
     #[test]
     fn renaming_moves_every_path_or_none() {
-        let entries = vec![entry("marigold.wallet", b"w"), entry("marigold.notes/vault.key", b"k")];
+        let entries = vec![entry("marigold.wallet/marigold.keys", b"w"), entry("marigold.wallet/notes/vault.key", b"k")];
         let renamed = rename_entries(entries, "marigold", "spare").unwrap();
-        assert_eq!(renamed[0].path, "spare.wallet");
-        assert_eq!(renamed[1].path, "spare.notes/vault.key");
+        assert_eq!(renamed[0].path, "spare.wallet/spare.keys");
+        assert_eq!(renamed[1].path, "spare.wallet/notes/vault.key");
 
-        let stray = vec![entry("marigold.wallet", b"w"), entry("something-else.dat", b"?")];
+        let stray = vec![entry("marigold.wallet/marigold.keys", b"w"), entry("something-else.dat", b"?")];
         assert!(rename_entries(stray, "marigold", "spare").is_err());
     }
 }

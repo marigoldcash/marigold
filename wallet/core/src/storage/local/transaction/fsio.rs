@@ -42,7 +42,7 @@ impl TransactionStore {
         let name = self.name.as_str();
         let binding_hex = binding.to_hex();
         let network_id = network_id.to_string();
-        format!("{name}.transactions/{binding_hex}/{network_id}")
+        format!("{}/{binding_hex}/{network_id}", crate::storage::local::transactions_dir_name(name))
     }
 
     fn make_folder(&self, binding: &Binding, network_id: &NetworkId) -> PathBuf {

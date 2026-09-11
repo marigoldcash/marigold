@@ -12,7 +12,7 @@
 //! Directory layout, mirroring `transaction/fsio.rs`'s `<name>.transactions/`
 //! convention exactly:
 //! ```text
-//! <folder>/<name>.notes/
+//! <folder>/<name>.wallet/notes/
 //!     vault.key        -- K, wallet-password-wrapped (Argon2 path -- see below)
 //!     manifest.tsv      -- plaintext (sn, value, pk, provenance, status, last_rotated_at)
 //!     active/<value>_<sn>.note
@@ -261,18 +261,18 @@ pub struct NoteVault {
 
 impl NoteVault {
     /// `folder`/`name` follow the exact convention `fsio::TransactionStore::new`
-    /// already established: `<folder>/<name>.notes/`.
+    /// already established: `<folder>/<name>.wallet/notes/`.
     pub fn new<P: AsRef<Path>>(folder: P, name: &str) -> Self {
         let base = fs::resolve_path(folder.as_ref().to_str().unwrap()).expect("note vault folder is invalid");
         Self {
-            folder: base.join(format!("{name}.notes")),
+            folder: base.join(crate::storage::local::notes_dir_name(name)),
             index: AsyncRwLock::new(HashMap::new()),
             loaded: AsyncMutex::new(false),
             key: AsyncRwLock::new(None),
         }
     }
 
-    /// Construct a vault handle pointed EXACTLY at `path` — no `<name>.notes`
+    /// Construct a vault handle pointed EXACTLY at `path` — no `<name>.wallet/notes`
     /// suffix appended, unlike [`Self::new`]. A wallet's own primary vault always
     /// uses `new()`'s folder/filename convention; `at()` is for standalone
     /// vault-shaped directories that exist independent of any wallet — a `note
@@ -770,7 +770,7 @@ mod tests {
         assert_eq!(info.pk, entry.derive_pk()?);
 
         // The plaintext file layout: value+serial in the filename, under active/.
-        let file_path = dir.path().join("test.notes/active").join(note_file_name(&sn, DenominationTag::D1));
+        let file_path = dir.path().join("test.wallet/notes/active").join(note_file_name(&sn, DenominationTag::D1));
         assert!(fs::exists(&file_path).await?);
 
         vault.remove(&secret, &sn).await?;
@@ -791,8 +791,8 @@ mod tests {
         let entry = NoteKeyEntry::new(sn, [0x44u8; 32], DenominationTag::D0_1, NoteProvenance::Hot);
         vault.store(&secret, entry).await?;
 
-        let active_path = dir.path().join("test.notes/active").join(note_file_name(&sn, DenominationTag::D0_1));
-        let superseded_path = dir.path().join("test.notes/superseded").join(note_file_name(&sn, DenominationTag::D0_1));
+        let active_path = dir.path().join("test.wallet/notes/active").join(note_file_name(&sn, DenominationTag::D0_1));
+        let superseded_path = dir.path().join("test.wallet/notes/superseded").join(note_file_name(&sn, DenominationTag::D0_1));
         assert!(fs::exists(&active_path).await?);
 
         vault.mark_status(&sn, NoteStatus::Superseded).await?;
@@ -814,7 +814,7 @@ mod tests {
         vault.create(&secret).await?;
 
         // Simulate the older layout: remove the directory create() just made.
-        let mirrored_dir = dir.path().join("test.notes/mirrored");
+        let mirrored_dir = dir.path().join("test.wallet/notes/mirrored");
         std::fs::remove_dir_all(&mirrored_dir).unwrap();
         assert!(!fs::exists(&mirrored_dir).await?);
 
@@ -875,7 +875,7 @@ mod tests {
         let vault = make_vault(&dir);
         vault.create(&secret).await?;
 
-        let key_path = dir.path().join("test.notes").join(VAULT_KEY_FILE);
+        let key_path = dir.path().join("test.wallet/notes").join(VAULT_KEY_FILE);
         let k = *vault.key.read().await.as_ref().unwrap();
 
         // Roll it back to the old format and drop the cached key, so unlock
@@ -1075,7 +1075,7 @@ mod tests {
         // Corrupt the mandatory plaintext index the way losing/truncating
         // `manifest.tsv` would (e.g. a crash mid-write) — the raw `.note` files
         // are untouched and still hold everything needed to reconstruct it.
-        fs::write(&dir.path().join("test.notes/manifest.tsv"), b"").await?;
+        fs::write(&dir.path().join("test.wallet/notes/manifest.tsv"), b"").await?;
 
         let fresh = make_vault(&dir);
         let count = fresh.rebuild_manifest(&secret).await?;

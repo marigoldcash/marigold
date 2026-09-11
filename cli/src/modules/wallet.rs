@@ -403,17 +403,28 @@ impl Wallet {
                 tprintln!(ctx, "");
                 if ctx.wallet().is_open() {
                     if let Some(descriptor) = ctx.store().descriptor() {
-                        tprintln!(ctx, "Wallet file:    {folder}/{}.wallet", descriptor.filename);
-                        tprintln!(ctx, "Note vault:     {folder}/{}.notes/", descriptor.filename);
-                        tprintln!(ctx, "Transactions:   {folder}/{}.transactions/", descriptor.filename);
+                        let name = &descriptor.filename;
+                        let dir = kaspa_wallet_core::storage::local::wallet_dir_name(name);
+                        tprintln!(ctx, "Your wallet:    {}", style(format!("{folder}/{dir}/")).bold());
+                        tprintln!(ctx, "");
+                        // Padded to the longest of the three, which varies
+                        // with the wallet's name.
+                        let keys = kaspa_wallet_core::storage::local::keys_file_name(name);
+                        let width = keys.len().max("transactions/".len());
+                        tprintln!(ctx, "  {:<width$}   your keys, encrypted", keys);
+                        tprintln!(ctx, "  {:<width$}   your notes — the money", "notes/");
+                        tprintln!(ctx, "  {:<width$}   history only", "transactions/");
+                        tprintln!(ctx, "");
+                        tprintln!(ctx, "That one directory is the whole wallet. Copy it and you have copied");
+                        tprintln!(ctx, "everything.");
                     }
                 } else {
                     tprintln!(ctx, "Wallet folder:  {folder}  (no wallet open — 'wallet list' shows the files)");
                 }
                 tprintln!(ctx, "Settings file:  {settings_folder}/marigold.settings");
                 tprintln!(ctx, "");
-                tprintln!(ctx, "Your money is the wallet file and the note vault. The transactions folder is");
-                tprintln!(ctx, "history only — 'wallet backup <file>' takes exactly what a restore needs.");
+                tprintln!(ctx, "{}", style("'wallet backup <file>' packs it into one encrypted file, leaving out").dim());
+                tprintln!(ctx, "{}", style("the history, which a restore does not need.").dim());
 
                 // In a container that path is inside the image unless somebody
                 // mounted something over it, and saying so is the difference
@@ -693,12 +704,13 @@ impl Wallet {
 
         // vault_folder() is the resolved on-disk path, so its parent is the
         // real storage folder — no second guess at where '~' points.
+        // <storage>/<name>.wallet/notes -> <storage>/<name>.wallet
         let vault_folder = ctx.wallet().store().as_note_key_store()?.vault_folder().await?;
-        let folder = vault_folder
+        let wallet_dir = vault_folder
             .parent()
             .ok_or_else(|| Error::custom("cannot work out the wallet folder"))?
             .to_path_buf();
-        let wallet_file = folder.join(kaspa_wallet_core::storage::local::wallet_file_name(&name));
+        let wallet_file = wallet_dir.join(kaspa_wallet_core::storage::local::keys_file_name(&name));
         if !wallet_file.exists() {
             return Err(Error::custom(format!("{} is missing — nothing to back up", wallet_file.display())));
         }
@@ -745,20 +757,19 @@ impl Wallet {
         }
         let passphrase = Secret::from(pass.as_bytes().to_vec());
 
+        // Paths in the archive are relative to the storage folder, so an
+        // archive restores by dropping one directory into place.
+        let dir = kaspa_wallet_core::storage::local::wallet_dir_name(&name);
         let mut entries = vec![archive::ArchiveEntry {
-            path: kaspa_wallet_core::storage::local::wallet_file_name(&name),
+            path: format!("{dir}/{}", kaspa_wallet_core::storage::local::keys_file_name(&name)),
             data: std::fs::read(&wallet_file).map_err(|e| Error::custom(format!("cannot read the wallet file: {e}")))?,
         }];
-        // The transactions folder is deliberately left out: it is a record of
-        // what happened, not a means of getting anything back, and it is by far
-        // the largest thing in the directory.
+        // The transactions folder is deliberately left out even though it now
+        // lives inside the wallet directory: it is a record of what happened,
+        // not a means of getting anything back, and it is by far the largest
+        // thing in there.
         if vault_folder.exists() {
-            let prefix = vault_folder
-                .file_name()
-                .ok_or_else(|| Error::custom("cannot work out the vault folder name"))?
-                .to_string_lossy()
-                .to_string();
-            archive::collect_tree(&vault_folder, &prefix, &mut entries)?;
+            archive::collect_tree(&vault_folder, &format!("{dir}/notes"), &mut entries)?;
         }
 
         let file_count = entries.len();
@@ -994,12 +1005,18 @@ impl Wallet {
 
     /// The wallet's name, read off the one top-level `.wallet` entry.
     fn wallet_name_in(entries: &[crate::backup::ArchiveEntry]) -> Result<String> {
-        let mut found = entries.iter().filter(|e| !e.path.contains('/') && e.path.ends_with(".wallet"));
-        let entry = found.next().ok_or_else(|| Error::custom("that archive holds no wallet file"))?;
+        // `<name>.wallet/<name>.keys` — one level down, and the directory
+        // name is the authority since the keys file is named after it.
+        let mut found = entries.iter().filter_map(|e| {
+            let (dir, file) = e.path.split_once('/')?;
+            let name = dir.strip_suffix(".wallet")?;
+            (file == format!("{name}.keys")).then(|| name.to_string())
+        });
+        let name = found.next().ok_or_else(|| Error::custom("that archive holds no wallet file"))?;
         if found.next().is_some() {
             return Err(Error::custom("that archive holds more than one wallet file"));
         }
-        Ok(entry.path.trim_end_matches(".wallet").to_string())
+        Ok(name)
     }
 
     /// Work out where to write. A folder gets a dated filename; anything else

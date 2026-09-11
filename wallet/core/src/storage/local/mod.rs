@@ -25,13 +25,126 @@ pub use payload::Payload;
 pub use storage::Storage;
 pub use wallet::{ClientMetadata, WalletStorage};
 
-/// On-disk file name for a wallet: `<name>.wallet` normally, but a name that
-/// already carries an extension (contains a dot) is used verbatim — the user
-/// may deliberately disguise or namespace their wallet file. Such files are
-/// NOT discovered by `wallet_list`/the open picker (discovery is by the
-/// `.wallet` extension); they must be opened by name.
+/// A wallet is one directory. `<name>.wallet/` holds everything that wallet
+/// owns:
+///
+/// ```text
+/// XYZ.wallet/
+///     XYZ.keys        the account keys, encrypted under the wallet password
+///     notes/          the note vault — the money
+///     transactions/   history, not needed to restore anything
+///     .lock           held while the wallet is open
+/// ```
+///
+/// It used to be a file and two sibling directories, which meant three things
+/// to copy and two ways to copy them wrong. One directory is one thing to
+/// move to a USB stick, sync to a cloud folder, or hand to `wallet backup`.
+/// The directory is created with the wallet, before there are any notes in it.
+pub fn wallet_dir_name(name: &str) -> String {
+    format!("{name}.wallet")
+}
+
+/// The keys file inside that directory. Named `.keys` rather than `.wallet`
+/// so that nothing is called `XYZ.wallet/XYZ.wallet`.
+pub fn keys_file_name(name: &str) -> String {
+    format!("{name}.keys")
+}
+
+/// Where the keys live, relative to the storage folder. Returns a *path*, not
+/// a file name, so every `folder.join(wallet_file_name(name))` in the codebase
+/// keeps resolving correctly.
 pub fn wallet_file_name(name: &str) -> String {
-    if name.contains('.') { name.to_string() } else { format!("{name}.wallet") }
+    format!("{}/{}", wallet_dir_name(name), keys_file_name(name))
+}
+
+/// The vault directory for a wallet, relative to the storage folder.
+pub fn notes_dir_name(name: &str) -> String {
+    format!("{}/notes", wallet_dir_name(name))
+}
+
+/// The transaction history directory, relative to the storage folder.
+pub fn transactions_dir_name(name: &str) -> String {
+    format!("{}/transactions", wallet_dir_name(name))
+}
+
+/// Move any wallet still in the old layout into its own directory.
+///
+/// Every step is a rename within one filesystem, so nothing is copied and a
+/// transactions folder of several million files moves instantly.
+///
+/// The new directory is assembled under a temporary name and put in place
+/// last. If this is interrupted, `<name>.wallet.migrating` is left behind with
+/// the parts already moved into it, and the next run finishes the job — rather
+/// than leaving a wallet half in one layout and half in the other.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn migrate_wallet_layout(folder: &std::path::Path) -> Vec<String> {
+    use std::fs;
+
+    let mut migrated = Vec::new();
+    if !folder.exists() {
+        return migrated;
+    }
+
+    // Names to consider: anything with an interrupted migration, plus any
+    // `<name>.wallet` that is still a plain file.
+    let mut names: Vec<String> = Vec::new();
+    let Ok(entries) = fs::read_dir(folder) else { return migrated };
+    for entry in entries.flatten() {
+        let file_name = entry.file_name().to_string_lossy().to_string();
+        if let Some(name) = file_name.strip_suffix(".wallet.migrating") {
+            names.push(name.to_string());
+        } else if let Some(name) = file_name.strip_suffix(".wallet")
+            && entry.path().is_file()
+        {
+            names.push(name.to_string());
+        }
+    }
+    names.sort();
+    names.dedup();
+
+    for name in names {
+        let staging = folder.join(format!("{name}.wallet.migrating"));
+        let old_keys = folder.join(format!("{name}.wallet"));
+        let old_notes = folder.join(format!("{name}.notes"));
+        let old_transactions = folder.join(format!("{name}.transactions"));
+
+        if fs::create_dir_all(&staging).is_err() {
+            continue;
+        }
+        // The keys file first: once it has moved, `<name>.wallet` is free for
+        // the directory to take, and a second run sees the staging folder
+        // rather than a file and resumes.
+        if old_keys.is_file() && fs::rename(&old_keys, staging.join(keys_file_name(&name))).is_err() {
+            continue;
+        }
+        if old_notes.is_dir() {
+            let _ = fs::rename(&old_notes, staging.join("notes"));
+        }
+        if old_transactions.is_dir() {
+            let _ = fs::rename(&old_transactions, staging.join("transactions"));
+        }
+        // Leftovers from the old layout that nothing reads any more.
+        let _ = fs::remove_file(folder.join(format!("{name}.wallet.lock")));
+
+        let destination = folder.join(wallet_dir_name(&name));
+        if destination.exists() {
+            // Only possible if a directory-layout wallet of the same name was
+            // created alongside the old one. Leave the staging folder for a
+            // person to look at rather than merging two wallets blindly.
+            continue;
+        }
+        if fs::rename(&staging, &destination).is_ok() {
+            migrated.push(name);
+        }
+    }
+
+    migrated
+}
+
+/// No-op on wasm, which has no filesystem to migrate.
+#[cfg(target_arch = "wasm32")]
+pub fn migrate_wallet_layout(_folder: &std::path::Path) -> Vec<String> {
+    Vec::new()
 }
 
 use crate::error::Error;
