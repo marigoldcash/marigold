@@ -89,6 +89,23 @@ pub struct KaspaCli {
     /// Widest balance segment rendered this session — the prompt pads to it
     /// so the command line never shifts under the user's fingers.
     prompt_balance_width: Arc<AtomicUsize>,
+    /// Authenticator state for this session: when a code was last accepted,
+    /// and which time steps have already been spent. Neither is written
+    /// anywhere. A lock that survived a restart would have to live in a file
+    /// that whoever is at the machine could simply delete, so it would buy
+    /// nothing and imply something it could not deliver.
+    otp_session: Mutex<OtpSession>,
+}
+
+/// See [`KaspaCli::otp_session`].
+#[derive(Default)]
+pub struct OtpSession {
+    /// Unix seconds of the last accepted code, for the grace window.
+    pub verified_at: Option<u64>,
+    /// Time steps already used. A thirty-second code is good for thirty
+    /// seconds to anyone who read it over a shoulder; spending it once closes
+    /// that.
+    pub used_steps: std::collections::HashSet<u64>,
 }
 
 impl From<&KaspaCli> for Arc<Terminal> {
@@ -189,6 +206,7 @@ impl KaspaCli {
             prompt_total_petals: Arc::new(AtomicU64::new(0)),
             prompt_total_valid: Arc::new(AtomicBool::new(false)),
             prompt_balance_width: Arc::new(AtomicUsize::new(0)),
+            otp_session: Mutex::new(OtpSession::default()),
         });
 
         let term = Arc::new(Terminal::try_new_with_options(kaspa_cli.clone(), options.terminal)?);
@@ -1008,6 +1026,11 @@ impl KaspaCli {
         self.prompt_total_valid.store(true, Ordering::SeqCst);
         tprintln!(self, "");
         tprintln!(self, "notes:  {} MAGLD", kaspa_wallet_core::utils::sompi_to_kaspa_string(notes));
+        // Said once, on opening, so that reaching for a phone at the moment
+        // of a payment is expected rather than alarming.
+        if self.otp().is_some() {
+            tprintln!(self, "{}", style("(this wallet asks for a code from your phone before it spends)").dim());
+        }
         if ledger > 0 {
             tprintln!(
                 self,
@@ -1553,6 +1576,9 @@ impl KaspaCli {
                                 Events::WalletOpen { .. } |
                                 Events::WalletReload { .. } => { },
                                 Events::WalletClose => {
+                                    // A code accepted for one wallet is not a
+                                    // code accepted for the next.
+                                    this.reset_otp_session();
                                     this.term().refresh_prompt();
                                 },
                                 Events::PrvKeyDataCreate { .. } => { },
@@ -1703,6 +1729,19 @@ impl KaspaCli {
     /// Asks uses for a wallet secret, checks the supplied account's private key info
     /// and if it requires a payment secret, asks for it as well.
     pub(crate) async fn ask_wallet_secret(&self, account: Option<&Arc<dyn Account>>) -> Result<(Secret, Option<Secret>)> {
+        let secrets = self.ask_wallet_secret_without_otp(account).await?;
+        // Every moment that stops to ask for a password is a moment worth a
+        // second factor — spends, exports, key changes. Gating here rather
+        // than at each caller means a command added next year is covered by
+        // default instead of by remembering.
+        self.require_otp("this goes ahead").await?;
+        Ok(secrets)
+    }
+
+    /// The password prompt alone. Only for the two places that must not
+    /// demand a code: `otp off`, which exists for somebody whose phone is
+    /// gone, and the enrolment that has not stored a secret yet.
+    pub(crate) async fn ask_wallet_secret_without_otp(&self, account: Option<&Arc<dyn Account>>) -> Result<(Secret, Option<Secret>)> {
         // Re-ask on empty input instead of proceeding to a guaranteed decrypt
         // failure: an empty answer here has historically meant a stray Enter
         // reached the prompt, not an intentional empty password — and the
@@ -1732,6 +1771,87 @@ impl KaspaCli {
         };
 
         Ok((wallet_secret, payment_secret))
+    }
+
+    /// The authenticator enrolled on the open wallet, if any.
+    pub(crate) fn otp(&self) -> Option<kaspa_wallet_core::storage::Otp> {
+        self.wallet().store().otp().ok().flatten()
+    }
+
+    /// Forget that a code was ever accepted. Called when a wallet closes, so
+    /// that opening a different one does not inherit the last one's grace.
+    pub(crate) fn reset_otp_session(&self) {
+        *self.otp_session.lock().unwrap() = OtpSession::default();
+    }
+
+    /// Record a code as accepted. Split out so `otp enable` can arm the grace
+    /// with the code the user just proved on their phone, rather than asking
+    /// for a second one a breath later.
+    pub(crate) fn note_otp_accepted(&self, step: u64, at: u64) {
+        let mut session = self.otp_session.lock().unwrap();
+        session.verified_at = Some(at);
+        session.used_steps.insert(step);
+    }
+
+    /// Ask for a code, if one is enrolled. `Ok(())` when there is no
+    /// authenticator, when a previous code is still inside the grace window,
+    /// or when a fresh code is accepted. Otherwise the command is refused.
+    ///
+    /// `what` completes "...before <what>" and is there so the prompt says
+    /// what is about to happen — a code demanded with no stated reason is a
+    /// code people learn to type without looking.
+    pub(crate) async fn require_otp(&self, what: &str) -> Result<()> {
+        let Some(otp) = self.otp() else { return Ok(()) };
+        let now = kaspa_wallet_core::storage::otp::unix_now_secs();
+
+        if otp.grace_secs > 0 {
+            let within = self.otp_session.lock().unwrap().verified_at.is_some_and(|at| now.saturating_sub(at) < otp.grace_secs);
+            if within {
+                return Ok(());
+            }
+        }
+
+        tprintln!(self, "");
+        tprintln!(self, "{}", style(format!("Authenticator code required before {what}.")).cyan());
+
+        for remaining_tries in (0..3).rev() {
+            let now = kaspa_wallet_core::storage::otp::unix_now_secs();
+            let seconds = kaspa_wallet_core::storage::otp::Otp::seconds_remaining(now);
+            // A code with three seconds left on it will have expired by the
+            // time it is typed, and the failure looks like a broken phone
+            // rather than a race. Say so before they start.
+            if seconds <= 3 {
+                tprintln!(self, "{}", style("(your code is about to change — wait for the next one)").dim());
+            }
+            let entered = self.term().ask(false, "Code from your authenticator: ").await?;
+            let entered = entered.trim().to_string();
+            if entered.is_empty() {
+                return Err(Error::custom("cancelled — no code entered"));
+            }
+
+            match otp.step_of(&entered, now) {
+                Some(step) if self.otp_session.lock().unwrap().used_steps.contains(&step) => {
+                    tprintln!(self, "{}", style("That code has already been used. Wait for your phone to show the next one.").red());
+                }
+                Some(step) => {
+                    self.note_otp_accepted(step, now);
+                    return Ok(());
+                }
+                None if remaining_tries > 0 => {
+                    tprintln!(
+                        self,
+                        "{}",
+                        style(format!("That code is not right — {remaining_tries} more {}.", if remaining_tries == 1 { "try" } else { "tries" }))
+                            .red()
+                    );
+                }
+                None => {}
+            }
+        }
+
+        // Deliberately not a hint about clock skew or wrong wallets. Whoever
+        // is typing either has the phone or does not.
+        Err(Error::custom("authenticator code not accepted"))
     }
 
     pub async fn account(&self) -> Result<Arc<dyn Account>> {

@@ -303,6 +303,19 @@ pub trait Interface: Send + Sync + AnySync {
         Ok(())
     }
 
+    /// The authenticator enrolled on the currently open wallet, if any.
+    /// `Ok(None)` when none is enrolled or the backend has no support.
+    fn otp(&self) -> Result<Option<crate::storage::Otp>> {
+        Ok(None)
+    }
+
+    /// Enrol, re-configure, or remove the authenticator, and write it. Needs
+    /// the wallet password because the secret lives in the encrypted payload
+    /// and the whole payload is re-sealed to store it.
+    async fn set_otp(&self, _wallet_secret: &Secret, _otp: Option<crate::storage::Otp>) -> Result<()> {
+        Err(Error::custom("this storage backend cannot hold an authenticator"))
+    }
+
     /// redirect where wallet files live (the `folder` setting). Applies to
     /// wallet/vault/transaction files only — the settings file stays at the
     /// default location so the redirect itself has a fixed home. Must be

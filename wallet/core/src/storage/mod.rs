@@ -14,6 +14,7 @@ pub mod keydata;
 pub mod local;
 pub mod metadata;
 pub mod notekeys;
+pub mod otp;
 pub mod storable;
 pub mod transaction;
 
@@ -32,6 +33,7 @@ pub use metadata::AccountMetadata;
 pub use notekeys::{
     NoteKeyEntry, NoteKeyInfo, NoteKeyMap, NoteProvenance, NoteStatus, PaymentRequestInfo, PaymentRequestKey, PaymentRequestMap,
 };
+pub use otp::Otp;
 pub use storable::Storable;
 pub use transaction::{TransactionData, TransactionId, TransactionKind, TransactionRecord};
 

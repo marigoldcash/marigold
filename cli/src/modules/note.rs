@@ -41,7 +41,7 @@ fn copy_dir_recursive(from: &Path, to: &Path) -> std::io::Result<()> {
 /// but does not touch the newlines inside it, so a multi-line payload has to
 /// arrive already converted. Done here rather than at the four call sites
 /// because the fifth one would forget.
-fn qr_string(text: &str) -> Option<String> {
+pub(crate) fn qr_string(text: &str) -> Option<String> {
     let code = qrcode::QrCode::new(text.as_bytes()).ok()?;
     Some(code.render::<qrcode::render::unicode::Dense1x2>().build().crlf())
 }

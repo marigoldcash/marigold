@@ -31,6 +31,11 @@ pub struct Cache {
     /// public content; the amount is invoice metadata). Plain Vec, not a
     /// `Collection` — requests are few and short-lived, linear scans are fine.
     pub payment_request_info: Vec<PaymentRequestInfo>,
+    /// The enrolled authenticator, held decrypted for the life of the
+    /// session. It has to be: the whole point is to challenge for a code at
+    /// moments when going back to the file for the password would defeat the
+    /// exercise.
+    pub otp: Option<crate::storage::Otp>,
 }
 
 fn payment_request_map_and_info(keys: Vec<PaymentRequestKey>) -> Result<(PaymentRequestMap, Vec<PaymentRequestInfo>)> {
@@ -64,6 +69,7 @@ impl Cache {
 
         let (payment_request_map, payment_request_info) = payment_request_map_and_info(payload.0.payment_request_keys.clone())?;
         let payment_request_data = Decrypted::new(payment_request_map).encrypt(secret, encryption_kind)?;
+        let otp = payload.0.otp.clone();
 
         Ok(Cache {
             wallet_title,
@@ -77,6 +83,7 @@ impl Cache {
             address_book,
             payment_request_data,
             payment_request_info,
+            otp,
         })
     }
 
@@ -99,6 +106,7 @@ impl Cache {
         let (payment_request_map, payment_request_info) = payment_request_map_and_info(payload.payment_request_keys)?;
         let payment_request_data = Decrypted::new(payment_request_map).encrypt(secret, encryption_kind)?;
         let client_metadata = None;
+        let otp = payload.otp;
 
         Ok(Cache {
             wallet_title,
@@ -112,6 +120,7 @@ impl Cache {
             address_book,
             payment_request_data,
             payment_request_info,
+            otp,
         })
     }
 
@@ -129,6 +138,7 @@ impl Cache {
         let payment_request_keys = payment_request_keys.values().cloned().collect::<Vec<_>>();
         let mut payload = Payload::new(prv_key_data, accounts, address_book);
         payload.payment_request_keys = payment_request_keys;
+        payload.otp = self.otp.clone();
         let payload = Decrypted::new(payload).encrypt(secret, self.encryption_kind)?;
 
         Ok(WalletStorage {

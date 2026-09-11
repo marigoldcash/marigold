@@ -771,6 +771,21 @@ impl Interface for LocalStore {
         Ok(())
     }
 
+    fn otp(&self) -> Result<Option<crate::storage::Otp>> {
+        Ok(self.inner()?.cache.read().unwrap().otp.clone())
+    }
+
+    async fn set_otp(&self, wallet_secret: &Secret, otp: Option<crate::storage::Otp>) -> Result<()> {
+        let inner = self.inner()?;
+        inner.cache.write().unwrap().otp = otp;
+        // Written through immediately rather than left to the next save. An
+        // enrolment the user has just confirmed on their phone, lost because
+        // the session ended before something else triggered a save, would
+        // leave them holding a code the wallet has never heard of.
+        inner.store(wallet_secret).await?;
+        Ok(())
+    }
+
     fn set_storage_folder(&self, folder: &str) -> Result<()> {
         if self.inner.lock().unwrap().is_some() {
             return Err(Error::Custom("cannot change the storage folder while a wallet is open".to_string()));
