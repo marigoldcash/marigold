@@ -13,6 +13,30 @@ impl Sweep {
         let (wallet_secret, payment_secret) = ctx.ask_wallet_secret(Some(&account)).await?;
 
         let utxo_count = account.utxo_context().mature_utxo_size();
+
+        // A sweep of several million coins is hours of work, and finding out
+        // half way through that the disk is full costs all of it. Batch
+        // records are not kept, so in the ordinary case this needs almost
+        // nothing — it is 'history detail' that turns every batch into a file.
+        let detail = ctx.wallet().settings().get::<bool>(WalletSettings::HistoryDetail).unwrap_or(false);
+        let estimate = crate::space::sweep_estimate(utxo_count as u64, detail);
+        if estimate > 0 {
+            let folder = kaspa_wallet_core::storage::local::default_storage_folder().to_string();
+            if let Ok(path) = workflow_store::fs::resolve_path(&folder) {
+                // Twice the estimate: room to write it, and room for the
+                // filesystem to not be at its very last block when we finish.
+                let need = crate::space::Need { required: estimate, comfortable: estimate.saturating_mul(2) };
+                if !ctx.disk_allows(
+                    &path,
+                    need,
+                    "this sweep",
+                    "'history detail off' stops the sweep recording every internal batch,\nwhich is what the estimate above is almost entirely made of.",
+                ) {
+                    return Ok(());
+                }
+            }
+        }
+
         tprintln!(
             ctx,
             "Consolidating {} coin(s) into fewer, larger ones — this builds and submits a chain of transactions; \

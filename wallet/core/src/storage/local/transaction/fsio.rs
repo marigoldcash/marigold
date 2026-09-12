@@ -24,6 +24,42 @@ pub struct TransactionStore {
     name: String,
 }
 
+/// Records are filed under the first byte of their id: `.../ab/abcdef…`.
+///
+/// One flat directory was fine until a wallet that is a mining payout target
+/// put 6,087,990 files in one of them. At that size ext4's directory hash
+/// tree hits its two-level ceiling — `Directory index full, reach max htree
+/// level: 2` — and every further create fails with `ENOSPC`, which surfaces
+/// as "No space left on device" on a disk with 200 GB free. The errno is the
+/// only one ext4 has for the condition; it is not about free space, and no
+/// amount of deleting elsewhere helps.
+///
+/// 256 buckets over a uniformly distributed hash keeps each directory to a
+/// few tens of thousands of entries even at the scale that broke it, which
+/// every filesystem handles without comment.
+fn shard_for(id: &TransactionId) -> String {
+    // Transaction ids are hashes, so the leading byte is as good a spread as
+    // any and needs no hashing of our own.
+    id.to_hex().chars().take(2).collect()
+}
+
+/// Where a record is written. Always sharded.
+fn record_path(folder: &Path, id: &TransactionId) -> PathBuf {
+    folder.join(shard_for(id)).join(id.to_hex())
+}
+
+/// Where a record is read from: the shard, or the flat path beside it.
+///
+/// Wallets that predate sharding have their records sitting directly in the
+/// network folder. They are left there rather than migrated — moving six
+/// million files to fix a problem that only bites at six million files is
+/// the wrong trade, and a wallet small enough for the migration to be quick
+/// is a wallet that was never in trouble. Both layouts are simply readable.
+fn existing_record_path(folder: &Path, id: &TransactionId) -> PathBuf {
+    let sharded = record_path(folder, id);
+    if sharded.exists() { sharded } else { folder.join(id.to_hex()) }
+}
+
 impl TransactionStore {
     pub fn new<P: AsRef<Path>>(folder: P, name: &str) -> TransactionStore {
         TransactionStore {
@@ -59,36 +95,64 @@ impl TransactionStore {
         Ok(folder)
     }
 
+    /// Every record id under this binding, newest first.
+    ///
+    /// `readdir` is not recursive, so the shard directories are walked
+    /// explicitly. Anything sitting directly in the network folder is a
+    /// record from before sharding and is included alongside them, which is
+    /// what keeps an older wallet's history visible.
     async fn enumerate(&self, binding: &Binding, network_id: &NetworkId) -> Result<VecDeque<TransactionId>> {
         let folder = self.make_folder(binding, network_id);
-        let mut transactions = VecDeque::new();
-        match fs::readdir(folder, true).await {
-            Ok(mut files) => {
-                // we reverse the order of the files so that the newest files are first
-                files.sort_by_key(|f| {
-                    let meta = f.metadata().expect("fsio: missing file metadata");
-                    std::cmp::Reverse(meta.created().or_else(|| meta.modified()).unwrap_or_default())
-                });
-
-                for file in files {
-                    if let Ok(id) = TransactionId::from_hex(file.file_name()) {
-                        transactions.push_back(id);
-                    } else {
-                        log_error!("TransactionStore::enumerate(): filename {:?} is not a hash (foreign file?)", file);
-                    }
-                }
-
-                Ok(transactions)
-            }
+        let top = match fs::readdir(folder.clone(), false).await {
+            Ok(entries) => entries,
             Err(e) => {
-                if e.code() == Some("ENOENT") {
+                return if e.code() == Some("ENOENT") {
                     Err(Error::NoRecordsFound)
                 } else {
                     log_info!("TransactionStore::enumerate(): error reading folder: {:?}", e);
                     Err(e.into())
+                };
+            }
+        };
+
+        // (id, when it was written) — sorting needs the time, and the time
+        // needs a stat, so they are gathered together rather than stat'd
+        // again during the sort.
+        let mut found: Vec<(TransactionId, u64)> = Vec::new();
+
+        let mut collect = |entries: Vec<fs::DirEntry>| {
+            for file in entries {
+                match TransactionId::from_hex(file.file_name()) {
+                    Ok(id) => {
+                        let when = file
+                            .metadata()
+                            .and_then(|meta| meta.created().or_else(|| meta.modified()))
+                            .unwrap_or_default();
+                        found.push((id, when));
+                    }
+                    // A two-character name is a shard directory, not a
+                    // foreign file, and saying otherwise on every listing
+                    // would be 256 lines of noise.
+                    Err(_) if file.file_name().len() == 2 => {}
+                    Err(_) => {
+                        log_error!("TransactionStore::enumerate(): filename {:?} is not a hash (foreign file?)", file);
+                    }
                 }
             }
+        };
+
+        let shards: Vec<String> =
+            top.iter().map(|e| e.file_name().to_string()).filter(|name| name.len() == 2).collect();
+        collect(top);
+        for shard in shards {
+            if let Ok(entries) = fs::readdir(folder.join(&shard), true).await {
+                collect(entries);
+            }
         }
+
+        // Newest first.
+        found.sort_by_key(|(_, when)| std::cmp::Reverse(*when));
+        Ok(found.into_iter().map(|(id, _)| id).collect())
     }
 }
 
@@ -104,7 +168,7 @@ impl TransactionRecordStore for TransactionStore {
 
     async fn load_single(&self, binding: &Binding, network_id: &NetworkId, id: &TransactionId) -> Result<Arc<TransactionRecord>> {
         let folder = self.make_folder(binding, network_id);
-        let path = folder.join(id.to_hex());
+        let path = existing_record_path(&folder, id);
         Ok(Arc::new(read(&path, None).await?))
     }
 
@@ -118,7 +182,7 @@ impl TransactionRecordStore for TransactionStore {
         let mut transactions = vec![];
 
         for id in ids {
-            let path = folder.join(id.to_hex());
+            let path = existing_record_path(&folder, id);
             match read(&path, None).await {
                 Ok(tx) => {
                     transactions.push(Arc::new(tx));
@@ -146,8 +210,8 @@ impl TransactionRecordStore for TransactionStore {
         let total = if let Some(filter) = filter {
             let mut located = 0;
 
-            for id in ids {
-                let path = folder.join(id.to_hex());
+            for id in &ids {
+                let path = existing_record_path(&folder, id);
 
                 match read(&path, None).await {
                     Ok(tx) => {
@@ -170,7 +234,7 @@ impl TransactionRecordStore for TransactionStore {
             let iter = ids.iter().skip(range.start).take(range.len());
 
             for id in iter {
-                let path = folder.join(id.to_hex());
+                let path = existing_record_path(&folder, id);
                 match read(&path, None).await {
                     Ok(tx) => {
                         transactions.push(Arc::new(tx));
@@ -190,7 +254,12 @@ impl TransactionRecordStore for TransactionStore {
     async fn store(&self, transaction_records: &[&TransactionRecord]) -> Result<()> {
         for tx in transaction_records {
             let folder = self.ensure_folder(tx.binding(), tx.network_id()).await?;
-            let filename = folder.join(tx.id().to_hex());
+            let filename = record_path(&folder, tx.id());
+            // The shard directory, not the network directory: `ensure_folder`
+            // caches the latter and would skip this.
+            if let Some(shard) = filename.parent() {
+                fs::create_dir_all(shard).await?;
+            }
             write(&filename, tx, None, EncryptionKind::XChaCha20Poly1305).await?;
         }
 
@@ -200,7 +269,7 @@ impl TransactionRecordStore for TransactionStore {
     async fn remove(&self, binding: &Binding, network_id: &NetworkId, ids: &[&TransactionId]) -> Result<()> {
         let folder = self.ensure_folder(binding, network_id).await?;
         for id in ids {
-            let filename = folder.join(id.to_hex());
+            let filename = existing_record_path(&folder, id);
             fs::remove(&filename).await?;
         }
 
@@ -215,7 +284,7 @@ impl TransactionRecordStore for TransactionStore {
         note: Option<String>,
     ) -> Result<()> {
         let folder = self.make_folder(binding, network_id);
-        let path = folder.join(id.to_hex());
+        let path = existing_record_path(&folder, &id);
         let mut transaction = read(&path, None).await?;
         transaction.note = note;
         write(&path, &transaction, None, EncryptionKind::XChaCha20Poly1305).await?;
@@ -229,7 +298,7 @@ impl TransactionRecordStore for TransactionStore {
         metadata: Option<String>,
     ) -> Result<()> {
         let folder = self.make_folder(binding, network_id);
-        let path = folder.join(id.to_hex());
+        let path = existing_record_path(&folder, &id);
         let mut transaction = read(&path, None).await?;
         transaction.metadata = metadata;
         write(&path, &transaction, None, EncryptionKind::XChaCha20Poly1305).await?;
@@ -287,7 +356,7 @@ impl Stream for TransactionRecordStream {
             Poll::Ready(None)
         } else {
             let id = self.transactions.pop_front().unwrap();
-            let path = self.folder.join(id.to_hex());
+            let path = existing_record_path(&self.folder, &id);
             match read_sync(&path, None) {
                 Ok(transaction_data) => Poll::Ready(Some(Ok(Arc::new(transaction_data)))),
                 Err(err) => Poll::Ready(Some(Err(err))),
@@ -320,4 +389,154 @@ async fn write(path: &Path, record: &TransactionRecord, secret: Option<&Secret>,
     };
     fs::write(path, &borsh::to_vec(&data)?).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::transaction::{TransactionData, UtxoRecord};
+    use crate::storage::Binding;
+    use crate::utxo::UtxoContextId;
+    use kaspa_consensus_core::network::NetworkType;
+
+    fn a_record(id_byte: u8, binding: &Binding, network_id: &NetworkId) -> TransactionRecord {
+        TransactionRecord {
+            id: TransactionId::from_bytes([id_byte; 32]),
+            unixtime_msec: Some(1_757_000_000_000),
+            value: 100,
+            binding: binding.clone(),
+            block_daa_score: 1,
+            network_id: *network_id,
+            transaction_data: TransactionData::Incoming { aggregate_input_value: 100, utxo_entries: Vec::<UtxoRecord>::new() },
+            note: None,
+            metadata: None,
+        }
+    }
+
+    fn a_store(dir: &tempfile::TempDir) -> (TransactionStore, Binding, NetworkId) {
+        let store = TransactionStore::new(dir.path(), "test");
+        let binding = Binding::Custom(UtxoContextId::default());
+        let network_id = NetworkId::with_suffix(NetworkType::Testnet, 10);
+        (store, binding, network_id)
+    }
+
+    fn network_folder(dir: &tempfile::TempDir, binding: &Binding, network_id: &NetworkId) -> PathBuf {
+        dir.path()
+            .join(crate::storage::local::transactions_dir_name("test"))
+            .join(binding.to_hex())
+            .join(network_id.to_string())
+    }
+
+    /// The whole point: a record must not land directly in the network
+    /// folder, because six million of those is what wedged ext4's directory
+    /// index in the first place.
+    #[tokio::test]
+    async fn a_record_is_written_into_a_shard_and_read_back() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let (store, binding, network_id) = a_store(&dir);
+        let record = a_record(0xab, &binding, &network_id);
+
+        store.store(&[&record]).await?;
+
+        let folder = network_folder(&dir, &binding, &network_id);
+        let id_hex = record.id.to_hex();
+        assert!(folder.join("ab").join(&id_hex).is_file(), "the record belongs under its first byte");
+        assert!(!folder.join(&id_hex).is_file(), "and not loose in the network folder");
+
+        let loaded = store.load_single(&binding, &network_id, &record.id).await?;
+        assert_eq!(loaded.id, record.id);
+        assert_eq!(loaded.value, 100);
+        Ok(())
+    }
+
+    /// Wallets that predate sharding keep their records loose in the network
+    /// folder. They are not migrated, so they have to stay readable — if this
+    /// breaks, existing history silently disappears.
+    #[tokio::test]
+    async fn a_record_from_before_sharding_is_still_found() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let (store, binding, network_id) = a_store(&dir);
+        let old = a_record(0x11, &binding, &network_id);
+        let new = a_record(0x22, &binding, &network_id);
+
+        // Written the way the old code wrote it: straight into the folder.
+        let folder = network_folder(&dir, &binding, &network_id);
+        fs::create_dir_all(&folder).await?;
+        write(&folder.join(old.id.to_hex()), &old, None, EncryptionKind::XChaCha20Poly1305).await?;
+
+        store.store(&[&new]).await?;
+
+        assert_eq!(store.load_single(&binding, &network_id, &old.id).await?.id, old.id, "the old one still loads");
+        assert_eq!(store.load_single(&binding, &network_id, &new.id).await?.id, new.id);
+
+        // And both show up in a listing, which is what `history` walks.
+        let listed = store.enumerate(&binding, &network_id).await?;
+        assert_eq!(listed.len(), 2, "a listing spans both layouts");
+        assert!(listed.contains(&old.id) && listed.contains(&new.id));
+        Ok(())
+    }
+
+    /// A shard directory is not a stray file, and must not be logged as one
+    /// 256 times per listing.
+    #[tokio::test]
+    async fn many_records_spread_across_shards_and_all_come_back() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let (store, binding, network_id) = a_store(&dir);
+
+        let records: Vec<TransactionRecord> = (0..=255u8).map(|b| a_record(b, &binding, &network_id)).collect();
+        let refs: Vec<&TransactionRecord> = records.iter().collect();
+        store.store(&refs).await?;
+
+        let folder = network_folder(&dir, &binding, &network_id);
+        let shards = std::fs::read_dir(&folder)?.filter_map(|e| e.ok()).filter(|e| e.path().is_dir()).count();
+        assert_eq!(shards, 256, "an id per leading byte fills every bucket");
+
+        let mut loose = std::fs::read_dir(&folder)?.filter_map(|e| e.ok()).filter(|e| e.path().is_file()).peekable();
+        assert!(loose.peek().is_none(), "nothing is left in the network folder itself");
+
+        let listed = store.enumerate(&binding, &network_id).await?;
+        assert_eq!(listed.len(), 256, "every record is enumerated exactly once");
+        Ok(())
+    }
+
+    /// Removal has to find a record wherever it actually lives, or
+    /// `history clear`-style work leaves the files behind.
+    #[tokio::test]
+    async fn removal_finds_a_record_in_either_layout() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let (store, binding, network_id) = a_store(&dir);
+        let old = a_record(0x33, &binding, &network_id);
+        let new = a_record(0x44, &binding, &network_id);
+
+        let folder = network_folder(&dir, &binding, &network_id);
+        fs::create_dir_all(&folder).await?;
+        write(&folder.join(old.id.to_hex()), &old, None, EncryptionKind::XChaCha20Poly1305).await?;
+        store.store(&[&new]).await?;
+
+        store.remove(&binding, &network_id, &[&old.id, &new.id]).await?;
+        assert!(!folder.join(old.id.to_hex()).exists());
+        assert!(!folder.join("44").join(new.id.to_hex()).exists());
+        Ok(())
+    }
+
+    /// Editing a note must rewrite the record where it is, not silently
+    /// duplicate it into the other layout.
+    #[tokio::test]
+    async fn annotating_an_old_record_does_not_duplicate_it() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let (store, binding, network_id) = a_store(&dir);
+        let old = a_record(0x55, &binding, &network_id);
+
+        let folder = network_folder(&dir, &binding, &network_id);
+        fs::create_dir_all(&folder).await?;
+        write(&folder.join(old.id.to_hex()), &old, None, EncryptionKind::XChaCha20Poly1305).await?;
+
+        store.store_transaction_note(&binding, &network_id, old.id, Some("paid the plumber".into())).await?;
+
+        assert!(folder.join(old.id.to_hex()).is_file(), "it stays where it was");
+        assert!(!folder.join("55").join(old.id.to_hex()).exists(), "and does not gain a second copy");
+        assert_eq!(store.enumerate(&binding, &network_id).await?.len(), 1);
+        assert_eq!(store.load_single(&binding, &network_id, &old.id).await?.note.as_deref(), Some("paid the plumber"));
+        Ok(())
+    }
 }

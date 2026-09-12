@@ -79,6 +79,43 @@ impl Default for Wallet {
     }
 }
 
+/// One day's running coinbase figures, as held on the summary record.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CoinbaseTally {
+    pub count: u64,
+    pub total: u64,
+    /// The highest DAA score folded in so far.
+    pub high_water: u64,
+}
+
+/// Fold one mined payout into the day's running total, or decide it has
+/// already been counted.
+///
+/// The wallet rescans its UTXO set whenever it reconnects, and discovery
+/// fires again for everything still unspent. While every payout was its own
+/// file, the per-record existence check caught that; with the files gone,
+/// the DAA score does the same job. Payouts at or above the highest score
+/// counted so far are folded in, ones below it are not.
+///
+/// At or above, rather than strictly above: a DAG has several blocks sharing
+/// a DAA score, and demanding a strictly higher one would drop every sibling
+/// after the first. The cost of the looser test is that a reconnect may
+/// recount the handful of payouts sitting exactly on the mark. Losing real
+/// payouts every day is the worse of the two errors.
+pub(crate) fn fold_coinbase(existing: Option<CoinbaseTally>, value: u64, block_daa_score: u64) -> Option<CoinbaseTally> {
+    let Some(tally) = existing else {
+        return Some(CoinbaseTally { count: 1, total: value, high_water: block_daa_score });
+    };
+    if block_daa_score < tally.high_water {
+        return None;
+    }
+    Some(CoinbaseTally {
+        count: tally.count + 1,
+        total: tally.total.saturating_add(value),
+        high_water: block_daa_score.max(tally.high_water),
+    })
+}
+
 impl Wallet {
     pub fn local_store() -> Result<Arc<dyn Interface>> {
         Ok(Arc::new(LocalStore::try_new(false)?))
@@ -1004,7 +1041,111 @@ impl Wallet {
         self.utxo_processor().is_connected()
     }
 
+    /// The day a coinbase payout belongs to, as whole days since the epoch.
+    /// UTC, because a summary row that shifts when the user travels is worse
+    /// than one that is occasionally an hour off what they expected.
+    fn utc_day(unixtime_msec: u64) -> u64 {
+        unixtime_msec / 86_400_000
+    }
+
+    /// A stable id for one day's coinbase summary, so that the row can be
+    /// found again and added to rather than duplicated.
+    fn coinbase_summary_id(binding: &Binding, network_id: &NetworkId, day: u64) -> TransactionId {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        // Domain-separated so this can never collide with a real transaction
+        // id, which is a hash of transaction data and not of this string.
+        hasher.update(b"marigold/coinbase-day-summary/v1");
+        hasher.update(binding.to_hex().as_bytes());
+        hasher.update(network_id.to_string().as_bytes());
+        hasher.update(day.to_be_bytes());
+        let digest: [u8; 32] = hasher.finalize().into();
+        TransactionId::from_bytes(digest)
+    }
+
+    /// Fold one coinbase payout into the day's summary row.
+    ///
+    /// A coinbase payout is money arriving, so by kind it is a real incoming
+    /// transaction and the history filter lets it through. But a wallet that
+    /// is a mining payout target receives one per block: on the wallet that
+    /// prompted this, 3,793,126 of them in a single day at 10 BPS. Written
+    /// one file each, that was 25 GB of 220-byte records in a single
+    /// directory, and finally an ext4 directory index too full to accept
+    /// another — reported, accurately and uselessly, as "No space left on
+    /// device" with 200 GB free.
+    ///
+    /// Nobody reads a mining log a coin at a time. What is worth keeping is
+    /// the day's total, and that is the only thing the chain will not give
+    /// back later: a pruned node forgets spent outputs after thirty hours.
+    /// So one row per UTC day, rewritten in place as payouts arrive. Balances
+    /// are unaffected either way — they come from the live UTXO set and have
+    /// never been derived from these records.
+    ///
+    /// `history detail` is the way out for anyone who genuinely wants one row
+    /// per coin.
+    async fn record_coinbase_discovery(&self, record: &TransactionRecord) -> Result<()> {
+        let store = self.store().as_transaction_record_store()?;
+        let network_id = self.network_id()?;
+        let binding = record.binding().clone();
+
+        let unixtime_msec = record.unixtime_msec.unwrap_or_else(workflow_core::time::unixtime_as_millis_u64);
+        let day = Self::utc_day(unixtime_msec);
+        let id = Self::coinbase_summary_id(&binding, &network_id, day);
+
+        // The count lives in `metadata` because it is the one number that
+        // cannot be recovered from the record itself once the individual
+        // payouts are not being kept. `note` is the human sentence and is
+        // rewritten from the count each time.
+        //
+        // `block_daa_score` holds the highest score counted so far, which is
+        // what keeps a reconnect from counting the day twice. The wallet
+        // rescans its UTXO set whenever it reconnects and discovery fires
+        // again for everything still unspent; before, the per-record
+        // `load_single` was what caught that, and with the records gone
+        // something has to. Payouts at or above the mark are counted, below
+        // it are not.
+        //
+        // At or above, not strictly above: a DAG has several blocks sharing a
+        // DAA score, and demanding a strictly higher one would drop every
+        // sibling after the first. The cost of the looser test is that a
+        // reconnect may recount the handful of payouts sitting exactly on the
+        // mark. Losing real payouts every day is the worse error of the two.
+        let existing = match store.load_single(&binding, &network_id, &id).await {
+            Ok(existing) => Some(CoinbaseTally {
+                count: existing.metadata.as_deref().and_then(|m| m.parse::<u64>().ok()).unwrap_or(0),
+                total: existing.value,
+                high_water: existing.block_daa_score,
+            }),
+            Err(_) => None,
+        };
+
+        let Some(tally) = fold_coinbase(existing, record.value, record.block_daa_score) else {
+            return Ok(());
+        };
+        let CoinbaseTally { count, total, high_water } = tally;
+
+        let mut summary = record.clone();
+        summary.id = id;
+        summary.value = total;
+        summary.block_daa_score = high_water;
+        summary.unixtime_msec = Some(unixtime_msec);
+        summary.transaction_data = TransactionData::Incoming { aggregate_input_value: total, utxo_entries: vec![] };
+        summary.metadata = Some(count.to_string());
+        summary.note = Some(format!("{count} mined payout{} this day, summarised", if count == 1 { "" } else { "s" }));
+
+        store.store(&[&summary]).await?;
+        Ok(())
+    }
+
     pub(crate) async fn handle_discovery(&self, record: TransactionRecord) -> Result<()> {
+        // A payment somebody sent you is an event with a counterparty and is
+        // kept in full. Your own machine paying you a block reward is not,
+        // and is folded into a daily total instead — see above.
+        let detailed = self.settings().get::<bool>(WalletSettings::HistoryDetail).unwrap_or(false);
+        if record.is_coinbase() && !detailed {
+            return self.record_coinbase_discovery(&record).await;
+        }
+
         let transaction_store = self.store().as_transaction_record_store()?;
 
         if let Err(_err) = transaction_store.load_single(record.binding(), &self.network_id()?, record.id()).await {
@@ -1574,10 +1715,94 @@ impl Wallet {
 #[cfg(not(target_arch = "wasm32"))]
 #[cfg(test)]
 mod test {
-    // use hex_literal::hex;
+    use super::*;
+    use crate::utxo::UtxoContextId;
+    use kaspa_consensus_core::network::NetworkType;
 
-    // use super::*;
-    // use kaspa_addresses::Address;
+    fn a_binding() -> Binding {
+        Binding::Custom(UtxoContextId::default())
+    }
+
+    /// The summary row is found again by recomputing its id, so the id has to
+    /// be the same every time for the same day — otherwise each payout writes
+    /// a new file and we are back where we started, but with worse names.
+    #[test]
+    fn a_days_summary_id_is_stable_and_unique_to_that_day() {
+        let binding = a_binding();
+        let network = NetworkId::with_suffix(NetworkType::Testnet, 10);
+
+        let day = Wallet::utc_day(1_757_000_000_000);
+        let id = Wallet::coinbase_summary_id(&binding, &network, day);
+        assert_eq!(id, Wallet::coinbase_summary_id(&binding, &network, day), "same inputs, same id");
+
+        assert_ne!(id, Wallet::coinbase_summary_id(&binding, &network, day + 1), "a different day is a different row");
+        assert_ne!(
+            id,
+            Wallet::coinbase_summary_id(&binding, &NetworkId::with_suffix(NetworkType::Testnet, 11), day),
+            "a different network is a different row"
+        );
+        assert_ne!(id, Wallet::coinbase_summary_id(&a_binding(), &network, day), "a different account is a different row");
+    }
+
+    /// A day of mining folds into one row that adds up.
+    #[test]
+    fn payouts_accumulate_into_one_row() {
+        let mut tally = None;
+        for block in 1..=1000u64 {
+            tally = fold_coinbase(tally, 50, block);
+            assert!(tally.is_some(), "a forward scan counts every payout");
+        }
+        let tally = tally.unwrap();
+        assert_eq!(tally.count, 1000);
+        assert_eq!(tally.total, 50_000);
+        assert_eq!(tally.high_water, 1000);
+    }
+
+    /// The reconnect case. Before the summary existed, the per-record file
+    /// was what stopped a rescan counting the day twice; now the DAA score
+    /// has to.
+    #[test]
+    fn a_rescan_does_not_count_the_day_again() {
+        let mut tally = None;
+        for block in 1..=100u64 {
+            tally = fold_coinbase(tally, 50, block);
+        }
+        let after_scan = tally.unwrap();
+
+        // The wallet reconnects and discovery replays everything unspent.
+        let mut replayed = Some(after_scan);
+        for block in 1..=99u64 {
+            assert_eq!(fold_coinbase(replayed, 50, block), None, "payout at {block} was already counted");
+        }
+        // Only the blocks sitting exactly on the mark can be recounted.
+        replayed = fold_coinbase(replayed, 50, 100);
+        assert_eq!(replayed.unwrap().count, after_scan.count + 1, "a reconnect costs at most the top of the mark");
+    }
+
+    /// Several blocks share a DAA score in a DAG. Dropping the siblings would
+    /// quietly lose real money from the total every single day.
+    #[test]
+    fn blocks_sharing_a_daa_score_are_all_counted() {
+        let mut tally = None;
+        for _ in 0..5 {
+            tally = fold_coinbase(tally, 50, 7);
+        }
+        let tally = tally.unwrap();
+        assert_eq!(tally.count, 5, "five siblings at the same score are five payouts");
+        assert_eq!(tally.total, 250);
+    }
+
+    /// Everything within one UTC day folds into one row, and midnight starts
+    /// a new one.
+    #[test]
+    fn the_day_boundary_is_utc_midnight() {
+        const DAY: u64 = 86_400_000;
+        // 2026-09-11T00:00:00Z is a whole number of days since the epoch.
+        let midnight = 20_707 * DAY;
+        assert_eq!(Wallet::utc_day(midnight), Wallet::utc_day(midnight + DAY - 1), "the whole day is one row");
+        assert_eq!(Wallet::utc_day(midnight + DAY), Wallet::utc_day(midnight) + 1, "and the next second is the next");
+        assert_eq!(Wallet::utc_day(0), 0);
+    }
 
     /*
     use workflow_rpc::client::ConnectOptions;

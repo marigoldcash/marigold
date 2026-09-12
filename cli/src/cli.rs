@@ -269,6 +269,41 @@ impl KaspaCli {
     ///
     /// Returns the node's `Rpc` so the caller can decide when — or whether —
     /// to hand the wallet over to it. `Ok(None)` means one was already running.
+    /// Report on the disk before a long job, and say whether it should run.
+    ///
+    /// Returns false only when there is genuinely not enough. A filesystem we
+    /// cannot measure reads as fine — refusing to work because the
+    /// measurement failed would be the worse of the two errors.
+    ///
+    /// `what` finishes "…to run <what>", and `remedy` is the line that says
+    /// what to do about it, because a refusal with no way forward is just a
+    /// wall.
+    pub fn disk_allows(self: &Arc<Self>, path: &std::path::Path, need: crate::space::Need, what: &str, remedy: &str) -> bool {
+        use crate::space::{Verdict, human};
+        match crate::space::check(path, need) {
+            Verdict::Fine => true,
+            Verdict::Tight { available } => {
+                tprintln!(self, "");
+                tprintln!(self, "{}", style(format!("{} free — enough to start {what}, not much more.", human(available))).yellow());
+                tprintln!(self, "{}", style(remedy).dim());
+                tprintln!(self, "");
+                true
+            }
+            Verdict::Short { available, required } => {
+                tprintln!(self, "");
+                tprintln!(
+                    self,
+                    "{}",
+                    style(format!("Not enough room to run {what}: {} free, about {} needed.", human(available), human(required)))
+                        .red()
+                );
+                tprintln!(self, "{}", style(remedy).dim());
+                tprintln!(self, "");
+                false
+            }
+        }
+    }
+
     #[cfg(feature = "embedded-node")]
     pub async fn spawn_embedded_node(self: &Arc<Self>) -> Result<Option<Rpc>> {
         if self.embedded_node.lock().unwrap().is_some() {
@@ -277,6 +312,19 @@ impl KaspaCli {
         }
         let network_id = self.wallet.network_id()?;
         let appdir = crate::embedded::default_appdir(network_id)?;
+
+        // Asked before the node is started rather than discovered eight hours
+        // into a sync. A node that runs out of disk part way through leaves a
+        // half-written database, and the person finds out when it will not
+        // open again.
+        if !self.disk_allows(
+            &appdir,
+            crate::space::LOCAL_NODE,
+            "your own node",
+            "A node keeps its own copy of the chain. 'history clear' frees whatever old\ntransaction history is using, or point the wallet at a bigger disk with\n'settings set folder <path>' before starting one.",
+        ) {
+            return Ok(None);
+        }
 
         // Silent: the callers say different things about the same event, and a
         // fixed paragraph here meant every one of them had to talk over it.
@@ -561,6 +609,22 @@ impl KaspaCli {
             tprintln!(self, "");
             return Ok(());
         }
+        // Mining writes no files itself, but every block it finds pays into
+        // this wallet and grows the node's database. Starting a miner on a
+        // disk that cannot hold the growth is how a node ends up corrupt at
+        // three in the morning.
+        let network_id = self.wallet.network_id()?;
+        if let Ok(appdir) = crate::embedded::default_appdir(network_id) {
+            if !self.disk_allows(
+                &appdir,
+                crate::space::MINING,
+                "mining",
+                "Mining pays into this wallet block after block, and the node's copy of the\nchain grows with it. 'history clear' frees old transaction history.",
+            ) {
+                return Ok(());
+            }
+        }
+
         let account = match self.wallet.account() {
             Ok(account) => account,
             Err(_) => {

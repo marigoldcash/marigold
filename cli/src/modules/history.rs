@@ -2,6 +2,7 @@ use crate::imports::*;
 use kaspa_consensus_core::tx::TransactionId;
 use kaspa_wallet_core::error::Error as WalletError;
 use kaspa_wallet_core::storage::Binding;
+use kaspa_wallet_core::storage::local::transactions_dir_name;
 #[derive(Default, Handler)]
 #[help("Display transaction history")]
 pub struct History;
@@ -184,13 +185,32 @@ impl History {
             .unwrap_or_else(|| kaspa_wallet_core::storage::local::default_storage_folder().to_string());
         let folder = workflow_store::fs::resolve_path(&configured)?;
 
-        // Which .transactions folders to remove: this wallet's, or every one.
+        // Which history folders to remove: this wallet's, or every one.
+        //
+        // Both layouts are looked for. History lives at
+        // `<name>.wallet/transactions` since a wallet became one directory,
+        // and this command went on pointing at the old sibling
+        // `<name>.transactions` for long enough to report "No history to
+        // clear" on a wallet holding 25 GB of it. Anyone who never ran the
+        // migration still has the old folder, so both are cleared rather
+        // than swapping one wrong answer for another.
         let mut targets: Vec<std::path::PathBuf> = Vec::new();
+        let mut push_if_dir = |path: std::path::PathBuf, targets: &mut Vec<std::path::PathBuf>| {
+            if path.is_dir() {
+                targets.push(path);
+            }
+        };
+
         if all {
             if let Ok(entries) = std::fs::read_dir(&folder) {
                 for entry in entries.flatten() {
                     let name = entry.file_name().to_string_lossy().to_string();
-                    if name.ends_with(".transactions") && entry.path().is_dir() {
+                    if !entry.path().is_dir() {
+                        continue;
+                    }
+                    if let Some(wallet_name) = name.strip_suffix(".wallet") {
+                        push_if_dir(folder.join(transactions_dir_name(wallet_name)), &mut targets);
+                    } else if name.ends_with(".transactions") {
                         targets.push(entry.path());
                     }
                 }
@@ -200,10 +220,8 @@ impl History {
                 tprintln!(ctx, "Open a wallet first, or use 'history clear all'.");
                 return Ok(());
             };
-            let path = folder.join(format!("{}.transactions", descriptor.filename));
-            if path.is_dir() {
-                targets.push(path);
-            }
+            push_if_dir(folder.join(transactions_dir_name(&descriptor.filename)), &mut targets);
+            push_if_dir(folder.join(format!("{}.transactions", descriptor.filename)), &mut targets);
         }
 
         if targets.is_empty() {

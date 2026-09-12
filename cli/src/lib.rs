@@ -15,6 +15,7 @@ pub mod miner;
 pub mod modules;
 mod notifier;
 pub mod result;
+pub mod space;
 pub mod utils;
 mod wizards;
 
