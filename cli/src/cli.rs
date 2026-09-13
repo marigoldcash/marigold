@@ -2545,11 +2545,23 @@ pub async fn kaspa_cli(terminal_options: TerminalOptions, banner: Option<String>
     let options = Options::new(terminal_options, None);
     let cli = KaspaCli::try_new_arc(options).await?;
 
-    // 'connect' first, because it is: nothing works until the wallet can reach
-    // a node, and 'help' answers a question a new user has not formed yet.
-    let banner = banner
-        .unwrap_or_else(|| format!("Marigold Cli Wallet v{} (type 'connect' or 'help' for list of commands)", env!("CARGO_PKG_VERSION")));
-    cli.term().writeln(banner);
+    // An embedder that supplied its own banner gets exactly that; otherwise
+    // the wallet introduces itself properly. 'connect' leads because nothing
+    // works until the wallet can reach a node, and 'help' answers a question
+    // a new user has not formed yet.
+    match banner {
+        Some(banner) => cli.term().writeln(banner),
+        None => {
+            // Settings are loaded again by `start()` below, but that happens
+            // after this point and the splash wants to name the network it is
+            // about to use. Loading twice is cheap; guessing is not.
+            cli.wallet().load_settings().await.ok();
+            let network = cli.wallet().settings().get::<String>(WalletSettings::Network);
+            cli.term().writeln("");
+            crate::splash::show(&cli, env!("CARGO_PKG_VERSION"), network.as_deref());
+            cli.term().writeln("");
+        }
+    }
 
     // redirect the global log output to terminal
     #[cfg(not(target_arch = "wasm32"))]

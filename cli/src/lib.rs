@@ -16,6 +16,8 @@ pub mod modules;
 mod notifier;
 pub mod result;
 pub mod space;
+pub mod splash;
+pub mod ui;
 pub mod utils;
 mod wizards;
 

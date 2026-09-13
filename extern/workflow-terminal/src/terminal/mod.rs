@@ -962,6 +962,13 @@ impl Terminal {
         self.term.cols()
     }
 
+    /// How many rows the terminal has (Marigold addition — upstream exposed
+    /// only `cols`, and anything that decides whether a tall block will fit
+    /// on screen rather than scroll its own top away needs both).
+    pub fn rows(&self) -> Option<usize> {
+        self.term.rows()
+    }
+
     pub async fn select<T>(self: &Arc<Terminal>, prompt: &str, list: &[T]) -> Result<Option<T>>
     where
         T: std::fmt::Display + Clone, // + IdT + Clone + Send + Sync + 'static,

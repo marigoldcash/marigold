@@ -84,6 +84,7 @@ workflow-store.workspace = true
 workflow-terminal.workspace = true
 workflow-wasm.workspace = true
 libc = "0.2"
+unicode-width = "0.1.14"
 fs4 = { version = "0.13", default-features = false, features = ["sync"], optional = true }
 
 [dependencies.web-sys]
