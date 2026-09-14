@@ -102,7 +102,7 @@ Cadence — two distinct announcement moments, deliberately different in volume:
 1. **Now → testnet live:** T1–T8 (days).
 2. **Testnet live → public:** T9–T10 + website sweep (days; gated only by your "runs properly" judgment and the T9 blessing).
 3. **Moment A announcements**; soak clock starts (P8.7: ≥3 months with outsiders).
-4. **During soak, in parallel:** whitepaper (draft → review → publish → Show HN), explorer port, faucet/status polish, P8.1–P8.6 hardening, trustee recruitment, audit booking, sunset model, legal review.
+4. **During soak, in parallel:** whitepaper (draft → review → publish → Show HN), explorer port, faucet/status polish, **P8.0b notes-only wallets first** (tester-requested, 2026-09-13 — it changes what the outside testers are testing, so it goes before the hardening steps), then P8.1–P8.6 hardening, trustee recruitment, audit booking, sunset model, legal review.
 5. **Audit gate (P8.8) closes → P9.x → Moment B (≥4 weeks notice) → mainnet genesis (P9.5 ceremony) → P9.8 first-month watch.**
 
 Realistic earliest mainnet, honestly stated: soak + audit arithmetic puts genesis in **Q1 2027**. The gating resources are calendar time (soak), external humans (auditors, trustees), and the founder's decisions above — not engineering throughput.
