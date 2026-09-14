@@ -1,5 +1,6 @@
 use crate::imports::*;
 
+pub mod about;
 pub mod account;
 pub mod address;
 pub mod advanced;
@@ -72,7 +73,7 @@ pub fn register_handlers(cli: &Arc<KaspaCli>) -> Result<()> {
         cli,
         cli.handlers(),
         [
-            account, address, advanced, auto, balance, close, connect, details, disconnect, estimate, exchange, exit, export, guide, help, history, rpc, list,
+            about, account, address, advanced, auto, balance, close, connect, details, disconnect, estimate, exchange, exit, export, guide, help, history, rpc, list,
             miner, message, monitor, mute, network, node, note, open, otp, ping, pskb, quit, reload, select, server, settings, sweep,
             track, transfer, utxos, wallet,
             // halt,
