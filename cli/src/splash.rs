@@ -276,13 +276,16 @@ fn next_steps(indent: &str) -> String {
 /// specimen, which says the same thing in five rows.
 pub fn show(ctx: &Arc<KaspaCli>, version: &str, network: Option<&str>) {
     let network = network.unwrap_or("unknown network");
-    let cols = ctx.term().cols().unwrap_or(80);
-    let rows = ctx.term().rows().unwrap_or(24);
 
-    if cols >= NOTE_WIDTH && rows >= NOTE_ROWS {
-        banknote(ctx, version, network);
-    } else {
-        specimen(ctx, version, network);
+    match (ui::measured(ctx.term().cols()), ui::measured(ctx.term().rows())) {
+        (Some(cols), Some(rows)) if cols < NOTE_WIDTH || rows < NOTE_ROWS => specimen(ctx, version, network),
+        // A terminal that will not say how big it is is not a small terminal.
+        // It is a container, a pipe, or a test harness — `docker compose run`
+        // hands the container a pty reporting zero by zero. Guessing "small"
+        // there means no Docker tester ever sees the note, which is the one
+        // thing this screen exists for; guessing "roomy" costs a wrapped line
+        // in the rare case it is wrong.
+        _ => banknote(ctx, version, network),
     }
 }
 
@@ -349,5 +352,43 @@ mod tests {
     fn the_specimen_mark_is_even() {
         let widths: Vec<usize> = MARK.iter().map(|row| row.iter().map(|(_, t)| ui::display_width(t)).sum()).collect();
         assert!(widths.iter().all(|w| *w == widths[0]), "uneven mark rows: {widths:?}");
+    }
+}
+
+#[cfg(test)]
+mod fit_tests {
+    use super::*;
+
+    /// Which rendering a given terminal gets. Kept in one place so the rule
+    /// can be stated as a table rather than inferred from the branch.
+    fn choice(cols: Option<usize>, rows: Option<usize>) -> &'static str {
+        match (ui::measured(cols), ui::measured(rows)) {
+            (Some(c), Some(r)) if c < NOTE_WIDTH || r < NOTE_ROWS => "specimen",
+            _ => "note",
+        }
+    }
+
+    #[test]
+    fn a_terminal_with_room_gets_the_note() {
+        assert_eq!(choice(Some(80), Some(30)), "note", "exactly the minimum still fits");
+        assert_eq!(choice(Some(120), Some(45)), "note");
+    }
+
+    #[test]
+    fn a_terminal_without_room_gets_the_specimen() {
+        assert_eq!(choice(Some(79), Some(40)), "specimen", "one column short");
+        assert_eq!(choice(Some(100), Some(29)), "specimen", "one row short");
+        assert_eq!(choice(Some(40), Some(10)), "specimen");
+    }
+
+    /// The case that sent every Docker tester the compact mark: `docker
+    /// compose run` gives the container a pty reporting zero by zero, and
+    /// zero read as "tiny" rather than "it will not say".
+    #[test]
+    fn a_terminal_that_will_not_say_its_size_gets_the_note() {
+        assert_eq!(choice(Some(0), Some(0)), "note", "a container pty reports zero");
+        assert_eq!(choice(None, None), "note", "so does a pipe");
+        assert_eq!(choice(Some(0), Some(40)), "note");
+        assert_eq!(choice(Some(120), Some(0)), "note");
     }
 }

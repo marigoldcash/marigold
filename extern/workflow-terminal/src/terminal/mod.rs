@@ -478,7 +478,10 @@ impl Terminal {
             .collect::<Vec<_>>();
         list.sort_by_key(|(cmd, _)| cmd.to_string());
         let separator = separator.unwrap_or(" ");
-        let term_width: usize = self.cols().unwrap_or(80);
+        // Zero is what a `docker compose run` pty reports, and subtracting the
+        // column widths from it underflowed straight into a panic (Marigold
+        // fix). A terminal that will not give its size gets the usual eighty.
+        let term_width: usize = self.cols().filter(|c| *c > 0).unwrap_or(80).max(40);
         let cmd_width = list.iter().map(|(c, _)| c.len()).fold(0, |a, b| a.max(b)) + 2;
         // Saturating with a readable floor (Marigold fix): the subtraction
         // underflowed and panicked whenever the widest command was near the

@@ -194,7 +194,18 @@ pub const MIN_WIDTH: usize = 44;
 pub const MAX_WIDTH: usize = 84;
 
 pub fn width(ctx: &Arc<KaspaCli>) -> usize {
-    ctx.term().cols().unwrap_or(80).clamp(MIN_WIDTH, MAX_WIDTH)
+    measured(ctx.term().cols()).unwrap_or(80).clamp(MIN_WIDTH, MAX_WIDTH)
+}
+
+/// What the terminal says it is, or `None` where it will not say.
+///
+/// Zero is not a width. A container started by `docker compose run` gets a
+/// pty that reports zero by zero — `stty size` says so too — and taking that
+/// literally clamps every frame in the wallet to its minimum and makes the
+/// splash think it is on a phone. Zero means "this terminal cannot tell you",
+/// which is a different answer from "small".
+pub fn measured(value: Option<usize>) -> Option<usize> {
+    value.filter(|v| *v > 0)
 }
 
 /// How many columns a string occupies once printed.
