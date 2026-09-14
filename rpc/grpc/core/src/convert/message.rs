@@ -330,12 +330,20 @@ from!(item: RpcResult<&kaspa_rpc_core::GetHeadersResponse>, protowire::GetHeader
     Self { headers: item.headers.iter().map(|x| x.hash.to_string()).collect(), error: None }
 });
 
+from!(item: &kaspa_rpc_core::RpcUtxosByAddressesCursor, protowire::RpcUtxosByAddressesCursor, {
+    Self { address: (&item.address).into(), outpoint: Some((&item.outpoint).into()) }
+});
 from!(item: &kaspa_rpc_core::GetUtxosByAddressesRequest, protowire::GetUtxosByAddressesRequestMessage, {
-    Self { addresses: item.addresses.iter().map(|x| x.into()).collect() }
+    Self {
+        addresses: item.addresses.iter().map(|x| x.into()).collect(),
+        cursor: item.cursor.as_ref().map(|c| c.into()),
+        // proto3 has no absent scalar; zero is the wire's "not set".
+        limit: item.limit.unwrap_or(0),
+    }
 });
 from!(item: RpcResult<&kaspa_rpc_core::GetUtxosByAddressesResponse>, protowire::GetUtxosByAddressesResponseMessage, {
     debug!("GRPC, Creating GetUtxosByAddresses message with {} entries", item.entries.len());
-    Self { entries: item.entries.iter().map(|x| x.into()).collect(), error: None }
+    Self { entries: item.entries.iter().map(|x| x.into()).collect(), cursor: item.cursor.as_ref().map(|c| c.into()), error: None }
 });
 
 from!(item: &kaspa_rpc_core::GetBalanceByAddressRequest, protowire::GetBalanceByAddressRequestMessage, {
@@ -923,11 +931,28 @@ try_from!(item: &protowire::GetHeadersResponseMessage, RpcResult<kaspa_rpc_core:
     Self { headers: vec![] }
 });
 
+try_from!(item: &protowire::RpcUtxosByAddressesCursor, kaspa_rpc_core::RpcUtxosByAddressesCursor, {
+    Self {
+        address: item.address.as_str().try_into()?,
+        outpoint: item
+            .outpoint
+            .as_ref()
+            .ok_or_else(|| RpcError::MissingRpcFieldError("RpcUtxosByAddressesCursor".to_string(), "outpoint".to_string()))?
+            .try_into()?,
+    }
+});
 try_from!(item: &protowire::GetUtxosByAddressesRequestMessage, kaspa_rpc_core::GetUtxosByAddressesRequest, {
-    Self { addresses: item.addresses.iter().map(|x| x.as_str().try_into()).collect::<Result<Vec<_>, _>>()? }
+    Self {
+        addresses: item.addresses.iter().map(|x| x.as_str().try_into()).collect::<Result<Vec<_>, _>>()?,
+        cursor: item.cursor.as_ref().map(|c| c.try_into()).transpose()?,
+        limit: if item.limit == 0 { None } else { Some(item.limit) },
+    }
 });
 try_from!(item: &protowire::GetUtxosByAddressesResponseMessage, RpcResult<kaspa_rpc_core::GetUtxosByAddressesResponse>, {
-    Self { entries: item.entries.iter().map(|x| x.try_into()).collect::<Result<Vec<_>, _>>()? }
+    Self {
+        entries: item.entries.iter().map(|x| x.try_into()).collect::<Result<Vec<_>, _>>()?,
+        cursor: item.cursor.as_ref().map(|c| c.try_into()).transpose()?,
+    }
 });
 
 try_from!(item: &protowire::GetBalanceByAddressRequestMessage, kaspa_rpc_core::GetBalanceByAddressRequest, {

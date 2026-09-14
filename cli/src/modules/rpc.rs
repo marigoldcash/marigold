@@ -171,7 +171,7 @@ impl Rpc {
                     return Err(Error::custom("Please specify at least one address"));
                 }
                 let addresses = argv.iter().map(|s| Address::try_from(s.as_str())).collect::<std::result::Result<Vec<_>, _>>()?;
-                let result = rpc.get_utxos_by_addresses_call(None, GetUtxosByAddressesRequest { addresses }).await?;
+                let result = rpc.get_utxos_by_addresses_call(None, GetUtxosByAddressesRequest::new(addresses)).await?;
                 self.println(&ctx, result);
             }
             RpcApiOps::GetBalanceByAddress => {

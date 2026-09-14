@@ -68,6 +68,9 @@ pub enum RpcError {
     #[error("Transaction {0} not found")]
     TransactionNotFound(TransactionId),
 
+    #[error("The requested addresses hold more than {0} UTXOs, which is more than one response can carry. Ask for pages: set `limit` (and pass back each response's `cursor`).")]
+    UtxoSetTooLargeToServeWhole(usize),
+
     #[error("Method unavailable. Run the node with the --utxoindex argument.")]
     NoUtxoIndex,
 

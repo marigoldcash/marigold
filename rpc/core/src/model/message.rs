@@ -1446,22 +1446,103 @@ impl Deserializer for GetSinkBlueScoreResponse {
     }
 }
 
+/// Where a page of `GetUtxosByAddresses` stopped, so the next request can
+/// carry on from there.
+///
+/// Both halves are needed: the request may name several addresses, served in
+/// request order, and within one address entries are served in the index's
+/// own key order (outpoint bytes). The cursor is the last entry returned.
+/// Resuming seeks to that key rather than skipping past it, so an entry spent
+/// between two pages does not cause the one after it to be dropped.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RpcUtxosByAddressesCursor {
+    pub address: RpcAddress,
+    pub outpoint: RpcTransactionOutpoint,
+}
+
+impl Serializer for RpcUtxosByAddressesCursor {
+    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        store!(u8, &1, writer)?;
+        store!(RpcAddress, &self.address, writer)?;
+        serialize!(RpcTransactionOutpoint, &self.outpoint, writer)?;
+        Ok(())
+    }
+}
+
+impl Deserializer for RpcUtxosByAddressesCursor {
+    fn deserialize<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
+        let _version = load!(u8, reader)?;
+        let address = load!(RpcAddress, reader)?;
+        let outpoint = deserialize!(RpcTransactionOutpoint, reader)?;
+        Ok(Self { address, outpoint })
+    }
+}
+
+/// Requests the UTXOs held by a set of addresses.
+///
+/// Version 2 (2026-09-14) adds paging. A request that sets either `cursor` or
+/// `limit` is served one page at a time: at most `limit` entries (capped by the
+/// node — see `GetUtxosByAddressesResponse::cursor`), and a cursor to pass back
+/// for the next page. A request that sets neither is served as before, whole,
+/// up to a node-side ceiling above which the node refuses rather than building
+/// a response no transport could carry.
+///
+/// Why paging exists at all: one Marigold account has one ledger address, so
+/// an address that has been mined into for a fortnight can hold millions of
+/// coins. At ~160 bytes each, 4.4 million of them is ~700 MB — above wRPC's
+/// 128 MB message limit, so the old whole-set answer could not be delivered
+/// over the wire at that scale, and on the node side any unauthenticated client
+/// could make a public node build it anyway. A capped page bounds both.
+///
+/// Pass the same `addresses` with every page; they are served in request order
+/// and the cursor is relative to that order.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetUtxosByAddressesRequest {
     pub addresses: Vec<RpcAddress>,
+    /// Resume after this entry (the `cursor` of the previous response).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<RpcUtxosByAddressesCursor>,
+    /// Ask for at most this many entries. The node caps it; sending a larger
+    /// number is not an error, it is simply not honoured.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
 }
 
 impl GetUtxosByAddressesRequest {
+    /// The whole set, as before version 2.
     pub fn new(addresses: Vec<RpcAddress>) -> Self {
-        Self { addresses }
+        Self { addresses, cursor: None, limit: None }
+    }
+
+    /// One page.
+    pub fn page(addresses: Vec<RpcAddress>, cursor: Option<RpcUtxosByAddressesCursor>, limit: u32) -> Self {
+        Self { addresses, cursor, limit: Some(limit) }
+    }
+
+    /// Whether the caller asked to be paged. Either field is enough: a
+    /// cursor without a limit means "next page, node's default size".
+    pub fn is_paged(&self) -> bool {
+        self.cursor.is_some() || self.limit.is_some()
     }
 }
 
 impl Serializer for GetUtxosByAddressesRequest {
     fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
-        store!(u16, &1, writer)?;
+        store!(u16, &2, writer)?;
         store!(Vec<RpcAddress>, &self.addresses, writer)?;
+        // Version 2 tail. An older node reads the version and the addresses
+        // and stops, which is exactly "serve the whole set" — the behaviour a
+        // client sending these fields to an old node gets is unchanged.
+        match &self.cursor {
+            Some(cursor) => {
+                store!(u8, &1, writer)?;
+                serialize!(RpcUtxosByAddressesCursor, cursor, writer)?;
+            }
+            None => store!(u8, &0, writer)?,
+        }
+        store!(Option<u32>, &self.limit, writer)?;
 
         Ok(())
     }
@@ -1469,10 +1550,22 @@ impl Serializer for GetUtxosByAddressesRequest {
 
 impl Deserializer for GetUtxosByAddressesRequest {
     fn deserialize<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
-        let _version = load!(u16, reader)?;
+        let version = load!(u16, reader)?;
         let addresses = load!(Vec<RpcAddress>, reader)?;
+        // Version-gated, per the `min_confirmation_count` precedent above:
+        // a version-1 request has no tail, and reading one unconditionally
+        // would fail every client built before paging existed.
+        let (cursor, limit) = if version > 1 {
+            let cursor = match load!(u8, reader)? {
+                0 => None,
+                _ => Some(deserialize!(RpcUtxosByAddressesCursor, reader)?),
+            };
+            (cursor, load!(Option<u32>, reader)?)
+        } else {
+            (None, None)
+        };
 
-        Ok(Self { addresses })
+        Ok(Self { addresses, cursor, limit })
     }
 }
 
@@ -1480,18 +1573,37 @@ impl Deserializer for GetUtxosByAddressesRequest {
 #[serde(rename_all = "camelCase")]
 pub struct GetUtxosByAddressesResponse {
     pub entries: Vec<RpcUtxosByAddressesEntry>,
+    /// `Some` means there is another page and this is where it starts;
+    /// `None` means `entries` completes the set. Always `None` for a
+    /// whole-set (unpaged) request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<RpcUtxosByAddressesCursor>,
 }
 
 impl GetUtxosByAddressesResponse {
     pub fn new(entries: Vec<RpcUtxosByAddressesEntry>) -> Self {
-        Self { entries }
+        Self { entries, cursor: None }
+    }
+
+    pub fn with_cursor(entries: Vec<RpcUtxosByAddressesEntry>, cursor: Option<RpcUtxosByAddressesCursor>) -> Self {
+        Self { entries, cursor }
     }
 }
 
 impl Serializer for GetUtxosByAddressesResponse {
     fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
-        store!(u16, &1, writer)?;
+        store!(u16, &2, writer)?;
         serialize!(Vec<RpcUtxosByAddressesEntry>, &self.entries, writer)?;
+        // Version 2 tail; an older client stops after `entries`. Since an old
+        // client never asks for a page, the node never sets a cursor for it
+        // and the tail it ignores is always absent.
+        match &self.cursor {
+            Some(cursor) => {
+                store!(u8, &1, writer)?;
+                serialize!(RpcUtxosByAddressesCursor, cursor, writer)?;
+            }
+            None => store!(u8, &0, writer)?,
+        }
 
         Ok(())
     }
@@ -1499,10 +1611,18 @@ impl Serializer for GetUtxosByAddressesResponse {
 
 impl Deserializer for GetUtxosByAddressesResponse {
     fn deserialize<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
-        let _version = load!(u16, reader)?;
+        let version = load!(u16, reader)?;
         let entries = deserialize!(Vec<RpcUtxosByAddressesEntry>, reader)?;
+        let cursor = if version > 1 {
+            match load!(u8, reader)? {
+                0 => None,
+                _ => Some(deserialize!(RpcUtxosByAddressesCursor, reader)?),
+            }
+        } else {
+            None
+        };
 
-        Ok(Self { entries })
+        Ok(Self { entries, cursor })
     }
 }
 

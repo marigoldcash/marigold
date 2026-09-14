@@ -1059,9 +1059,19 @@ mod mockery {
 
     test!(GetSinkBlueScoreResponse);
 
+    impl Mock for RpcUtxosByAddressesCursor {
+        fn mock() -> Self {
+            RpcUtxosByAddressesCursor { address: mock(), outpoint: mock() }
+        }
+    }
+
+    test!(RpcUtxosByAddressesCursor);
+
+    // Mocked with the version-2 tail populated, so the generic round trip
+    // exercises the presence byte and the cursor, not just the addresses.
     impl Mock for GetUtxosByAddressesRequest {
         fn mock() -> Self {
-            GetUtxosByAddressesRequest { addresses: mock() }
+            GetUtxosByAddressesRequest { addresses: mock(), cursor: Some(mock()), limit: Some(50_000) }
         }
     }
 
@@ -1069,11 +1079,60 @@ mod mockery {
 
     impl Mock for GetUtxosByAddressesResponse {
         fn mock() -> Self {
-            GetUtxosByAddressesResponse { entries: mock() }
+            GetUtxosByAddressesResponse { entries: mock(), cursor: Some(mock()) }
         }
     }
 
     test!(GetUtxosByAddressesResponse);
+
+    /// A request or response written by a client or node from before paging
+    /// existed — version 1, nothing after the addresses / entries — must read
+    /// back as "whole set, no cursor". This is the compatibility the versioned
+    /// tail promises, pinned by hand-built version-1 bytes rather than by a
+    /// round trip that would only ever see version 2.
+    #[test]
+    fn version_one_utxos_by_addresses_messages_still_read() {
+        let addresses: Vec<RpcAddress> = mock();
+        let mut v1_request = Vec::new();
+        store!(u16, &1, &mut v1_request).unwrap();
+        store!(Vec<RpcAddress>, &addresses, &mut v1_request).unwrap();
+        let request = GetUtxosByAddressesRequest::deserialize(&mut v1_request.as_slice()).unwrap();
+        assert_eq!(request.addresses.len(), addresses.len());
+        assert!(request.cursor.is_none() && request.limit.is_none(), "a v1 request asks for the whole set");
+        assert!(!request.is_paged());
+
+        let entries: Vec<RpcUtxosByAddressesEntry> = mock();
+        let mut v1_response = Vec::new();
+        store!(u16, &1, &mut v1_response).unwrap();
+        serialize!(Vec<RpcUtxosByAddressesEntry>, &entries, &mut v1_response).unwrap();
+        let response = GetUtxosByAddressesResponse::deserialize(&mut v1_response.as_slice()).unwrap();
+        assert_eq!(response.entries.len(), entries.len());
+        assert!(response.cursor.is_none(), "a v1 response completes the set");
+    }
+
+    /// The other direction: a version-2 request with the tail *absent* (no
+    /// cursor, no limit) is what a new client sends for a whole-set request —
+    /// it must round-trip as absent, not as an empty cursor.
+    #[test]
+    fn absent_request_tail_round_trips_as_absent() {
+        let request = GetUtxosByAddressesRequest::new(mock());
+        let mut bytes = Vec::new();
+        serialize!(GetUtxosByAddressesRequest, &request, &mut bytes).unwrap();
+        let back = deserialize!(GetUtxosByAddressesRequest, &mut bytes.as_slice()).unwrap();
+        assert_eq!(back.addresses, request.addresses);
+        assert!(back.cursor.is_none() && back.limit.is_none() && !back.is_paged());
+    }
+
+    /// ...and the same for a response that completes the set.
+    #[test]
+    fn absent_response_cursor_round_trips_as_absent() {
+        let response = GetUtxosByAddressesResponse::new(mock());
+        let mut bytes = Vec::new();
+        serialize!(GetUtxosByAddressesResponse, &response, &mut bytes).unwrap();
+        let back = deserialize!(GetUtxosByAddressesResponse, &mut bytes.as_slice()).unwrap();
+        assert_eq!(back.entries.len(), response.entries.len());
+        assert!(back.cursor.is_none());
+    }
 
     impl Mock for BanRequest {
         fn mock() -> Self {

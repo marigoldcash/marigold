@@ -20,6 +20,11 @@ pub const MAX_SAFE_WINDOW_SIZE: u32 = 10_000;
 /// The [`RpcApi`] trait defines RPC calls taking a request message as unique parameter.
 ///
 /// For each RPC call a matching readily implemented function taking detailed parameters is also provided.
+/// Entries the paging wrapper asks for per round trip. Below the node's own
+/// cap so it is honoured as asked; large enough that a million-coin wallet
+/// is a handful of requests rather than hundreds.
+pub const GET_UTXOS_BY_ADDRESSES_PAGE: u32 = 50_000;
+
 #[async_trait]
 pub trait RpcApi: Sync + Send + AnySync {
     ///
@@ -391,8 +396,25 @@ pub trait RpcApi: Sync + Send + AnySync {
     /// Requests all current UTXOs for the given node addresses.
     ///
     /// This call is only available when this node was started with `--utxoindex`.
+    ///
+    /// Fetched a page at a time and joined, so a caller gets the whole set
+    /// however large it is and never sees a response the transport cannot
+    /// carry. Against a node from before paging, the first request comes
+    /// back whole with no cursor and the loop runs once — identical to what
+    /// this method did before. Callers that want to handle pages themselves
+    /// use `get_utxos_by_addresses_call` with `GetUtxosByAddressesRequest::page`.
     async fn get_utxos_by_addresses(&self, addresses: Vec<RpcAddress>) -> RpcResult<Vec<RpcUtxosByAddressesEntry>> {
-        Ok(self.get_utxos_by_addresses_call(None, GetUtxosByAddressesRequest::new(addresses)).await?.entries)
+        let mut entries = Vec::new();
+        let mut cursor = None;
+        loop {
+            let request = GetUtxosByAddressesRequest::page(addresses.clone(), cursor.take(), GET_UTXOS_BY_ADDRESSES_PAGE);
+            let response = self.get_utxos_by_addresses_call(None, request).await?;
+            entries.extend(response.entries);
+            match response.cursor {
+                Some(next) => cursor = Some(next),
+                None => return Ok(entries),
+            }
+        }
     }
     async fn get_utxos_by_addresses_call(
         &self,

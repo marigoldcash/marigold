@@ -2,7 +2,7 @@ use std::{collections::HashSet, sync::Arc};
 
 use kaspa_consensus_core::{
     BlockHashSet,
-    tx::{ScriptPublicKeys, TransactionOutpoint},
+    tx::{ScriptPublicKey, ScriptPublicKeys, TransactionOutpoint},
 };
 use kaspa_core::trace;
 use kaspa_database::prelude::{CachePolicy, DB, StoreResult};
@@ -10,7 +10,7 @@ use kaspa_index_core::indexed_utxos::BalanceByScriptPublicKey;
 
 use crate::{
     IDENT,
-    model::UtxoSetByScriptPublicKey,
+    model::{CompactUtxoEntry, UtxoSetByScriptPublicKey},
     stores::{
         indexed_utxos::{DbUtxoSetByScriptPublicKeyStore, UtxoSetByScriptPublicKeyStore, UtxoSetByScriptPublicKeyStoreReader},
         supply::{CirculatingSupplyStore, CirculatingSupplyStoreReader, DbCirculatingSupplyStore},
@@ -36,6 +36,15 @@ impl Store {
 
     pub fn get_utxos_by_script_public_key(&self, script_public_keys: ScriptPublicKeys) -> StoreResult<UtxoSetByScriptPublicKey> {
         self.utxos_by_script_public_key_store.get_utxos_from_script_public_keys(script_public_keys)
+    }
+
+    pub fn get_utxos_page_by_script_public_key(
+        &self,
+        script_public_key: &ScriptPublicKey,
+        after: Option<&TransactionOutpoint>,
+        limit: usize,
+    ) -> StoreResult<Vec<(TransactionOutpoint, CompactUtxoEntry)>> {
+        self.utxos_by_script_public_key_store.get_utxos_page_from_script_public_key(script_public_key, after, limit)
     }
 
     pub fn get_balance_by_script_public_key(&self, script_public_keys: ScriptPublicKeys) -> StoreResult<BalanceByScriptPublicKey> {

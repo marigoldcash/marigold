@@ -1254,7 +1254,7 @@ declare! {
 try_from! ( args: IGetUtxosByAddressesRequest, GetUtxosByAddressesRequest, {
     let js_value = JsValue::from(args);
     let request = if let Ok(addresses) = Vec::<Address>::try_from(AddressOrStringArrayT::from(js_value.clone())) {
-        GetUtxosByAddressesRequest { addresses }
+        GetUtxosByAddressesRequest { addresses, cursor: None, limit: None }
     } else {
         from_value::<GetUtxosByAddressesRequest>(js_value)?
     };
@@ -1276,7 +1276,7 @@ declare! {
 }
 
 try_from! ( args: GetUtxosByAddressesResponse, IGetUtxosByAddressesResponse, {
-    let GetUtxosByAddressesResponse { entries } = args;
+    let GetUtxosByAddressesResponse { entries, cursor: _ } = args;
     let entries = entries.into_iter().map(UtxoEntryReference::from).collect::<Vec<UtxoEntryReference>>();
     let entries = js_sys::Array::from_iter(entries.into_iter().map(JsValue::from));
     let response = IGetUtxosByAddressesResponse::default();

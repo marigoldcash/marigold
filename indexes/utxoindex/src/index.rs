@@ -2,11 +2,15 @@ use crate::{
     IDENT,
     api::UtxoIndexApi,
     errors::{UtxoIndexError, UtxoIndexResult},
-    model::{CirculatingSupply, UtxoChanges, UtxoSetByScriptPublicKey},
+    model::{CirculatingSupply, CompactUtxoEntry, UtxoChanges, UtxoSetByScriptPublicKey},
     stores::store_manager::Store,
     update_container::UtxoIndexChanges,
 };
-use kaspa_consensus_core::{BlockHashSet, tx::ScriptPublicKeys, utxo::utxo_diff::UtxoDiff};
+use kaspa_consensus_core::{
+    BlockHashSet,
+    tx::{ScriptPublicKey, ScriptPublicKeys, TransactionOutpoint},
+    utxo::utxo_diff::UtxoDiff,
+};
 use kaspa_consensusmanager::{ConsensusManager, ConsensusResetHandler};
 use kaspa_core::{info, trace};
 use kaspa_database::prelude::{DB, StoreError, StoreResult};
@@ -62,6 +66,17 @@ impl UtxoIndexApi for UtxoIndex {
         trace!("[{0}] retrieving utxos from {1} script public keys", IDENT, script_public_keys.len());
 
         self.store.get_utxos_by_script_public_key(script_public_keys)
+    }
+
+    fn get_utxos_page_by_script_public_key(
+        &self,
+        script_public_key: &ScriptPublicKey,
+        after: Option<&TransactionOutpoint>,
+        limit: usize,
+    ) -> StoreResult<Vec<(TransactionOutpoint, CompactUtxoEntry)>> {
+        trace!("[{0}] retrieving a page of up to {1} utxos from one script public key", IDENT, limit);
+
+        self.store.get_utxos_page_by_script_public_key(script_public_key, after, limit)
     }
 
     /// Retrieve utxos by script public keys from the utxoindex db.

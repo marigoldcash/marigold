@@ -68,6 +68,9 @@ use kaspa_rpc_core::{
 };
 use kaspa_system_info::SystemInfo;
 use kaspa_txscript::{extract_script_pub_key_address, pay_to_address_script};
+use kaspa_consensus_core::tx::{ScriptPublicKey, TransactionOutpoint};
+use kaspa_index_core::indexed_utxos::CompactUtxoEntry;
+use kaspa_rpc_core::{RpcUtxosByAddressesCursor, RpcUtxoEntry, RpcUtxosByAddressesEntry};
 use kaspa_utils::expiring_cache::ExpiringCache;
 use kaspa_utils::{channel::Channel, triggers::SingleTrigger};
 use kaspa_utils_tower::counters::TowerConnectionCounters;
@@ -125,6 +128,20 @@ pub struct RpcCoreService {
 }
 
 const RPC_CORE: &str = "rpc-core";
+
+/// Most entries one `GetUtxosByAddresses` page will carry, whatever the
+/// caller asks for. ~160 bytes each on the wire: 100,000 is ~16 MB, well
+/// under wRPC's 128 MB frame and small enough to answer while a client is
+/// still willing to wait.
+pub const MAX_UTXOS_PER_PAGE: usize = 100_000;
+
+/// Most entries a whole-set (unpaged) request will be served. Above this the
+/// node refuses with `UtxoSetTooLargeToServeWhole` instead of building a
+/// response the transport cannot deliver. 500,000 is ~80 MB — the largest
+/// answer that could actually have arrived over wRPC before paging existed,
+/// so nothing that worked before stops working; only the doomed cases now
+/// fail fast and cheaply, on the node's side.
+pub const MAX_UTXOS_WHOLE: usize = 500_000;
 
 impl RpcCoreService {
     pub const IDENT: &'static str = "rpc-core-service";
@@ -847,10 +864,105 @@ NOTE: This error usually indicates an RPC conversion error between the node and 
             return Err(RpcError::ConsensusInTransitionalIbdState);
         }
 
-        // TODO: discuss if the entry order is part of the method requirements
-        //       (the current impl does not retain an entry order matching the request addresses order)
-        let entry_map = self.get_utxo_set_by_script_public_key(request.addresses.iter()).await;
-        Ok(GetUtxosByAddressesResponse::new(self.index_converter.get_utxos_by_addresses_entries(&entry_map)))
+        // Served in request order, one address after another, each address in
+        // the index's own key order. That order is what the cursor is relative
+        // to, so it is part of the contract now rather than an accident.
+        let index = self.utxoindex.clone().unwrap();
+        let to_entry = |address: &RpcAddress, spk: &ScriptPublicKey, outpoint: TransactionOutpoint, entry: CompactUtxoEntry| {
+            RpcUtxosByAddressesEntry {
+                address: Some(address.clone()),
+                outpoint: outpoint.into(),
+                utxo_entry: RpcUtxoEntry::new(entry.amount, spk.clone(), entry.block_daa_score, entry.is_coinbase, entry.covenant_id),
+            }
+        };
+
+        if request.is_paged() {
+            // A page. `limit` is honoured up to the cap and never below one;
+            // a caller who asks for more than the cap gets the cap, not an
+            // error — the point of the cap is what the node will build, not
+            // what the caller may say.
+            let limit = request.limit.map(|l| l as usize).unwrap_or(MAX_UTXOS_PER_PAGE).clamp(1, MAX_UTXOS_PER_PAGE);
+            let mut entries: Vec<RpcUtxosByAddressesEntry> = Vec::with_capacity(limit);
+            let mut cursor_out: Option<RpcUtxosByAddressesCursor> = None;
+
+            // The cursor names the address it stopped in; addresses before it
+            // in the request are done. Within it, resume after the outpoint.
+            // Every address after it starts from its beginning.
+            let mut resume_after: Option<TransactionOutpoint> = request.cursor.as_ref().map(|c| c.outpoint.into());
+            let mut reached_cursor_address = request.cursor.is_none();
+
+            let last_index = request.addresses.len().saturating_sub(1);
+            for (i, address) in request.addresses.iter().enumerate() {
+                if !reached_cursor_address {
+                    if request.cursor.as_ref().is_some_and(|c| &c.address == address) {
+                        reached_cursor_address = true;
+                    } else {
+                        continue;
+                    }
+                }
+                let spk = pay_to_address_script(address);
+                let want = limit - entries.len();
+                // One more than wanted, to learn whether this address has
+                // another page without a second query.
+                let page = index
+                    .clone()
+                    .get_utxos_page_by_script_public_key(spk.clone(), resume_after.take(), want + 1)
+                    .await
+                    .map_err(|e| RpcError::from(e.to_string()))?;
+                let more_in_this_address = page.len() > want;
+                for (outpoint, entry) in page.into_iter().take(want) {
+                    entries.push(to_entry(address, &spk, outpoint, entry));
+                }
+                if entries.len() >= limit {
+                    // Full. There is a next page if this address has more or
+                    // any address remains — the latter is not checked here
+                    // (it would cost a query per remaining address), so the
+                    // boundary case costs the client one extra, empty page.
+                    if more_in_this_address || i < last_index {
+                        let last = entries.last().expect("a full page has a last entry");
+                        cursor_out = Some(RpcUtxosByAddressesCursor { address: address.clone(), outpoint: last.outpoint.clone() });
+                    }
+                    break;
+                }
+            }
+            return Ok(GetUtxosByAddressesResponse::with_cursor(entries, cursor_out));
+        }
+
+        // The whole set, as before paging existed — but refused above a
+        // ceiling rather than built and then found undeliverable. Before this,
+        // any client could make a public node assemble a response for a
+        // millions-of-coins address that no transport could carry; the
+        // ceiling bounds the work an unpaged request can cause.
+        let mut entries: Vec<RpcUtxosByAddressesEntry> = Vec::new();
+        for address in request.addresses.iter() {
+            let spk = pay_to_address_script(address);
+            let mut after: Option<TransactionOutpoint> = None;
+            loop {
+                let room = MAX_UTXOS_WHOLE.saturating_sub(entries.len());
+                if room == 0 {
+                    return Err(RpcError::UtxoSetTooLargeToServeWhole(MAX_UTXOS_WHOLE));
+                }
+                let page = index
+                    .clone()
+                    .get_utxos_page_by_script_public_key(spk.clone(), after.take(), room + 1)
+                    .await
+                    .map_err(|e| RpcError::from(e.to_string()))?;
+                if page.len() > room {
+                    return Err(RpcError::UtxoSetTooLargeToServeWhole(MAX_UTXOS_WHOLE));
+                }
+                let got = page.len();
+                let last_outpoint = page.last().map(|(o, _)| *o);
+                for (outpoint, entry) in page {
+                    entries.push(to_entry(address, &spk, outpoint, entry));
+                }
+                // A short page means this address is exhausted.
+                if got < room + 1 {
+                    break;
+                }
+                after = last_outpoint;
+            }
+        }
+        Ok(GetUtxosByAddressesResponse::new(entries))
     }
 
     async fn get_balance_by_address_call(

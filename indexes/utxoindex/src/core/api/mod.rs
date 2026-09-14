@@ -1,6 +1,6 @@
 use kaspa_consensus_core::{
     BlockHashSet,
-    tx::{ScriptPublicKeys, TransactionOutpoint},
+    tx::{ScriptPublicKey, ScriptPublicKeys, TransactionOutpoint},
     utxo::utxo_diff::UtxoDiff,
 };
 use kaspa_consensusmanager::spawn_blocking;
@@ -12,7 +12,7 @@ use std::{collections::HashSet, fmt::Debug, sync::Arc};
 
 use crate::{
     errors::UtxoIndexResult,
-    model::{UtxoChanges, UtxoSetByScriptPublicKey},
+    model::{CompactUtxoEntry, UtxoChanges, UtxoSetByScriptPublicKey},
 };
 
 ///Utxoindex API targeted at retrieval calls.
@@ -26,6 +26,13 @@ pub trait UtxoIndexApi: Send + Sync + Debug {
     ///
     /// Note: Use a read lock when accessing this method
     fn get_utxos_by_script_public_keys(&self, script_public_keys: ScriptPublicKeys) -> StoreResult<UtxoSetByScriptPublicKey>;
+    /// One page of one script public key's UTXOs — see the store's method of the same name.
+    fn get_utxos_page_by_script_public_key(
+        &self,
+        script_public_key: &ScriptPublicKey,
+        after: Option<&TransactionOutpoint>,
+        limit: usize,
+    ) -> StoreResult<Vec<(TransactionOutpoint, CompactUtxoEntry)>>;
 
     fn get_balance_by_script_public_keys(&self, script_public_keys: ScriptPublicKeys) -> StoreResult<BalanceByScriptPublicKey>;
 
@@ -68,6 +75,15 @@ impl UtxoIndexProxy {
 
     pub async fn get_circulating_supply(self) -> StoreResult<u64> {
         spawn_blocking(move || self.inner.read().get_circulating_supply()).await.unwrap()
+    }
+
+    pub async fn get_utxos_page_by_script_public_key(
+        self,
+        script_public_key: ScriptPublicKey,
+        after: Option<TransactionOutpoint>,
+        limit: usize,
+    ) -> StoreResult<Vec<(TransactionOutpoint, CompactUtxoEntry)>> {
+        spawn_blocking(move || self.inner.read().get_utxos_page_by_script_public_key(&script_public_key, after.as_ref(), limit)).await.unwrap()
     }
 
     pub async fn get_utxos_by_script_public_keys(self, script_public_keys: ScriptPublicKeys) -> StoreResult<UtxoSetByScriptPublicKey> {

@@ -564,12 +564,26 @@ message StopNotifyingUtxosChangedResponseMessage {
 // GetUtxosByAddressesRequestMessage requests all current UTXOs for the given kaspad addresses
 //
 // This call is only available when this kaspad was started with `--utxoindex`
+// Where a page of GetUtxosByAddresses stopped. Pass a response's cursor back
+// as the next request's cursor to continue from there.
+message RpcUtxosByAddressesCursor {
+  string address = 1;
+  RpcOutpoint outpoint = 2;
+}
+
 message GetUtxosByAddressesRequestMessage {
   repeated string addresses = 1;
+  // Paging (2026-09-14). Setting either asks for one page; omitting both asks
+  // for the whole set, which the node refuses above a ceiling. limit 0 means
+  // "not set". The node caps limit; a larger value is honoured as the cap.
+  RpcUtxosByAddressesCursor cursor = 2;
+  uint32 limit = 3;
 }
 
 message GetUtxosByAddressesResponseMessage {
   repeated RpcUtxosByAddressesEntry entries = 1;
+  // Set when another page follows; absent when entries completes the set.
+  RpcUtxosByAddressesCursor cursor = 2;
 
   RPCError error = 1000;
 }
