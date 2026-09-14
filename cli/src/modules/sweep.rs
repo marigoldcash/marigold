@@ -1,4 +1,5 @@
 use crate::imports::*;
+use crate::ui;
 use std::sync::atomic::AtomicU64;
 
 #[derive(Default, Handler)]
@@ -6,8 +7,22 @@ use std::sync::atomic::AtomicU64;
 pub struct Sweep;
 
 impl Sweep {
-    async fn main(self: Arc<Self>, ctx: &Arc<dyn Context>, _argv: Vec<String>, _cmd: &str) -> Result<()> {
+    async fn main(self: Arc<Self>, ctx: &Arc<dyn Context>, argv: Vec<String>, _cmd: &str) -> Result<()> {
         let ctx = ctx.clone().downcast_arc::<KaspaCli>()?;
+
+        // `sweep` used to take its arguments and drop them on the floor. Somebody
+        // typed `sweep 1000` meaning to bound the work, got no complaint, and
+        // consolidated all 4,439,680 of their coins instead. A command that
+        // silently does something larger than what was asked for is worse than
+        // one that refuses.
+        if let Some(extra) = argv.first() {
+            tprintln!(ctx, "");
+            tprintln!(ctx, "{}", ui::warn(format!("'sweep' takes no arguments, and '{extra}' was about to be ignored.")));
+            tprintln!(ctx, "{}", ui::dim("It consolidates everything on the ledger, however many coins that is."));
+            tprintln!(ctx, "{}", ui::dim("To have it happen on its own above a coin count, use 'auto sweep <n>'."));
+            tprintln!(ctx, "");
+            return Ok(());
+        }
 
         let account = ctx.wallet().account()?;
         let (wallet_secret, payment_secret) = ctx.ask_wallet_secret(Some(&account)).await?;
