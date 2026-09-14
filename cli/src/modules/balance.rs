@@ -123,13 +123,26 @@ impl Balance {
         // from an empty ledger by looking at it — so the wallet says which of
         // the two it is rather than printing a zero it cannot stand behind.
         if !ctx.ledger_is_known() {
+            // The wallet's own figure comes from a UTXO context it has not
+            // managed to fill, but the node can still be asked the simple
+            // question. Showing the node's answer and saying it is not
+            // spendable yet beats showing nothing, and beats showing zero by
+            // a distance somebody measured at 812,524 TMAGLD.
             rows.push(vec![String::new(); 4]);
-            rows.push(vec![
-                ui::paint(ui::Ink::Cream, "ledger"),
-                ui::paint(ui::Ink::Moss, "not read yet"),
-                String::new(),
-                ui::paint(ui::Ink::Moss, "the node has not answered — try 'balance' again shortly"),
-            ]);
+            match ctx.ledger_total_from_node().await {
+                Some(total) => rows.push(vec![
+                    ui::paint(ui::Ink::Cream, "ledger"),
+                    ui::paint(ui::Ink::Petal, ui::ledger_amount(total)),
+                    unit.clone(),
+                    ui::paint(ui::Ink::Moss, "as the node sees it — still reading the coins before it can be spent"),
+                ]),
+                None => rows.push(vec![
+                    ui::paint(ui::Ink::Cream, "ledger"),
+                    ui::paint(ui::Ink::Moss, "not read yet"),
+                    String::new(),
+                    ui::paint(ui::Ink::Moss, "the node has not answered — try 'balance' again shortly"),
+                ]),
+            }
         } else if let Some(balance) = account.balance() {
             if balance.mature > 0 || balance.pending > 0 {
                 let mut aside = format!(

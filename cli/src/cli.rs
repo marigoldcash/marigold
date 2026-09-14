@@ -293,6 +293,25 @@ impl KaspaCli {
         self.ledger_known.load(Ordering::SeqCst)
     }
 
+    /// Ask the node outright what this account's ledger address holds.
+    ///
+    /// One number over the wire, which is the whole point. The wallet's own
+    /// figure comes from its UTXO context, and that context is filled by
+    /// fetching every coin on the address in a single unpaginated response —
+    /// four million of them does not arrive inside the RPC timeout, so the
+    /// context stays empty and the wallet has nothing to report. The node can
+    /// answer the simpler question immediately whatever the coin count is.
+    ///
+    /// This is for saying what is there. It is not a substitute for the
+    /// context: spending coins needs the coins, not their total.
+    pub async fn ledger_total_from_node(&self) -> Option<u64> {
+        if !self.wallet.is_connected() {
+            return None;
+        }
+        let address = self.wallet.account().ok()?.receive_address().ok()?;
+        self.wallet.rpc_api().get_balance_by_address(address).await.ok()
+    }
+
     /// What this network calls its money — `MAGLD` on mainnet, `TMAGLD` on
     /// testnet. Worth asking for rather than writing out: the prompt has
     /// always used the real ticker, so every hardcoded "MAGLD" beside it was
@@ -1192,7 +1211,17 @@ impl KaspaCli {
             tprintln!(self, "{}", style("(this wallet asks for a code from your phone before it spends)").dim());
         }
         if !self.ledger_is_known() {
-            tprintln!(self, "{}", crate::ui::dim("ledger: not read yet — the node has not answered"));
+            match self.ledger_total_from_node().await {
+                Some(total) => tprintln!(
+                    self,
+                    "{}",
+                    crate::ui::dim(format!(
+                        "ledger: {} {ticker}  (as the node sees it — still reading the coins)",
+                        crate::ui::ledger_amount(total)
+                    ))
+                ),
+                None => tprintln!(self, "{}", crate::ui::dim("ledger: not read yet — the node has not answered")),
+            }
         } else if ledger > 0 {
             tprintln!(
                 self,
