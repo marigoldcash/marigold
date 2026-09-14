@@ -106,5 +106,8 @@ features = [
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 
 
+[dev-dependencies]
+tempfile.workspace = true
+
 [lints]
 workspace = true

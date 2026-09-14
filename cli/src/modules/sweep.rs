@@ -69,6 +69,18 @@ impl Sweep {
         let ctx_ = ctx.clone();
         let submitted = Arc::new(AtomicU64::new(0));
         let submitted_ = submitted.clone();
+
+        // Measure what each signed transaction actually weighs. The generator
+        // stops packing inputs at four fifths of the mass limit to leave room
+        // for signatures it cannot size in advance; whether that headroom is
+        // needed or wasted is a question about real transactions, and this is
+        // a consolidation, which is where the question matters most.
+        let folder = kaspa_wallet_core::storage::local::default_storage_folder().to_string();
+        let masslog = workflow_store::fs::resolve_path(&folder)
+            .ok()
+            .and_then(|path| crate::masslog::MassLog::try_new(&path, ctx.wallet().network_id().ok()?).ok())
+            .map(Arc::new);
+        let masslog_ = masslog.clone();
         let (summary, _ids) = account
             .sweep(
                 wallet_secret,
@@ -76,6 +88,9 @@ impl Sweep {
                 fee_rate,
                 &abortable,
                 Some(Arc::new(move |ptx| {
+                    if let Some(masslog) = masslog_.as_ref() {
+                        masslog.record(ptx);
+                    }
                     // Every 25th transaction, so a long sweep shows life
                     // without drowning the terminal.
                     let n = submitted_.fetch_add(1, Ordering::Relaxed) + 1;
@@ -92,6 +107,23 @@ impl Sweep {
 
         tprintln!(ctx, "  submitted {} transaction(s) in total", submitted.load(Ordering::Relaxed));
         tprintln!(ctx, "Sweep: {summary}");
+
+        if let Some(masslog) = masslog.as_ref() {
+            masslog.finish();
+            if masslog.rows() > 0 {
+                tprintln!(ctx, "");
+                tprintln!(
+                    ctx,
+                    "{}",
+                    ui::dim(format!(
+                        "Measured {} transaction(s); the fullest used {:.1}% of the mass limit.",
+                        masslog.rows().separated_string(),
+                        masslog.peak_percent()
+                    ))
+                );
+                tprintln!(ctx, "{}", ui::dim(format!("Recorded in {}", masslog.path().display())));
+            }
+        }
 
         Ok(())
     }

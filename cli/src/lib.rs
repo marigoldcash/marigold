@@ -9,6 +9,7 @@ pub(crate) mod log_sink;
 pub mod extensions;
 mod helpers;
 mod imports;
+pub mod masslog;
 mod matchers;
 #[cfg(feature = "embedded-node")]
 pub mod miner;
