@@ -324,7 +324,19 @@ pub trait Account: AnySync + Send + Sync + 'static {
         let mut ids = vec![];
         while let Some(transaction) = stream.try_next().await? {
             transaction.try_sign()?;
-            ids.push(transaction.try_submit(&self.wallet().rpc_api()).await?);
+            match transaction.try_submit(&self.wallet().rpc_api()).await {
+                Ok(id) => ids.push(id),
+                // The node already has this one. That is not a failure — it is
+                // the same transaction arriving twice, which happens when a
+                // rescan re-derives inputs the wallet had already spent from.
+                // Aborting on it stopped a 4.4-million-coin consolidation after
+                // its first transaction and reported the stop in red, as though
+                // the money had gone wrong.
+                Err(err) if is_already_known(&err) => {
+                    ids.push(transaction.id());
+                }
+                Err(err) => return Err(err.into()),
+            }
 
             if let Some(notifier) = notifier.as_ref() {
                 notifier(&transaction);
@@ -916,6 +928,19 @@ pub trait DerivationCapableAccount: Account {
         let address = self.derivation().change_address_manager().get_range(index..index + 1)?.first().unwrap().clone();
         Ok(address)
     }
+}
+
+/// Whether a submission failed only because the node already had the
+/// transaction — either accepted into the chain or sitting in the mempool.
+///
+/// Matched on the message rather than the type: the mempool's own error enum
+/// does not survive the RPC boundary, which hands back a rejection string.
+/// Both phrasings come from `mining/errors/src/mempool.rs` and are stable
+/// there; a wording change would make this fall back to treating a duplicate
+/// as an error, which is the safe direction to be wrong in.
+pub(crate) fn is_already_known(err: &Error) -> bool {
+    let text = err.to_string();
+    text.contains("already accepted by the consensus") || text.contains("is already in the mempool")
 }
 
 downcast_sync!(dyn DerivationCapableAccount);

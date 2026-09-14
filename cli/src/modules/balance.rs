@@ -117,7 +117,20 @@ impl Balance {
         // its ticker go in their own columns rather than arriving as one
         // pre-formatted string, so the ledger figure lines up with the notes
         // figure above it instead of floating a few characters to the right.
-        if let Some(balance) = account.balance() {
+        //
+        // And only when the figure is actually known. After a reload that did
+        // not finish, the UTXO context is empty, which is indistinguishable
+        // from an empty ledger by looking at it — so the wallet says which of
+        // the two it is rather than printing a zero it cannot stand behind.
+        if !ctx.ledger_is_known() {
+            rows.push(vec![String::new(); 4]);
+            rows.push(vec![
+                ui::paint(ui::Ink::Cream, "ledger"),
+                ui::paint(ui::Ink::Moss, "not read yet"),
+                String::new(),
+                ui::paint(ui::Ink::Moss, "the node has not answered — try 'balance' again shortly"),
+            ]);
+        } else if let Some(balance) = account.balance() {
             if balance.mature > 0 || balance.pending > 0 {
                 let mut aside = format!(
                     "{} piece{}",

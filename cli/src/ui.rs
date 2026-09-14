@@ -546,3 +546,37 @@ mod layout_tests {
         assert_eq!(split.chunks(6).count(), 4, "four rows of six");
     }
 }
+
+#[cfg(test)]
+mod trust_tests {
+    /// Zero and "not read yet" are different facts, and the wallet has to be
+    /// able to tell them apart before it prints either.
+    ///
+    /// This is the rule that was missing: a reload clears the UTXO context and
+    /// refills it from the node, so a reload that times out leaves an empty
+    /// context — which looks exactly like an empty ledger. The wallet told
+    /// somebody holding 812,524 TMAGLD across 4.4 million coins that their
+    /// ledger was empty, and then used that same zero to decide there was
+    /// nothing to mint.
+    fn figure(known: bool, mature: u64) -> &'static str {
+        if !known {
+            "not read yet"
+        } else if mature > 0 {
+            "an amount"
+        } else {
+            "zero"
+        }
+    }
+
+    #[test]
+    fn an_unread_ledger_is_never_reported_as_empty() {
+        assert_eq!(figure(false, 0), "not read yet");
+        assert_eq!(figure(false, 812_524), "not read yet", "unknown stays unknown whatever is cached");
+    }
+
+    #[test]
+    fn a_ledger_that_really_is_empty_still_says_so() {
+        assert_eq!(figure(true, 0), "zero");
+        assert_eq!(figure(true, 812_524), "an amount");
+    }
+}

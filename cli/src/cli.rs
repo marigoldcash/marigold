@@ -95,6 +95,17 @@ pub struct KaspaCli {
     /// that whoever is at the machine could simply delete, so it would buy
     /// nothing and imply something it could not deliver.
     otp_session: Mutex<OtpSession>,
+    /// Whether the wallet's view of the ledger can be stated as fact.
+    ///
+    /// It cannot, after a reload that failed: the reload clears the UTXO
+    /// context and repopulates it from the node, so a failure leaves an empty
+    /// context that reads as a balance of zero with zero coins in it. The
+    /// wallet then told somebody holding 812,524 TMAGLD across 4.4 million
+    /// coins that their ledger was empty (founder report, 2026-09-13).
+    ///
+    /// Zero and "not known" are different facts and only one of them is
+    /// alarming. Nothing may print a ledger figure while this is false.
+    ledger_known: Arc<AtomicBool>,
 }
 
 /// See [`KaspaCli::otp_session`].
@@ -207,6 +218,7 @@ impl KaspaCli {
             prompt_total_valid: Arc::new(AtomicBool::new(false)),
             prompt_balance_width: Arc::new(AtomicUsize::new(0)),
             otp_session: Mutex::new(OtpSession::default()),
+            ledger_known: Arc::new(AtomicBool::new(true)),
         });
 
         let term = Arc::new(Terminal::try_new_with_options(kaspa_cli.clone(), options.terminal)?);
@@ -231,6 +243,11 @@ impl KaspaCli {
 
     pub fn notifier(&self) -> &Notifier {
         &self.notifier
+    }
+
+    /// Whether the ledger figure can be stated as fact — see `ledger_known`.
+    pub fn ledger_is_known(&self) -> bool {
+        self.ledger_known.load(Ordering::SeqCst)
     }
 
     /// What this network calls its money — `MAGLD` on mainnet, `TMAGLD` on
@@ -1135,7 +1152,9 @@ impl KaspaCli {
         if self.otp().is_some() {
             tprintln!(self, "{}", style("(this wallet asks for a code from your phone before it spends)").dim());
         }
-        if ledger > 0 {
+        if !self.ledger_is_known() {
+            tprintln!(self, "{}", crate::ui::dim("ledger: not read yet — the node has not answered"));
+        } else if ledger > 0 {
             tprintln!(
                 self,
                 "ledger: {} {ticker}  ({} piece{})",
@@ -1192,6 +1211,16 @@ impl KaspaCli {
         }
         let loud = announce || self.auto_verbose();
         let ticker = self.ticker();
+        // Never decide anything from a ledger figure the wallet has not
+        // actually read. An unfinished reload reads as zero, and "nothing to
+        // mint, the ledger holds 0" was printed over a ledger holding
+        // 812,524 TMAGLD — the decision was as wrong as the sentence.
+        if !self.ledger_is_known() {
+            if loud {
+                tprintln!(self, "{}", crate::ui::dim("(waiting for the node — the ledger has not been read yet)"));
+            }
+            return;
+        }
         // "Armed" means something is actually configured to run — holding the
         // secret is not the same thing, and conflating them made a wallet with
         // only auto-sweep on look like auto-mint was armed too.
@@ -1594,7 +1623,8 @@ impl KaspaCli {
                                 },
                                 #[allow(unused_variables)]
                                 Events::Disconnect{ url, network_id } => {
-                                    tprintln!(this, "Disconnected from {}",url.unwrap_or("N/A".to_string()));
+                                    this.ledger_known.store(false, Ordering::SeqCst);
+                                    tprintln!(this, "Disconnected from {}", url.unwrap_or_else(|| "the node".to_string()));
                                     this.term().refresh_prompt();
                                 },
                                 Events::UtxoIndexNotEnabled { .. } => {
@@ -1630,16 +1660,20 @@ impl KaspaCli {
                                             workflow_core::task::sleep(Duration::from_secs(3)).await;
                                             outcome = this.wallet().reload(true, &guard).await;
                                         }
+                                        // A failed reload leaves the UTXO context empty, and an
+                                        // empty context is indistinguishable from an empty ledger
+                                        // unless something remembers which it is.
+                                        this.ledger_known.store(outcome.is_ok(), Ordering::SeqCst);
                                         if outcome.is_err() {
                                             // Not the raw error. "RPC Server (remote error) ->
                                             // RPC request timeout" tells a person nothing except
                                             // that something broke, and it did not break — the
-                                            // balance is simply still the one from before.
+                                            // wallet simply has not read the ledger yet.
                                             tprintln!(
                                                 this,
                                                 "{}",
                                                 crate::ui::dim(
-                                                    "(the node did not answer in time while refreshing — your balance may be a little behind)"
+                                                    "(the node did not answer in time — the ledger has not been read yet; 'balance' again in a moment)"
                                                 )
                                             );
                                         }
@@ -1654,7 +1688,12 @@ impl KaspaCli {
                                     ..
                                 } => {
 
-                                    tprintln!(this, "Connected to Marigold node version {server_version} at {}", url.unwrap_or("N/A".to_string()));
+                                    // No URL means the node is inside this process — there is no
+                                    // address to print, and "at N/A" reads like a fault.
+                                    match url {
+                                        Some(url) => tprintln!(this, "Connected to Marigold node version {server_version} at {url}"),
+                                        None => tprintln!(this, "Connected to your own Marigold node, version {server_version}"),
+                                    }
 
                                     let is_open = this.wallet.is_open();
 
@@ -1797,6 +1836,10 @@ impl KaspaCli {
                                     balance,
                                     id,
                                 } => {
+                                    // The processor only emits this once it has read the coins,
+                                    // so the figure is the node's answer rather than an empty
+                                    // context left behind by a reload that did not finish.
+                                    this.ledger_known.store(true, Ordering::SeqCst);
 
                                     if !this.is_mutted() || (this.is_mutted() && this.flags.get(Track::Balance)) {
                                         let network_id = this.wallet.network_id().expect("missing network type");
