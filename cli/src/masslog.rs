@@ -1,26 +1,51 @@
 //! Measure what a consolidation transaction actually weighs.
 //!
-//! # Why this exists
+//! # What it found
 //!
-//! The transaction generator stops accumulating inputs at four fifths of
-//! `MAXIMUM_STANDARD_TRANSACTION_MASS` (`generator.rs`'s
-//! `TRANSACTION_MASS_BOUNDARY_FOR_ADDITIONAL_INPUT_ACCUMULATION`). That
-//! headroom is for the change output and for signatures, whose real size is
-//! not known until the inputs are signed — an estimate that runs over the
-//! limit produces a transaction the node refuses, which on a long
-//! consolidation means discovering it hours in.
+//! Measured over 75 consolidation transactions on testnet-10 (2026-09-14,
+//! wallet build 2.0.62), and the answer settled a question that had been
+//! guessed at wrongly:
 //!
-//! Four fifths is upstream's guess. If the real signed mass lands nearer the
-//! limit than the guess assumes, the headroom is being wasted: a
-//! consolidation needs about a quarter more transactions than it has to, and
-//! on a wallet holding millions of coins that is real money. If it lands
-//! close to the limit, the guess is right and the cap should be left alone.
+//! ```text
+//! inputs                88   every transaction, no variation
+//! signed total mass     98,890 of a 100,000 limit — 98.89%
+//! headroom              1,110, against ~1,124 mass for one more input
+//! generator's estimate  98,990 — 100 high, 0.1%, and on the safe side
+//! storage mass          0 on every single one
+//! fee                   9,940,200 petals — exactly 100 sompi/gram
+//! ```
 //!
-//! Nobody knows which without measuring, so this measures. It writes one row
-//! per transaction that a sweep actually signed and submitted, and the numbers
-//! it records are the ones the decision turns on: the mass the generator
-//! believed, the mass the signed transaction really has, and how much of the
-//! limit each used.
+//! So the transactions are full. They stop at 88 inputs because an 89th does
+//! not fit, not because anything told them to stop early, and there is no
+//! spare capacity to reclaim.
+//!
+//! The suspicion this was built to test — that the generator's
+//! `TRANSACTION_MASS_BOUNDARY_FOR_ADDITIONAL_INPUT_ACCUMULATION`, four fifths
+//! of the mass limit, was capping transactions at 80% and costing a quarter
+//! more of them — was wrong. That constant is not a cap. Its own comment says
+//! it governs an opportunistic extra-input pass that exists to *reduce
+//! storage mass*, and the branch is gated on `storage_mass > 0`. A
+//! consolidation merges value rather than splitting it, so its storage mass is
+//! zero and that branch never runs. It has nothing to do with how full these
+//! transactions are.
+//!
+//! The fee is the protocol minimum: 100 sompi per gram is the node's own
+//! `DEFAULT_MINIMUM_RELAY_TRANSACTION_FEE`, and the wallet pays exactly it.
+//!
+//! What remains is arithmetic, not waste. Consolidation costs about 112,957
+//! petals per coin — 0.00113 MAGLD against coins worth 0.152, so 0.74% of
+//! each. Clearing 4,439,373 coins takes roughly 50,447 transactions and about
+//! 5,014 MAGLD, which is 0.62% of the 812,524 they held. Nothing in the
+//! transaction's shape or price can move that. The only thing that ever could
+//! was not letting four million coins accumulate, which is a scheduling
+//! problem and was fixed as one.
+//!
+//! # Why it is still here
+//!
+//! The numbers above are one network, one wallet, one day. Mass accounting
+//! changes (Toccata moved the relay fee by a factor of a hundred), and the
+//! next time somebody wonders whether consolidation is priced properly the
+//! answer should come from a measurement rather than from this comment.
 //!
 //! # What it does not do
 //!
