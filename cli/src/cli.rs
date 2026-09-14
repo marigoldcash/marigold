@@ -1246,7 +1246,11 @@ impl KaspaCli {
                         kaspa_wallet_core::utils::sompi_to_kaspa_string(waiting),
                         kaspa_wallet_core::utils::sompi_to_kaspa_string(threshold)
                     );
-                } else {
+                } else if mature > 0 {
+                    // Only when there is something there but not enough. An
+                    // empty ledger under a threshold is not news — it is the
+                    // normal state of every wallet that keeps its money as
+                    // notes, which is all of them, reported once per open.
                     tprintln!(
                         self,
                         "Nothing to mint: ledger holds {} {ticker}, threshold is {}.",
@@ -1597,8 +1601,19 @@ impl KaspaCli {
                                     tprintln!(this, "Error: Marigold node UTXO index is not enabled...")
                                 },
                                 Events::SyncState { sync_state } => {
+                                    // Only on the edge into synced. This used to fire on every
+                                    // synced sync-state event, and a node that keeps reporting
+                                    // itself synced — which is what a healthy one does — meant a
+                                    // full wallet reload over and over, each one re-reading the
+                                    // UTXO set over RPC. On a large wallet they overlap and time
+                                    // out, which is where "RPC request timeout" came from.
+                                    let was_synced =
+                                        this.sync_state.lock().unwrap().as_ref().map(|state| state.is_synced()).unwrap_or(false);
+                                    let became_synced = sync_state.is_synced() && !was_synced;
 
-                                    if sync_state.is_synced() && this.wallet().is_open() {
+                                    this.sync_state.lock().unwrap().replace(sync_state);
+
+                                    if became_synced && this.wallet().is_open() {
                                         let guard = this.wallet().guard();
                                         let guard = guard.lock().await;
                                         // reactivate: true — reload(false) stops every account and
@@ -1606,12 +1621,30 @@ impl KaspaCli {
                                         // caller... which this caller never did (inherited upstream).
                                         // Anyone who opened their wallet BEFORE connecting got a
                                         // permanent N/A balance out of it.
-                                        if let Err(error) = this.wallet().reload(true, &guard).await {
-                                            terrorln!(this, "Unable to reload wallet: {error}");
+                                        //
+                                        // Tried twice: the first attempt lands exactly when the
+                                        // node has just finished syncing and is at its busiest, and
+                                        // a timeout there is a slow node rather than a broken one.
+                                        let mut outcome = this.wallet().reload(true, &guard).await;
+                                        if outcome.is_err() {
+                                            workflow_core::task::sleep(Duration::from_secs(3)).await;
+                                            outcome = this.wallet().reload(true, &guard).await;
+                                        }
+                                        if outcome.is_err() {
+                                            // Not the raw error. "RPC Server (remote error) ->
+                                            // RPC request timeout" tells a person nothing except
+                                            // that something broke, and it did not break — the
+                                            // balance is simply still the one from before.
+                                            tprintln!(
+                                                this,
+                                                "{}",
+                                                crate::ui::dim(
+                                                    "(the node did not answer in time while refreshing — your balance may be a little behind)"
+                                                )
+                                            );
                                         }
                                     }
 
-                                    this.sync_state.lock().unwrap().replace(sync_state);
                                     this.term().refresh_prompt();
                                 }
                                 Events::ServerStatus {
