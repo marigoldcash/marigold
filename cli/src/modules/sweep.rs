@@ -10,24 +10,21 @@ impl Sweep {
     async fn main(self: Arc<Self>, ctx: &Arc<dyn Context>, argv: Vec<String>, _cmd: &str) -> Result<()> {
         let ctx = ctx.clone().downcast_arc::<KaspaCli>()?;
 
-        // `sweep` used to take its arguments and drop them on the floor. Somebody
-        // typed `sweep 1000` meaning to bound the work, got no complaint, and
-        // consolidated all 4,439,680 of their coins instead. A command that
-        // silently does something larger than what was asked for is worse than
-        // one that refuses.
-        if let Some(extra) = argv.first() {
-            tprintln!(ctx, "");
-            tprintln!(ctx, "{}", ui::warn(format!("'sweep' takes no arguments, and '{extra}' was about to be ignored.")));
-            tprintln!(ctx, "{}", ui::dim("It consolidates everything on the ledger, however many coins that is."));
-            tprintln!(ctx, "{}", ui::dim("To have it happen on its own above a coin count, use 'auto sweep <n>'."));
-            tprintln!(ctx, "");
-            return Ok(());
-        }
+        // `sweep <amount>` bounds the work by value. Four million coins is
+        // hours of consolidation in one unbroken run, and somebody who types a
+        // number wants a piece of it, not all of it — this argument used to be
+        // taken and dropped on the floor, so `sweep 1000` consolidated all
+        // 4,439,680 coins without a word about the number it was given.
+        let limit = match argv.first() {
+            Some(text) => Some(try_parse_required_nonzero_kaspa_as_sompi_u64(Some(text))?),
+            None => None,
+        };
 
         let account = ctx.wallet().account()?;
         let (wallet_secret, payment_secret) = ctx.ask_wallet_secret(Some(&account)).await?;
 
         let utxo_count = account.utxo_context().mature_utxo_size();
+        let ticker = ctx.ticker();
 
         // A sweep of several million coins is hours of work, and finding out
         // half way through that the disk is full costs all of it. Batch
@@ -52,12 +49,20 @@ impl Sweep {
             }
         }
 
-        tprintln!(
-            ctx,
-            "Consolidating {} coin(s) into fewer, larger ones — this builds and submits a chain of transactions; \
-             a large wallet takes a while (progress below)...",
-            utxo_count.separated_string()
-        );
+        match limit {
+            Some(limit) => tprintln!(
+                ctx,
+                "Consolidating up to {} {ticker} of this wallet's {} coin(s), then stopping — run 'sweep' again for more.",
+                ui::ledger_amount(limit),
+                utxo_count.separated_string()
+            ),
+            None => tprintln!(
+                ctx,
+                "Consolidating all {} coin(s) into fewer, larger ones — this builds and submits a chain of transactions; \
+                 a large wallet takes a while (progress below). 'sweep <amount>' does it a piece at a time.",
+                utxo_count.separated_string()
+            ),
+        }
         // TODO fee_rate
         let fee_rate = None;
         let abortable = Abortable::default();
@@ -78,6 +83,7 @@ impl Sweep {
                         tprintln!(ctx_, "  submitted {n} transaction(s)... (latest {})", ptx.id());
                     }
                 })),
+                limit,
             )
             .await?;
 

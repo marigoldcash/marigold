@@ -580,3 +580,48 @@ mod trust_tests {
         assert_eq!(figure(true, 812_524), "an amount");
     }
 }
+
+/// A ledger amount, to the hundredth and no further.
+///
+/// Below 0.01 nothing can be done with it: the smallest note is 0.01, so a
+/// remainder under that cannot be minted, cannot be sent to an exchange, and
+/// cannot be spent as a note. Printing `812,524.99677725` asks somebody to
+/// read eight digits that change nothing, and hides the figure that matters
+/// in the middle of them.
+///
+/// Truncated, never rounded. `812,524.99677725` shows as `812,524.99`, not
+/// `812,525.00` — a balance may be shown as less than it is, and must never
+/// be shown as more.
+pub fn ledger_amount(petals: u64) -> String {
+    use kaspa_consensus_core::constants::SOMPI_PER_KASPA;
+    const PER_HUNDREDTH: u64 = SOMPI_PER_KASPA / 100;
+    let whole = petals / SOMPI_PER_KASPA;
+    let hundredths = (petals % SOMPI_PER_KASPA) / PER_HUNDREDTH;
+    format!("{}.{hundredths:02}", whole.separated_string())
+}
+
+#[cfg(test)]
+mod amount_tests {
+    use super::*;
+
+    #[test]
+    fn a_ledger_amount_stops_at_the_hundredth() {
+        assert_eq!(ledger_amount(81_252_499_677_725), "812,524.99");
+        assert_eq!(ledger_amount(34_148_284_000_000), "341,482.84");
+        assert_eq!(ledger_amount(0), "0.00");
+        assert_eq!(ledger_amount(100_000_000), "1.00");
+    }
+
+    /// The direction that matters. Rounding would have turned
+    /// 812,524.99677725 into 812,525.00 — more money than the person has.
+    #[test]
+    fn it_truncates_rather_than_rounds() {
+        assert_eq!(ledger_amount(199_999_999), "1.99", "1.99999999 is not 2.00");
+        assert_eq!(ledger_amount(999_999), "0.00", "dust below a hundredth is nothing you can use");
+    }
+
+    #[test]
+    fn large_amounts_keep_their_separators() {
+        assert_eq!(ledger_amount(1_234_567_800_000_000), "12,345,678.00");
+    }
+}

@@ -138,12 +138,12 @@ impl Balance {
                     if balance.mature_utxo_count == 1 { "" } else { "s" }
                 );
                 if balance.pending > 0 {
-                    aside = format!("{} pending · {aside}", sompi_to_kaspa_string(balance.pending));
+                    aside = format!("{} pending · {aside}", ui::ledger_amount(balance.pending));
                 }
                 rows.push(vec![String::new(); 4]);
                 rows.push(vec![
                     ui::paint(ui::Ink::Cream, "ledger"),
-                    money(balance.mature),
+                    ui::paint(ui::Ink::Petal, ui::ledger_amount(balance.mature)),
                     unit.clone(),
                     ui::paint(ui::Ink::Moss, aside),
                 ]);

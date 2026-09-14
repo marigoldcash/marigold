@@ -1158,7 +1158,7 @@ impl KaspaCli {
             tprintln!(
                 self,
                 "ledger: {} {ticker}  ({} piece{})",
-                kaspa_wallet_core::utils::sompi_to_kaspa_string(ledger),
+                crate::ui::ledger_amount(ledger),
                 pieces.separated_string(),
                 if pieces == 1 { "" } else { "s" }
             );
@@ -1351,7 +1351,7 @@ impl KaspaCli {
                 tprintln!(self, "Consolidating {} ledger pieces — this can take a while...", pieces.separated_string());
             }
             let notifier: Option<kaspa_wallet_core::account::GenerationNotifier> = None;
-            match account.clone().sweep(secret.clone(), payment_secret.clone(), None, &abortable, notifier).await {
+            match account.clone().sweep(secret.clone(), payment_secret.clone(), None, &abortable, notifier, None).await {
                 Ok(summary) => {
                     if loud {
                         tprintln!(

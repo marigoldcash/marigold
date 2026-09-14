@@ -301,6 +301,17 @@ pub trait Account: AnySync + Send + Sync + 'static {
 
     /// Aggregate all account UTXOs into the change address.
     /// Also known as "compounding".
+    /// Consolidate the ledger's coins into fewer, larger ones.
+    ///
+    /// `limit` bounds the work by value: once the transactions submitted so
+    /// far have consumed at least that many petals of input, the sweep stops
+    /// and leaves the rest for another run. A wallet holding four million
+    /// coins is hours of consolidation, and an operation that size wants to be
+    /// done in pieces the person can watch finish.
+    ///
+    /// Each streamed transaction is submitted on its own and is valid on its
+    /// own, so stopping between two of them leaves nothing half-done — only
+    /// less consolidated than it would have been.
     async fn sweep(
         self: Arc<Self>,
         wallet_secret: Secret,
@@ -308,6 +319,7 @@ pub trait Account: AnySync + Send + Sync + 'static {
         fee_rate: Option<f64>,
         abortable: &Abortable,
         notifier: Option<GenerationNotifier>,
+        limit: Option<u64>,
     ) -> Result<(GeneratorSummary, Vec<kaspa_hashes::Hash>)> {
         let keydata = self.prv_key_data(wallet_secret).await?;
         let signer = Arc::new(Signer::new(self.clone().as_dyn_arc(), keydata, payment_secret));
@@ -322,6 +334,7 @@ pub trait Account: AnySync + Send + Sync + 'static {
 
         let mut stream = generator.stream();
         let mut ids = vec![];
+        let mut consumed = 0u64;
         while let Some(transaction) = stream.try_next().await? {
             transaction.try_sign()?;
             match transaction.try_submit(&self.wallet().rpc_api()).await {
@@ -340,6 +353,13 @@ pub trait Account: AnySync + Send + Sync + 'static {
 
             if let Some(notifier) = notifier.as_ref() {
                 notifier(&transaction);
+            }
+
+            if let Some(limit) = limit {
+                consumed = consumed.saturating_add(transaction.aggregate_input_value());
+                if consumed >= limit {
+                    break;
+                }
             }
             yield_executor().await;
         }
