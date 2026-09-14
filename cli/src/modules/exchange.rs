@@ -8,6 +8,7 @@ impl Exchange {
     async fn main(self: Arc<Self>, ctx: &Arc<dyn Context>, argv: Vec<String>, _cmd: &str) -> Result<()> {
         // address, amount, priority fee
         let ctx = ctx.clone().downcast_arc::<KaspaCli>()?;
+        let ticker = ctx.ticker();
 
         let account = ctx.wallet().account()?;
 
@@ -47,7 +48,7 @@ impl Exchange {
             if note_total < amount_sompi && mature + note_total > amount_sompi {
                 tprintln!(
                     ctx,
-                    "Paying {} MAGLD from both sides at once: {} MAGLD on the ledger plus notes, in one transaction.",
+                    "Paying {} {ticker} from both sides at once: {} {ticker} on the ledger plus notes, in one transaction.",
                     sompi_to_kaspa_string(amount_sompi),
                     sompi_to_kaspa_string(mature)
                 );
@@ -61,7 +62,7 @@ impl Exchange {
                 .await?;
                 tprintln!(
                     ctx,
-                    "\nSent {} MAGLD to {address} from {utxos} ledger coin(s) and {notes} note(s) (fee {} MAGLD); tx: {}\n",
+                    "\nSent {} {ticker} to {address} from {utxos} ledger coin(s) and {notes} note(s) (fee {} {ticker}); tx: {}\n",
                     sompi_to_kaspa_string(amount_sompi),
                     sompi_to_kaspa_string(fee),
                     transaction_id
@@ -72,7 +73,7 @@ impl Exchange {
             if note_total >= amount_sompi {
                 tprintln!(
                     ctx,
-                    "Ledger balance is {} MAGLD — paying from notes instead (one transaction: notes are redeemed straight to {address}).",
+                    "Ledger balance is {} {ticker} — paying from notes instead (one transaction: notes are redeemed straight to {address}).",
                     sompi_to_kaspa_string(mature)
                 );
                 // Select enough notes to cover the payment plus room for the fee.
@@ -88,7 +89,7 @@ impl Exchange {
                 .await?;
                 tprintln!(
                     ctx,
-                    "\nSent {} MAGLD to {address} from {} note(s) (fee {} MAGLD); tx: {}\n",
+                    "\nSent {} {ticker} to {address} from {} note(s) (fee {} {ticker}); tx: {}\n",
                     sompi_to_kaspa_string(amount_sompi),
                     result.serials.len(),
                     sompi_to_kaspa_string(result.fee_petals),
@@ -115,7 +116,7 @@ impl Exchange {
             .await?;
 
         tprintln!(ctx, "Send - {summary}");
-        tprintln!(ctx, "\nSending {} MAGLD to {address}, tx ids:", sompi_to_kaspa_string(amount_sompi));
+        tprintln!(ctx, "\nSending {} {ticker} to {address}, tx ids:", sompi_to_kaspa_string(amount_sompi));
         // tprintln!(ctx, "{}\n", ids.into_iter().map(|a| a.to_string()).collect::<Vec<_>>().join("\n"));
 
         Ok(())

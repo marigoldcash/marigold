@@ -16,6 +16,7 @@ pub struct Pskb;
 impl Pskb {
     async fn main(self: Arc<Self>, ctx: &Arc<dyn Context>, mut argv: Vec<String>, _cmd: &str) -> Result<()> {
         let ctx = ctx.clone().downcast_arc::<KaspaCli>()?;
+        let ticker = ctx.ticker();
 
         if !ctx.wallet().is_open() {
             return Err(Error::WalletIsNotOpen);
@@ -135,7 +136,7 @@ impl Pskb {
 
                         tprintln!(
                             ctx,
-                            "{} locked UTXO{} found with total amount of {} MAGLD",
+                            "{} locked UTXO{} found with total amount of {} {ticker}",
                             spend_utxos.len(),
                             if spend_utxos.len() == 1 { "" } else { "s" },
                             sompi_to_kaspa(total_locked_sompi)

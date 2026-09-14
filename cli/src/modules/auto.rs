@@ -17,6 +17,7 @@ pub struct Auto;
 impl Auto {
     async fn main(self: Arc<Self>, ctx: &Arc<dyn Context>, argv: Vec<String>, _cmd: &str) -> Result<()> {
         let ctx = ctx.clone().downcast_arc::<KaspaCli>()?;
+        let ticker = ctx.ticker();
 
         if !ctx.wallet().is_open() {
             tprintln!(ctx, "Open a wallet first");
@@ -40,7 +41,7 @@ impl Auto {
                 if meta.auto_mint {
                     tprintln!(
                         ctx,
-                        "auto-mint is ON above {} MAGLD — {}",
+                        "auto-mint is ON above {} {ticker} — {}",
                         sompi_to_kaspa_string(threshold),
                         if ctx.auto_mint_armed() { "armed for this session" } else { "not armed (re-open the wallet to arm it)" }
                     );
@@ -148,7 +149,7 @@ impl Auto {
                             return Ok(());
                         }
                 ctx.arm_auto_mint(wallet_secret, payment_secret, threshold);
-                tprintln!(ctx, "auto-mint on: ledger balance above {} MAGLD becomes notes automatically.", sompi_to_kaspa_string(threshold));
+                tprintln!(ctx, "auto-mint on: ledger balance above {} {ticker} becomes notes automatically.", sompi_to_kaspa_string(threshold));
             }
             Some("off") => {
                 meta.auto_mint = false;
@@ -170,7 +171,7 @@ impl Auto {
                         }
                     ctx.arm_auto_mint(wallet_secret, payment_secret, threshold);
                 }
-                tprintln!(ctx, "auto-mint threshold set to {} MAGLD.", sompi_to_kaspa_string(threshold));
+                tprintln!(ctx, "auto-mint threshold set to {} {ticker}.", sompi_to_kaspa_string(threshold));
                 if !armed {
                     tprintln!(ctx, "(auto-mint is still off — 'auto on' to enable it)");
                 }

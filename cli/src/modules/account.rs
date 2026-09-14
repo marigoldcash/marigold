@@ -257,6 +257,7 @@ impl Account {
         sweep: bool,
         fee_rate: Option<f64>,
     ) -> Result<()> {
+        let ticker = ctx.ticker();
         let account = ctx.account().await?;
         let (wallet_secret, payment_secret) = ctx.ask_wallet_secret(Some(&account)).await?;
         let _ = ctx.notifier().show(Notification::Processing).await;
@@ -280,13 +281,13 @@ impl Account {
                     if let Some(txid) = txid {
                         tprintln!(
                             ctx_,
-                            "Scan detected {} MAGLD at index {}; transfer txid: {}",
+                            "Scan detected {} {ticker} at index {}; transfer txid: {}",
                             sompi_to_kaspa_string(balance),
                             processed,
                             txid
                         );
                     } else {
-                        tprintln!(ctx_, "Scanned {} derivations, found {} MAGLD", processed, sompi_to_kaspa_string(balance));
+                        tprintln!(ctx_, "Scanned {} derivations, found {} {ticker}", processed, sompi_to_kaspa_string(balance));
                     }
                 })),
             )

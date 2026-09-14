@@ -233,6 +233,18 @@ impl KaspaCli {
         &self.notifier
     }
 
+    /// What this network calls its money — `MAGLD` on mainnet, `TMAGLD` on
+    /// testnet. Worth asking for rather than writing out: the prompt has
+    /// always used the real ticker, so every hardcoded "MAGLD" beside it was
+    /// naming the same money twice, differently, on every testnet wallet
+    /// there is.
+    pub fn ticker(&self) -> &'static str {
+        self.wallet
+            .network_id()
+            .map(|id| kaspa_wallet_core::utils::kaspa_suffix(&NetworkType::from(id)))
+            .unwrap_or("{ticker}")
+    }
+
     pub fn version(&self) -> String {
         env!("CARGO_PKG_VERSION").to_string()
     }
@@ -1083,35 +1095,19 @@ impl KaspaCli {
     pub async fn report_holdings(self: &Arc<Self>) -> u64 {
         self.wait_for_account().await;
         self.finish_loading_progress();
-        let (notes, ledger, pieces) = self.total_holdings().await;
-        // Keep the prompt's figure in step, so it is right from the moment a
-        // wallet opens rather than after the first minute tick.
-        self.prompt_total_petals.store(notes + ledger, Ordering::SeqCst);
-        self.prompt_total_valid.store(true, Ordering::SeqCst);
-        tprintln!(self, "");
-        tprintln!(self, "notes:  {} MAGLD", kaspa_wallet_core::utils::sompi_to_kaspa_string(notes));
-        // Said once, on opening, so that reaching for a phone at the moment
-        // of a payment is expected rather than alarming.
-        if self.otp().is_some() {
-            tprintln!(self, "{}", style("(this wallet asks for a code from your phone before it spends)").dim());
-        }
-        if ledger > 0 {
-            tprintln!(
-                self,
-                "ledger: {} MAGLD  ({} piece{})",
-                kaspa_wallet_core::utils::sompi_to_kaspa_string(ledger),
-                pieces.separated_string(),
-                if pieces == 1 { "" } else { "s" }
-            );
-        }
-        // Same check the `balance` command runs, at the moment a wallet opens
-        // and after each announced housekeeping pass — which is exactly when a
-        // failed submission would have left a note behind that is not on chain.
-        // Reconcile quietly. A note the pool has not got is usually a mint
-        // that has not landed yet, and shouting about it every time a balance
-        // is printed taught people to ignore a line that one day will matter.
-        // Nothing is said until a synced node has said so three times, at
-        // which point it has stopped being counted and that is worth one line.
+        let (mut notes, ledger, pieces) = self.total_holdings().await;
+        let ticker = self.ticker();
+
+        // Checked before it is printed, not after. A note that stops being
+        // counted stops being counted in this figure too — announcing the
+        // total first and then saying part of it does not exist left a wrong
+        // number on screen and the corrected one in the prompt beneath it.
+        //
+        // Nothing is said unless a synced node has failed to find the same
+        // note three separate times. A note the pool has not got is usually a
+        // mint that has not landed, and saying so on every open taught people
+        // to ignore a line that one day will matter.
+        let mut vanished: Option<(usize, u64)> = None;
         if notes > 0 && self.wallet.is_connected() {
             if let Ok(account) = self.wallet.account() {
                 if let Ok(Some(result)) = kaspa_wallet_core::account::notepool::reconcile_held_notes(account).await {
@@ -1121,21 +1117,45 @@ impl KaspaCli {
                             .iter()
                             .map(|i| kaspa_consensus_core::notepool::DENOMINATION_PETALS[i.d as usize])
                             .sum();
-                        tprintln!(
-                            self,
-                            "{}",
-                            style(format!(
-                                "{} note(s) worth {} MAGLD are not on chain and have stopped being counted.",
-                                result.moved_to_unknown.len(),
-                                kaspa_wallet_core::utils::sompi_to_kaspa_string(value)
-                            ))
-                            .yellow()
-                        );
-                        tprintln!(self, "{}", style("Most often a payment that never landed, in which case the money never").dim());
-                        tprintln!(self, "{}", style("left your ledger balance. 'note unknown' lists them.").dim());
+                        notes = notes.saturating_sub(value);
+                        vanished = Some((result.moved_to_unknown.len(), value));
                     }
                 }
             }
+        }
+
+        // Keep the prompt's figure in step, so it is right from the moment a
+        // wallet opens rather than after the first minute tick.
+        self.prompt_total_petals.store(notes + ledger, Ordering::SeqCst);
+        self.prompt_total_valid.store(true, Ordering::SeqCst);
+        tprintln!(self, "");
+        tprintln!(self, "notes:  {} {ticker}", kaspa_wallet_core::utils::sompi_to_kaspa_string(notes));
+        // Said once, on opening, so that reaching for a phone at the moment
+        // of a payment is expected rather than alarming.
+        if self.otp().is_some() {
+            tprintln!(self, "{}", style("(this wallet asks for a code from your phone before it spends)").dim());
+        }
+        if ledger > 0 {
+            tprintln!(
+                self,
+                "ledger: {} {ticker}  ({} piece{})",
+                kaspa_wallet_core::utils::sompi_to_kaspa_string(ledger),
+                pieces.separated_string(),
+                if pieces == 1 { "" } else { "s" }
+            );
+        }
+        if let Some((count, value)) = vanished {
+            tprintln!(self, "");
+            tprintln!(
+                self,
+                "{}",
+                crate::ui::warn(format!(
+                    "{count} note(s) worth {} {ticker} are not on chain and are not counted above.",
+                    kaspa_wallet_core::utils::sompi_to_kaspa_string(value)
+                ))
+            );
+            tprintln!(self, "{}", crate::ui::dim("Most often a payment that never landed, in which case the money never"));
+            tprintln!(self, "{}", crate::ui::dim("left your ledger balance. 'note unknown' lists them."));
         }
         tprintln!(self, "");
         notes
@@ -1171,6 +1191,7 @@ impl KaspaCli {
             return;
         }
         let loud = announce || self.auto_verbose();
+        let ticker = self.ticker();
         // "Armed" means something is actually configured to run — holding the
         // secret is not the same thing, and conflating them made a wallet with
         // only auto-sweep on look like auto-mint was armed too.
@@ -1221,14 +1242,14 @@ impl KaspaCli {
                 if waiting > 0 {
                     tprintln!(
                         self,
-                        "Nothing to mint yet: {} MAGLD is confirming (threshold {}). It will be minted as it lands.",
+                        "Nothing to mint yet: {} {ticker} is confirming (threshold {}). It will be minted as it lands.",
                         kaspa_wallet_core::utils::sompi_to_kaspa_string(waiting),
                         kaspa_wallet_core::utils::sompi_to_kaspa_string(threshold)
                     );
                 } else {
                     tprintln!(
                         self,
-                        "Nothing to mint: ledger holds {} MAGLD, threshold is {}.",
+                        "Nothing to mint: ledger holds {} {ticker}, threshold is {}.",
                         kaspa_wallet_core::utils::sompi_to_kaspa_string(mature),
                         kaspa_wallet_core::utils::sompi_to_kaspa_string(threshold)
                     );
@@ -1256,7 +1277,7 @@ impl KaspaCli {
                         if loud {
                             tprintln!(
                                 self,
-                                "Minted {} MAGLD into {notes} note(s).",
+                                "Minted {} {ticker} into {notes} note(s).",
                                 kaspa_wallet_core::utils::sompi_to_kaspa_string(amount)
                             );
                         }
@@ -1302,7 +1323,7 @@ impl KaspaCli {
                     if loud {
                         tprintln!(
                             self,
-                            "Consolidated (fees {} MAGLD).",
+                            "Consolidated (fees {} {ticker}).",
                             kaspa_wallet_core::utils::sompi_to_kaspa_string(summary.0.aggregate_fees())
                         );
                     }

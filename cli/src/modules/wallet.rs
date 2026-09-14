@@ -10,6 +10,7 @@ pub struct Wallet;
 impl Wallet {
     async fn main(self: Arc<Self>, ctx: &Arc<dyn Context>, mut argv: Vec<String>, cmd: &str) -> Result<()> {
         let ctx = ctx.clone().downcast_arc::<KaspaCli>()?;
+        let ticker = ctx.ticker();
 
         let guard = ctx.wallet().guard();
         let guard = guard.lock().await;
@@ -338,7 +339,7 @@ impl Wallet {
                         ctx,
                         "{}",
                         style(format!(
-                            "Refusing: '{name}' still holds {active_notes} spendable note(s) worth {} MAGLD.",
+                            "Refusing: '{name}' still holds {active_notes} spendable note(s) worth {} {ticker}.",
                             kaspa_wallet_core::utils::sompi_to_kaspa_string(active_petals)
                         ))
                         .red()
@@ -355,7 +356,7 @@ impl Wallet {
                         ctx,
                         "{}",
                         style(format!(
-                            "  ⚠ its vault still holds {active_notes} ACTIVE note(s) worth {} MAGLD — without a backup, NOBODY can ever spend them again",
+                            "  ⚠ its vault still holds {active_notes} ACTIVE note(s) worth {} {ticker} — without a backup, NOBODY can ever spend them again",
                             kaspa_wallet_core::utils::sompi_to_kaspa_string(active_petals)
                         ))
                         .red()

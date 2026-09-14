@@ -13,6 +13,9 @@ impl Balance {
         let ctx = ctx.clone().downcast_arc::<KaspaCli>()?;
         let account = ctx.wallet().account()?;
 
+        let network_type = NetworkType::from(ctx.wallet().network_id()?);
+        let ticker = kaspa_wallet_core::utils::kaspa_suffix(&network_type);
+
         tprintln!(ctx, "");
         let note_key_store = ctx.wallet().store().as_note_key_store()?;
         let mut stream = note_key_store.iter().await?;
@@ -37,6 +40,40 @@ impl Balance {
                 _ => {}
             }
         }
+        // The chain check happens BEFORE anything is printed, because it can
+        // change the answer. A note that stops being counted stops being
+        // counted in this total too — printing the figure first and then
+        // saying some of it does not exist leaves a wrong number on screen
+        // and a corrected one in the prompt, which is what it did.
+        let mut chain_note: Vec<String> = Vec::new();
+        if total > 0 || mirrored > 0 {
+            if ctx.wallet().is_connected() {
+                match kaspa_wallet_core::account::notepool::reconcile_held_notes(account.clone()).await {
+                    Ok(Some(result)) if !result.moved_to_unknown.is_empty() => {
+                        let mut dropped = 0u64;
+                        for info in &result.moved_to_unknown {
+                            let petals = DENOMINATION_PETALS[info.d as usize];
+                            dropped += petals;
+                            total = total.saturating_sub(petals);
+                            counts[info.d as usize] = counts[info.d as usize].saturating_sub(1);
+                        }
+                        chain_note.push(ui::warn(format!(
+                            "{} note(s) worth {} {ticker} are not on chain and are no longer counted above.",
+                            result.moved_to_unknown.len(),
+                            sompi_to_kaspa_string(dropped)
+                        )));
+                        chain_note.push(ui::dim("Most often a payment that never landed, in which case the money never"));
+                        chain_note.push(ui::dim("left your ledger balance. 'note unknown' lists them."));
+                    }
+                    Ok(_) => {}
+                    Err(err) => chain_note.push(ui::dim(format!("(could not check these against the chain: {err})"))),
+                }
+            } else {
+                chain_note.push(ui::dim("Not verified on chain — this is what your vault says it holds, unchecked."));
+                chain_note.push(ui::dim("Connect a node and run 'balance' again to confirm the notes really exist."));
+            }
+        }
+
         // Columns rather than a frame. A frame is for a moment — the note at
         // startup, a wallet being created; `balance` is run twenty times a
         // day and furniture that often becomes wallpaper. What it does need
@@ -44,11 +81,11 @@ impl Balance {
         // right-aligned column is for and what a hand-rolled format! never
         // quite managed.
         let money = |petals: u64| ui::paint(ui::Ink::Petal, sompi_to_kaspa_string(petals));
-        let unit = ui::paint(ui::Ink::Moss, "MAGLD");
+        let unit = ui::paint(ui::Ink::Moss, ticker);
         // The minimums keep an empty wallet's balance from collapsing to
         // "notes 0 MAGLD" — the widths should not move as money arrives.
         const COLUMNS: [ui::Column; 4] =
-            [("", ui::Align::Left, 15), ("", ui::Align::Right, 14), ("", ui::Align::Left, 5), ("", ui::Align::Left, 0)];
+            [("", ui::Align::Left, 15), ("", ui::Align::Right, 14), ("", ui::Align::Left, 6), ("", ui::Align::Left, 0)];
 
         let mut rows: Vec<Vec<String>> = vec![vec![ui::paint(ui::Ink::Cream, "notes"), money(total), unit.clone(), String::new()]];
         for (index, count) in counts.iter().enumerate().rev() {
@@ -75,67 +112,41 @@ impl Balance {
             ]);
         }
 
-        // Every balance is checked against the pool, and says so only when
-        // there is something to say. A figure the wallet merely believes is
-        // worth no more than the belief — but a line confirming the obvious on
-        // every call trains people to stop reading it, so silence means good.
-        if total > 0 || mirrored > 0 {
-            if ctx.wallet().is_connected() {
-                match kaspa_wallet_core::account::notepool::reconcile_held_notes(account.clone()).await {
-                    Ok(Some(result)) if !result.moved_to_unknown.is_empty() => {
-                        let value: u64 = result.moved_to_unknown.iter().map(|i| DENOMINATION_PETALS[i.d as usize]).sum();
-                        tprintln!(ctx, "");
-                        tprintln!(
-                            ctx,
-                            "{}",
-                            style(format!(
-                                "{} note(s) worth {} MAGLD are not on chain and have stopped being counted.",
-                                result.moved_to_unknown.len(),
-                                sompi_to_kaspa_string(value)
-                            ))
-                            .yellow()
-                        );
-                        tprintln!(ctx, "{}", style("Most often a payment that never landed, in which case the money never").dim());
-                        tprintln!(ctx, "{}", style("left your ledger balance. 'note unknown' lists them.").dim());
-                    }
-                    Ok(_) => {}
-                    Err(err) => {
-                        tprintln!(ctx, "");
-                        tprintln!(ctx, "{}", style(format!("(could not check these against the chain: {err})")).dim());
-                    }
-                }
-            } else {
-                tprintln!(ctx, "");
-                tprintln!(ctx, "{}", style("Not verified on chain — this is what your vault says it holds, unchecked.").dim());
-                tprintln!(ctx, "{}", style("Connect a node and run 'balance' again to confirm the notes really exist.").dim());
-            }
-        }
-
         // The ledger comes last and only when it holds something — for anyone
-        // but an exchange it should be empty most of the time.
-        let network_id = ctx.wallet().network_id()?;
-        let network_type = NetworkType::from(network_id);
+        // but an exchange it should be empty most of the time. The amount and
+        // its ticker go in their own columns rather than arriving as one
+        // pre-formatted string, so the ledger figure lines up with the notes
+        // figure above it instead of floating a few characters to the right.
         if let Some(balance) = account.balance() {
             if balance.mature > 0 || balance.pending > 0 {
-                let strings = BalanceStrings::from((Some(&balance), &network_type, None));
+                let mut aside = format!(
+                    "{} piece{}",
+                    balance.mature_utxo_count.separated_string(),
+                    if balance.mature_utxo_count == 1 { "" } else { "s" }
+                );
+                if balance.pending > 0 {
+                    aside = format!("{} pending · {aside}", sompi_to_kaspa_string(balance.pending));
+                }
                 rows.push(vec![String::new(); 4]);
                 rows.push(vec![
                     ui::paint(ui::Ink::Cream, "ledger"),
-                    ui::paint(ui::Ink::Petal, strings.to_string()),
-                    String::new(),
-                    ui::paint(
-                        ui::Ink::Moss,
-                        format!(
-                            "{} piece{}",
-                            balance.mature_utxo_count.separated_string(),
-                            if balance.mature_utxo_count == 1 { "" } else { "s" }
-                        ),
-                    ),
+                    money(balance.mature),
+                    unit.clone(),
+                    ui::paint(ui::Ink::Moss, aside),
                 ]);
             }
         }
 
         ui::table(&ctx, &COLUMNS, &rows);
+
+        // After the figures, not before them: the explanation of why a number
+        // moved is only readable once the number is on screen.
+        if !chain_note.is_empty() {
+            tprintln!(ctx, "");
+            for line in chain_note {
+                tprintln!(ctx, "{line}");
+            }
+        }
 
         if total == 0 {
             if let Some(balance) = account.balance() {

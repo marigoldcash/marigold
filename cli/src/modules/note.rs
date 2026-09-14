@@ -88,6 +88,7 @@ impl Note {
     /// `note request [amount]` — create a payment request (fresh pk, persisted
     /// before display), show its QR + text, then watch for the payment.
     async fn request(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
+        let ticker = ctx.ticker();
         let account = ctx.wallet().account()?;
         // Amount is optional per POOL-SPEC.md P5.6's two QR forms: pinned (40-byte)
         // or left for the payer to fill in (32-byte, the printed/static form).
@@ -101,7 +102,7 @@ impl Note {
         }
         tprintln!(ctx, "{text}");
         match amount_petals {
-            Some(amount) => tprintln!(ctx, "requesting {} MAGLD", sompi_to_kaspa_string(amount)),
+            Some(amount) => tprintln!(ctx, "requesting {} {ticker}", sompi_to_kaspa_string(amount)),
             None => tprintln!(ctx, "no pinned amount - the payer chooses"),
         }
 
@@ -109,7 +110,7 @@ impl Note {
         tprintln!(ctx, "watching for payment (up to {}s; the request stays claimable after a timeout)...", timeout.as_secs());
         match await_payment_request(&ctx.wallet(), &wallet_secret, request.pk, timeout).await {
             Ok(claimed) => {
-                tprintln!(ctx, "payment received: {} MAGLD in {} note(s):", sompi_to_kaspa_string(claimed.total_petals), claimed.notes.len());
+                tprintln!(ctx, "payment received: {} {ticker} in {} note(s):", sompi_to_kaspa_string(claimed.total_petals), claimed.notes.len());
                 for note in &claimed.notes {
                     tprintln!(ctx, "  {} - {}", note.sn, sompi_to_kaspa_string(DENOMINATION_PETALS[note.d as usize]));
                 }
@@ -125,6 +126,7 @@ impl Note {
 
     /// `note pay <request-text> [amount]` — pay a payment request from held notes.
     async fn pay(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
+        let ticker = ctx.ticker();
         if argv.is_empty() {
             tprintln!(ctx, "usage: 'note pay <request-text> [amount]'\r\n");
             return Ok(());
@@ -138,7 +140,7 @@ impl Note {
         let result = account.pay_payment_request(wallet_secret, request, amount_override).await?;
         tprintln!(
             ctx,
-            "paid {} note(s) (fee {} MAGLD); tx: {}",
+            "paid {} note(s) (fee {} {ticker}); tx: {}",
             result.external_serials.len(),
             sompi_to_kaspa_string(result.fee_petals),
             result.transaction_id
@@ -150,6 +152,7 @@ impl Note {
     /// `note import <bearer-text>` — bearer-note import: verify on-chain, store
     /// (Hot), immediately rotate to fresh Cold keys, report.
     async fn import(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
+        let ticker = ctx.ticker();
         if argv.is_empty() {
             tprintln!(ctx, "usage: 'note import <bearer-text>'\r\n");
             return Ok(());
@@ -166,7 +169,7 @@ impl Note {
         }
         tprintln!(
             ctx,
-            "rotation tx: {} (fee {} MAGLD); the note is yours once this confirms",
+            "rotation tx: {} (fee {} {ticker}); the note is yours once this confirms",
             result.rotation.transaction_id,
             sompi_to_kaspa_string(result.rotation.fee_petals)
         );
@@ -193,6 +196,7 @@ impl Note {
     /// shared, wait for the isolation to land on-chain, then show the handover
     /// QR + text and mark the note handed over.
     async fn export(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
+        let ticker = ctx.ticker();
         if argv.is_empty() {
             tprintln!(ctx, "usage: 'note export <serial>'\r\n");
             return Ok(());
@@ -205,7 +209,7 @@ impl Note {
         if let Some(isolation) = &result.isolation {
             tprintln!(
                 ctx,
-                "key was shared - isolated onto a fresh solo key first (tx {}, fee {} MAGLD)",
+                "key was shared - isolated onto a fresh solo key first (tx {}, fee {} {ticker})",
                 isolation.transaction_id,
                 sompi_to_kaspa_string(isolation.fee_petals)
             );
@@ -231,7 +235,7 @@ impl Note {
         tprintln!(ctx, "{text}");
         tprintln!(
             ctx,
-            "note {} ({} MAGLD) handed over - it is the receiver's once they rotate it; both of you can spend it until then",
+            "note {} ({} {ticker}) handed over - it is the receiver's once they rotate it; both of you can spend it until then",
             result.bearer.sn,
             sompi_to_kaspa_string(DENOMINATION_PETALS[result.bearer.d as usize])
         );
@@ -242,6 +246,7 @@ impl Note {
     /// `note pos <amount>` — one POS checkout: fresh landing-pad `pk`, wait for
     /// exact payment, sweep the instant it confirms.
     async fn pos(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
+        let ticker = ctx.ticker();
         if argv.is_empty() {
             tprintln!(ctx, "usage: 'note pos <amount>'\r\n");
             return Ok(());
@@ -250,7 +255,7 @@ impl Note {
         let amount_petals = try_parse_required_nonzero_kaspa_as_sompi_u64(argv.first())?;
         let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(Some(&account)).await?;
 
-        tprintln!(ctx, "checkout: {} MAGLD", sompi_to_kaspa_string(amount_petals));
+        tprintln!(ctx, "checkout: {} {ticker}", sompi_to_kaspa_string(amount_petals));
         let timeout = Duration::from_secs(120);
         let ctx_for_qr = ctx.clone();
         let on_request = Box::new(move |request: &notepool::PaymentRequest| {
@@ -264,7 +269,7 @@ impl Note {
 
         tprintln!(
             ctx,
-            "payment received: {} MAGLD in {} note(s); swept to {} fresh key(s) (fee {} MAGLD), tx {}",
+            "payment received: {} {ticker} in {} note(s); swept to {} fresh key(s) (fee {} {ticker}), tx {}",
             sompi_to_kaspa_string(result.claimed.total_petals),
             result.claimed.notes.len(),
             result.sweep.own_notes.len(),
@@ -283,6 +288,7 @@ impl Note {
     }
 
     async fn mint(&self, ctx: &Arc<KaspaCli>, mut argv: Vec<String>) -> Result<()> {
+        let ticker = ctx.ticker();
         let account = ctx.wallet().account()?;
 
         // 'note mint' with no amount offers to mint everything; 'note mint all'
@@ -300,7 +306,7 @@ impl Note {
                 }
                 let answer = ctx
                     .term()
-                    .ask(false, &format!("Mint all available (~{} MAGLD)? [y/N]: ", sompi_to_kaspa_string(max)))
+                    .ask(false, &format!("Mint all available (~{} {ticker})? [y/N]: ", sompi_to_kaspa_string(max)))
                     .await?
                     .trim()
                     .to_lowercase();
@@ -339,7 +345,7 @@ impl Note {
 
         tprintln!(
             ctx,
-            "Minting {} MAGLD — building, signing, and submitting the funding transactions (a large wallet sweeps in many batches; progress below)...",
+            "Minting {} {ticker} — building, signing, and submitting the funding transactions (a large wallet sweeps in many batches; progress below)...",
             sompi_to_kaspa_string(amount_petals)
         );
         let progress = Self::progress_printer(ctx);
@@ -369,7 +375,7 @@ impl Note {
             (amount_petals, result)
         };
 
-        tprintln!(ctx, "minted {} MAGLD into {} note(s):", sompi_to_kaspa_string(amount_petals), result.notes.len());
+        tprintln!(ctx, "minted {} {ticker} into {} note(s):", sompi_to_kaspa_string(amount_petals), result.notes.len());
         for entry in &result.notes {
             tprintln!(ctx, "  {} - {}", entry.sn, sompi_to_kaspa_string(DENOMINATION_PETALS[entry.d as usize]));
         }
@@ -439,6 +445,7 @@ impl Note {
         wallet_secret: &Secret,
         serials: Vec<Hash>,
     ) -> Result<()> {
+        let ticker = ctx.ticker();
         let store = ctx.wallet().store().as_note_key_store()?;
         let batches = plan_restore_rotation(serials);
         for (i, batch) in batches.iter().enumerate() {
@@ -457,7 +464,7 @@ impl Note {
             match account.clone().rotate_notes(wallet_secret.clone(), still_active).await {
                 Ok(result) => tprintln!(
                     ctx,
-                    "  batch {}/{}: {} note(s), tx {} (fee {} MAGLD)",
+                    "  batch {}/{}: {} note(s), tx {} (fee {} {ticker})",
                     i + 1,
                     batches.len(),
                     result.own_notes.len(),
@@ -514,6 +521,7 @@ impl Note {
     /// destination stores them Hot (a key that crossed a wallet boundary), and
     /// an optional up-front rotation covers the compromised-vault case.
     async fn move_notes(&self, ctx: &Arc<KaspaCli>, _argv: Vec<String>) -> Result<()> {
+        let ticker = ctx.ticker();
         let account = ctx.wallet().account()?;
         let store = ctx.wallet().store().as_note_key_store()?;
         let Some(descriptor) = ctx.store().descriptor() else {
@@ -629,12 +637,13 @@ impl Note {
             }
         }
         tprintln!(ctx, "");
-        tprintln!(ctx, "moved {} note(s) ({} MAGLD) into '{dest}' — no chain transaction involved.", moved, sompi_to_kaspa_string(moved_petals));
+        tprintln!(ctx, "moved {} note(s) ({} {ticker}) into '{dest}' — no chain transaction involved.", moved, sompi_to_kaspa_string(moved_petals));
         tprintln!(ctx, "They no longer exist in this wallet. Open '{dest}' to use them (it holds them as imported Hot keys).\r\n");
         Ok(())
     }
 
     async fn redeem(&self, ctx: &Arc<KaspaCli>, mut argv: Vec<String>) -> Result<()> {
+        let ticker = ctx.ticker();
         if argv.is_empty() {
             tprintln!(ctx, "usage: 'note redeem <serial> [<serial> ...]' or 'note redeem amount <amount>'\r\n");
             return Ok(());
@@ -663,7 +672,7 @@ impl Note {
 
         tprintln!(
             ctx,
-            "redeemed {} note(s) worth {} MAGLD (fee {} MAGLD); transparent balance +{} MAGLD",
+            "redeemed {} note(s) worth {} {ticker} (fee {} {ticker}); transparent balance +{} {ticker}",
             result.serials.len(),
             sompi_to_kaspa_string(result.redeemed_value_petals),
             sompi_to_kaspa_string(result.fee_petals),
@@ -675,6 +684,7 @@ impl Note {
     }
 
     async fn balance(&self, ctx: &Arc<KaspaCli>) -> Result<()> {
+        let ticker = ctx.ticker();
         let note_key_store = ctx.wallet().store().as_note_key_store()?;
         let mut stream = note_key_store.iter().await?;
         let mut counts = [0u64; DENOMINATION_PETALS.len()];
@@ -686,10 +696,10 @@ impl Note {
             }
         }
 
-        tprintln!(ctx, "note balance: {} MAGLD", sompi_to_kaspa_string(total));
+        tprintln!(ctx, "note balance: {} {ticker}", sompi_to_kaspa_string(total));
         for (index, count) in counts.iter().enumerate() {
             if *count > 0 {
-                tprintln!(ctx, "  {} x {} MAGLD", count, sompi_to_kaspa_string(DENOMINATION_PETALS[index]));
+                tprintln!(ctx, "  {} x {} {ticker}", count, sompi_to_kaspa_string(DENOMINATION_PETALS[index]));
             }
         }
         tprintln!(ctx, "");
@@ -706,6 +716,7 @@ impl Note {
     /// never left the ledger and nothing was lost — or something holding the
     /// same key spent it.
     async fn unknown(&self, ctx: &Arc<KaspaCli>) -> Result<()> {
+        let ticker = ctx.ticker();
         let store = ctx.wallet().store().as_note_key_store()?;
         let mut unknown: Vec<Arc<NoteKeyInfo>> = Vec::new();
         let mut stream = store.iter().await?;
@@ -723,10 +734,10 @@ impl Note {
         }
 
         let total: u64 = unknown.iter().map(|i| DENOMINATION_PETALS[i.d as usize]).sum();
-        tprintln!(ctx, "{} note(s), {} MAGLD, not on chain:", unknown.len(), sompi_to_kaspa_string(total));
+        tprintln!(ctx, "{} note(s), {} {ticker}, not on chain:", unknown.len(), sompi_to_kaspa_string(total));
         tprintln!(ctx, "");
         for info in unknown.iter().take(30) {
-            tprintln!(ctx, "  {} MAGLD   {}", sompi_to_kaspa_string(DENOMINATION_PETALS[info.d as usize]), info.sn);
+            tprintln!(ctx, "  {} {ticker}   {}", sompi_to_kaspa_string(DENOMINATION_PETALS[info.d as usize]), info.sn);
         }
         if unknown.len() > 30 {
             tprintln!(ctx, "  ... and {} more", unknown.len() - 30);
@@ -757,6 +768,7 @@ impl Note {
     /// the transaction then fails to land: the note stays in the vault and
     /// exists nowhere else. This is the command that tells the difference.
     async fn verify(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
+        let ticker = ctx.ticker();
         if !ctx.wallet().is_connected() {
             tprintln!(ctx, "Connect to a node first — this checks your notes against the network.");
             return Ok(());
@@ -768,7 +780,7 @@ impl Note {
         let value = |notes: &[Arc<NoteKeyInfo>]| -> u64 { notes.iter().map(|i| DENOMINATION_PETALS[i.d as usize]).sum() };
 
         tprintln!(ctx, "");
-        tprintln!(ctx, "confirmed on chain:  {} MAGLD in {} note(s)", sompi_to_kaspa_string(value(&present)), present.len());
+        tprintln!(ctx, "confirmed on chain:  {} {ticker} in {} note(s)", sompi_to_kaspa_string(value(&present)), present.len());
         if phantom.is_empty() {
             tprintln!(ctx, "");
             tprintln!(ctx, "Every note you hold exists in the pool. Your balance is real.");
@@ -777,7 +789,7 @@ impl Note {
         }
 
         let lost = value(&phantom);
-        tprintln!(ctx, "not in the pool:     {} MAGLD in {} note(s)", sompi_to_kaspa_string(lost), phantom.len());
+        tprintln!(ctx, "not in the pool:     {} {ticker} in {} note(s)", sompi_to_kaspa_string(lost), phantom.len());
         tprintln!(ctx, "");
         tprintln!(ctx, "These notes are in your vault but not on chain. That happens when a");
         tprintln!(ctx, "transaction was submitted, its notes recorded here, and the transaction");
@@ -786,7 +798,7 @@ impl Note {
         let mut phantom = phantom;
         phantom.sort_by(|a, b| b.d.cmp(&a.d));
         for info in phantom.iter().take(20) {
-            tprintln!(ctx, "  {} - {} MAGLD", info.sn, sompi_to_kaspa_string(DENOMINATION_PETALS[info.d as usize]));
+            tprintln!(ctx, "  {} - {} {ticker}", info.sn, sompi_to_kaspa_string(DENOMINATION_PETALS[info.d as usize]));
         }
         if phantom.len() > 20 {
             tprintln!(ctx, "  ... and {} more", phantom.len() - 20);
@@ -801,7 +813,7 @@ impl Note {
             tprintln!(ctx, "");
             return Ok(());
         }
-        let answer = ctx.term().ask(false, &format!("Write off {} MAGLD as unrecoverable? [y/N]: ", sompi_to_kaspa_string(lost)))
+        let answer = ctx.term().ask(false, &format!("Write off {} {ticker} as unrecoverable? [y/N]: ", sompi_to_kaspa_string(lost)))
             .await?
             .trim()
             .to_lowercase();
@@ -825,6 +837,7 @@ impl Note {
     /// it — every spend, fee-source and merge selector filters on `Active`, so
     /// marking a note `Mirrored` takes it out of all of them at once.
     async fn mirror(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
+        let ticker = ctx.ticker();
         let store = ctx.wallet().store().as_note_key_store()?;
         let mut mirrored: Vec<Arc<NoteKeyInfo>> = Vec::new();
         let mut spendable: Vec<Arc<NoteKeyInfo>> = Vec::new();
@@ -860,9 +873,9 @@ impl Note {
                 }
                 mirrored.sort_by(|a, b| b.d.cmp(&a.d));
                 tprintln!(ctx, "");
-                tprintln!(ctx, "On your phone: {} MAGLD", sompi_to_kaspa_string(total(&mirrored)));
+                tprintln!(ctx, "On your phone: {} {ticker}", sompi_to_kaspa_string(total(&mirrored)));
                 for info in &mirrored {
-                    tprintln!(ctx, "  {} - {} MAGLD", info.sn, sompi_to_kaspa_string(DENOMINATION_PETALS[info.d as usize]));
+                    tprintln!(ctx, "  {} - {} {ticker}", info.sn, sompi_to_kaspa_string(DENOMINATION_PETALS[info.d as usize]));
                 }
                 tprintln!(ctx, "");
                 tprintln!(ctx, "{}", style("This wallet will not spend or merge these. 'note mirror revoke' if the phone is lost.").dim());
@@ -878,7 +891,7 @@ impl Note {
                 for info in &mirrored {
                     store.mark_status(&info.sn, NoteStatus::Active).await?;
                 }
-                tprintln!(ctx, "Took back {count} note(s), {} MAGLD.", sompi_to_kaspa_string(amount));
+                tprintln!(ctx, "Took back {count} note(s), {} {ticker}.", sompi_to_kaspa_string(amount));
                 tprintln!(ctx, "");
                 tprintln!(
                     ctx,
@@ -928,7 +941,7 @@ impl Note {
                 }
                 let pages = notepool::mirror_export_pages(&entries, &Secret::from(pass.as_bytes().to_vec()))?;
                 tprintln!(ctx, "");
-                tprintln!(ctx, "{} MAGLD in {} note(s), as {} block(s):", sompi_to_kaspa_string(total(&mirrored)), entries.len(), pages.len());
+                tprintln!(ctx, "{} {ticker} in {} note(s), as {} block(s):", sompi_to_kaspa_string(total(&mirrored)), entries.len(), pages.len());
                 for (i, page) in pages.iter().enumerate() {
                     tprintln!(ctx, "");
                     tprintln!(ctx, "{}", style(format!("--- block {} of {} ---", i + 1, pages.len())).dim());
@@ -945,7 +958,7 @@ impl Note {
                 }
                 let amount = total(&mirrored);
                 tprintln!(ctx, "");
-                tprintln!(ctx, "This rotates {} MAGLD onto fresh keys.", sompi_to_kaspa_string(amount));
+                tprintln!(ctx, "This rotates {} {ticker} onto fresh keys.", sompi_to_kaspa_string(amount));
                 tprintln!(ctx, "Every copy on the phone dies the moment it lands — including any a thief has.");
                 tprintln!(ctx, "The money comes back here.");
                 tprintln!(ctx, "");
@@ -960,7 +973,7 @@ impl Note {
                 match notepool::rotate_notes(account, wallet_secret, serials).await {
                     Ok(result) => {
                         tprintln!(ctx, "");
-                        tprintln!(ctx, "Revoked. {} MAGLD is back on fresh keys here.", sompi_to_kaspa_string(amount));
+                        tprintln!(ctx, "Revoked. {} {ticker} is back on fresh keys here.", sompi_to_kaspa_string(amount));
                         tprintln!(ctx, "{} note(s), transaction {}", result.own_notes.len(), result.transaction_id);
                     }
                     Err(err) => {
@@ -989,8 +1002,8 @@ impl Note {
                         tprintln!(ctx, "You hold no notes to put on the phone.");
                     } else {
                         let smallest = spendable.iter().map(|i| DENOMINATION_PETALS[i.d as usize]).min().unwrap_or(0);
-                        tprintln!(ctx, "No note here is small enough to make up {} MAGLD.", sompi_to_kaspa_string(target));
-                        tprintln!(ctx, "Your smallest is {} MAGLD — mint or split one first.", sompi_to_kaspa_string(smallest));
+                        tprintln!(ctx, "No note here is small enough to make up {} {ticker}.", sompi_to_kaspa_string(target));
+                        tprintln!(ctx, "Your smallest is {} {ticker} — mint or split one first.", sompi_to_kaspa_string(smallest));
                     }
                     tprintln!(ctx, "");
                     return Ok(());
@@ -999,7 +1012,7 @@ impl Note {
                     store.mark_status(&info.sn, NoteStatus::Mirrored).await?;
                 }
                 tprintln!(ctx, "");
-                tprintln!(ctx, "On your phone: {} MAGLD in {} note(s).", sompi_to_kaspa_string(sum), chosen.len());
+                tprintln!(ctx, "On your phone: {} {ticker} in {} note(s).", sompi_to_kaspa_string(sum), chosen.len());
                 if sum < target {
                     tprintln!(
                         ctx,
@@ -1110,6 +1123,7 @@ impl Note {
     /// rotated, which is the closest thing to a note-spend record: the pool
     /// records that a serial was retired, never who retired it.
     async fn history(&self, ctx: &Arc<KaspaCli>) -> Result<()> {
+        let ticker = ctx.ticker();
         let note_key_store = ctx.wallet().store().as_note_key_store()?;
         let mut stream = note_key_store.iter().await?;
         let mut retired = Vec::new();
@@ -1125,7 +1139,7 @@ impl Note {
         retired.sort_by(|a, b| b.d.cmp(&a.d).then(a.sn.cmp(&b.sn)));
         tprintln!(ctx, "spent notes ({}):", retired.len());
         for info in &retired {
-            tprintln!(ctx, "  {} - {} MAGLD", info.sn, sompi_to_kaspa_string(DENOMINATION_PETALS[info.d as usize]));
+            tprintln!(ctx, "  {} - {} {ticker}", info.sn, sompi_to_kaspa_string(DENOMINATION_PETALS[info.d as usize]));
         }
         tprintln!(ctx, "");
         Ok(())
@@ -1237,6 +1251,7 @@ impl Note {
     }
 
     async fn vault_restore(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
+        let ticker = ctx.ticker();
         if argv.len() < 2 {
             tprintln!(ctx, "usage: 'note vault restore <dir> <24 recovery words>'\r\n");
             return Ok(());
@@ -1341,7 +1356,7 @@ impl Note {
             match account.clone().rotate_notes(wallet_secret.clone(), still_active).await {
                 Ok(result) => tprintln!(
                     ctx,
-                    "  batch {}/{}: {} note(s), tx {} (fee {} MAGLD)",
+                    "  batch {}/{}: {} note(s), tx {} (fee {} {ticker})",
                     i + 1,
                     batches.len(),
                     result.own_notes.len(),
@@ -1436,7 +1451,7 @@ impl Note {
                 ("rotate all | <serial> ...", "Rotate notes to fresh keys on-chain (revokes old backups/stolen copies)"),
                 ("move", "Move ALL active notes into another wallet's vault - no chain transaction"),
                 ("redeem <serial> [<serial> ...]", "Redeem specific notes by serial"),
-                ("redeem amount <amount>", "Redeem enough owned notes to cover at least <amount> MAGLD"),
+                ("redeem amount <amount>", "Redeem enough owned notes to cover at least <amount> {ticker}"),
                 ("request [<amount>]", "Create a payment request (QR + text), then watch for the payment"),
                 ("pay <request-text> [<amount>]", "Pay a payment request from held notes"),
                 ("import <bearer-text>", "Import a bearer note and immediately rotate it to fresh keys"),

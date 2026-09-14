@@ -8,6 +8,7 @@ pub struct Utxos;
 impl Utxos {
     async fn main(self: Arc<Self>, ctx: &Arc<dyn Context>, argv: Vec<String>, _cmd: &str) -> Result<()> {
         let ctx = ctx.clone().downcast_arc::<KaspaCli>()?;
+        let ticker = ctx.ticker();
         let account = ctx.wallet().account()?;
         let show_all = argv.first().map(|s| s.to_lowercase()).as_deref() == Some("all");
         // A mining wallet on this network can hold hundreds of thousands of
@@ -24,13 +25,13 @@ impl Utxos {
         }
 
         let total: u64 = mature.iter().map(|e| e.amount()).sum();
-        tprintln!(ctx, "mature: {} UTXOs, {} MAGLD total", mature.len(), sompi_to_kaspa_string(total));
+        tprintln!(ctx, "mature: {} UTXOs, {} {ticker} total", mature.len(), sompi_to_kaspa_string(total));
         let limit = if show_all { mature.len() } else { DEFAULT_LIMIT };
         for entry in mature.iter().take(limit) {
             let coinbase = if entry.is_coinbase() { "  (coinbase)" } else { "" };
             tprintln!(
                 ctx,
-                "  {} MAGLD - daa {}{}",
+                "  {} {ticker} - daa {}{}",
                 sompi_to_kaspa_string(entry.amount()).pad_to_width_with_alignment(16, pad::Alignment::Right),
                 entry.block_daa_score(),
                 coinbase
@@ -41,7 +42,7 @@ impl Utxos {
         }
         if !pending.is_empty() {
             let pending_total: u64 = pending.iter().map(|e| e.amount()).sum();
-            tprintln!(ctx, "pending: {} UTXOs, {} MAGLD", pending.len(), sompi_to_kaspa_string(pending_total));
+            tprintln!(ctx, "pending: {} UTXOs, {} {ticker}", pending.len(), sompi_to_kaspa_string(pending_total));
         }
         if !stasis.is_empty() {
             tprintln!(ctx, "stasis (fresh coinbase): {} UTXOs", stasis.len());
