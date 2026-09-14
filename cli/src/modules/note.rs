@@ -1,4 +1,5 @@
 use crate::imports::*;
+use crate::ui;
 use kaspa_consensus_core::Hash;
 use kaspa_consensus_core::notepool::DENOMINATION_PETALS;
 use kaspa_wallet_core::account::notepool;
@@ -419,9 +420,7 @@ impl Note {
             None => {
                 let words = store.vault_create(wallet_secret).await?;
                 tprintln!(ctx, "");
-                tprintln!(ctx, "{}", style("Your note vault recovery phrase — write these 24 words down NOW:").red());
-                tprintln!(ctx, "");
-                tprintln!(ctx, "{}", style(&words).cyan());
+                crate::ui::recovery_words(ctx, &words);
                 tprintln!(ctx, "");
                 tprintln!(ctx, "Recovery requires BOTH these words AND the vault files ('note vault backup <dir>').");
                 ctx.term().ask(false, "Press <enter> once you have written them down: ").await?;
@@ -1039,33 +1038,67 @@ impl Note {
             return Ok(());
         }
         notes.sort_by(|a, b| b.d.cmp(&a.d).then(a.sn.cmp(&b.sn)));
-        let mut handed_over_header = false;
-        for info in notes.iter().filter(|i| i.status == NoteStatus::Active) {
-            tprintln!(
-                ctx,
-                "  {} - {} MAGLD - {:?}",
-                info.sn,
-                sompi_to_kaspa_string(DENOMINATION_PETALS[info.d as usize]),
-                info.provenance
-            );
-        }
-        let mut phone_header = false;
-        for info in notes.iter().filter(|i| i.status == NoteStatus::Mirrored) {
-            if !phone_header {
-                tprintln!(ctx, "{}", style("on your phone:").dim());
-                phone_header = true;
+
+        // Amount first and right-aligned, so a column of notes reads as a
+        // column of money rather than a wall of hex with numbers hiding in
+        // it. The serial follows in full — people copy these into
+        // 'note redeem' — with its leading characters lit and the rest
+        // dimmed, because that prefix is very nearly always enough to tell
+        // two notes apart and this is where someone learns to look at it.
+        const HEAD: usize = 8;
+        let serial = |sn: &Hash| {
+            let hex = sn.to_string();
+            let (head, tail) = hex.split_at(HEAD.min(hex.len()));
+            format!("{}{}", ui::paint(ui::Ink::Petal, head), ui::paint(ui::Ink::Moss, tail))
+        };
+        let money = |d: u8| ui::paint(ui::Ink::Cream, sompi_to_kaspa_string(DENOMINATION_PETALS[d as usize]));
+        const COLUMNS: [ui::Column; 3] = [("", ui::Align::Right, 10), ("", ui::Align::Left, 0), ("", ui::Align::Left, 0)];
+
+        let section = |ctx: &Arc<KaspaCli>, label: Option<&str>, rows: Vec<Vec<String>>| {
+            if rows.is_empty() {
+                return;
             }
-            tprintln!(ctx, "  {} - {} MAGLD", info.sn, sompi_to_kaspa_string(DENOMINATION_PETALS[info.d as usize]));
-        }
-        for info in notes.iter().filter(|i| i.status == NoteStatus::HandedOver) {
-            if !handed_over_header {
-                tprintln!(ctx, "{}", style("handed over (awaiting the receiver's rotation):").dim());
-                handed_over_header = true;
+            if let Some(label) = label {
+                tprintln!(ctx, "{}", ui::paint(ui::Ink::Moss, label));
             }
-            tprintln!(ctx, "  {} - {} MAGLD", info.sn, sompi_to_kaspa_string(DENOMINATION_PETALS[info.d as usize]));
-        }
+            ui::table(ctx, &COLUMNS, &rows);
+        };
+
+        section(
+            ctx,
+            None,
+            notes
+                .iter()
+                .filter(|i| i.status == NoteStatus::Active)
+                .map(|i| {
+                    vec![money(i.d as u8), serial(&i.sn), ui::paint(ui::Ink::Moss, format!("{:?}", i.provenance).to_lowercase())]
+                })
+                .collect(),
+        );
+
+        section(
+            ctx,
+            Some("on your phone"),
+            notes
+                .iter()
+                .filter(|i| i.status == NoteStatus::Mirrored)
+                .map(|i| vec![money(i.d as u8), serial(&i.sn), String::new()])
+                .collect(),
+        );
+
+        section(
+            ctx,
+            Some("handed over — waiting for the receiver to rotate"),
+            notes
+                .iter()
+                .filter(|i| i.status == NoteStatus::HandedOver)
+                .map(|i| vec![money(i.d as u8), serial(&i.sn), String::new()])
+                .collect(),
+        );
+
         if retired > 0 {
-            tprintln!(ctx, "{}", style(format!("({retired} spent note(s) in 'note history')")).dim());
+            tprintln!(ctx, "");
+            tprintln!(ctx, "{}", ui::paint(ui::Ink::Moss, format!("{retired} spent note(s) — 'note history'")));
         }
         tprintln!(ctx, "");
 

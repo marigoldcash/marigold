@@ -969,6 +969,21 @@ impl Terminal {
         self.term.rows()
     }
 
+    /// Fit the terminal to the element holding it (Marigold addition).
+    ///
+    /// In a browser, xterm.js reports its own default of eighty by
+    /// twenty-four from the moment it is opened until the resize observer
+    /// fires, which is after the first layout — so anything measuring the
+    /// terminal during startup is told twenty-four rows however large the
+    /// window is. Calling this first asks the fit addon to settle it now
+    /// rather than on the next frame. A no-op in a real terminal, which knew
+    /// its own size all along.
+    pub fn fit(&self) -> Result<()> {
+        #[cfg(target_arch = "wasm32")]
+        self.term.resize()?;
+        Ok(())
+    }
+
     pub async fn select<T>(self: &Arc<Terminal>, prompt: &str, list: &[T]) -> Result<Option<T>>
     where
         T: std::fmt::Display + Clone, // + IdT + Clone + Send + Sync + 'static,

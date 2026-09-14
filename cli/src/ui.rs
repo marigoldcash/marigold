@@ -38,9 +38,14 @@ pub enum Ink {
     Amber,
     /// Inner petals, the wordmark, amounts, and words worth the eye.
     Petal,
-    /// Body text.
+    /// Body text — deliberately *not* a colour. On the note this is cream,
+    /// but a terminal already has a foreground its owner chose, and painting
+    /// near-white text on a white terminal is how the browser wallet first
+    /// came out unreadable. Body text is whatever this terminal calls text.
     Cream,
-    /// Secondary text — the part skipped on a second reading.
+    /// Secondary text — the part skipped on a second reading. Pulled darker
+    /// than the note's moss so that it survives a light ground as well as the
+    /// note's own dark one.
     Moss,
     /// The microtext band, which is texture and is not meant to be read.
     Micro,
@@ -52,8 +57,10 @@ impl Ink {
             Ink::Gold => (0xe4, 0xa3, 0x3d),
             Ink::Amber => (0xc9, 0x76, 0x1f),
             Ink::Petal => (0xf3, 0xcf, 0x82),
+            // Never used: `paint` short-circuits Cream to the terminal's own
+            // foreground. Kept so the note's palette is written down whole.
             Ink::Cream => (0xef, 0xe7, 0xd3),
-            Ink::Moss => (0x9a, 0xa8, 0x94),
+            Ink::Moss => (0x7e, 0x8c, 0x86),
             // Moss carried most of the way to the ground it sits on. A real
             // note's microtext is meant to be seen and not read, and an
             // opacity cannot be expressed in a terminal, so it is mixed here.
@@ -127,6 +134,9 @@ pub fn nearest_256(r: u8, g: u8, b: u8) -> u8 {
 /// Write `text` in `ink`, in whatever the terminal can actually show.
 pub fn paint<S: AsRef<str>>(ink: Ink, text: S) -> String {
     let text = text.as_ref();
+    if ink == Ink::Cream {
+        return text.to_string();
+    }
     let (r, g, b) = ink.rgb();
     match depth() {
         Depth::Plain => text.to_string(),
@@ -305,6 +315,14 @@ pub fn rule(ctx: &Arc<KaspaCli>, label: Option<&str>) {
 // Columns
 // ---------------------------------------------------------------------------
 
+/// A column: its heading (empty for none), which way its contents sit, and
+/// the width it holds even when its contents are narrower.
+///
+/// The minimum is what stops a one-row table collapsing into
+/// `notes 0 MAGLD` — columns sized purely by content look wrong precisely
+/// when there is least content, which is a new wallet's very first `balance`.
+pub type Column = (&'static str, Align, usize);
+
 /// Which way a column's contents sit against its width.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Align {
@@ -317,12 +335,12 @@ pub enum Align {
 /// Amounts belong in `Align::Right` so the decimal points line up; that is
 /// the whole reason this exists rather than another hand-rolled `format!`
 /// with a guessed column width in it.
-pub fn table(ctx: &Arc<KaspaCli>, headers: &[(&str, Align)], rows: &[Vec<String>]) {
+pub fn table(ctx: &Arc<KaspaCli>, headers: &[Column], rows: &[Vec<String>]) {
     if rows.is_empty() {
         return;
     }
 
-    let mut widths: Vec<usize> = headers.iter().map(|(h, _)| display_width(h)).collect();
+    let mut widths: Vec<usize> = headers.iter().map(|(h, _, min)| display_width(h).max(*min)).collect();
     for row in rows {
         for (i, cell) in row.iter().enumerate() {
             if i < widths.len() {
@@ -337,7 +355,7 @@ pub fn table(ctx: &Arc<KaspaCli>, headers: &[(&str, Align)], rows: &[Vec<String>
             .enumerate()
             .map(|(i, cell)| {
                 let w = widths.get(i).copied().unwrap_or(0);
-                match headers.get(i).map(|(_, a)| *a).unwrap_or(Align::Left) {
+                match headers.get(i).map(|(_, a, _)| *a).unwrap_or(Align::Left) {
                     Align::Left => pad(cell, w),
                     Align::Right => {
                         let shown = display_width(cell);
@@ -351,8 +369,14 @@ pub fn table(ctx: &Arc<KaspaCli>, headers: &[(&str, Align)], rows: &[Vec<String>
             .to_string()
     };
 
-    let header: Vec<String> = headers.iter().map(|(h, _)| dim(h)).collect();
-    ctx.term().writeln(format!("  {}", render(&header)));
+    // A table of figures often wants the alignment without the labels — a
+    // balance does not need a column called "amount". Passing empty headers
+    // asks for exactly that, rather than printing a blank line above the
+    // numbers.
+    if headers.iter().any(|(h, _, _)| !h.is_empty()) {
+        let header: Vec<String> = headers.iter().map(|(h, _, _)| dim(h)).collect();
+        ctx.term().writeln(format!("  {}", render(&header)));
+    }
     for row in rows {
         ctx.term().writeln(format!("  {}", render(row)));
     }
@@ -437,5 +461,77 @@ mod tests {
         assert_eq!(strip_ansi("\x1b[38;5;214mgold\x1b[0m"), "gold");
         assert_eq!(strip_ansi("\x1b[1m\x1b[4mboth\x1b[0m"), "both");
         assert_eq!(strip_ansi("no escapes here"), "no escapes here");
+    }
+}
+
+/// The twenty-four words, framed and numbered, as the one screen in the
+/// wallet that must not be skimmed.
+///
+/// Numbered in four rows of six because that is how they get copied onto
+/// paper and checked back, and because an unnumbered block of twenty-four
+/// words is transcribed wrong often enough to matter. Framed because this is
+/// a moment rather than a routine — everything else the wallet prints can be
+/// scrolled past, and this cannot.
+pub fn recovery_words(ctx: &Arc<KaspaCli>, words: &str) {
+    let words: Vec<&str> = words.split_whitespace().collect();
+    const PER_ROW: usize = 6;
+
+    let longest = words.iter().map(|w| w.len()).max().unwrap_or(0);
+    let cell = longest + 5; // "12 " plus the word plus a gap
+
+    let mut body = vec![String::new()];
+    for (row, chunk) in words.chunks(PER_ROW).enumerate() {
+        let line: String = chunk
+            .iter()
+            .enumerate()
+            .map(|(column, word)| {
+                let n = row * PER_ROW + column + 1;
+                pad(&format!("{}{}", paint(Ink::Micro, format!("{n:>2} ")), paint(Ink::Petal, *word)), cell)
+            })
+            .collect();
+        body.push(format!("  {}", line.trim_end()));
+    }
+    body.push(String::new());
+
+    panel(ctx, Some("your 24 recovery words — write them down now"), &body);
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use super::*;
+
+    /// A column keeps its width when its contents are narrower, which is what
+    /// stops a brand-new wallet's balance reading `notes 0 MAGLD`.
+    #[test]
+    fn a_minimum_holds_a_column_open() {
+        let columns: [Column; 2] = [("", Align::Left, 12), ("", Align::Right, 8)];
+        let widths: Vec<usize> = columns.iter().map(|(h, _, min)| display_width(h).max(*min)).collect();
+        assert_eq!(widths, vec![12, 8]);
+    }
+
+    /// ...and gives way to content that is wider than it.
+    #[test]
+    fn content_wider_than_the_minimum_still_fits() {
+        let columns: [Column; 1] = [("", Align::Left, 4)];
+        let rows = [vec!["a much longer cell".to_string()]];
+        let mut widths: Vec<usize> = columns.iter().map(|(h, _, min)| display_width(h).max(*min)).collect();
+        for row in &rows {
+            for (i, cell) in row.iter().enumerate() {
+                widths[i] = widths[i].max(display_width(cell));
+            }
+        }
+        assert_eq!(widths[0], 18);
+    }
+
+    /// The twenty-four words have to arrive as twenty-four numbered words, in
+    /// rows of six, inside a frame that does not wander.
+    #[test]
+    fn the_recovery_panel_numbers_every_word() {
+        workflow_log::set_colors_enabled(true);
+        let words: Vec<String> = (1..=24).map(|n| format!("word{n}")).collect();
+        let joined = words.join(" ");
+        let split: Vec<&str> = joined.split_whitespace().collect();
+        assert_eq!(split.len(), 24);
+        assert_eq!(split.chunks(6).count(), 4, "four rows of six");
     }
 }

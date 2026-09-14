@@ -2549,6 +2549,25 @@ pub async fn kaspa_cli(terminal_options: TerminalOptions, banner: Option<String>
     // the wallet introduces itself properly. 'connect' leads because nothing
     // works until the wallet can reach a node, and 'help' answers a question
     // a new user has not formed yet.
+    // A Marigold note is printed on deep green, and in a browser the page is
+    // ours to set — so it is set, before anything is drawn on it. In a real
+    // terminal the ground belongs to whoever configured the terminal and is
+    // left alone; that is why `Ink::Cream` is the default foreground rather
+    // than an actual cream.
+    cli.term()
+        .set_theme(workflow_terminal::Theme {
+            background: Some("#0f1813".into()),
+            foreground: Some("#efe7d3".into()),
+            cursor: Some("#f3cf82".into()),
+            selection: Some("#2a3d33".into()),
+        })
+        .ok();
+
+    // Measure only after the terminal has been fitted to its element: in a
+    // browser it claims eighty by twenty-four until the first layout, which
+    // would hand every window the compact mark meant for small ones.
+    cli.term().fit().ok();
+
     match banner {
         Some(banner) => cli.term().writeln(banner),
         None => {

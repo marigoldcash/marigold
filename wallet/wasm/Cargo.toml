@@ -27,3 +27,10 @@ workflow-wasm.workspace = true
 
 [lints]
 workspace = true
+# wasm-opt refuses the bundle without these: the Rust toolchain emits bulk
+# memory and non-trapping float conversions by default now, and the wasm-opt
+# that wasm-pack downloads validates against an older baseline. Without them
+# the build still produces a working module and then fails on the very last
+# step, which reads as a broken build when it is only an unoptimised one.
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ['-O', '--enable-bulk-memory', '--enable-nontrapping-float-to-int']

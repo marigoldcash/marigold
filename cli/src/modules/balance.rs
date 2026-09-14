@@ -1,4 +1,5 @@
 use crate::imports::*;
+use crate::ui;
 use kaspa_consensus_core::notepool::DENOMINATION_PETALS;
 use kaspa_wallet_core::storage::NoteStatus;
 use kaspa_wallet_core::utils::sompi_to_kaspa_string;
@@ -36,22 +37,42 @@ impl Balance {
                 _ => {}
             }
         }
-        tprintln!(ctx, "notes:  {} MAGLD", sompi_to_kaspa_string(total));
+        // Columns rather than a frame. A frame is for a moment — the note at
+        // startup, a wallet being created; `balance` is run twenty times a
+        // day and furniture that often becomes wallpaper. What it does need
+        // is the amounts lining up on the decimal point, which is what the
+        // right-aligned column is for and what a hand-rolled format! never
+        // quite managed.
+        let money = |petals: u64| ui::paint(ui::Ink::Petal, sompi_to_kaspa_string(petals));
+        let unit = ui::paint(ui::Ink::Moss, "MAGLD");
+        // The minimums keep an empty wallet's balance from collapsing to
+        // "notes 0 MAGLD" — the widths should not move as money arrives.
+        const COLUMNS: [ui::Column; 4] =
+            [("", ui::Align::Left, 15), ("", ui::Align::Right, 14), ("", ui::Align::Left, 5), ("", ui::Align::Left, 0)];
+
+        let mut rows: Vec<Vec<String>> = vec![vec![ui::paint(ui::Ink::Cream, "notes"), money(total), unit.clone(), String::new()]];
         for (index, count) in counts.iter().enumerate().rev() {
             if *count > 0 {
-                tprintln!(ctx, "  {} x {} MAGLD", count, sompi_to_kaspa_string(DENOMINATION_PETALS[index]));
+                rows.push(vec![
+                    ui::paint(ui::Ink::Moss, format!("  {count} × {}", sompi_to_kaspa_string(DENOMINATION_PETALS[index]))),
+                    ui::paint(ui::Ink::Moss, sompi_to_kaspa_string(count * DENOMINATION_PETALS[index])),
+                    String::new(),
+                    String::new(),
+                ]);
             }
         }
 
+        // Still yours, but on the phone and untouchable here. On its own row
+        // rather than folded into the total: money that silently vanishes
+        // from a balance when you fund a phone reads as money lost.
         if mirrored > 0 {
-            tprintln!(ctx, "");
-            tprintln!(
-                ctx,
-                "on your phone:  {} MAGLD  ({} note{})",
-                sompi_to_kaspa_string(mirrored),
-                mirrored_count,
-                if mirrored_count == 1 { "" } else { "s" }
-            );
+            rows.push(vec![String::new(); 4]);
+            rows.push(vec![
+                ui::paint(ui::Ink::Cream, "on your phone"),
+                money(mirrored),
+                unit.clone(),
+                ui::paint(ui::Ink::Moss, format!("{mirrored_count} note{}", if mirrored_count == 1 { "" } else { "s" })),
+            ]);
         }
 
         // Every balance is checked against the pool, and says so only when
@@ -97,15 +118,24 @@ impl Balance {
         if let Some(balance) = account.balance() {
             if balance.mature > 0 || balance.pending > 0 {
                 let strings = BalanceStrings::from((Some(&balance), &network_type, None));
-                tprintln!(ctx, "");
-                tprintln!(
-                    ctx,
-                    "ledger: {strings}   ({} piece{})",
-                    balance.mature_utxo_count,
-                    if balance.mature_utxo_count == 1 { "" } else { "s" }
-                );
+                rows.push(vec![String::new(); 4]);
+                rows.push(vec![
+                    ui::paint(ui::Ink::Cream, "ledger"),
+                    ui::paint(ui::Ink::Petal, strings.to_string()),
+                    String::new(),
+                    ui::paint(
+                        ui::Ink::Moss,
+                        format!(
+                            "{} piece{}",
+                            balance.mature_utxo_count.separated_string(),
+                            if balance.mature_utxo_count == 1 { "" } else { "s" }
+                        ),
+                    ),
+                ]);
             }
         }
+
+        ui::table(&ctx, &COLUMNS, &rows);
 
         if total == 0 {
             if let Some(balance) = account.balance() {

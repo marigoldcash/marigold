@@ -1,23 +1,29 @@
-<html>
-    <head>
-        <script type="module">
-            import * as kaspa from './kaspa-wallet/kaspa-wallet.js';
-            (async () => {
-                const wasm = await kaspa.default('./kaspa-wallet/kaspa-wallet_bg.wasm');
-                await wasm.load_kaspa_wallet_cli();
-            })();
-        </script>
-        <style>
-            body {
-                margin: 0;
-                padding: 0;
-            }
-            .terminal {
-                margin: 8px;
-                width: calc(100vw - 16px);
-                height: calc(100vh - 16px);
-            }
-        </style>
-    </head>
-    <body></body>
-</html>
+<!doctype html>
+<meta charset="utf-8">
+<title>Marigold Wallet</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script type="module">
+    import * as kaspa from './kaspa-wallet/kaspa-wallet.js';
+    (async () => {
+        const wasm = await kaspa.default('./kaspa-wallet/kaspa-wallet_bg.wasm');
+        document.getElementById('loading').remove();
+        await wasm.load_kaspa_wallet_cli();
+    })();
+</script>
+<style>
+    /* The note's own ground, so the page and the terminal inside it are the
+       same colour rather than a green rectangle floating on white. The
+       terminal sets its own theme from Rust; this matches it. */
+    html, body { margin: 0; padding: 0; height: 100%; background: #0f1813; }
+    .terminal { margin: 0; width: 100vw; height: 100vh; }
+    #loading {
+        position: absolute; inset: 0; display: grid; place-content: center;
+        font: 400 13px/1.6 "IBM Plex Mono", ui-monospace, Menlo, monospace;
+        color: #7e8c86; letter-spacing: .08em; text-transform: uppercase;
+    }
+</style>
+<body>
+    <!-- 18 MB of wasm takes a moment on a cold cache, and a blank green page
+         gives no sign that anything is happening. -->
+    <div id="loading">loading the wallet…</div>
+</body>

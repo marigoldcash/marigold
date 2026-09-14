@@ -285,9 +285,7 @@ pub(crate) async fn create(
             let words = vault_words.clone();
             store.vault_restore_from_words(&words, &wallet_secret).await?;
             tprintln!(ctx, "");
-            tprintln!(ctx, "{}", style("Your note vault recovery phrase — write these 24 words down NOW:").red());
-            tprintln!(ctx, "");
-            term.writeln(style(&words).cyan().to_string());
+            crate::ui::recovery_words(ctx, &words);
             tprintln!(ctx, "");
             tpara!(
                 ctx,
