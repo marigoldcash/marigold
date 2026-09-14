@@ -1255,10 +1255,24 @@ impl KaspaCli {
         // mint, the ledger holds 0" was printed over a ledger holding
         // 812,524 TMAGLD — the decision was as wrong as the sentence.
         if !self.ledger_is_known() {
-            if loud {
-                tprintln!(self, "{}", crate::ui::dim("(waiting for the node — the ledger has not been read yet)"));
+            // Try to make it known rather than waiting for another sync edge
+            // that may never come: the edge fires once, and if its reload
+            // timed out the wallet would otherwise sit not knowing forever.
+            // A big wallet's UTXO set is a single large RPC response and
+            // whether it arrives inside the timeout is luck on the day, so
+            // the thing to do is keep asking.
+            let guard = self.wallet.guard();
+            let guard = guard.lock().await;
+            let recovered = self.wallet.reload(true, &guard).await.is_ok();
+            drop(guard);
+            self.ledger_known.store(recovered, Ordering::SeqCst);
+            if !recovered {
+                if loud {
+                    tprintln!(self, "{}", crate::ui::dim("(still reading the ledger from the node — nothing is being minted meanwhile)"));
+                }
+                self.auto_busy.store(false, Ordering::SeqCst);
+                return;
             }
-            return;
         }
         // "Armed" means something is actually configured to run — holding the
         // secret is not the same thing, and conflating them made a wallet with
@@ -1955,10 +1969,17 @@ impl KaspaCli {
                                     balance,
                                     id,
                                 } => {
-                                    // The processor only emits this once it has read the coins,
-                                    // so the figure is the node's answer rather than an empty
-                                    // context left behind by a reload that did not finish.
-                                    this.ledger_known.store(true, Ordering::SeqCst);
+                                    // Deliberately does NOT mark the ledger as read.
+                                    //
+                                    // It used to, and that was wrong in the way that mattered: a
+                                    // balance event fires whenever the figure changes, including
+                                    // when it is recomputed from a context a failed reload left
+                                    // empty. One arriving coin was enough to re-label an unread
+                                    // ledger as read, and the wallet went back to presenting 0.00
+                                    // as fact — the exact thing the flag exists to prevent.
+                                    //
+                                    // Only a reload that actually completed proves the coins were
+                                    // read, so only that sets it.
 
                                     if !this.is_mutted() || (this.is_mutted() && this.flags.get(Track::Balance)) {
                                         let network_id = this.wallet.network_id().expect("missing network type");

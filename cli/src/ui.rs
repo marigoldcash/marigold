@@ -708,3 +708,56 @@ mod backlog_rules {
         assert_eq!(hours, 4, "4.4 million coins is about four hours of background consolidation");
     }
 }
+
+#[cfg(test)]
+mod ledger_trust_rules {
+    /// What is allowed to mark the ledger as read.
+    ///
+    /// A balance event is not, and used to be — which undid the whole flag. A
+    /// balance event fires whenever the figure changes, including when it is
+    /// recomputed from a context a failed reload left empty, so one arriving
+    /// coin re-labelled an unread ledger as read and the wallet went back to
+    /// showing 0.00 as fact.
+    #[derive(Clone, Copy)]
+    enum Event {
+        ReloadSucceeded,
+        ReloadFailed,
+        Disconnected,
+        BalanceChanged,
+    }
+
+    fn apply(known: bool, event: Event) -> bool {
+        match event {
+            Event::ReloadSucceeded => true,
+            Event::ReloadFailed | Event::Disconnected => false,
+            // Proves a figure was computed, not that the coins were read.
+            Event::BalanceChanged => known,
+        }
+    }
+
+    #[test]
+    fn only_a_completed_reload_marks_the_ledger_read() {
+        assert!(apply(false, Event::ReloadSucceeded));
+        assert!(!apply(true, Event::ReloadFailed));
+        assert!(!apply(true, Event::Disconnected));
+    }
+
+    #[test]
+    fn an_arriving_coin_does_not_relabel_an_unread_ledger() {
+        assert!(!apply(false, Event::BalanceChanged), "this is the regression");
+        assert!(apply(true, Event::BalanceChanged), "and it does not unset a good one either");
+    }
+
+    /// The sequence from the session that exposed it: connect, the reload
+    /// times out, coins keep arriving. The ledger must stay unread throughout.
+    #[test]
+    fn coins_arriving_after_a_failed_reload_keep_it_unread() {
+        let mut known = true;
+        for event in [Event::ReloadFailed, Event::BalanceChanged, Event::BalanceChanged, Event::BalanceChanged] {
+            known = apply(known, event);
+        }
+        assert!(!known);
+        // ...until a reload finally gets through.
+        assert!(apply(known, Event::ReloadSucceeded));
+    }
+}
