@@ -158,6 +158,49 @@ impl workflow_log::Sink for KaspaCli {
     }
 }
 
+/// Transactions an automatic consolidation pass submits before stopping.
+///
+/// Housekeeping is one task doing minting and consolidation in sequence, so an
+/// unbounded sweep on a large wallet stops the wallet minting for as long as it
+/// takes. This bounds a pass to something that finishes inside the minute
+/// between passes.
+const SWEEP_TRANSACTIONS_PER_PASS_CONST: usize = 200;
+
+/// Coins a consolidation transaction takes in, near enough.
+///
+/// The generator packs inputs until four fifths of the standard mass limit,
+/// which lands around here. Only used to describe how long a backlog will
+/// take, so approximate is what it needs to be.
+const COINS_PER_SWEEP_TRANSACTION: u64 = 80;
+
+/// Above this many ledger coins, housekeeping stops and asks.
+///
+/// Derived rather than picked: it is about fifteen minutes of automatic
+/// consolidation. Below that the backlog is background work; above it, income
+/// has been outrunning consolidation for long enough that somebody should
+/// look, and hours of unasked-for work on somebody's money should be their
+/// decision.
+const AUTOMATIC_HOUSEKEEPING_CEILING: u64 = 250_000;
+
+/// Ledger coins an automatic pass gets through in a minute.
+fn coins_per_minute() -> u64 {
+    SWEEP_TRANSACTIONS_PER_PASS_CONST as u64 * COINS_PER_SWEEP_TRANSACTION
+}
+
+/// "about 4 hours", "about 20 minutes" — a figure somebody can plan around,
+/// not one they should hold us to.
+fn humanised_minutes(minutes: u64) -> String {
+    match minutes {
+        0 => "a moment".to_string(),
+        1 => "a minute".to_string(),
+        m if m < 90 => format!("{m} minutes"),
+        m => {
+            let hours = (m + 30) / 60;
+            format!("{hours} hour{}", if hours == 1 { "" } else { "s" })
+        }
+    }
+}
+
 impl KaspaCli {
     pub fn init() {
         cfg_if! {
@@ -985,10 +1028,6 @@ impl KaspaCli {
     /// is how a wallet double-spends its own inputs: the coins are gone from
     /// its point of view only once the spending transaction confirms, and the
     /// node rejects the second attempt with "already spent in the mempool".
-    fn has_unconfirmed_spends(&self) -> bool {
-        self.wallet.account().ok().and_then(|account| account.balance()).map(|balance| balance.outgoing > 0).unwrap_or(false)
-    }
-
     /// Ask for the opening sequence (report, housekeeping, report) to run as
     /// soon as the wallet's coins are known.
     pub fn request_open_housekeeping(&self) {
@@ -1250,17 +1289,72 @@ impl KaspaCli {
         };
         let payment_secret = self.auto_payment_secret.lock().unwrap().clone();
 
+        // --- 0. is this more than an automatic process should start on its own? ---
+        //
+        // Automatic consolidation proceeds at a rate this wallet sets: a pass a
+        // minute, and SWEEP_TRANSACTIONS_PER_PASS transactions in a pass. Past
+        // a certain backlog that is hours of work on somebody's money, begun
+        // without being asked, and hours during which every pass is also
+        // minting and adding change of its own.
+        //
+        // A backlog that size means something has already gone wrong — income
+        // outrunning consolidation for a long time. The wallet says so and
+        // stops, rather than grinding through it quietly and leaving the person
+        // to wonder why their wallet has been busy since Tuesday.
+        let pieces = account.utxo_context().mature_utxo_size() as u64;
+        if pieces > AUTOMATIC_HOUSEKEEPING_CEILING {
+            if loud {
+                let minutes = pieces / coins_per_minute().max(1);
+                let ledger: u64 = account.utxo_context().utxo_entries_snapshot().0.iter().map(|entry| entry.amount()).sum();
+                tprintln!(self, "");
+                tprintln!(
+                    self,
+                    "{}",
+                    crate::ui::warn(format!(
+                        "{} ledger coin(s) worth {} {ticker} — too many to tidy up unattended.",
+                        pieces.separated_string(),
+                        crate::ui::ledger_amount(ledger)
+                    ))
+                );
+                tprintln!(
+                    self,
+                    "{}",
+                    crate::ui::dim(format!(
+                        "Consolidating them takes roughly {} at the rate this runs in the background,",
+                        humanised_minutes(minutes)
+                    ))
+                );
+                tprintln!(self, "{}", crate::ui::dim("so it is left to you rather than started without asking."));
+                tprintln!(self, "");
+                tprintln!(self, "{}", crate::ui::dim("  'sweep <amount>'   consolidate that much and stop — as many times as you like"));
+                tprintln!(self, "{}", crate::ui::dim("  'sweep'            consolidate all of it in one run"));
+                tprintln!(self, "");
+                tprintln!(self, "{}", crate::ui::dim("Minting is paused until the ledger is back to a workable size."));
+                tprintln!(self, "");
+            }
+            self.auto_busy.store(false, Ordering::SeqCst);
+            return;
+        }
+
         // --- 1. turn the ledger into notes ---
         // Minting comes FIRST because a mint IS a consolidation: it takes many
         // mature coins as inputs and leaves notes plus a single change coin.
         // Sweeping first spent the very coins the mint needed and pushed them
         // into "pending", so the mint that followed saw almost nothing —
         // 1.32 MAGLD of a 143,000 MAGLD ledger (founder report, 2026-09-06).
+        // The ordering above is what protects the mint, not a guard. This used
+        // to also refuse to mint while anything at all was unconfirmed, which
+        // was the same blunt instrument that starved the sweep below: any one
+        // outgoing transaction anywhere stopped the whole pipeline. Now that
+        // consolidation runs every pass, its transactions would have been in
+        // flight most of the time and the starvation would simply have moved
+        // from the sweep to the mint.
+        //
+        // What the mint actually needs is enough MATURE balance, which is
+        // checked directly below — and `mature` already excludes every coin a
+        // pending transaction has claimed.
         let threshold = self.auto_mint_threshold();
-        if threshold > 0 && self.has_unconfirmed_spends() && loud {
-            tprintln!(self, "Waiting: this wallet has transactions the chain has not confirmed yet.");
-        }
-        if threshold > 0 && !self.has_unconfirmed_spends() {
+        if threshold > 0 {
             // Read the coins, not the cached Balance — it is None during the
             // window right after activation, which silently skipped minting.
             let (mature_entries, _, _) = account.utxo_context().utxo_entries_snapshot();
@@ -1344,14 +1438,39 @@ impl KaspaCli {
         // --- 2. consolidate whatever minting could not take ---
         // Only what the mint left behind: change, dust below a whole petal,
         // and coins that arrived while it ran.
+        // Deliberately NOT gated on unconfirmed spends, unlike the mint above.
+        //
+        // It used to be, and that guard is what let this wallet reach
+        // 4,439,373 coins. The mint runs first and registers its transactions
+        // as outgoing, so by the time this line was reached there were always
+        // unconfirmed spends — the ones the mint had just made. On a wallet
+        // with income arriving continuously the mint always has something to
+        // do, so the sweep was skipped on every single pass and the coin count
+        // only ever grew. Step one guaranteed step two would not run.
+        //
+        // The guard was never needed for safety either: registering an
+        // outgoing transaction removes its inputs from `mature` (see
+        // `UtxoContext::register_outgoing_transaction`), so a sweep starting
+        // here can only see coins the mint did not take.
         let sweep_threshold = self.auto_sweep_threshold();
+        // Re-read: the mint above has just spent some of them.
         let pieces = account.utxo_context().mature_utxo_size() as u64;
-        if sweep_threshold > 0 && pieces > sweep_threshold && !self.has_unconfirmed_spends() {
+        if sweep_threshold > 0 && pieces > sweep_threshold {
             if loud {
                 tprintln!(self, "Consolidating {} ledger pieces — this can take a while...", pieces.separated_string());
             }
             let notifier: Option<kaspa_wallet_core::account::GenerationNotifier> = None;
-            match account.clone().sweep(secret.clone(), payment_secret.clone(), None, &abortable, notifier, None).await {
+            // Bounded, because housekeeping is one task: minting and
+            // consolidation run in sequence, so an unbounded sweep on a large
+            // wallet stops the wallet minting for as long as it takes. A pass
+            // this size clears roughly a million coins an hour while leaving
+            // the minute's minting to happen.
+            const SWEEP_TRANSACTIONS_PER_PASS: usize = SWEEP_TRANSACTIONS_PER_PASS_CONST;
+            match account
+                .clone()
+                .sweep(secret.clone(), payment_secret.clone(), None, &abortable, notifier, None, Some(SWEEP_TRANSACTIONS_PER_PASS))
+                .await
+            {
                 Ok(summary) => {
                     if loud {
                         tprintln!(
@@ -1407,7 +1526,7 @@ impl KaspaCli {
         }
 
         // --- 4. tidy the notes themselves (ten of a size become one larger) ---
-        // Deliberately NOT gated on has_unconfirmed_spends(): that measures the
+        // Deliberately NOT gated on whether anything is unconfirmed: that measures the
         // ledger's outgoing balance, and a note merge is a pure pool operation
         // that spends notes and pays its fee from a spare one — it touches no
         // ledger coin at all. Since minting runs first and always leaves an

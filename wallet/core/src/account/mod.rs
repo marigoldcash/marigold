@@ -309,6 +309,11 @@ pub trait Account: AnySync + Send + Sync + 'static {
     /// coins is hours of consolidation, and an operation that size wants to be
     /// done in pieces the person can watch finish.
     ///
+    /// `max_transactions` bounds it by count, which is what an automatic
+    /// sweep wants: housekeeping is one task doing minting and consolidation
+    /// in sequence, so a sweep that runs for hours is a sweep that stops the
+    /// wallet minting for hours.
+    ///
     /// Each streamed transaction is submitted on its own and is valid on its
     /// own, so stopping between two of them leaves nothing half-done — only
     /// less consolidated than it would have been.
@@ -320,6 +325,7 @@ pub trait Account: AnySync + Send + Sync + 'static {
         abortable: &Abortable,
         notifier: Option<GenerationNotifier>,
         limit: Option<u64>,
+        max_transactions: Option<usize>,
     ) -> Result<(GeneratorSummary, Vec<kaspa_hashes::Hash>)> {
         let keydata = self.prv_key_data(wallet_secret).await?;
         let signer = Arc::new(Signer::new(self.clone().as_dyn_arc(), keydata, payment_secret));
@@ -360,6 +366,9 @@ pub trait Account: AnySync + Send + Sync + 'static {
                 if consumed >= limit {
                     break;
                 }
+            }
+            if max_transactions.is_some_and(|max| ids.len() >= max) {
+                break;
             }
             yield_executor().await;
         }

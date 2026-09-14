@@ -84,6 +84,9 @@ impl Sweep {
                     }
                 })),
                 limit,
+                // A sweep somebody typed is bounded by what they asked for,
+                // not by a count chosen for the background.
+                None,
             )
             .await?;
 

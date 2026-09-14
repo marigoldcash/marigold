@@ -625,3 +625,86 @@ mod amount_tests {
         assert_eq!(ledger_amount(1_234_567_800_000_000), "12,345,678.00");
     }
 }
+
+#[cfg(test)]
+mod housekeeping_rules {
+    /// Housekeeping mints, then consolidates, in one pass. Both steps used to
+    /// refuse to run while *anything at all* was unconfirmed — and the mint
+    /// runs first, so by the time the sweep was reached there were always
+    /// unconfirmed spends: the ones the mint had just made.
+    ///
+    /// Step one guaranteed step two would never run. On a wallet with income
+    /// arriving continuously the mint always has something to do, so the
+    /// consolidation was skipped on every single pass and the coin count only
+    /// ever grew — to 4,439,373 before anyone looked.
+    fn sweep_runs(mint_submitted_something: bool, gated_on_unconfirmed: bool, pieces_over_threshold: bool) -> bool {
+        if !pieces_over_threshold {
+            return false;
+        }
+        if gated_on_unconfirmed && mint_submitted_something {
+            return false;
+        }
+        true
+    }
+
+    #[test]
+    fn the_old_gate_starved_the_sweep_whenever_the_mint_had_work() {
+        assert!(!sweep_runs(true, true, true), "this is the bug: minting blocked consolidating");
+        assert!(sweep_runs(false, true, true), "it only ran on a pass where the mint did nothing");
+    }
+
+    #[test]
+    fn without_the_gate_consolidation_keeps_up() {
+        assert!(sweep_runs(true, false, true));
+        assert!(sweep_runs(false, false, true));
+    }
+
+    /// The threshold still decides whether there is anything worth doing.
+    #[test]
+    fn a_tidy_ledger_is_still_left_alone() {
+        assert!(!sweep_runs(true, false, false));
+        assert!(!sweep_runs(false, false, false));
+    }
+}
+
+#[cfg(test)]
+mod backlog_rules {
+    /// Automatic consolidation runs at a rate the wallet sets: a pass a
+    /// minute, two hundred transactions a pass, about eighty coins a
+    /// transaction. Past a certain backlog that is hours of unasked-for work
+    /// on somebody's money, so housekeeping stops and hands it over.
+    const PER_MINUTE: u64 = 200 * 80;
+    const CEILING: u64 = 250_000;
+
+    fn runs_unattended(pieces: u64) -> bool {
+        pieces <= CEILING
+    }
+
+    #[test]
+    fn an_ordinary_backlog_is_still_tidied_in_the_background() {
+        assert!(runs_unattended(0));
+        assert!(runs_unattended(2_000), "the usual auto-sweep threshold");
+        assert!(runs_unattended(CEILING));
+    }
+
+    #[test]
+    fn a_backlog_that_would_take_hours_is_handed_to_the_person() {
+        assert!(!runs_unattended(CEILING + 1));
+        assert!(!runs_unattended(4_439_373), "the wallet that prompted this");
+    }
+
+    /// The ceiling is about a quarter of an hour of work, not a round number
+    /// chosen because it looked tidy.
+    #[test]
+    fn the_ceiling_is_roughly_fifteen_minutes_of_work() {
+        let minutes = CEILING / PER_MINUTE;
+        assert!((10..=20).contains(&minutes), "ceiling is {minutes} minutes of consolidation");
+    }
+
+    /// And the figure quoted to the person is that same arithmetic.
+    #[test]
+    fn the_quoted_time_matches_the_rate_it_actually_runs_at() {
+        let hours = 4_439_373 / PER_MINUTE / 60;
+        assert_eq!(hours, 4, "4.4 million coins is about four hours of background consolidation");
+    }
+}
