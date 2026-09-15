@@ -1747,6 +1747,18 @@ mod tests {
         assert!(paper_export_decode_page(&pages[0], &wrong).is_err());
     }
 
+    /// The keep line is where storage mass makes a change coin cost more
+    /// than it is worth; the 0.04 burned on 2026-09-15 sits below it and a
+    /// whole MAGLD sits above it.
+    #[test]
+    fn change_keep_line_separates_dust_from_change_worth_keeping() {
+        let line = change_keep_line(1_000_000_000_000, 105.0);
+        assert!((10_000_000..11_000_000).contains(&line), "line was {line}");
+        assert!(4_000_000 < line, "0.04 is below the line");
+        assert!(100_000_000 > line, "a whole MAGLD is above it");
+        assert_eq!(change_keep_line(1_000_000_000_000, 0.0), 0);
+    }
+
     #[test]
     fn paper_export_handles_empty_entry_list() {
         let password = Secret::from("paper-export-test-password");
@@ -1756,6 +1768,15 @@ mod tests {
         assert_eq!(header.chunk_count, 1);
         assert!(entries.is_empty());
     }
+}
+
+/// The smallest change output worth keeping. KIP-9 prices an output at
+/// `storage_mass_parameter / value` grams, so keeping a change coin of `v`
+/// costs about `C · rate / v` in fee; below `sqrt(C · rate)` that is more than
+/// the coin itself, and the generator (rightly) gives it to the miner instead
+/// of creating it. At C = 10^12 and 105 sompi per gram the line is ~0.102 MAGLD.
+pub fn change_keep_line(storage_mass_parameter: u64, fee_rate: f64) -> u64 {
+    (storage_mass_parameter as f64 * fee_rate.max(0.0)).sqrt() as u64
 }
 
 /// Largest amount [`mint`] can currently fund from the account's mature
@@ -1815,16 +1836,31 @@ pub async fn max_mintable_petals(
     // different shape with a different mass. Spending the last petal means
     // any discrepancy at all comes back as "Insufficient funds", which is
     // exactly what a mining wallet with 140k coins reported (2026-09-05).
-    // Two percent, floored at one quantum, costs nothing and never fails.
+    // Two percent, floored at one quantum, costs nothing and never fails —
+    // on a ledger big enough for the margin to survive as a change coin,
+    // where it is minted on the next pass. Below the KIP-9 line it does not
+    // survive: an output that small costs more in storage mass to keep than
+    // it is worth, the generator hands it to the miner, and the margin is
+    // simply burned. A 1.10 deposit minted 1.06 and paid 0.04 that way
+    // (2026-09-15). So the margin is held back only when it can be kept;
+    // otherwise the exact-shape verification below is the whole safety net,
+    // with more tries.
     let margin = (candidate / 50).max(quantum);
-    candidate = candidate.saturating_sub(margin) / quantum * quantum;
+    let keep_line =
+        change_keep_line(Params::from(account.wallet().network_id()?).storage_mass_parameter, fee_rate.unwrap_or(POOL_FEE_RATE));
+    let tries = if margin >= keep_line {
+        candidate = candidate.saturating_sub(margin) / quantum * quantum;
+        4
+    } else {
+        8
+    };
     if candidate == 0 {
         return Ok(0);
     }
 
     // Verify the exact shape mint() will use; back off by one quantum at a
     // time if the refined estimate still lands a hair over.
-    for _ in 0..4 {
+    for _ in 0..tries {
         if let Some(progress) = &progress {
             progress(format!("verifying the final amount ({} MAGLD)...", crate::utils::sompi_to_kaspa_string(candidate)));
         }
