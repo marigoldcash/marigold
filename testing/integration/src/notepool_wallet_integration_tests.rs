@@ -245,7 +245,7 @@ async fn wallet_notepool_mint_redeem_test() {
     assert_eq!(redeem_result.serials, mint_serials);
     println!(
         "redeem tx: {}, redeemed_value_petals: {}, fee_sompi: {}",
-        redeem_result.transaction_id, redeem_result.redeemed_value_petals, redeem_result.fee_sompi
+        redeem_result.transaction_id, redeem_result.redeemed_value_petals, redeem_result.fee_petals
     );
 
     // `redeem()` marks the redeemed serials Superseded immediately on successful RPC
@@ -295,7 +295,7 @@ async fn wallet_notepool_mint_redeem_test() {
     let redeemed_gain = balance_after_redeem - balance_after_mint;
     assert_eq!(
         redeemed_gain,
-        redeem_result.redeemed_value_petals - redeem_result.fee_sompi,
+        redeem_result.redeemed_value_petals - redeem_result.fee_petals,
         "transparent balance must rise by exactly (redeemed value - real fee)"
     );
 
@@ -303,10 +303,10 @@ async fn wallet_notepool_mint_redeem_test() {
     // -(mint_fee + redeem_fee) -- the pool round-trip cost nothing but the two real
     // network fees. ---
     let net_change = balance_before_mint - balance_after_redeem;
-    assert_eq!(net_change, mint_fee + redeem_result.fee_sompi, "net balance change should equal exactly the two real network fees");
+    assert_eq!(net_change, mint_fee + redeem_result.fee_petals, "net balance change should equal exactly the two real network fees");
     println!(
         "reconciliation: before={balance_before_mint} after_mint={balance_after_mint} (fee {mint_fee}) after_redeem={balance_after_redeem} (fee {}) net_change={net_change}",
-        redeem_result.fee_sompi
+        redeem_result.fee_petals
     );
 
     if let Some(client) = wallet.try_wrpc_client() {
