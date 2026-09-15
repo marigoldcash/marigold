@@ -451,6 +451,12 @@ impl Terminal {
         if self.user_input.is_enabled() {
             return;
         }
+        // Nor after 'bye!': background ticks kept painting a prompt nobody
+        // could type at while the program was still on its way out
+        // (Marigold, founder report 2026-09-15).
+        if self.terminate.load(Ordering::SeqCst) {
+            return;
+        }
         if !self.is_running() {
             self.write(format!("{}", ClearLine));
             let data = self.inner().unwrap();

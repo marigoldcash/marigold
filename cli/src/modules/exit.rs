@@ -30,8 +30,21 @@ impl Exit {
         }
 
         term.writeln("bye!");
+        // Through the CLI's own shutdown, which raises the flag every
+        // background loop checks — housekeeping, the minute tick, the node
+        // handover watch — and stops any daemon it started. Leaving through
+        // the terminal alone left those loops running, redrawing the prompt
+        // over "bye!" while the wallet was still shutting down.
         #[cfg(not(target_arch = "wasm32"))]
-        term.exit().await;
+        match ctx.clone().downcast_arc::<KaspaCli>() {
+            Ok(cli) => {
+                if let Err(err) = cli.shutdown().await {
+                    term.writeln(format!("{err}"));
+                    term.exit().await;
+                }
+            }
+            Err(_) => term.exit().await,
+        }
         #[cfg(target_arch = "wasm32")]
         workflow_dom::utils::window().location().reload().ok();
 

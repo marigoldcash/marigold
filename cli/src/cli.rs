@@ -1849,12 +1849,47 @@ impl KaspaCli {
     }
 
     pub async fn stop(self: &Arc<Self>) -> Result<()> {
-        self.wallet.stop().await?;
+        // The terminal has already gone by the time this runs, so these lines
+        // go to stdout directly. Said in plain words and only when a step is
+        // actually slow: a wallet that leaves in under a second says nothing.
+        // Each step is timed and named, so a long wait explains itself and
+        // tells us which part it was.
+        let slow = |what: &str, started: std::time::Instant| {
+            let took = started.elapsed();
+            if took.as_secs() >= 2 {
+                std::println!("  ({what}: {} s)", took.as_secs());
+            }
+        };
+        let overall = std::time::Instant::now();
+        let announced = Arc::new(AtomicBool::new(false));
+        {
+            // Say something if the first second passes without being done.
+            let announced = announced.clone();
+            workflow_core::task::spawn(async move {
+                workflow_core::task::sleep(Duration::from_millis(1200)).await;
+                if !announced.swap(true, Ordering::SeqCst) {
+                    std::println!("Tidying up before leaving — a moment, please.");
+                }
+            });
+        }
 
+        let step = std::time::Instant::now();
+        self.wallet.stop().await?;
+        slow("the wallet's own bookkeeping", step);
+
+        let step = std::time::Instant::now();
         self.handlers.stop(self).await?;
+        slow("the commands' housekeeping", step);
 
         // stop notification pipe task
+        let step = std::time::Instant::now();
         self.stop_notification_pipe_task().await?;
+        slow("the notification relay", step);
+
+        announced.store(true, Ordering::SeqCst);
+        if overall.elapsed().as_secs() >= 2 {
+            std::println!("Done.");
+        }
         Ok(())
     }
 
@@ -2560,8 +2595,6 @@ impl KaspaCli {
     pub async fn shutdown(&self) -> Result<()> {
         if !self.shutdown.load(Ordering::SeqCst) {
             self.shutdown.store(true, Ordering::SeqCst);
-
-            tprintln!(self, "{}", style("shutting down...").magenta());
 
             let miner = self.daemons().try_cpu_miner();
             let kaspad = self.daemons().try_kaspad();

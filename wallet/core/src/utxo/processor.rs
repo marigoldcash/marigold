@@ -754,6 +754,19 @@ impl UtxoProcessor {
         spawn(async move {
             loop {
                 select_biased! {
+                    // Stop is polled FIRST. Upstream polled it last, "to drain
+                    // rpc_ctl and notifications before shutting down" — which on
+                    // a mining wallet holding millions of coins meant it was
+                    // never reached: a notification lands every block, each one
+                    // is processed against that whole set, and the queue is
+                    // never empty, so 'exit' sat there until something else gave
+                    // (founder report, 2026-09-15: "after about a minute it
+                    // releases"). Whatever is still queued when we are told to
+                    // stop describes a wallet that is going away.
+                    _ = task_ctl_receiver.recv().fuse() => {
+                        break;
+                    },
+
                     msg = rpc_ctl_channel.receiver.recv().fuse() => {
                         match msg {
                             Ok(msg) => {
@@ -801,14 +814,6 @@ impl UtxoProcessor {
                             }
                         }
                     },
-
-                    // we use select_biased to drain rpc_ctl
-                    // and notifications before shutting down
-                    // as such task_ctl is last in the poll order
-                    _ = task_ctl_receiver.recv().fuse() => {
-                        break;
-                    },
-
                 }
             }
 
