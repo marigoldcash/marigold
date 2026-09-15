@@ -8,15 +8,43 @@ pub const EVERYDAY: &[&str] = &[
 ];
 
 #[derive(Default, Handler)]
-#[help("Show the advanced/expert commands (the everyday ones are in 'help')")]
+#[help("Show the expert commands; 'advanced on' shows the technical side everywhere, 'advanced off' hides it")]
 pub struct Advanced;
 
 impl Advanced {
-    async fn main(self: Arc<Self>, dyn_ctx: &Arc<dyn Context>, _argv: Vec<String>, _cmd: &str) -> Result<()> {
+    async fn main(self: Arc<Self>, dyn_ctx: &Arc<dyn Context>, argv: Vec<String>, _cmd: &str) -> Result<()> {
         let term = dyn_ctx.term();
         let ctx = dyn_ctx.clone().downcast_arc::<KaspaCli>()?;
 
-        term.writeln("\nAdvanced commands — you rarely need these.".crlf());
+        // One switch for the technical side, remembered across sessions
+        // (founder, 2026-09-15): off, the wallet shows no addresses and no
+        // cryptic errors and 'help' lists the everyday commands; on, it is
+        // verbose — every command, addresses, the reason behind each error.
+        match argv.first().map(|s| s.to_lowercase()).as_deref() {
+            Some("on") => {
+                ctx.set_advanced(true).await;
+                tprintln!(ctx, "");
+                tprintln!(ctx, "Advanced on: 'help' lists every command, addresses are shown, and errors say why.");
+                tprintln!(ctx, "{}", style("'advanced off' puts it back.").dim());
+                tprintln!(ctx, "");
+                return Ok(());
+            }
+            Some("off") => {
+                ctx.set_advanced(false).await;
+                tprintln!(ctx, "");
+                tprintln!(ctx, "Advanced off: the everyday wallet, without the technical side.");
+                tprintln!(ctx, "");
+                return Ok(());
+            }
+            Some(other) if other != "help" => {
+                tprintln!(ctx, "usage: 'advanced', 'advanced on' or 'advanced off'");
+                return Ok(());
+            }
+            _ => {}
+        }
+
+        let state = if ctx.advanced() { "on" } else { "off" };
+        term.writeln(format!("\nAdvanced commands — you rarely need these. Advanced mode is {state} ('advanced on' / 'advanced off').").crlf());
 
         let handlers = ctx.handlers().collect();
         let handlers = handlers

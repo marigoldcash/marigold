@@ -27,6 +27,8 @@ pub enum WalletSettings {
     Folder,
     #[describe("Record the wallet's internal bookkeeping in history too (default off; see 'history detail')")]
     HistoryDetail,
+    #[describe("Show the technical side: every command in 'help', addresses, the reasons behind errors (default off; 'advanced on')")]
+    Advanced,
 }
 
 #[async_trait]

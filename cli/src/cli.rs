@@ -57,6 +57,9 @@ pub struct KaspaCli {
     /// shutdown can reach it; `None` means we are talking to someone else's.
     #[cfg(feature = "embedded-node")]
     embedded_node: Mutex<Option<Arc<crate::embedded::EmbeddedNode>>>,
+    /// 'advanced on': the technical side shown — every command in help,
+    /// addresses, the reasons behind errors. Off by default; persisted.
+    advanced: AtomicBool,
     /// Whether the wallet is actually *using* that node.
     ///
     /// Running and using it are no longer the same thing: a node that is still
@@ -246,6 +249,7 @@ impl KaspaCli {
             auto_secret: Mutex::new(None),
             #[cfg(feature = "embedded-node")]
             embedded_node: Mutex::new(None),
+            advanced: AtomicBool::new(false),
             #[cfg(feature = "embedded-node")]
             embedded_node_adopted: Arc::new(AtomicBool::new(false)),
             #[cfg(feature = "embedded-node")]
@@ -314,6 +318,40 @@ impl KaspaCli {
                 "This wallet keeps notes only — there is no ledger account. 'account create bip32' adds one.",
             )),
             Err(err) => Err(err.into()),
+        }
+    }
+
+    /// Whether the technical side is shown: every command in 'help',
+    /// addresses, and the reasons behind errors. Off by default, because the
+    /// front page of a wallet should read like a wallet.
+    pub fn advanced(&self) -> bool {
+        self.advanced.load(Ordering::SeqCst)
+    }
+
+    pub async fn set_advanced(&self, on: bool) {
+        self.advanced.store(on, Ordering::SeqCst);
+        self.wallet.settings().set(WalletSettings::Advanced, on).await.ok();
+    }
+
+    /// An error, as it should be said. With 'advanced on', verbatim. Without,
+    /// the wallet's own sentences pass through and anything technical — a
+    /// transport chain, an OS error code, a type name — becomes one plain
+    /// line that still says what to do next. Amber rather than red: a
+    /// mistake is not an alarm. Works from the text because the dispatcher
+    /// hands back the terminal's error, which has already flattened ours.
+    pub fn describe_error(&self, text: &str) -> String {
+        use crate::ui::{self, Ink};
+        if self.advanced() {
+            return ui::paint(Ink::Amber, text);
+        }
+        let hint = ui::paint(Ink::Moss, "  ('advanced on' shows the reason)");
+        let lower = text.to_ascii_lowercase();
+        if ["wrpc", "websocket", "connection refused", "rpc", "not connected", "timed out"].iter().any(|m| lower.contains(m)) {
+            format!("{}{hint}", ui::paint(Ink::Amber, "Could not reach the node. 'connect' tries again."))
+        } else if is_technical(text) {
+            format!("{}{hint}", ui::paint(Ink::Amber, "That did not work."))
+        } else {
+            ui::paint(Ink::Amber, text)
         }
     }
 
@@ -2435,6 +2473,9 @@ impl KaspaCli {
                     };
                     tprintln!(self, "• ledger: {}   {}", account.balance_as_strings(None)?, style(info).dim());
                 }
+                if self.advanced() {
+                    tprintln!(self, "  {}", style(account.receive_address()?.to_string()).blue());
+                }
                 printed_accounts += 1;
             }
         }
@@ -2594,7 +2635,7 @@ impl Cli for KaspaCli {
                 // Commands with sub-command tables print them too.
                 if matches!(verb.as_str(), "wallet" | "note" | "account" | "history" | "node" | "miner") {
                     if let Err(err) = self.handlers.execute(&self, &format!("{verb} help")).await {
-                        term.writeln(style(err.to_string()).red().to_string());
+                        term.writeln(self.describe_error(&err.to_string()));
                     }
                 } else {
                     term.writeln("");
@@ -2609,7 +2650,7 @@ impl Cli for KaspaCli {
             // mind. Say nothing and hand the prompt back.
             let text = err.to_string();
             if !matches!(text.as_str(), "Cli error cancelled" | "cancelled" | "Aborted") {
-                term.writeln(style(text).red().to_string());
+                term.writeln(self.describe_error(&err.to_string()));
             }
         }
         Ok(())
@@ -2887,6 +2928,7 @@ pub async fn kaspa_cli(terminal_options: TerminalOptions, banner: Option<String>
             // after this point and the splash wants to name the network it is
             // about to use. Loading twice is cheap; guessing is not.
             cli.wallet().load_settings().await.ok();
+            cli.advanced.store(cli.wallet().settings().get::<bool>(WalletSettings::Advanced).unwrap_or(false), Ordering::SeqCst);
             let network = cli.wallet().settings().get::<String>(WalletSettings::Network);
             // Whether there is a wallet to open decides the one line under
             // the note: 'open' if there is, 'wallet create' if not.
@@ -2984,4 +3026,14 @@ impl KaspaCli {
         // #[cfg(target_arch = "wasm32")]
         workflow_log::pipe(Some(self.clone()));
     }
+}
+
+/// Text that was written for a log, not for a person: a transport chain, an
+/// OS error code, a Rust type or path, or simply too much of it.
+fn is_technical(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    text.len() > 160
+        || [" -> ", "os error", "error(", "::", "0x", "wrpc", "rpc", "websocket", "serde", "panicked", "unwrap"]
+            .iter()
+            .any(|marker| lower.contains(marker))
 }

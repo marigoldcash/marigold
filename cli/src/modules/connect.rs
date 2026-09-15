@@ -202,7 +202,11 @@ impl Connect {
                 }
                 tprintln!(ctx, "");
                 // The technical reason, for whoever wants it, last and dimmed.
-                tprintln!(ctx, "{}", style(format!("({err})")).dim());
+                if ctx.advanced() {
+                    tprintln!(ctx, "{}", style(format!("({err})")).dim());
+                } else {
+                    tprintln!(ctx, "{}", style("'advanced on' shows the reason.").dim());
+                }
                 tprintln!(ctx, "");
                 #[cfg(feature = "embedded-node")]
                 if want_local {

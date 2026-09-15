@@ -357,9 +357,12 @@ pub(crate) async fn create(
     term.writeln("");
 
     if let Some(account) = &account {
-        let receive_address = account.receive_address()?;
-        term.writeln("Your default account deposit address:");
-        term.writeln(style(receive_address).blue().to_string());
+        if ctx.advanced() {
+            term.writeln("Your ledger address:");
+            term.writeln(style(account.receive_address()?).blue().to_string());
+        } else {
+            term.writeln("Your ledger address is one 'address' away, for when a miner or an exchange needs it.");
+        }
         term.writeln("");
     } else {
         term.writeln("This wallet keeps notes only. 'note request' makes a payment request; 'account create bip32' adds a ledger later.");

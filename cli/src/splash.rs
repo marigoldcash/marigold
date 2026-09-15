@@ -226,12 +226,9 @@ pub fn banknote(ctx: &Arc<KaspaCli>, version: &str, network: &str, has_wallet: O
     term.writeln(ui::paint(Gold, NOTE_BOTTOM));
     term.writeln("");
 
-    // Outside the frame, the way a specimen note is annotated rather than
-    // printed: what this sheet is, where it came from, and what to type.
-    let serial = ui::paint(Micro, "  № 000001 — specimen");
-    let site = ui::paint(Moss, "marigold.cash");
-    let pad = NOTE_WIDTH.saturating_sub(ui::display_width(&serial) + ui::display_width(&site));
-    term.writeln(format!("{serial}{}{site}", " ".repeat(pad)));
+    // Under the frame, only what to type. A specimen serial and the site
+    // used to sit here too; under the note they read as part of it, and
+    // confused rather than annotated (founder, 2026-09-15).
     term.writeln(next_steps("  ", has_wallet));
 }
 
