@@ -11,7 +11,9 @@ pub struct Balance;
 impl Balance {
     async fn main(self: Arc<Self>, ctx: &Arc<dyn Context>, _argv: Vec<String>, _cmd: &str) -> Result<()> {
         let ctx = ctx.clone().downcast_arc::<KaspaCli>()?;
-        let account = ctx.wallet().account()?;
+        // None on a wallet that keeps notes only (FORK-PLAN P8.0b): then
+        // there is no ledger row, because there is no ledger.
+        let account = ctx.wallet().account().ok();
 
         let network_type = NetworkType::from(ctx.wallet().network_id()?);
         let ticker = kaspa_wallet_core::utils::kaspa_suffix(&network_type);
@@ -48,7 +50,7 @@ impl Balance {
         let mut chain_note: Vec<String> = Vec::new();
         if total > 0 || mirrored > 0 {
             if ctx.wallet().is_connected() {
-                match kaspa_wallet_core::account::notepool::reconcile_held_notes(account.clone()).await {
+                match kaspa_wallet_core::account::notepool::reconcile_held_notes(&ctx.wallet()).await {
                     Ok(Some(result)) if !result.moved_to_unknown.is_empty() => {
                         let mut dropped = 0u64;
                         for info in &result.moved_to_unknown {
@@ -122,7 +124,9 @@ impl Balance {
         // not finish, the UTXO context is empty, which is indistinguishable
         // from an empty ledger by looking at it — so the wallet says which of
         // the two it is rather than printing a zero it cannot stand behind.
-        if !ctx.ledger_is_known() {
+        if account.is_none() {
+            // Notes only. Nothing to say about a ledger this wallet has not got.
+        } else if !ctx.ledger_is_known() {
             // The wallet's own figure comes from a UTXO context it has not
             // managed to fill, but the node can still be asked the simple
             // question. Showing the node's answer and saying it is not
@@ -143,7 +147,7 @@ impl Balance {
                     ui::paint(ui::Ink::Moss, "the node has not answered — try 'balance' again shortly"),
                 ]),
             }
-        } else if let Some(balance) = account.balance() {
+        } else if let Some(balance) = account.as_ref().and_then(|account| account.balance()) {
             if balance.mature > 0 || balance.pending > 0 {
                 let mut aside = format!(
                     "{} piece{}",
@@ -175,7 +179,7 @@ impl Balance {
         }
 
         if total == 0 {
-            if let Some(balance) = account.balance() {
+            if let Some(balance) = account.as_ref().and_then(|account| account.balance()) {
                 if balance.mature > 0 {
                     tprintln!(ctx, "");
                     tprintln!(ctx, "Tip: turn ledger balance into bearer notes with 'note mint <amount>' (or 'note mint all')");

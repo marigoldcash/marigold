@@ -350,7 +350,7 @@ async fn claim(
     // the row HandedOver.
     let mut notes = Vec::new();
     for sn in bundle {
-        match notepool::bearer_export(state.account.clone(), state.wallet_secret.clone(), sn).await {
+        match notepool::bearer_export(state.account.wallet(), state.wallet_secret.clone(), sn).await {
             Ok(result) => {
                 let payload = result.bearer.to_text();
                 notes.push(ClaimNote {

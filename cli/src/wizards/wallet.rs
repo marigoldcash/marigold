@@ -107,8 +107,33 @@ pub(crate) async fn create(
         return Ok(());
     }
 
-    let account_name = term.ask(false, "Default account title: ").await?.trim().to_string();
-    let account_name = account_name.is_not_empty().then_some(account_name);
+    // Most wallets never need the ledger (FORK-PLAN P8.0b): notes are paid
+    // and received directly. The ledger is for mining, and for exchanges that
+    // only pay to an address — and a wallet that starts without one can add
+    // it later, so the question costs nothing to get wrong.
+    let ledger = if import_with_mnemonic {
+        true
+    } else {
+        tprintln!(ctx, "");
+        tpara!(
+            ctx,
+            "\
+            Most people never need a ledger account: notes are paid and received directly. \
+            A ledger is for mining, and for receiving from an exchange that only pays to an \
+            address. You can add one at any time with 'account create bip32'.\
+            ",
+        );
+        tprintln!(ctx, "");
+        let answer = term.ask(false, "Keep a ledger account too? [Y/n]: ").await?.trim().to_lowercase();
+        !matches!(answer.as_str(), "n" | "no")
+    };
+
+    let account_name = if ledger {
+        let account_name = term.ask(false, "Default account title: ").await?.trim().to_string();
+        account_name.is_not_empty().then_some(account_name)
+    } else {
+        None
+    };
 
     tpara!(
         ctx,
@@ -173,17 +198,24 @@ pub(crate) async fn create(
         );
     }
 
-    let payment_secret = term.ask(true, "Enter bip39 mnemonic passphrase (optional): ").await?;
-    let payment_secret =
-        if payment_secret.trim().is_empty() { None } else { Some(Secret::new(payment_secret.trim().as_bytes().to_vec())) };
+    // A bip39 passphrase protects the account key; without a ledger there is
+    // no account key to protect.
+    let payment_secret = if ledger {
+        let payment_secret = term.ask(true, "Enter bip39 mnemonic passphrase (optional): ").await?;
+        let payment_secret =
+            if payment_secret.trim().is_empty() { None } else { Some(Secret::new(payment_secret.trim().as_bytes().to_vec())) };
 
-    if let Some(payment_secret) = payment_secret.as_ref() {
-        let payment_secret_validate =
-            Secret::new(term.ask(true, "Please re-enter mnemonic passphrase: ").await?.trim().as_bytes().to_vec());
-        if payment_secret_validate.as_ref() != payment_secret.as_ref() {
-            return Err(Error::PaymentSecretMatch);
+        if let Some(payment_secret) = payment_secret.as_ref() {
+            let payment_secret_validate =
+                Secret::new(term.ask(true, "Please re-enter mnemonic passphrase: ").await?.trim().as_bytes().to_vec());
+            if payment_secret_validate.as_ref() != payment_secret.as_ref() {
+                return Err(Error::PaymentSecretMatch);
+            }
         }
-    }
+        payment_secret
+    } else {
+        None
+    };
 
     tprintln!(ctx, "");
 
@@ -232,14 +264,16 @@ pub(crate) async fn create(
         None => kaspa_wallet_core::storage::local::notevault::new_vault_words()?,
     };
 
-    let prv_key_data_args = if import_with_mnemonic {
+    let prv_key_data_args = if !ledger {
+        None
+    } else if import_with_mnemonic {
         let words = crate::wizards::import::prompt_for_mnemonic(&term).await?;
-        PrvKeyDataCreateArgs::new(None, payment_secret.clone(), Secret::from(words.join(" ")), PrvKeyDataVariantKind::Mnemonic)
+        Some(PrvKeyDataCreateArgs::new(None, payment_secret.clone(), Secret::from(words.join(" ")), PrvKeyDataVariantKind::Mnemonic))
     } else {
         // Derived, not random: the vault phrase reproduces it, so there is one
         // phrase to keep rather than two.
         let account = kaspa_wallet_core::storage::local::notevault::account_mnemonic_from_vault_words(&vault_words)?;
-        PrvKeyDataCreateArgs::new(None, payment_secret.clone(), Secret::from(account.phrase_string()), PrvKeyDataVariantKind::Mnemonic)
+        Some(PrvKeyDataCreateArgs::new(None, payment_secret.clone(), Secret::from(account.phrase_string()), PrvKeyDataVariantKind::Mnemonic))
     };
 
     let notifier = ctx.notifier().show(Notification::Processing).await;
@@ -249,10 +283,17 @@ pub(crate) async fn create(
 
     let wallet_args = WalletCreateArgs::new(name.map(String::from), custom_filename.clone(), EncryptionKind::XChaCha20Poly1305, hint, true);
     let (wallet_descriptor, storage_descriptor) = ctx.wallet().create_wallet(&wallet_secret, wallet_args).await?;
-    let prv_key_data_id = wallet.create_prv_key_data(&wallet_secret, prv_key_data_args).await?;
-
-    let account_args = AccountCreateArgsBip32::new(account_name, None);
-    let account = wallet.create_account_bip32(&wallet_secret, prv_key_data_id, payment_secret.as_ref(), account_args).await?;
+    // No key and no account on a notes-only wallet: the ledger address is
+    // never derived, which is the point (P8.0b) — nothing to sweep, nothing
+    // to mint from, nothing an exchange can be told to pay by mistake.
+    let account = match prv_key_data_args {
+        Some(prv_key_data_args) => {
+            let prv_key_data_id = wallet.create_prv_key_data(&wallet_secret, prv_key_data_args).await?;
+            let account_args = AccountCreateArgsBip32::new(account_name, None);
+            Some(wallet.create_account_bip32(&wallet_secret, prv_key_data_id, payment_secret.as_ref(), account_args).await?)
+        }
+        None => None,
+    };
 
     // flush data to storage
     wallet.store().flush(&wallet_secret).await?;
@@ -268,7 +309,7 @@ pub(crate) async fn create(
     // one more that gets photographed, pasted, or written on the wrong piece of
     // paper. 'export mnemonic' produces it from an open wallet on the rare
     // occasion something outside Marigold needs it.
-    if !import_with_mnemonic {
+    if ledger && !import_with_mnemonic {
         tprintln!(ctx, "");
         tpara!(
             ctx,
@@ -287,15 +328,26 @@ pub(crate) async fn create(
             tprintln!(ctx, "");
             crate::ui::recovery_words(ctx, &words);
             tprintln!(ctx, "");
-            tpara!(
-                ctx,
-                "\
-                These words bring back your ledger balance on their own. Your NOTES need \
-                the words AND a copy of the vault files ('note vault backup <dir>' makes \
-                one) — nothing can derive a note, which is exactly what makes it cash. \
-                The words will not be shown again.\
-                ",
-            );
+            if ledger {
+                tpara!(
+                    ctx,
+                    "\
+                    These words bring back your ledger balance on their own. Your NOTES need \
+                    the words AND a copy of the vault files ('note vault backup <dir>' makes \
+                    one) — nothing can derive a note, which is exactly what makes it cash. \
+                    The words will not be shown again.\
+                    ",
+                );
+            } else {
+                tpara!(
+                    ctx,
+                    "\
+                    Your notes need these words AND a copy of the vault files ('note vault \
+                    backup <dir>' makes one) — nothing can derive a note, which is exactly \
+                    what makes it cash. The words will not be shown again.\
+                    ",
+                );
+            }
             term.ask(false, "Press <enter> once you have written them down: ").await?;
         }
     }
@@ -304,10 +356,15 @@ pub(crate) async fn create(
     term.writeln(format!("Your wallet is stored in: {}", storage_descriptor));
     term.writeln("");
 
-    let receive_address = account.receive_address()?;
-    term.writeln("Your default account deposit address:");
-    term.writeln(style(receive_address).blue().to_string());
-    term.writeln("");
+    if let Some(account) = &account {
+        let receive_address = account.receive_address()?;
+        term.writeln("Your default account deposit address:");
+        term.writeln(style(receive_address).blue().to_string());
+        term.writeln("");
+    } else {
+        term.writeln("This wallet keeps notes only. 'note request' makes a payment request; 'account create bip32' adds a ledger later.");
+        term.writeln("");
+    }
 
     wallet.open(&wallet_secret, custom_filename.clone().or_else(|| name.map(String::from)), WalletOpenArgs::default_with_legacy_accounts(), &guard).await?;
     wallet.activate_accounts(None, &guard).await?;

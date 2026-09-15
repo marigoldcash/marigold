@@ -1005,6 +1005,10 @@ impl NoteKeyStore for LocalStoreInner {
         Ok(self.cache.read().unwrap().payment_request_info.clone())
     }
 
+    async fn verify_secret(&self, wallet_secret: &Secret) -> Result<()> {
+        self.notevault.verify_secret(wallet_secret).await
+    }
+
     async fn load_payment_request_key(&self, wallet_secret: &Secret, pk: &[u8; 32]) -> Result<Option<PaymentRequestKey>> {
         let map: Decrypted<PaymentRequestMap> = self.cache.read().unwrap().payment_request_data.decrypt(wallet_secret)?;
         Ok(map.get(pk).cloned())

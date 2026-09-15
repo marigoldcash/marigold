@@ -20,7 +20,7 @@ impl Sweep {
             None => None,
         };
 
-        let account = ctx.wallet().account()?;
+        let account = ctx.ledger_account().await?;
         let (wallet_secret, payment_secret) = ctx.ask_wallet_secret(Some(&account)).await?;
 
         let utxo_count = account.utxo_context().mature_utxo_size();

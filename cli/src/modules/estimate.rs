@@ -16,7 +16,7 @@ impl Estimate {
     async fn main(self: Arc<Self>, ctx: &Arc<dyn Context>, argv: Vec<String>, _cmd: &str) -> Result<()> {
         let ctx = ctx.clone().downcast_arc::<KaspaCli>()?;
 
-        let account = ctx.wallet().account()?;
+        let account = ctx.ledger_account().await?;
 
         if argv.is_empty() {
             tprintln!(ctx, "usage: estimate <amount> [<priority fee>]");

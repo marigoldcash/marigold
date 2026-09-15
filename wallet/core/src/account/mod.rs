@@ -435,7 +435,7 @@ pub trait Account: AnySync + Send + Sync + 'static {
     /// Rotate owned notes to fresh Cold keys (FORK-PLAN P7.3; the P5.6 receive
     /// flow's step 3 and the future P7.4 isolation primitive).
     async fn rotate_notes(self: Arc<Self>, wallet_secret: Secret, serials: Vec<Hash>) -> Result<notepool::TransferResult> {
-        notepool::rotate_notes(self.as_dyn_arc(), wallet_secret, serials).await
+        notepool::rotate_notes(self.wallet(), wallet_secret, serials).await
     }
 
     /// Import a bearer note and immediately rotate it (FORK-PLAN P7.3 flow (a)).
@@ -444,7 +444,7 @@ pub trait Account: AnySync + Send + Sync + 'static {
         wallet_secret: Secret,
         bearer: notepool::BearerNote,
     ) -> Result<notepool::BearerImportResult> {
-        notepool::bearer_import(self.as_dyn_arc(), wallet_secret, bearer).await
+        notepool::bearer_import(self.wallet(), wallet_secret, bearer).await
     }
 
     /// Pay a payment request (FORK-PLAN P7.3 flow (b) payer half; split planning
@@ -455,13 +455,13 @@ pub trait Account: AnySync + Send + Sync + 'static {
         request: notepool::PaymentRequest,
         amount_override: Option<u64>,
     ) -> Result<notepool::TransferResult> {
-        notepool::pay_payment_request(self.as_dyn_arc(), wallet_secret, request, amount_override).await
+        notepool::pay_payment_request(self.wallet(), wallet_secret, request, amount_override).await
     }
 
     /// Bearer-export a note, auto-isolating first if its key isn't solo
     /// (FORK-PLAN P7.4 flow (b)).
     async fn bearer_export(self: Arc<Self>, wallet_secret: Secret, sn: Hash) -> Result<notepool::BearerExportResult> {
-        notepool::bearer_export(self.as_dyn_arc(), wallet_secret, sn).await
+        notepool::bearer_export(self.wallet(), wallet_secret, sn).await
     }
 
     /// One POS checkout: request, await payment, immediately sweep off the shared
@@ -474,7 +474,7 @@ pub trait Account: AnySync + Send + Sync + 'static {
         timeout: std::time::Duration,
         on_request: Option<notepool::PosCheckoutRequestHook>,
     ) -> Result<notepool::PosCheckoutResult> {
-        notepool::pos_checkout(self.as_dyn_arc(), wallet_secret, amount_petals, timeout, on_request).await
+        notepool::pos_checkout(self.wallet(), wallet_secret, amount_petals, timeout, on_request).await
     }
 
     async fn commit_reveal_manual(

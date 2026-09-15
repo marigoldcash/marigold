@@ -10,7 +10,14 @@ impl Exchange {
         let ctx = ctx.clone().downcast_arc::<KaspaCli>()?;
         let ticker = ctx.ticker();
 
-        let account = ctx.wallet().account()?;
+        // None on a wallet that keeps notes only (FORK-PLAN P8.0b): the
+        // payment then comes from notes alone, redeemed straight to the
+        // address, and there is no ledger to return change to.
+        let account = match ctx.wallet().account() {
+            Ok(account) => Some(account),
+            Err(_) if !ctx.has_ledger_account().await => None,
+            Err(err) => return Err(err.into()),
+        };
 
         if argv.len() < 2 {
             tprintln!(ctx, "usage: exchange <address> <amount> <priority fee>");
@@ -24,13 +31,13 @@ impl Exchange {
         let priority_fee_sompi = try_parse_optional_kaspa_as_sompi_i64(argv.get(2))?.unwrap_or(0);
         let outputs = PaymentOutputs::from((address.clone(), amount_sompi));
         let abortable = Abortable::default();
-        let (wallet_secret, payment_secret) = ctx.ask_wallet_secret(Some(&account)).await?;
+        let (wallet_secret, payment_secret) = ctx.ask_wallet_secret(account.as_ref()).await?;
 
         // Ledger short but notes cover it? Redeem straight to the recipient —
         // one transaction destroys the notes and pays the address, with change
         // returning here. This is the exchange-deposit path: the user thinks
         // "send 500", not "redeem, wait, then send".
-        let mature = account.balance().map(|b| b.mature).unwrap_or(0);
+        let mature = account.as_ref().and_then(|account| account.balance()).map(|b| b.mature).unwrap_or(0);
         if mature < amount_sompi {
             let note_total = {
                 let store = ctx.wallet().store().as_note_key_store()?;
@@ -45,7 +52,10 @@ impl Exchange {
             };
             // Neither side alone covers it, but together they do: one
             // transaction spends transparent coins AND consumes notes.
-            if note_total < amount_sompi && mature + note_total > amount_sompi {
+            if let Some(account) = &account
+                && note_total < amount_sompi
+                && mature + note_total > amount_sompi
+            {
                 tprintln!(
                     ctx,
                     "Paying {} {ticker} from both sides at once: {} {ticker} on the ledger plus notes, in one transaction.",
@@ -71,20 +81,29 @@ impl Exchange {
             }
 
             if note_total >= amount_sompi {
-                tprintln!(
-                    ctx,
-                    "Ledger balance is {} {ticker} — paying from notes instead (one transaction: notes are redeemed straight to {address}).",
-                    sompi_to_kaspa_string(mature)
-                );
+                if account.is_some() {
+                    tprintln!(
+                        ctx,
+                        "Ledger balance is {} {ticker} — paying from notes instead (one transaction: notes are redeemed straight to {address}).",
+                        sompi_to_kaspa_string(mature)
+                    );
+                } else {
+                    tprintln!(ctx, "Paying from notes: they are redeemed straight to {address} in one transaction.");
+                }
                 // Select enough notes to cover the payment plus room for the fee.
                 let selection = kaspa_wallet_core::account::notepool::RedeemSelection::Amount(
                     amount_sompi.saturating_add(kaspa_consensus_core::notepool::DENOMINATION_PETALS[0]),
                 );
-                let result = kaspa_wallet_core::account::notepool::redeem_to(
-                    account.clone(),
+                // Change goes back to the ledger when there is one. Without one
+                // the notes must cover the amount to within a 0.01 note —
+                // redeem_with says so, in those words, when they do not.
+                let change = account.as_ref().map(|account| account.change_address()).transpose()?;
+                let result = kaspa_wallet_core::account::notepool::redeem_with(
+                    &ctx.wallet(),
                     wallet_secret,
                     selection,
                     Some((address.clone(), amount_sompi)),
+                    change,
                 )
                 .await?;
                 tprintln!(
@@ -98,6 +117,15 @@ impl Exchange {
                 return Ok(());
             }
         }
+
+        let Some(account) = account else {
+            tprintln!(
+                ctx,
+                "Your notes do not cover {} {ticker}, and this wallet has no ledger to make up the difference.",
+                sompi_to_kaspa_string(amount_sompi)
+            );
+            return Ok(());
+        };
 
         // let ctx_ = ctx.clone();
         let (summary, _ids) = account

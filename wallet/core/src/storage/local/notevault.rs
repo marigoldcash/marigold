@@ -372,6 +372,16 @@ impl NoteVault {
         Ok(())
     }
 
+    /// Check a password against `vault.key` without caching anything.
+    /// `unlock` remembers the key once it has it, so after the first success
+    /// it would vouch for any password at all; this reads the file each time.
+    pub async fn verify_secret(&self, wallet_secret: &Secret) -> Result<()> {
+        let wrapped = fs::read(&self.folder.join(VAULT_KEY_FILE))
+            .await
+            .map_err(|_| Error::Custom("no note vault found (or vault.key is missing)".to_string()))?;
+        unwrap_vault_key(&wrapped, wallet_secret).map(|_| ())
+    }
+
     /// Unwrap `K` from `vault.key` under `wallet_secret`, caching it for the
     /// session. Idempotent (returns the cached copy on later calls).
     pub(crate) async fn unlock(&self, wallet_secret: &Secret) -> Result<[u8; 32]> {

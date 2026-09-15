@@ -129,7 +129,7 @@ impl Message {
     }
 
     async fn get_address_private_key(self: Arc<Self>, ctx: &Arc<KaspaCli>, kaspa_address: Address) -> Result<[u8; 32]> {
-        let account = ctx.wallet().account()?;
+        let account = ctx.ledger_account().await?;
 
         match account.account_kind().as_ref() {
             BIP32_ACCOUNT_KIND => {

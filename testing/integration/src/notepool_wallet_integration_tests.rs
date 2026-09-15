@@ -936,7 +936,7 @@ async fn wallet_notepool_vault_test() {
     copy_dir_recursive(backup_dir.path(), &vault_b_folder);
     store_b.vault_restore_from_words(&words, &secret_b).await.expect("vault_restore_from_words failed");
 
-    let deep_report = deep_verify(account_b.clone(), secret_b.clone()).await.expect("deep_verify failed");
+    let deep_report = deep_verify(account_b.wallet(), secret_b.clone()).await.expect("deep_verify failed");
     assert!(deep_report.corrupted.is_empty());
     assert!(deep_report.stale.is_empty());
     assert_eq!(
@@ -1010,13 +1010,13 @@ async fn wallet_notepool_vault_test() {
     assert!(note_path.exists(), "expected the rotated note's file to exist at {note_path:?}");
     std::fs::write(&note_path, b"not-valid-ciphertext-at-all").expect("failed to corrupt note file");
 
-    let light_report_after_corruption = light_verify(account_b.clone()).await.expect("light_verify failed");
+    let light_report_after_corruption = light_verify(account_b.wallet()).await.expect("light_verify failed");
     assert!(
         light_report_after_corruption.live.contains(&corrupt_note.sn),
         "light verify never decrypts, so it cannot see the corruption -- it must still report the note live"
     );
 
-    let deep_report_after_corruption = deep_verify(account_b.clone(), secret_b.clone()).await.expect("deep_verify failed");
+    let deep_report_after_corruption = deep_verify(account_b.wallet(), secret_b.clone()).await.expect("deep_verify failed");
     assert!(
         deep_report_after_corruption.corrupted.contains(&corrupt_note.sn),
         "deep verify decrypts every note and must catch the corrupted ciphertext"

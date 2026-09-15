@@ -59,12 +59,14 @@ wallet create
 
 Walks an interactive wizard, in this exact order:
 
-1. `Default account title:` — press enter to skip.
-2. A phishing-hint explainer paragraph, then `Create phishing hint (optional, press <enter> to skip):` — press enter to skip.
-3. `Enter wallet encryption password:` (masked) and `Re-enter wallet encryption password:` (masked) — must match.
-4. A bip39-passphrase explainer, then `Enter bip39 mnemonic passphrase (optional):` (masked) — press enter to skip (this is a *second*, optional secret on top of the wallet password; skip it unless you specifically want one).
+1. A short explainer, then `Keep a ledger account too? [Y/n]:` — enter (or `y`) keeps one; `n` makes a **notes-only wallet** (section 12). Most people never need the ledger; it is for mining and for exchanges that only pay to an address, and `account create bip32` can add it later.
+2. `Default account title:` — only asked when keeping a ledger; press enter to skip.
+3. A phishing-hint explainer paragraph, then `Create phishing hint (optional, press <enter> to skip):` — press enter to skip.
+4. `Enter wallet encryption password:` (masked) and `Re-enter wallet encryption password:` (masked) — must match.
+5. `Enter bip39 mnemonic passphrase (optional):` (masked) — only asked when keeping a ledger; press enter to skip (a *second*, optional secret on top of the wallet password; skip it unless you specifically want one).
+6. `Enter your own 24-word vault recovery phrase, or press <enter> to generate one:` — the one ceremony. These 24 words are the wallet's root: the note vault key `K` comes from them, and so does the ledger account key when there is one (P8.0), so there is nothing else to write down. They are shown once, in a numbered panel, and the wizard waits for enter before going on.
 
-The wizard then prints the new BIP32 account's 12-word mnemonic (**a wallet-level recovery phrase for transparent funds and note-pool key generation — a completely different secret from the note vault's own 24-word K, covered in step 6**), the wallet's storage path, and its default receive address (`marigoldsim:...`). The wallet and default account are automatically opened and activated — no separate `wallet open` needed in the same session.
+The wizard then prints the wallet's storage path and — when keeping a ledger — the default deposit address (`marigoldsim:...`). The account's own 12-word phrase is deliberately not shown (it is derived from the 24 words; `export mnemonic` produces it if another program ever needs it). The wallet is opened and activated in the same session — no separate `wallet open` needed.
 
 ## 4. Fund the wallet
 
@@ -188,6 +190,18 @@ note vault restore <backup-dir> <word1> <word2> ... <word24>
 Copies the backup's files in, recovers `K` from the words, deep-verifies (reports live/stale/corrupted), then — by default — offers the restore-time rotation: 2-5 randomly-composed batches, each its own transaction, rotating every recovered note to a fresh key (invalidating every old copy of this backup, including any that may have leaked). Each batch is attempted independently — one batch's failure doesn't stop the others.
 
 **Caveat found while validating this**: if the *source* wallet the backup came from is still active and mid-spend (e.g. you're testing restore against a backup you just took without pausing the original wallet), a rotation batch that happens to need a fee-stamp from a note the source wallet is simultaneously spending will fail with `already consumed by transaction ... in the mempool` (or, once that transaction confirms, `does not exist in the pool`) — a real instance of POOL-SPEC.md's same-key-in-two-wallets hazard, not a wallet defect. Mine a confirming block for the source wallet's pending transaction and re-run `note vault restore` (idempotent — it re-copies and re-verifies) to pick up wherever it left off.
+
+## 12. Notes-only wallets
+
+Answer `n` to `Keep a ledger account too?` and the wallet has a vault and nothing else: no account key, no ledger address ever derived, `list` shows no account and the prompt carries no account name. Everything under `note` works exactly as above — `note request`, `note pay`, `note import`/`export`, `note pos`, `note verify`, `note vault backup`/`restore`, `note history` — because none of it ever needed the ledger; it only used the account as a handle. `balance` shows notes alone. The ledger commands (`mint`, `redeem`, `transfer`, `sweep`, `estimate`, `address`, `utxos`, `message sign`) refuse with one line: *This wallet keeps notes only — there is no ledger account. 'account create bip32' adds one.* That command attaches the ledger at any later time, derived from the same 24 words, so there is no new secret and backups need nothing extra.
+
+Three things a notes-only wallet meets that a ledger wallet does not:
+
+- **Bootstrap.** It cannot mint or mine, so its first notes must arrive by `note pay` from someone else or by importing a bearer note (`note import`). On testnet the faucet hands out bearer notes with fee stamps.
+- **Fee stamps.** A pure note transfer pays its fee with a small note, so a wallet holding only large denominations cannot pay for anything — splitting included. A first payment to it should include some 0.01s.
+- **Paying out without change.** `exchange <address> <amount>` pays an exchange (or anyone) straight from notes, in one transaction, with no ledger involved. But a redeem cannot make a note, and there is no ledger for change, so the notes chosen must cover the amount to within one 0.01 note; the whole redeemed value less the fee goes to the address, so the deposit arrives a fraction over what was asked, never under. If the closest cover is further over than that the wallet says so and does nothing — pick an amount the notes cover, or `account create bip32`.
+
+`auto on` still works: the password is checked against the vault key instead of an account key, and housekeeping tidies notes (ten of a size into one larger) while the ledger steps stay off.
 
 ## Gotchas found while writing this (2026-08-17)
 

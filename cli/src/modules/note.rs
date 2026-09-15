@@ -89,11 +89,10 @@ impl Note {
     /// before display), show its QR + text, then watch for the payment.
     async fn request(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
         let ticker = ctx.ticker();
-        let account = ctx.wallet().account()?;
         // Amount is optional per POOL-SPEC.md P5.6's two QR forms: pinned (40-byte)
         // or left for the payer to fill in (32-byte, the printed/static form).
         let amount_petals = if argv.is_empty() { None } else { Some(try_parse_required_nonzero_kaspa_as_sompi_u64(argv.first())?) };
-        let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(Some(&account)).await?;
+        let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(None).await?;
 
         let request = create_payment_request(&ctx.wallet(), &wallet_secret, amount_petals).await?;
         let text = request.to_text();
@@ -131,13 +130,12 @@ impl Note {
             tprintln!(ctx, "usage: 'note pay <request-text> [amount]'\r\n");
             return Ok(());
         }
-        let account = ctx.wallet().account()?;
         let request = PaymentRequest::from_text(&argv[0])?;
         let amount_override =
             if argv.len() > 1 { Some(try_parse_required_nonzero_kaspa_as_sompi_u64(argv.get(1))?) } else { None };
-        let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(Some(&account)).await?;
+        let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(None).await?;
 
-        let result = account.pay_payment_request(wallet_secret, request, amount_override).await?;
+        let result = notepool::pay_payment_request(&ctx.wallet(), wallet_secret, request, amount_override).await?;
         tprintln!(
             ctx,
             "paid {} note(s) (fee {} {ticker}); tx: {}",
@@ -157,12 +155,12 @@ impl Note {
             tprintln!(ctx, "usage: 'note import <bearer-text>'\r\n");
             return Ok(());
         }
-        let account: Arc<dyn kaspa_wallet_core::account::Account> = ctx.wallet().account()?;
+        let wallet = ctx.wallet();
         let bearer = BearerNote::from_text(&argv[0])?;
-        let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(Some(&account)).await?;
+        let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(None).await?;
         self.ensure_vault_interactive(ctx, &wallet_secret).await?;
 
-        let result = account.clone().bearer_import(wallet_secret.clone(), bearer).await?;
+        let result = notepool::bearer_import(&wallet, wallet_secret.clone(), bearer).await?;
         tprintln!(ctx, "imported note {} and immediately rotated it to fresh cold key(s):", result.imported_sn);
         for note in &result.rotation.own_notes {
             tprintln!(ctx, "  {} - {}", note.sn, sompi_to_kaspa_string(DENOMINATION_PETALS[note.d as usize]));
@@ -176,7 +174,7 @@ impl Note {
 
         // Housekeeping on receipt: ten notes of one size become one of the
         // next, so a vault never accumulates a drawer full of small change.
-        match notepool::merge_held_notes(account.clone(), wallet_secret, 4).await {
+        match notepool::merge_held_notes(&wallet, wallet_secret, 4).await {
             Ok((0, None)) => {}
             Ok((merged, failure)) => {
                 if merged > 0 {
@@ -201,11 +199,10 @@ impl Note {
             tprintln!(ctx, "usage: 'note export <serial>'\r\n");
             return Ok(());
         }
-        let account = ctx.wallet().account()?;
         let sn = argv[0].parse::<Hash>().map_err(|_| Error::Custom(format!("'{}' is not a valid note serial (32-byte hex)", argv[0])))?;
-        let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(Some(&account)).await?;
+        let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(None).await?;
 
-        let result = account.bearer_export(wallet_secret, sn).await?;
+        let result = notepool::bearer_export(&ctx.wallet(), wallet_secret, sn).await?;
         if let Some(isolation) = &result.isolation {
             tprintln!(
                 ctx,
@@ -251,9 +248,8 @@ impl Note {
             tprintln!(ctx, "usage: 'note pos <amount>'\r\n");
             return Ok(());
         }
-        let account = ctx.wallet().account()?;
         let amount_petals = try_parse_required_nonzero_kaspa_as_sompi_u64(argv.first())?;
-        let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(Some(&account)).await?;
+        let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(None).await?;
 
         tprintln!(ctx, "checkout: {} {ticker}", sompi_to_kaspa_string(amount_petals));
         let timeout = Duration::from_secs(120);
@@ -265,7 +261,7 @@ impl Note {
             }
             tprintln!(ctx_for_qr, "{text}");
         });
-        let result = account.pos_checkout(wallet_secret, amount_petals, timeout, Some(on_request)).await?;
+        let result = notepool::pos_checkout(&ctx.wallet(), wallet_secret, amount_petals, timeout, Some(on_request)).await?;
 
         tprintln!(
             ctx,
@@ -289,7 +285,7 @@ impl Note {
 
     async fn mint(&self, ctx: &Arc<KaspaCli>, mut argv: Vec<String>) -> Result<()> {
         let ticker = ctx.ticker();
-        let account = ctx.wallet().account()?;
+        let account = ctx.ledger_account().await?;
 
         // 'note mint' with no amount offers to mint everything; 'note mint all'
         // does it without asking. "Everything" is fee-aware: the mint
@@ -441,7 +437,7 @@ impl Note {
     async fn rotate_serials(
         &self,
         ctx: &Arc<KaspaCli>,
-        account: &Arc<dyn kaspa_wallet_core::account::Account>,
+        wallet: &Arc<kaspa_wallet_core::wallet::Wallet>,
         wallet_secret: &Secret,
         serials: Vec<Hash>,
     ) -> Result<()> {
@@ -461,7 +457,7 @@ impl Note {
                 tprintln!(ctx, "  batch {}/{}: already rotated by an earlier batch's fee stamp - skipped", i + 1, batches.len());
                 continue;
             }
-            match account.clone().rotate_notes(wallet_secret.clone(), still_active).await {
+            match notepool::rotate_notes(wallet, wallet_secret.clone(), still_active).await {
                 Ok(result) => tprintln!(
                     ctx,
                     "  batch {}/{}: {} note(s), tx {} (fee {} {ticker})",
@@ -485,7 +481,7 @@ impl Note {
             tprintln!(ctx, "usage: 'note rotate all' or 'note rotate <serial> [<serial> ...]'\r\n");
             return Ok(());
         }
-        let account = ctx.wallet().account()?;
+        let wallet = ctx.wallet();
         let store = ctx.wallet().store().as_note_key_store()?;
         let serials: Vec<Hash> = if argv[0].to_lowercase() == "all" {
             let mut stream = store.iter().await?;
@@ -508,9 +504,9 @@ impl Note {
             tprintln!(ctx, "no active notes to rotate\r\n");
             return Ok(());
         }
-        let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(Some(&account)).await?;
+        let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(None).await?;
         tprintln!(ctx, "rotating {} note(s) to fresh cold keys...", serials.len());
-        self.rotate_serials(ctx, &account, &wallet_secret, serials).await?;
+        self.rotate_serials(ctx, &wallet, &wallet_secret, serials).await?;
         tprintln!(ctx, "rotation complete - every old copy (backups, exports, stolen files) of these keys is now worthless\r\n");
         Ok(())
     }
@@ -522,7 +518,7 @@ impl Note {
     /// an optional up-front rotation covers the compromised-vault case.
     async fn move_notes(&self, ctx: &Arc<KaspaCli>, _argv: Vec<String>) -> Result<()> {
         let ticker = ctx.ticker();
-        let account = ctx.wallet().account()?;
+        let wallet = ctx.wallet();
         let store = ctx.wallet().store().as_note_key_store()?;
         let Some(descriptor) = ctx.store().descriptor() else {
             tprintln!(ctx, "Unable to resolve the open wallet's file\r\n");
@@ -593,7 +589,7 @@ impl Note {
                 }
             }
             tprintln!(ctx, "rotating {} note(s) first...", serials.len());
-            self.rotate_serials(ctx, &account, &wallet_secret, serials).await?;
+            self.rotate_serials(ctx, &wallet, &wallet_secret, serials).await?;
         }
 
         // Destination vault (ceremony if it doesn't exist yet).
@@ -649,7 +645,14 @@ impl Note {
             return Ok(());
         }
 
-        let account = ctx.wallet().account()?;
+        let account = match ctx.ledger_account().await {
+            Ok(account) => account,
+            Err(err) => {
+                tprintln!(ctx, "{err}");
+                tprintln!(ctx, "Notes can still be paid out to any address with 'exchange <address> <amount>'.");
+                return Ok(());
+            }
+        };
 
         let selection = if argv[0] == "amount" {
             if argv.len() != 2 {
@@ -773,10 +776,9 @@ impl Note {
             tprintln!(ctx, "Connect to a node first — this checks your notes against the network.");
             return Ok(());
         }
-        let account = ctx.wallet().account()?;
         tprintln!(ctx, "");
         tprintln!(ctx, "Checking your notes against the pool...");
-        let (present, phantom) = notepool::verify_held_notes(account).await?;
+        let (present, phantom) = notepool::verify_held_notes(&ctx.wallet()).await?;
         let value = |notes: &[Arc<NoteKeyInfo>]| -> u64 { notes.iter().map(|i| DENOMINATION_PETALS[i.d as usize]).sum() };
 
         tprintln!(ctx, "");
@@ -968,9 +970,8 @@ impl Note {
                     return Ok(());
                 }
                 let (wallet_secret, _) = ctx.ask_wallet_secret(None).await?;
-                let account = ctx.wallet().account()?;
                 let serials: Vec<Hash> = mirrored.iter().map(|i| i.sn).collect();
-                match notepool::rotate_notes(account, wallet_secret, serials).await {
+                match notepool::rotate_notes(&ctx.wallet(), wallet_secret, serials).await {
                     Ok(result) => {
                         tprintln!(ctx, "");
                         tprintln!(ctx, "Revoked. {} {ticker} is back on fresh keys here.", sompi_to_kaspa_string(amount));
@@ -1182,8 +1183,7 @@ impl Note {
     }
 
     async fn vault_create(&self, ctx: &Arc<KaspaCli>) -> Result<()> {
-        let account = ctx.wallet().account()?;
-        let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(Some(&account)).await?;
+        let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(None).await?;
         let store = ctx.wallet().store().as_note_key_store()?;
         if store.vault_exists().await? {
             tprintln!(ctx, "a note vault already exists for this wallet\r\n");
@@ -1228,9 +1228,8 @@ impl Note {
             return Ok(());
         }
         if argv.first().map(String::as_str) == Some("deep") {
-            let account = ctx.wallet().account()?;
-            let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(Some(&account)).await?;
-            let report = deep_verify(account, wallet_secret).await?;
+            let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(None).await?;
+            let report = deep_verify(&ctx.wallet(), wallet_secret).await?;
             tprintln!(
                 ctx,
                 "deep verify: {} live, {} stale, {} corrupted",
@@ -1244,8 +1243,7 @@ impl Note {
             tprintln!(ctx, "");
             return Ok(());
         }
-        let account = ctx.wallet().account()?;
-        let report = light_verify(account).await?;
+        let report = light_verify(&ctx.wallet()).await?;
         tprintln!(ctx, "light verify: {} live, {} stale\r\n", report.live.len(), report.stale.len());
         Ok(())
     }
@@ -1266,9 +1264,9 @@ impl Note {
             );
             return Ok(());
         }
-        let account = ctx.wallet().account()?;
+        let wallet = ctx.wallet();
         let store = ctx.wallet().store().as_note_key_store()?;
-        let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(Some(&account)).await?;
+        let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(None).await?;
 
         // A vault already existing here usually means this wallet has its own K
         // (and possibly its own notes under it) - copying a backup's `vault.key`
@@ -1297,7 +1295,7 @@ impl Note {
         store.vault_restore_from_words(&words, &wallet_secret).await?;
 
         tprintln!(ctx, "vault files copied in and key recovered from words - deep-verifying...");
-        let report = deep_verify(account.clone(), wallet_secret.clone()).await?;
+        let report = deep_verify(&wallet, wallet_secret.clone()).await?;
         tprintln!(
             ctx,
             "recovered {} live note(s); {} stale; {} corrupted",
@@ -1353,7 +1351,7 @@ impl Note {
             // this backup was copied from, a real instance of POOL-SPEC.md's
             // same-key-in-two-wallets hazard. Report it and keep going: the other
             // batches' notes aren't affected and still deserve to be rotated.
-            match account.clone().rotate_notes(wallet_secret.clone(), still_active).await {
+            match notepool::rotate_notes(&wallet, wallet_secret.clone(), still_active).await {
                 Ok(result) => tprintln!(
                     ctx,
                     "  batch {}/{}: {} note(s), tx {} (fee {} {ticker})",
@@ -1378,9 +1376,8 @@ impl Note {
         let dir = std::path::PathBuf::from(&argv[0]);
         std::fs::create_dir_all(&dir).map_err(|e| Error::Custom(format!("could not create {}: {e}", dir.display())))?;
 
-        let account = ctx.wallet().account()?;
-        let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(Some(&account)).await?;
-        let entries = export_active_entries(account, wallet_secret).await?;
+        let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(None).await?;
+        let entries = export_active_entries(&ctx.wallet(), wallet_secret).await?;
         if entries.is_empty() {
             tprintln!(ctx, "no active notes to export\r\n");
             return Ok(());
@@ -1429,14 +1426,14 @@ impl Note {
         }
 
         let password = Secret::new(ctx.term().ask(true, "Enter paper backup password: ").await?.trim().as_bytes().to_vec());
-        let account = ctx.wallet().account()?;
-        let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(Some(&account)).await?;
+        let wallet = ctx.wallet();
+        let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(None).await?;
         let mut imported = 0usize;
         for page in &pages {
             let (_, entries) = paper_export_decode_page(page, &password)
                 .map_err(|_| Error::Custom("could not decrypt this paper backup - check the password and try again".to_string()))?;
             for bearer in entries {
-                account.clone().bearer_import(wallet_secret.clone(), bearer).await?;
+                notepool::bearer_import(&wallet, wallet_secret.clone(), bearer).await?;
                 imported += 1;
             }
         }

@@ -289,6 +289,34 @@ impl KaspaCli {
     }
 
     /// Whether the ledger figure can be stated as fact — see `ledger_known`.
+    /// Does this wallet have a ledger account at all? A wallet that keeps
+    /// notes only (FORK-PLAN P8.0b) has none, and `account()` failing is then
+    /// the normal state rather than a selection that has not happened yet.
+    ///
+    /// Asked of the store, not of `wallet.accounts()`: that needs the wallet
+    /// guard, and the `wallet` command holds it for its whole run — including
+    /// the holdings report after `wallet open`, which would then wait on
+    /// itself forever (found by the P8.0b verify, 2026-09-15).
+    pub async fn has_ledger_account(&self) -> bool {
+        match self.wallet.store().as_account_store() {
+            Ok(store) => !store.is_empty().await.unwrap_or(true),
+            Err(_) => false,
+        }
+    }
+
+    /// The selected account, for commands that need the ledger. On a wallet
+    /// that keeps notes only the refusal says what to do about it, instead of
+    /// the bare "no account selected" that means something else.
+    pub async fn ledger_account(&self) -> Result<Arc<dyn Account>> {
+        match self.wallet.account() {
+            Ok(account) => Ok(account),
+            Err(kaspa_wallet_core::error::Error::AccountSelection) if !self.has_ledger_account().await => Err(Error::custom(
+                "This wallet keeps notes only — there is no ledger account. 'account create bip32' adds one.",
+            )),
+            Err(err) => Err(err.into()),
+        }
+    }
+
     pub fn ledger_is_known(&self) -> bool {
         self.ledger_known.load(Ordering::SeqCst)
     }
@@ -977,7 +1005,16 @@ impl KaspaCli {
     /// the prompt has scrolled away — a typo accepted here becomes an
     /// automation that quietly does nothing, which is the worst way to find out.
     pub async fn verify_wallet_secret(&self, secret: &Secret, payment_secret: Option<&Secret>) -> Result<()> {
-        let account = self.wallet().account()?;
+        let account = match self.wallet().account() {
+            Ok(account) => account,
+            Err(_) if !self.has_ledger_account().await => {
+                // Notes only: the vault key is the only key there is, and it is
+                // wrapped under the wallet password.
+                let store = self.wallet().store().as_note_key_store()?;
+                return store.verify_secret(secret).await.map_err(|_| Error::custom("That password does not open this wallet"));
+            }
+            Err(err) => return Err(err.into()),
+        };
         let id = account.prv_key_data_id()?;
         let key_data = match self.wallet().get_prv_key_data(secret, id).await {
             Ok(Some(key_data)) => key_data,
@@ -1070,6 +1107,9 @@ impl KaspaCli {
     /// settle: on a mining wallet it never does, since every fee paid returns
     /// as a block reward within seconds.
     async fn wait_for_account(&self) -> Option<Arc<dyn Account>> {
+        if !self.has_ledger_account().await {
+            return None;
+        }
         for i in 0..60 {
             if let Ok(account) = self.wallet.account() {
                 let has_coins = account.utxo_context().mature_utxo_size() > 0
@@ -1184,8 +1224,8 @@ impl KaspaCli {
         // to ignore a line that one day will matter.
         let mut vanished: Option<(usize, u64)> = None;
         if notes > 0 && self.wallet.is_connected() {
-            if let Ok(account) = self.wallet.account() {
-                if let Ok(Some(result)) = kaspa_wallet_core::account::notepool::reconcile_held_notes(account).await {
+            {
+                if let Ok(Some(result)) = kaspa_wallet_core::account::notepool::reconcile_held_notes(&self.wallet).await {
                     if !result.moved_to_unknown.is_empty() {
                         let value: u64 = result
                             .moved_to_unknown
@@ -1322,247 +1362,248 @@ impl KaspaCli {
             return;
         }
         let abortable = Abortable::default();
-        let Some(account) = self.wait_for_account().await else {
-            self.auto_busy.store(false, Ordering::SeqCst);
-            return;
-        };
+        // None on a wallet that keeps notes only: steps 0–3 are the ledger's
+        // and are skipped; the notes are still tidied.
+        let account = self.wait_for_account().await;
         let Some(secret) = self.auto_secret.lock().unwrap().clone() else {
             self.auto_busy.store(false, Ordering::SeqCst);
             return;
         };
         let payment_secret = self.auto_payment_secret.lock().unwrap().clone();
 
-        // --- 0. is this more than an automatic process should start on its own? ---
-        //
-        // Automatic consolidation proceeds at a rate this wallet sets: a pass a
-        // minute, and SWEEP_TRANSACTIONS_PER_PASS transactions in a pass. Past
-        // a certain backlog that is hours of work on somebody's money, begun
-        // without being asked, and hours during which every pass is also
-        // minting and adding change of its own.
-        //
-        // A backlog that size means something has already gone wrong — income
-        // outrunning consolidation for a long time. The wallet says so and
-        // stops, rather than grinding through it quietly and leaving the person
-        // to wonder why their wallet has been busy since Tuesday.
-        let pieces = account.utxo_context().mature_utxo_size() as u64;
-        if pieces > AUTOMATIC_HOUSEKEEPING_CEILING {
-            if loud {
-                let minutes = pieces / coins_per_minute().max(1);
-                let ledger: u64 = account.utxo_context().utxo_entries_snapshot().0.iter().map(|entry| entry.amount()).sum();
-                tprintln!(self, "");
-                tprintln!(
-                    self,
-                    "{}",
-                    crate::ui::warn(format!(
-                        "{} ledger coin(s) worth {} {ticker} — too many to tidy up unattended.",
-                        pieces.separated_string(),
-                        crate::ui::ledger_amount(ledger)
-                    ))
-                );
-                tprintln!(
-                    self,
-                    "{}",
-                    crate::ui::dim(format!(
-                        "Consolidating them takes roughly {} at the rate this runs in the background,",
-                        humanised_minutes(minutes)
-                    ))
-                );
-                tprintln!(self, "{}", crate::ui::dim("so it is left to you rather than started without asking."));
-                tprintln!(self, "");
-                tprintln!(self, "{}", crate::ui::dim("  'sweep <amount>'   consolidate that much and stop — as many times as you like"));
-                tprintln!(self, "{}", crate::ui::dim("  'sweep'            consolidate all of it in one run"));
-                tprintln!(self, "");
-                tprintln!(self, "{}", crate::ui::dim("Minting is paused until the ledger is back to a workable size."));
-                tprintln!(self, "");
+        if let Some(account) = account.as_ref() {
+            // --- 0. is this more than an automatic process should start on its own? ---
+            //
+            // Automatic consolidation proceeds at a rate this wallet sets: a pass a
+            // minute, and SWEEP_TRANSACTIONS_PER_PASS transactions in a pass. Past
+            // a certain backlog that is hours of work on somebody's money, begun
+            // without being asked, and hours during which every pass is also
+            // minting and adding change of its own.
+            //
+            // A backlog that size means something has already gone wrong — income
+            // outrunning consolidation for a long time. The wallet says so and
+            // stops, rather than grinding through it quietly and leaving the person
+            // to wonder why their wallet has been busy since Tuesday.
+            let pieces = account.utxo_context().mature_utxo_size() as u64;
+            if pieces > AUTOMATIC_HOUSEKEEPING_CEILING {
+                if loud {
+                    let minutes = pieces / coins_per_minute().max(1);
+                    let ledger: u64 = account.utxo_context().utxo_entries_snapshot().0.iter().map(|entry| entry.amount()).sum();
+                    tprintln!(self, "");
+                    tprintln!(
+                        self,
+                        "{}",
+                        crate::ui::warn(format!(
+                            "{} ledger coin(s) worth {} {ticker} — too many to tidy up unattended.",
+                            pieces.separated_string(),
+                            crate::ui::ledger_amount(ledger)
+                        ))
+                    );
+                    tprintln!(
+                        self,
+                        "{}",
+                        crate::ui::dim(format!(
+                            "Consolidating them takes roughly {} at the rate this runs in the background,",
+                            humanised_minutes(minutes)
+                        ))
+                    );
+                    tprintln!(self, "{}", crate::ui::dim("so it is left to you rather than started without asking."));
+                    tprintln!(self, "");
+                    tprintln!(self, "{}", crate::ui::dim("  'sweep <amount>'   consolidate that much and stop — as many times as you like"));
+                    tprintln!(self, "{}", crate::ui::dim("  'sweep'            consolidate all of it in one run"));
+                    tprintln!(self, "");
+                    tprintln!(self, "{}", crate::ui::dim("Minting is paused until the ledger is back to a workable size."));
+                    tprintln!(self, "");
+                }
+                self.auto_busy.store(false, Ordering::SeqCst);
+                return;
             }
-            self.auto_busy.store(false, Ordering::SeqCst);
-            return;
-        }
 
-        // --- 1. turn the ledger into notes ---
-        // Minting comes FIRST because a mint IS a consolidation: it takes many
-        // mature coins as inputs and leaves notes plus a single change coin.
-        // Sweeping first spent the very coins the mint needed and pushed them
-        // into "pending", so the mint that followed saw almost nothing —
-        // 1.32 MAGLD of a 143,000 MAGLD ledger (founder report, 2026-09-06).
-        // The ordering above is what protects the mint, not a guard. This used
-        // to also refuse to mint while anything at all was unconfirmed, which
-        // was the same blunt instrument that starved the sweep below: any one
-        // outgoing transaction anywhere stopped the whole pipeline. Now that
-        // consolidation runs every pass, its transactions would have been in
-        // flight most of the time and the starvation would simply have moved
-        // from the sweep to the mint.
-        //
-        // What the mint actually needs is enough MATURE balance, which is
-        // checked directly below — and `mature` already excludes every coin a
-        // pending transaction has claimed.
-        let threshold = self.auto_mint_threshold();
-        if threshold > 0 {
-            // Read the coins, not the cached Balance — it is None during the
-            // window right after activation, which silently skipped minting.
-            let (mature_entries, _, _) = account.utxo_context().utxo_entries_snapshot();
-            let mature: u64 = mature_entries.iter().map(|entry| entry.amount()).sum();
-            if loud && mature < threshold {
-                let (_, pending, stasis) = account.utxo_context().utxo_entries_snapshot();
-                let waiting: u64 = pending.iter().chain(stasis.iter()).map(|e| e.amount()).sum();
-                if waiting > 0 {
-                    tprintln!(
-                        self,
-                        "Nothing to mint yet: {} {ticker} is confirming (threshold {}). It will be minted as it lands.",
-                        kaspa_wallet_core::utils::sompi_to_kaspa_string(waiting),
-                        kaspa_wallet_core::utils::sompi_to_kaspa_string(threshold)
-                    );
-                } else if mature > 0 {
-                    // Only when there is something there but not enough. An
-                    // empty ledger under a threshold is not news — it is the
-                    // normal state of every wallet that keeps its money as
-                    // notes, which is all of them, reported once per open.
-                    tprintln!(
-                        self,
-                        "Nothing to mint: ledger holds {} {ticker}, threshold is {}.",
-                        kaspa_wallet_core::utils::sompi_to_kaspa_string(mature),
-                        kaspa_wallet_core::utils::sompi_to_kaspa_string(threshold)
-                    );
+            // --- 1. turn the ledger into notes ---
+            // Minting comes FIRST because a mint IS a consolidation: it takes many
+            // mature coins as inputs and leaves notes plus a single change coin.
+            // Sweeping first spent the very coins the mint needed and pushed them
+            // into "pending", so the mint that followed saw almost nothing —
+            // 1.32 MAGLD of a 143,000 MAGLD ledger (founder report, 2026-09-06).
+            // The ordering above is what protects the mint, not a guard. This used
+            // to also refuse to mint while anything at all was unconfirmed, which
+            // was the same blunt instrument that starved the sweep below: any one
+            // outgoing transaction anywhere stopped the whole pipeline. Now that
+            // consolidation runs every pass, its transactions would have been in
+            // flight most of the time and the starvation would simply have moved
+            // from the sweep to the mint.
+            //
+            // What the mint actually needs is enough MATURE balance, which is
+            // checked directly below — and `mature` already excludes every coin a
+            // pending transaction has claimed.
+            let threshold = self.auto_mint_threshold();
+            if threshold > 0 {
+                // Read the coins, not the cached Balance — it is None during the
+                // window right after activation, which silently skipped minting.
+                let (mature_entries, _, _) = account.utxo_context().utxo_entries_snapshot();
+                let mature: u64 = mature_entries.iter().map(|entry| entry.amount()).sum();
+                if loud && mature < threshold {
+                    let (_, pending, stasis) = account.utxo_context().utxo_entries_snapshot();
+                    let waiting: u64 = pending.iter().chain(stasis.iter()).map(|e| e.amount()).sum();
+                    if waiting > 0 {
+                        tprintln!(
+                            self,
+                            "Nothing to mint yet: {} {ticker} is confirming (threshold {}). It will be minted as it lands.",
+                            kaspa_wallet_core::utils::sompi_to_kaspa_string(waiting),
+                            kaspa_wallet_core::utils::sompi_to_kaspa_string(threshold)
+                        );
+                    } else if mature > 0 {
+                        // Only when there is something there but not enough. An
+                        // empty ledger under a threshold is not news — it is the
+                        // normal state of every wallet that keeps its money as
+                        // notes, which is all of them, reported once per open.
+                        tprintln!(
+                            self,
+                            "Nothing to mint: ledger holds {} {ticker}, threshold is {}.",
+                            kaspa_wallet_core::utils::sompi_to_kaspa_string(mature),
+                            kaspa_wallet_core::utils::sompi_to_kaspa_string(threshold)
+                        );
+                    }
+                }
+                if mature >= threshold {
+                    let minted = async {
+                        // mint_max owns the sizing: the estimate cannot predict the
+                        // real transaction's shape, so it retries with a larger
+                        // change reserve rather than trusting a margin.
+                        let result = kaspa_wallet_core::account::notepool::mint_max(
+                            account.clone(),
+                            secret.clone(),
+                            payment_secret.clone(),
+                            None,
+                            &abortable,
+                            None,
+                        )
+                        .await?;
+                        Ok::<_, kaspa_wallet_core::error::Error>(result.map(|(amount, result)| (amount, result.notes.len())))
+                    }
+                    .await;
+                    match minted {
+                        Ok(Some((amount, notes))) => {
+                            if loud {
+                                tprintln!(
+                                    self,
+                                    "Minted {} {ticker} into {notes} note(s).",
+                                    kaspa_wallet_core::utils::sompi_to_kaspa_string(amount)
+                                );
+                            }
+                        }
+                        Ok(None) => {
+                            if loud {
+                                tprintln!(self, "Nothing mintable right now (the fee would exceed what is there).");
+                            }
+                        }
+                        Err(err) => {
+                            // A decrypt failure will fail identically forever.
+                            // Retrying it every minute in silence is how an
+                            // automation ends up doing nothing for a week without
+                            // anyone noticing, so this one always speaks up.
+                            if matches!(
+                                err,
+                                kaspa_wallet_core::error::Error::Chacha20poly1305(_)
+                                    | kaspa_wallet_core::error::Error::WalletDecrypt(_)
+                            ) {
+                                self.disarm_auto_mint();
+                                tprintln!(self, "Auto-mint turned itself off: the stored password no longer opens this wallet.");
+                                tprintln!(self, "Run 'auto on' and enter it again.");
+                            } else if loud {
+                                tprintln!(self, "Minting stopped: {err}");
+                            }
+                        }
+                    }
                 }
             }
-            if mature >= threshold {
-                let minted = async {
-                    // mint_max owns the sizing: the estimate cannot predict the
-                    // real transaction's shape, so it retries with a larger
-                    // change reserve rather than trusting a margin.
-                    let result = kaspa_wallet_core::account::notepool::mint_max(
-                        account.clone(),
-                        secret.clone(),
-                        payment_secret.clone(),
-                        None,
-                        &abortable,
-                        None,
-                    )
-                    .await?;
-                    Ok::<_, kaspa_wallet_core::error::Error>(result.map(|(amount, result)| (amount, result.notes.len())))
+
+            // --- 2. consolidate whatever minting could not take ---
+            // Only what the mint left behind: change, dust below a whole petal,
+            // and coins that arrived while it ran.
+            // Deliberately NOT gated on unconfirmed spends, unlike the mint above.
+            //
+            // It used to be, and that guard is what let this wallet reach
+            // 4,439,373 coins. The mint runs first and registers its transactions
+            // as outgoing, so by the time this line was reached there were always
+            // unconfirmed spends — the ones the mint had just made. On a wallet
+            // with income arriving continuously the mint always has something to
+            // do, so the sweep was skipped on every single pass and the coin count
+            // only ever grew. Step one guaranteed step two would not run.
+            //
+            // The guard was never needed for safety either: registering an
+            // outgoing transaction removes its inputs from `mature` (see
+            // `UtxoContext::register_outgoing_transaction`), so a sweep starting
+            // here can only see coins the mint did not take.
+            let sweep_threshold = self.auto_sweep_threshold();
+            // Re-read: the mint above has just spent some of them.
+            let pieces = account.utxo_context().mature_utxo_size() as u64;
+            if sweep_threshold > 0 && pieces > sweep_threshold {
+                if loud {
+                    tprintln!(self, "Consolidating {} ledger pieces — this can take a while...", pieces.separated_string());
                 }
-                .await;
-                match minted {
-                    Ok(Some((amount, notes))) => {
+                let notifier: Option<kaspa_wallet_core::account::GenerationNotifier> = None;
+                // Bounded, because housekeeping is one task: minting and
+                // consolidation run in sequence, so an unbounded sweep on a large
+                // wallet stops the wallet minting for as long as it takes. A pass
+                // this size clears roughly a million coins an hour while leaving
+                // the minute's minting to happen.
+                const SWEEP_TRANSACTIONS_PER_PASS: usize = SWEEP_TRANSACTIONS_PER_PASS_CONST;
+                match account
+                    .clone()
+                    .sweep(secret.clone(), payment_secret.clone(), None, &abortable, notifier, None, Some(SWEEP_TRANSACTIONS_PER_PASS))
+                    .await
+                {
+                    Ok(summary) => {
                         if loud {
                             tprintln!(
                                 self,
-                                "Minted {} {ticker} into {notes} note(s).",
-                                kaspa_wallet_core::utils::sompi_to_kaspa_string(amount)
+                                "Consolidated (fees {} {ticker}).",
+                                kaspa_wallet_core::utils::sompi_to_kaspa_string(summary.0.aggregate_fees())
                             );
                         }
-                    }
-                    Ok(None) => {
+                        // No waiting here for the swept coins to confirm: that
+                        // wait was racing the chain and breaking early, and there
+                        // is nothing to race for. The next housekeeping run mints
+                        // them once they are actually mature.
                         if loud {
-                            tprintln!(self, "Nothing mintable right now (the fee would exceed what is there).");
+                            tprintln!(self, "The consolidated coins will be minted once they confirm.");
                         }
                     }
                     Err(err) => {
-                        // A decrypt failure will fail identically forever.
-                        // Retrying it every minute in silence is how an
-                        // automation ends up doing nothing for a week without
-                        // anyone noticing, so this one always speaks up.
-                        if matches!(
-                            err,
-                            kaspa_wallet_core::error::Error::Chacha20poly1305(_)
-                                | kaspa_wallet_core::error::Error::WalletDecrypt(_)
-                        ) {
-                            self.disarm_auto_mint();
-                            tprintln!(self, "Auto-mint turned itself off: the stored password no longer opens this wallet.");
-                            tprintln!(self, "Run 'auto on' and enter it again.");
-                        } else if loud {
-                            tprintln!(self, "Minting stopped: {err}");
+                        if loud {
+                            tprintln!(self, "Consolidation stopped: {err}");
                         }
                     }
                 }
             }
-        }
 
-        // --- 2. consolidate whatever minting could not take ---
-        // Only what the mint left behind: change, dust below a whole petal,
-        // and coins that arrived while it ran.
-        // Deliberately NOT gated on unconfirmed spends, unlike the mint above.
-        //
-        // It used to be, and that guard is what let this wallet reach
-        // 4,439,373 coins. The mint runs first and registers its transactions
-        // as outgoing, so by the time this line was reached there were always
-        // unconfirmed spends — the ones the mint had just made. On a wallet
-        // with income arriving continuously the mint always has something to
-        // do, so the sweep was skipped on every single pass and the coin count
-        // only ever grew. Step one guaranteed step two would not run.
-        //
-        // The guard was never needed for safety either: registering an
-        // outgoing transaction removes its inputs from `mature` (see
-        // `UtxoContext::register_outgoing_transaction`), so a sweep starting
-        // here can only see coins the mint did not take.
-        let sweep_threshold = self.auto_sweep_threshold();
-        // Re-read: the mint above has just spent some of them.
-        let pieces = account.utxo_context().mature_utxo_size() as u64;
-        if sweep_threshold > 0 && pieces > sweep_threshold {
-            if loud {
-                tprintln!(self, "Consolidating {} ledger pieces — this can take a while...", pieces.separated_string());
-            }
-            let notifier: Option<kaspa_wallet_core::account::GenerationNotifier> = None;
-            // Bounded, because housekeeping is one task: minting and
-            // consolidation run in sequence, so an unbounded sweep on a large
-            // wallet stops the wallet minting for as long as it takes. A pass
-            // this size clears roughly a million coins an hour while leaving
-            // the minute's minting to happen.
-            const SWEEP_TRANSACTIONS_PER_PASS: usize = SWEEP_TRANSACTIONS_PER_PASS_CONST;
-            match account
-                .clone()
-                .sweep(secret.clone(), payment_secret.clone(), None, &abortable, notifier, None, Some(SWEEP_TRANSACTIONS_PER_PASS))
-                .await
-            {
-                Ok(summary) => {
-                    if loud {
-                        tprintln!(
-                            self,
-                            "Consolidated (fees {} {ticker}).",
-                            kaspa_wallet_core::utils::sompi_to_kaspa_string(summary.0.aggregate_fees())
-                        );
-                    }
-                    // No waiting here for the swept coins to confirm: that
-                    // wait was racing the chain and breaking early, and there
-                    // is nothing to race for. The next housekeeping run mints
-                    // them once they are actually mature.
-                    if loud {
-                        tprintln!(self, "The consolidated coins will be minted once they confirm.");
-                    }
-                }
-                Err(err) => {
-                    if loud {
-                        tprintln!(self, "Consolidation stopped: {err}");
-                    }
-                }
-            }
-        }
-
-        // --- 3. remove recovery keys no account uses ---
-        // Left behind by an interrupted 'account create'; they hold nothing
-        // and no address can have received to them. Cleaning them up is
-        // housekeeping, not a decision to put to the user.
-        if let Ok(store) = self.wallet.store().as_prv_key_data_store() {
-            if let Ok(mut stream) = store.iter().await {
-                let mut orphans = Vec::new();
-                let guard = self.wallet.guard();
-                let guard = guard.lock().await;
-                while let Ok(Some(info)) = stream.try_next().await {
-                    if let Ok(mut accounts) = self.wallet.accounts(Some(info.id), &guard).await {
-                        if accounts.try_next().await.ok().flatten().is_none() {
-                            orphans.push(info.id);
+            // --- 3. remove recovery keys no account uses ---
+            // Left behind by an interrupted 'account create'; they hold nothing
+            // and no address can have received to them. Cleaning them up is
+            // housekeeping, not a decision to put to the user.
+            if let Ok(store) = self.wallet.store().as_prv_key_data_store() {
+                if let Ok(mut stream) = store.iter().await {
+                    let mut orphans = Vec::new();
+                    let guard = self.wallet.guard();
+                    let guard = guard.lock().await;
+                    while let Ok(Some(info)) = stream.try_next().await {
+                        if let Ok(mut accounts) = self.wallet.accounts(Some(info.id), &guard).await {
+                            if accounts.try_next().await.ok().flatten().is_none() {
+                                orphans.push(info.id);
+                            }
                         }
                     }
-                }
-                drop(guard);
-                if !orphans.is_empty() {
-                    let removed = orphans.len();
-                    for id in orphans {
-                        store.remove(&secret, &id).await.ok();
-                    }
-                    self.wallet.store().commit(&secret).await.ok();
-                    if loud {
-                        tprintln!(self, "Removed {removed} unused recovery key(s).");
+                    drop(guard);
+                    if !orphans.is_empty() {
+                        let removed = orphans.len();
+                        for id in orphans {
+                            store.remove(&secret, &id).await.ok();
+                        }
+                        self.wallet.store().commit(&secret).await.ok();
+                        if loud {
+                            tprintln!(self, "Removed {removed} unused recovery key(s).");
+                        }
                     }
                 }
             }
@@ -1579,7 +1620,7 @@ impl KaspaCli {
         // marked Superseded at submit time, so plan_merges cannot pick them
         // twice — the double-spend the gate was guarding against is handled
         // where it actually applies.
-        match kaspa_wallet_core::account::notepool::merge_held_notes(account, secret, 250).await {
+        match kaspa_wallet_core::account::notepool::merge_held_notes(&self.wallet, secret, 250).await {
             Ok((merged, failure)) => {
                 if merged > 0 && loud {
                     tprintln!(self, "Consolidated {merged} group(s) of ten notes into larger ones.");
@@ -2188,6 +2229,11 @@ impl KaspaCli {
         if let Ok(account) = self.wallet.account() {
             Ok(account)
         } else {
+            // Nothing to select from on a wallet that keeps notes only —
+            // say so, rather than "no accounts", which reads as a fault.
+            if !self.has_ledger_account().await {
+                return self.ledger_account().await;
+            }
             let account = self.select_account().await?;
             self.wallet.select(Some(&account)).await?;
             Ok(account)

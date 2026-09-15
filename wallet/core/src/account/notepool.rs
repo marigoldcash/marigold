@@ -233,7 +233,32 @@ pub async fn redeem_to(
     selection: RedeemSelection,
     destination: Option<(Address, u64)>,
 ) -> Result<RedeemResult> {
-    let note_key_store = account.wallet().store().as_note_key_store()?;
+    let change = account.change_address()?;
+    redeem_with(account.wallet(), wallet_secret, selection, destination, Some(change)).await
+}
+
+/// The redeem itself, bound to a wallet rather than an account. `change` is
+/// where value beyond the destination amount (less the fee) goes; a wallet
+/// that keeps notes only has no such place (FORK-PLAN P8.0b), and passes
+/// `None`. Then the notes must cover the destination amount to within one
+/// [`FEE_QUANTUM_PETALS`], and the whole redeemed value less the fee goes to
+/// the destination — a deposit may arrive a fraction over what was asked,
+/// never under. Anything further over is refused rather than handed to the
+/// recipient or the miner: a `RedeemOp` cannot produce a note, so there is
+/// nowhere else for it to go.
+pub async fn redeem_with(
+    wallet: &Arc<Wallet>,
+    wallet_secret: Secret,
+    selection: RedeemSelection,
+    destination: Option<(Address, u64)>,
+    change: Option<Address>,
+) -> Result<RedeemResult> {
+    let note_key_store = wallet.store().as_note_key_store()?;
+    let change_script = match (&change, &destination) {
+        (Some(address), _) => Some(pay_to_address_script(address)),
+        (None, Some(_)) => None,
+        (None, None) => return Err(Error::Custom("redeem: this wallet keeps notes only — there is no ledger to redeem to".to_string())),
+    };
 
     let serials = match selection {
         RedeemSelection::Serials(serials) => {
@@ -297,15 +322,12 @@ pub async fn redeem_to(
         groups_by_sk.entry(entry.sk).or_default().push(entry.sn);
     }
 
-    let network_id = account.utxo_context().processor().network_id()?;
+    let network_id = wallet.network_id()?;
     let params = Params::from(network_id);
     let mass_calculator = MassCalculator::new_with_consensus_params(&params);
 
-    let server_info = account.wallet().rpc_api().get_server_info().await?;
+    let server_info = wallet.rpc_api().get_server_info().await?;
     let freshness = FreshnessAnchor { anchor_daa_score: server_info.virtual_daa_score };
-
-    let change_address = account.change_address()?;
-    let script_public_key = pay_to_address_script(&change_address);
 
     // `PoolOp::Redeem`'s borsh tag / `NotePoolSigningHash` op_type byte (notepool/mod.rs
     // `PoolOp::op_type()`) — pinned as a constant here rather than round-tripping
@@ -321,12 +343,14 @@ pub async fn redeem_to(
     // Placeholder must have the same OUTPUT COUNT as the final transaction —
     // mass (and therefore the fee) depends on it, and a two-output redeem
     // costs more than a one-output one.
-    let placeholder_outputs = match &destination {
-        None => vec![TransactionOutput::new(redeemed_value_petals, script_public_key.clone())],
-        Some((address, petals)) => vec![
+    let placeholder_outputs = match (&destination, &change_script) {
+        (None, Some(change_script)) => vec![TransactionOutput::new(redeemed_value_petals, change_script.clone())],
+        (Some((address, petals)), Some(change_script)) => vec![
             TransactionOutput::new(*petals, pay_to_address_script(address)),
-            TransactionOutput::new(redeemed_value_petals.saturating_sub(*petals), script_public_key.clone()),
+            TransactionOutput::new(redeemed_value_petals.saturating_sub(*petals), change_script.clone()),
         ],
+        (Some((address, _)), None) => vec![TransactionOutput::new(redeemed_value_petals, pay_to_address_script(address))],
+        (None, None) => unreachable!("rejected above"),
     };
     let placeholder_tx =
         Transaction::new(TX_VERSION_TOCCATA, vec![], placeholder_outputs, 0, SUBNETWORK_ID_NOTE_POOL, 0, placeholder_payload);
@@ -345,7 +369,7 @@ pub async fn redeem_to(
     // And the same feerate floor: the node's estimate is a priority signal
     // reporting 1 petal per gram, while the mempool refuses anything under its
     // 100-per-gram relay minimum however patient the sender.
-    let feerate = match account.wallet().rpc_api().get_fee_estimate().await {
+    let feerate = match wallet.rpc_api().get_fee_estimate().await {
         Ok(estimate) => estimate.normal_buckets.first().map(|b| b.feerate).unwrap_or(1.0),
         Err(_) => 1.0,
     }
@@ -358,9 +382,9 @@ pub async fn redeem_to(
         )));
     }
     let output_value = redeemed_value_petals - fee_petals;
-    let outputs = match &destination {
-        None => vec![TransactionOutput::new(output_value, script_public_key)],
-        Some((address, petals)) => {
+    let outputs = match (&destination, change_script) {
+        (None, Some(change_script)) => vec![TransactionOutput::new(output_value, change_script)],
+        (Some((address, petals)), Some(change_script)) => {
             if *petals > output_value {
                 return Err(Error::Custom(format!(
                     "redeemed value after fee ({output_value} petals) does not cover the requested payment ({petals} petals)"
@@ -371,10 +395,29 @@ pub async fn redeem_to(
             // Dust-sized change is left to the fee rather than created as an
             // unspendable output.
             if change >= DENOMINATION_PETALS[0] {
-                outputs.push(TransactionOutput::new(change, script_public_key));
+                outputs.push(TransactionOutput::new(change, change_script));
             }
             outputs
         }
+        (Some((address, petals)), None) => {
+            if *petals > output_value {
+                return Err(Error::Custom(format!(
+                    "redeemed value after fee ({output_value} petals) does not cover the requested payment ({petals} petals)"
+                )));
+            }
+            let over = redeemed_value_petals - petals;
+            if over > FEE_QUANTUM_PETALS {
+                return Err(Error::Custom(format!(
+                    "the notes chosen come to {}, which is {} over the {} asked for, and this wallet has no ledger to return the difference to — pick an amount your notes cover to within {}, or 'account create bip32' adds a ledger",
+                    crate::utils::sompi_to_kaspa_string(redeemed_value_petals),
+                    crate::utils::sompi_to_kaspa_string(over),
+                    crate::utils::sompi_to_kaspa_string(*petals),
+                    crate::utils::sompi_to_kaspa_string(FEE_QUANTUM_PETALS)
+                )));
+            }
+            vec![TransactionOutput::new(output_value, pay_to_address_script(address))]
+        }
+        (None, None) => unreachable!("rejected above"),
     };
     let outputs_hash = transparent_outputs_hash(&outputs);
 
@@ -393,7 +436,7 @@ pub async fn redeem_to(
     tx.set_storage_mass(contextual);
 
     let rpc_tx: kaspa_rpc_core::RpcTransaction = (&tx).into();
-    let transaction_id = account.wallet().rpc_api().submit_transaction(rpc_tx, false).await?;
+    let transaction_id = wallet.rpc_api().submit_transaction(rpc_tx, false).await?;
 
     // The redeemed serials are gone from the pool the instant this transaction
     // confirms; mark them superseded now (plaintext-only, matches how the P7.1
@@ -632,7 +675,7 @@ pub struct TransferResult {
 /// transaction, persists the own rows (`serial_hash(txid, index)` with external
 /// payment notes occupying the leading indices) and tombstones everything consumed.
 async fn submit_transfer(
-    account: &Arc<dyn Account>,
+    wallet: &Arc<Wallet>,
     wallet_secret: &Secret,
     consumed_entries: &[NoteKeyEntry],
     external: &[NewNote],
@@ -663,7 +706,7 @@ async fn submit_transfer(
     let payload = PoolOp::Transfer(TransferOp { consumed: signed_groups, produced: produced.clone(), freshness }).encode_payload();
     let tx = Transaction::new(TX_VERSION_TOCCATA, vec![], vec![], 0, SUBNETWORK_ID_NOTE_POOL, 0, payload);
 
-    let network_id = account.utxo_context().processor().network_id()?;
+    let network_id = wallet.network_id()?;
     let mass_calculator = MassCalculator::new_with_consensus_params(&Params::from(network_id));
     let populated = PopulatedTransaction::new(&tx, vec![]);
     let storage_mass = mass_calculator
@@ -673,9 +716,9 @@ async fn submit_transfer(
     tx.set_storage_mass(storage_mass);
 
     let rpc_tx: kaspa_rpc_core::RpcTransaction = (&tx).into();
-    let transaction_id = account.wallet().rpc_api().submit_transaction(rpc_tx, false).await?;
+    let transaction_id = wallet.rpc_api().submit_transaction(rpc_tx, false).await?;
 
-    let note_key_store = account.wallet().store().as_note_key_store()?;
+    let note_key_store = wallet.store().as_note_key_store()?;
     let external_serials: Vec<Hash> = (0..external.len()).map(|i| serial_hash(&transaction_id, i as u32)).collect();
     let mut own_notes = Vec::with_capacity(own_fresh.len());
     for (offset, fresh) in own_fresh.iter().enumerate() {
@@ -694,8 +737,8 @@ async fn submit_transfer(
 
 /// Shared fee/feerate plumbing: the estimated feerate (sompi per gram) to size a
 /// transfer's fee quanta against, mirroring `redeem`'s sourcing.
-async fn transfer_feerate(account: &Arc<dyn Account>) -> f64 {
-    let estimated = match account.wallet().rpc_api().get_fee_estimate().await {
+async fn transfer_feerate(wallet: &Arc<Wallet>) -> f64 {
+    let estimated = match wallet.rpc_api().get_fee_estimate().await {
         Ok(estimate) => estimate.normal_buckets.first().map(|b| b.feerate).unwrap_or(1.0),
         Err(_) => 1.0,
     };
@@ -720,11 +763,11 @@ fn required_fee_quanta(mass: u64, feerate: f64) -> u64 {
 /// returned as change) — or, when the wallet holds nothing else, withheld from the
 /// rotated value itself ("slack mode": the produced decomposition simply comes out
 /// one fee-quantum short, the bootstrap case for a first-ever bearer receive).
-pub async fn rotate_notes(account: Arc<dyn Account>, wallet_secret: Secret, serials: Vec<Hash>) -> Result<TransferResult> {
+pub async fn rotate_notes(wallet: &Arc<Wallet>, wallet_secret: Secret, serials: Vec<Hash>) -> Result<TransferResult> {
     if serials.is_empty() {
         return Err(Error::Custom("no serials given to rotate".to_string()));
     }
-    let note_key_store = account.wallet().store().as_note_key_store()?;
+    let note_key_store = wallet.store().as_note_key_store()?;
 
     let mut rotate_entries = Vec::with_capacity(serials.len());
     for sn in &serials {
@@ -746,15 +789,15 @@ pub async fn rotate_notes(account: Arc<dyn Account>, wallet_secret: Secret, seri
         .try_filter(|info| futures::future::ready(info.status == NoteStatus::Active && !serials.contains(&info.sn)))
         .try_collect()
         .await?;
-    let spare_confirmed = pool_confirmed(&account, spares.iter().map(|info| info.sn).collect()).await?;
+    let spare_confirmed = pool_confirmed(wallet, spares.iter().map(|info| info.sn).collect()).await?;
     spares.retain(|info| spare_confirmed.contains(&info.sn));
     spares.sort_by_key(|info| DENOMINATION_PETALS[info.d as usize]);
 
-    let network_id = account.utxo_context().processor().network_id()?;
+    let network_id = wallet.network_id()?;
     let mass_calculator = MassCalculator::new_with_consensus_params(&Params::from(network_id));
-    let server_info = account.wallet().rpc_api().get_server_info().await?;
+    let server_info = wallet.rpc_api().get_server_info().await?;
     let freshness = FreshnessAnchor { anchor_daa_score: server_info.virtual_daa_score };
-    let feerate = transfer_feerate(&account).await;
+    let feerate = transfer_feerate(wallet).await;
 
     let mut fee_quanta: u64 = 1;
     // Bounded fixpoint: the fee affects the change/produced shape, which affects
@@ -828,7 +871,7 @@ pub async fn rotate_notes(account: Arc<dyn Account>, wallet_secret: Secret, seri
         }
         let own_fresh = generate_fresh_notes(&produced_denoms);
         return submit_transfer(
-            &account,
+            wallet,
             &wallet_secret,
             &consumed_entries,
             &[],
@@ -853,13 +896,13 @@ pub struct BearerImportResult {
 /// **immediately** rotate it to a fresh Cold key. The note is not considered
 /// received until that rotation confirms; the caller reports confirmation by
 /// watching the rotation's own serials.
-pub async fn bearer_import(account: Arc<dyn Account>, wallet_secret: Secret, bearer: BearerNote) -> Result<BearerImportResult> {
+pub async fn bearer_import(wallet: &Arc<Wallet>, wallet_secret: Secret, bearer: BearerNote) -> Result<BearerImportResult> {
     let secret_key = SecretKey::from_slice(&bearer.sk).map_err(|e| Error::Custom(format!("invalid bearer secret key: {e}")))?;
     let derived_pk = Keypair::from_secret_key(SECP256K1, &secret_key).x_only_public_key().0.serialize();
 
     // Verify against live pool state before touching the wallet: the serial must
     // exist, still be owned by exactly this key, and carry the claimed denomination.
-    let on_chain = account.wallet().rpc_api().get_notes_by_serial(vec![bearer.sn]).await?;
+    let on_chain = wallet.rpc_api().get_notes_by_serial(vec![bearer.sn]).await?;
     let entry = on_chain
         .iter()
         .find(|entry| entry.sn == bearer.sn)
@@ -877,11 +920,11 @@ pub async fn bearer_import(account: Arc<dyn Account>, wallet_secret: Secret, bea
         )));
     }
 
-    let note_key_store = account.wallet().store().as_note_key_store()?;
+    let note_key_store = wallet.store().as_note_key_store()?;
     note_key_store.import_bearer_key(&wallet_secret, bearer.sn, bearer.sk, bearer.d).await?;
 
     // The hot-key rule (POOL-SPEC.md P5.6): rotate immediately, not lazily.
-    let rotation = rotate_notes(account, wallet_secret, vec![bearer.sn]).await?;
+    let rotation = rotate_notes(wallet, wallet_secret, vec![bearer.sn]).await?;
     Ok(BearerImportResult { imported_sn: bearer.sn, rotation })
 }
 
@@ -907,7 +950,7 @@ pub async fn create_payment_request(wallet: &Arc<Wallet>, wallet_secret: &Secret
 /// change, and fee in one `TransferOp` (POOL-SPEC.md P5.6: "'split then pay' is one
 /// `TransferOp`, not two sequential ones").
 pub async fn pay_payment_request(
-    account: Arc<dyn Account>,
+    wallet: &Arc<Wallet>,
     wallet_secret: Secret,
     request: PaymentRequest,
     amount_override: Option<u64>,
@@ -920,7 +963,7 @@ pub async fn pay_payment_request(
         .ok_or_else(|| Error::Custom(format!("{amount} petals is not representable (must be a nonzero multiple of 0.01 MAGLD)")))?;
     let external: Vec<NewNote> = payment_denoms.iter().map(|d| NewNote { d: *d, pk: request.pk }).collect();
 
-    let note_key_store = account.wallet().store().as_note_key_store()?;
+    let note_key_store = wallet.store().as_note_key_store()?;
     let active: Vec<Arc<NoteKeyInfo>> = note_key_store
         .iter()
         .await?
@@ -929,11 +972,11 @@ pub async fn pay_payment_request(
         .await?;
     let held_total: u64 = active.iter().map(|info| DENOMINATION_PETALS[info.d as usize]).sum();
 
-    let network_id = account.utxo_context().processor().network_id()?;
+    let network_id = wallet.network_id()?;
     let mass_calculator = MassCalculator::new_with_consensus_params(&Params::from(network_id));
-    let server_info = account.wallet().rpc_api().get_server_info().await?;
+    let server_info = wallet.rpc_api().get_server_info().await?;
     let freshness = FreshnessAnchor { anchor_daa_score: server_info.virtual_daa_score };
-    let feerate = transfer_feerate(&account).await;
+    let feerate = transfer_feerate(wallet).await;
 
     let mut fee_quanta: u64 = 1;
     for _ in 0..8 {
@@ -973,7 +1016,7 @@ pub async fn pay_payment_request(
         }
         let own_fresh = generate_fresh_notes(&change_denoms);
         return submit_transfer(
-            &account,
+            wallet,
             &wallet_secret,
             &consumed_entries,
             &external,
@@ -1005,8 +1048,8 @@ pub struct BearerExportResult {
 /// [`rotate_notes`]; the exported payload then carries the isolated serial. The
 /// handed-over row is marked [`NoteStatus::HandedOver`] — excluded from balance and
 /// selection, flipping to `Superseded` when the receiver's rotation is observed.
-pub async fn bearer_export(account: Arc<dyn Account>, wallet_secret: Secret, sn: Hash) -> Result<BearerExportResult> {
-    let note_key_store = account.wallet().store().as_note_key_store()?;
+pub async fn bearer_export(wallet: &Arc<Wallet>, wallet_secret: Secret, sn: Hash) -> Result<BearerExportResult> {
+    let note_key_store = wallet.store().as_note_key_store()?;
     let info = note_key_store.load_info(&sn).await?.ok_or_else(|| Error::Custom(format!("serial {sn} is not in the note key database")))?;
     if info.status != NoteStatus::Active {
         return Err(Error::Custom(format!("serial {sn} is not active ({:?})", info.status)));
@@ -1035,7 +1078,7 @@ pub async fn bearer_export(account: Arc<dyn Account>, wallet_secret: Secret, sn:
         return Ok(BearerExportResult { bearer: BearerNote { sn, sk: entry.sk, d: entry.d }, isolation: None });
     }
 
-    let rotation = rotate_notes(account, wallet_secret, vec![sn]).await?;
+    let rotation = rotate_notes(wallet, wallet_secret, vec![sn]).await?;
     let isolated = rotation
         .own_notes
         .iter()
@@ -1178,20 +1221,19 @@ pub struct PosCheckoutResult {
 /// anything can be paid, but `pos_checkout` only *returns* once the whole sale
 /// (payment + sweep) is done.
 pub async fn pos_checkout(
-    account: Arc<dyn Account>,
+    wallet: &Arc<Wallet>,
     wallet_secret: Secret,
     amount_petals: u64,
     timeout: Duration,
     on_request: Option<PosCheckoutRequestHook>,
 ) -> Result<PosCheckoutResult> {
-    let wallet = account.wallet().clone();
-    let request = create_payment_request(&wallet, &wallet_secret, Some(amount_petals)).await?;
+    let request = create_payment_request(wallet, &wallet_secret, Some(amount_petals)).await?;
     if let Some(on_request) = on_request {
         on_request(&request);
     }
-    let claimed = await_payment_request(&wallet, &wallet_secret, request.pk, timeout).await?;
+    let claimed = await_payment_request(wallet, &wallet_secret, request.pk, timeout).await?;
     let serials: Vec<Hash> = claimed.notes.iter().map(|n| n.sn).collect();
-    let sweep = rotate_notes(account, wallet_secret, serials).await?;
+    let sweep = rotate_notes(wallet, wallet_secret, serials).await?;
     Ok(PosCheckoutResult { request, claimed, sweep })
 }
 
@@ -1219,8 +1261,8 @@ pub struct LightVerifyReport {
 /// Check every `Active` row's claimed `(pk, d)` against live `PoolState` — the
 /// "confirm a backup's health without restoring" capability from DECISIONS.md.
 /// Reads only the plaintext `NoteKeyInfo` index (`iter()`); never touches `sk`.
-pub async fn light_verify(account: Arc<dyn Account>) -> Result<LightVerifyReport> {
-    let note_key_store = account.wallet().store().as_note_key_store()?;
+pub async fn light_verify(wallet: &Arc<Wallet>) -> Result<LightVerifyReport> {
+    let note_key_store = wallet.store().as_note_key_store()?;
     let active: Vec<Arc<NoteKeyInfo>> = note_key_store
         .iter()
         .await?
@@ -1232,7 +1274,7 @@ pub async fn light_verify(account: Arc<dyn Account>) -> Result<LightVerifyReport
     }
 
     let serials: Vec<Hash> = active.iter().map(|info| info.sn).collect();
-    let on_chain = account.wallet().rpc_api().get_notes_by_serial(serials).await?;
+    let on_chain = wallet.rpc_api().get_notes_by_serial(serials).await?;
     let mut report = LightVerifyReport::default();
     for info in &active {
         match on_chain.iter().find(|entry| entry.sn == info.sn) {
@@ -1257,8 +1299,8 @@ pub struct DeepVerifyReport {
 /// against both the stored index (catches corruption) and the live pool (catches
 /// spent-elsewhere) — POOL-SPEC.md P5.6's mandatory first step of an actual
 /// restore. One `get_notes_by_serial` call total, not one per note.
-pub async fn deep_verify(account: Arc<dyn Account>, wallet_secret: Secret) -> Result<DeepVerifyReport> {
-    let note_key_store = account.wallet().store().as_note_key_store()?;
+pub async fn deep_verify(wallet: &Arc<Wallet>, wallet_secret: Secret) -> Result<DeepVerifyReport> {
+    let note_key_store = wallet.store().as_note_key_store()?;
     let active: Vec<Arc<NoteKeyInfo>> = note_key_store
         .iter()
         .await?
@@ -1271,7 +1313,7 @@ pub async fn deep_verify(account: Arc<dyn Account>, wallet_secret: Secret) -> Re
     }
 
     let serials: Vec<Hash> = active.iter().map(|info| info.sn).collect();
-    let on_chain = account.wallet().rpc_api().get_notes_by_serial(serials).await?;
+    let on_chain = wallet.rpc_api().get_notes_by_serial(serials).await?;
 
     for info in &active {
         // A decrypt failure (corrupted ciphertext) surfaces as `Err`, not `Ok(None)`
@@ -1339,8 +1381,8 @@ pub async fn light_verify_vault(
 /// call sites since it's the one place that legitimately holds every held `sk` in
 /// memory at once (paper export's whole point); everywhere else in this module
 /// touches only the notes a single operation actually selects.
-pub async fn export_active_entries(account: Arc<dyn Account>, wallet_secret: Secret) -> Result<Vec<NoteKeyEntry>> {
-    let note_key_store = account.wallet().store().as_note_key_store()?;
+pub async fn export_active_entries(wallet: &Arc<Wallet>, wallet_secret: Secret) -> Result<Vec<NoteKeyEntry>> {
+    let note_key_store = wallet.store().as_note_key_store()?;
     let active: Vec<Arc<NoteKeyInfo>> = note_key_store
         .iter()
         .await?
@@ -2074,8 +2116,8 @@ pub const STAMP_MERGE_TRIGGER: usize = 100;
 /// so a transaction that never lands leaves a note in the vault that exists
 /// nowhere else. Balance cannot detect that on its own — it reports belief, not
 /// fact — so this asks the node directly.
-pub async fn verify_held_notes(account: Arc<dyn Account>) -> Result<(Vec<Arc<NoteKeyInfo>>, Vec<Arc<NoteKeyInfo>>)> {
-    let note_key_store = account.wallet().store().as_note_key_store()?;
+pub async fn verify_held_notes(wallet: &Arc<Wallet>) -> Result<(Vec<Arc<NoteKeyInfo>>, Vec<Arc<NoteKeyInfo>>)> {
+    let note_key_store = wallet.store().as_note_key_store()?;
 
     // Notes written in the last couple of minutes are in flight, not lost. A
     // note is stored the instant its transaction is submitted, so a mint that
@@ -2099,7 +2141,7 @@ pub async fn verify_held_notes(account: Arc<dyn Account>) -> Result<(Vec<Arc<Not
     // Chunked: a mining wallet can hold thousands of notes, and one query
     // carrying every serial is a needlessly large request to build and parse.
     for chunk in held.chunks(500) {
-        let confirmed = pool_confirmed(&account, chunk.iter().map(|i| i.sn).collect()).await?;
+        let confirmed = pool_confirmed(wallet, chunk.iter().map(|i| i.sn).collect()).await?;
         for info in chunk {
             if confirmed.contains(&info.sn) {
                 present.push(info.clone());
@@ -2143,12 +2185,12 @@ pub struct Reconciliation {
 /// [`NoteStatus::Unknown`], where an archival lookup can later say whether the
 /// transaction that would have created it ever landed — and therefore whether
 /// this was money spent or money that never moved.
-pub async fn reconcile_held_notes(account: Arc<dyn Account>) -> Result<Option<Reconciliation>> {
-    if !account.wallet().utxo_processor().is_synced() {
+pub async fn reconcile_held_notes(wallet: &Arc<Wallet>) -> Result<Option<Reconciliation>> {
+    if !wallet.utxo_processor().is_synced() {
         return Ok(None);
     }
-    let note_key_store = account.wallet().store().as_note_key_store()?;
-    let (present, phantom) = verify_held_notes(account.clone()).await?;
+    let note_key_store = wallet.store().as_note_key_store()?;
+    let (present, phantom) = verify_held_notes(wallet).await?;
 
     // A serial that turned up cancels whatever it had accumulated.
     for info in &present {
@@ -2179,16 +2221,16 @@ pub async fn reconcile_held_notes(account: Arc<dyn Account>) -> Result<Option<Re
 /// outright. A failed query is an error, never an empty set: silently reading
 /// as "you hold nothing" would turn a dropped connection into a no-op that
 /// looks like tidy housekeeping.
-async fn pool_confirmed(account: &Arc<dyn Account>, serials: Vec<Hash>) -> Result<HashSet<Hash>> {
+async fn pool_confirmed(wallet: &Arc<Wallet>, serials: Vec<Hash>) -> Result<HashSet<Hash>> {
     if serials.is_empty() {
         return Ok(HashSet::new());
     }
-    let entries = account.wallet().rpc_api().get_notes_by_serial(serials).await?;
+    let entries = wallet.rpc_api().get_notes_by_serial(serials).await?;
     Ok(entries.into_iter().map(|entry| entry.sn).collect())
 }
 
-pub async fn plan_merges(account: Arc<dyn Account>) -> Result<Vec<Vec<Hash>>> {
-    let note_key_store = account.wallet().store().as_note_key_store()?;
+pub async fn plan_merges(wallet: &Arc<Wallet>) -> Result<Vec<Vec<Hash>>> {
+    let note_key_store = wallet.store().as_note_key_store()?;
     let mut candidates: Vec<(usize, Hash)> = Vec::new();
     let mut stream = note_key_store.iter().await?;
     while let Some(info) = stream.try_next().await? {
@@ -2205,7 +2247,7 @@ pub async fn plan_merges(account: Arc<dyn Account>) -> Result<Vec<Vec<Hash>>> {
     // ... does not exist in the pool" (founder report, 2026-09-06). Ask the
     // node what is really there and plan only over that.
     let serials: Vec<Hash> = candidates.iter().map(|(_, sn)| *sn).collect();
-    let confirmed: HashSet<Hash> = pool_confirmed(&account, serials).await?;
+    let confirmed: HashSet<Hash> = pool_confirmed(wallet, serials).await?;
 
     let mut by_denomination: HashMap<usize, Vec<Hash>> = HashMap::new();
     for (d, sn) in candidates {
@@ -2252,7 +2294,7 @@ pub async fn plan_merges(account: Arc<dyn Account>) -> Result<Vec<Vec<Hash>>> {
 /// A small one leaves a backlog — capping a run at twelve merged eleven groups
 /// of fee stamps and one of 0.1s, and left 122 notes of 10 MAGLD sitting
 /// exactly where they were (founder report, 2026-09-06).
-pub async fn merge_held_notes(account: Arc<dyn Account>, wallet_secret: Secret, limit: usize) -> Result<(usize, Option<String>)> {
+pub async fn merge_held_notes(wallet: &Arc<Wallet>, wallet_secret: Secret, limit: usize) -> Result<(usize, Option<String>)> {
     let mut merged = 0usize;
     // Serials this call has already spent. A plan is computed up front, but
     // `rotate_notes` sources its fee from the smallest spare it can find —
@@ -2267,7 +2309,7 @@ pub async fn merge_held_notes(account: Arc<dyn Account>, wallet_secret: Secret, 
     // ten 0.1s become a 1, and that new 1 may complete a group of ten 1s that
     // becomes a 10. Planning once would climb a single rung per run.
     while merged < limit {
-        let plans: Vec<Vec<Hash>> = plan_merges(account.clone())
+        let plans: Vec<Vec<Hash>> = plan_merges(wallet)
             .await?
             .into_iter()
             .filter(|group| group.iter().all(|sn| !spent.contains(sn)))
@@ -2284,7 +2326,7 @@ pub async fn merge_held_notes(account: Arc<dyn Account>, wallet_secret: Secret, 
             if group.iter().any(|sn| spent.contains(sn)) {
                 continue;
             }
-            match rotate_notes(account.clone(), wallet_secret.clone(), group).await {
+            match rotate_notes(wallet, wallet_secret.clone(), group).await {
                 Ok(result) => {
                     merged += 1;
                     // Both the group and whatever spare paid its fee.

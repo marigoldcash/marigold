@@ -9,7 +9,7 @@ impl Utxos {
     async fn main(self: Arc<Self>, ctx: &Arc<dyn Context>, argv: Vec<String>, _cmd: &str) -> Result<()> {
         let ctx = ctx.clone().downcast_arc::<KaspaCli>()?;
         let ticker = ctx.ticker();
-        let account = ctx.wallet().account()?;
+        let account = ctx.ledger_account().await?;
         let show_all = argv.first().map(|s| s.to_lowercase()).as_deref() == Some("all");
         // A mining wallet on this network can hold hundreds of thousands of
         // coinbase UTXOs — cap the default view.

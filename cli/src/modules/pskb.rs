@@ -42,7 +42,7 @@ impl Pskb {
                 let priority_fee_sompi = try_parse_optional_kaspa_as_sompi_i64(argv.get(2))?.unwrap_or(0);
                 let abortable = Abortable::default();
 
-                let account: Arc<dyn Account> = ctx.wallet().account()?;
+                let account: Arc<dyn Account> = ctx.ledger_account().await?;
                 let signer = account
                     .pskb_from_send_generator(
                         outputs.into(),
@@ -67,7 +67,7 @@ impl Pskb {
                 }
                 let subcommand = argv.remove(0);
                 let payload = argv.remove(0);
-                let account = ctx.wallet().account()?;
+                let account = ctx.ledger_account().await?;
                 let receive_address = account.receive_address()?;
                 let (wallet_secret, payment_secret) = ctx.ask_wallet_secret(None).await?;
                 let _ = ctx.notifier().show(Notification::Processing).await;
@@ -178,7 +178,7 @@ impl Pskb {
                 }
                 let (wallet_secret, payment_secret) = ctx.ask_wallet_secret(None).await?;
                 let pskb = Self::parse_input_pskb(argv.first().unwrap().as_str())?;
-                let account = ctx.wallet().account()?;
+                let account = ctx.ledger_account().await?;
                 match account.pskb_sign(&pskb, wallet_secret.clone(), payment_secret.clone(), None).await {
                     Ok(signed_pskb) => {
                         let pskb_pack = String::try_from(signed_pskb)?;
@@ -192,7 +192,7 @@ impl Pskb {
                     return self.display_help(ctx, argv).await;
                 }
                 let pskb = Self::parse_input_pskb(argv.first().unwrap().as_str())?;
-                let account = ctx.wallet().account()?;
+                let account = ctx.ledger_account().await?;
                 match account.pskb_broadcast(&pskb).await {
                     Ok(sent) => tprintln!(ctx, "Sent transactions {:?}", sent),
                     Err(e) => terrorln!(ctx, "Send error {:?}", e),
