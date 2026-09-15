@@ -280,6 +280,9 @@ pub struct Terminal {
     pub pipe_crlf: Channel<String>,
     pub pipe_ctl: DuplexChannel<()>,
     pub para_width: Arc<AtomicUsize>,
+    /// The ink everything the program says is written in, as an ANSI prefix
+    /// and suffix; `None` leaves the terminal's own foreground (Marigold).
+    voice: Arc<Mutex<Option<(String, String)>>>,
 }
 
 impl Terminal {
@@ -299,6 +302,7 @@ impl Terminal {
             pipe_crlf: Channel::unbounded(),
             pipe_ctl: DuplexChannel::oneshot(),
             para_width: Arc::new(AtomicUsize::new(DEFAULT_PARA_WIDTH)),
+            voice: Arc::new(Mutex::new(None)),
         };
 
         Ok(terminal)
@@ -325,6 +329,7 @@ impl Terminal {
             pipe_crlf: Channel::unbounded(),
             pipe_ctl: DuplexChannel::oneshot(),
             para_width: Arc::new(AtomicUsize::new(DEFAULT_PARA_WIDTH)),
+            voice: Arc::new(Mutex::new(None)),
         };
 
         Ok(terminal)
@@ -384,11 +389,29 @@ impl Terminal {
         self.term().write(s);
     }
 
+    /// Set (or clear) the ink the program speaks in. Text that already
+    /// carries its own colours keeps them; wherever it resets to the default
+    /// foreground, the voice takes over again instead of the terminal's white.
+    pub fn set_voice(&self, voice: Option<(String, String)>) {
+        *self.voice.lock().unwrap() = voice;
+    }
+
+    fn voiced(&self, s: String) -> String {
+        match self.voice.lock().unwrap().as_ref() {
+            None => s,
+            Some((prefix, suffix)) => {
+                let inner = s.replace("\x1b[39m", &format!("\x1b[39m{prefix}")).replace("\x1b[0m", &format!("\x1b[0m{prefix}"));
+                format!("{prefix}{inner}{suffix}")
+            }
+        }
+    }
+
     /// Write a string ending with CRLF sequence
     pub fn writeln<S>(&self, s: S)
     where
         S: ToString,
     {
+        let s = self.voiced(s.to_string());
         if self.is_running() {
             if self.user_input.is_enabled() {
                 if let Some(prompt) = self.user_input.get_prompt() {
@@ -593,10 +616,11 @@ impl Terminal {
         // a password prompt, and keys typed a beat too late must never leak
         // into the next command line (Marigold fix, see crossterm.rs).
         self.term().flush_pending_input();
-        self.term().write(prompt.to_string());
+        let prompt = self.voiced(prompt.to_string());
+        self.term().write(prompt.clone());
         let answer = self
             .user_input
-            .capture(secret, false, Some(prompt.to_string()), self)
+            .capture(secret, false, Some(prompt), self)
             .await;
         self.term().flush_pending_input();
         answer

@@ -145,6 +145,20 @@ pub fn paint<S: AsRef<str>>(ink: Ink, text: S) -> String {
     }
 }
 
+/// The ink the wallet speaks in — everything it prints that is not painted
+/// otherwise — as the escape codes that turn it on and off, for the
+/// terminal to apply. Petal: the note's own light yellow, which reads well as
+/// body text and is what the founder asked to keep instead of the terminal's
+/// white (2026-09-15). `None` where colour cannot be shown.
+pub fn voice() -> Option<(String, String)> {
+    let (r, g, b) = Ink::Petal.rgb();
+    match depth() {
+        Depth::Plain => None,
+        Depth::True => Some((format!("\x1b[38;2;{r};{g};{b}m"), "\x1b[39m".to_string())),
+        Depth::Indexed => Some((format!("\x1b[38;5;{}m", nearest_256(r, g, b)), "\x1b[39m".to_string())),
+    }
+}
+
 /// The same, bolder — for the wordmark and the denominations, which on a real
 /// note are printed heavier than everything around them.
 pub fn paint_bold<S: AsRef<str>>(ink: Ink, text: S) -> String {

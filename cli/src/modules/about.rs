@@ -24,7 +24,8 @@ impl About {
             .or_else(|| ctx.wallet().settings().get::<String>(WalletSettings::Network));
 
         tprintln!(ctx, "");
-        crate::splash::show(&ctx, env!("CARGO_PKG_VERSION"), network.as_deref());
+        let has_wallet = ctx.store().wallet_list().await.map(|wallets| !wallets.is_empty()).ok();
+        crate::splash::show(&ctx, env!("CARGO_PKG_VERSION"), network.as_deref(), has_wallet);
         tprintln!(ctx, "");
 
         Ok(())

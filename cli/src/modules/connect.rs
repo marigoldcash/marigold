@@ -93,6 +93,76 @@ impl Connect {
             };
             let mut outcome = wrpc_client.connect(Some(dial(url))).await;
 
+            // Your own node, not running. The old answer — "check the
+            // address" — was about an address nobody typed: the wallet
+            // remembers the node it last used, and a node inside this
+            // program is not running until this program starts it. So start
+            // it, say it is no use until it has caught up, and ask whether to
+            // use a public node meanwhile. Ask, because whoever runs a public
+            // node sees which notes this wallet asks about, and that is not a
+            // choice to make on someone's behalf (founder, 2026-09-15).
+            #[cfg(feature = "embedded-node")]
+            let mut own_node_started = false;
+            #[cfg(feature = "embedded-node")]
+            if outcome.is_err() && is_local_target(&url_label) && !ctx.embedded_node_running() {
+                tprintln!(ctx, "");
+                tprintln!(ctx, "Your own node is not running. Starting it.");
+                match ctx.spawn_embedded_node().await {
+                    Err(err) => {
+                        tprintln!(ctx, "{}", style(format!("Your node could not start: {err}")).yellow());
+                        tprintln!(ctx, "'connect public' uses a public node instead.");
+                        tprintln!(ctx, "");
+                        return Ok(());
+                    }
+                    Ok(None) => {}
+                    Ok(Some(rpc)) => {
+                        if KaspaCli::node_is_synced(&rpc).await {
+                            ctx.adopt_embedded_node(rpc).await?;
+                            tprintln!(ctx, "{}", style("Your node is caught up. Using it — nobody else sees your notes.").green());
+                            tprintln!(ctx, "");
+                            ctx.print_next_step().await;
+                            if ctx.wallet().is_open() {
+                                ctx.request_open_housekeeping();
+                            }
+                            return Ok(());
+                        }
+                        ctx.announce_sync_started();
+                        tprintln!(ctx, "Until it has caught up, your node cannot tell you what is on the ledger.");
+                        tprintln!(ctx, "{}", style("A public node can, but whoever runs it sees which notes your wallet asks about.").dim());
+                        let answer =
+                            ctx.term().ask(false, "Use a public node while your node is loading? [y/N]: ").await?.trim().to_lowercase();
+                        tprintln!(ctx, "");
+                        let public = kaspa_wrpc_client::resolver::public_nodes(network_id)
+                            .into_iter()
+                            .next()
+                            .and_then(|node| wrpc_client.parse_url_with_network_type(node, network_id.into()).ok());
+                        match (answer.starts_with('y'), public) {
+                            (true, Some(target)) => {
+                                tprintln!(ctx, "Connecting to a public node until your own is ready.");
+                                outcome = wrpc_client.connect(Some(dial(target))).await;
+                                is_public = true;
+                                own_node_started = true;
+                                ctx.start_node_handover_task(rpc);
+                            }
+                            (true, None) => {
+                                tprintln!(ctx, "There is no public node to use. Using your own while it catches up.");
+                                ctx.adopt_embedded_node(rpc).await?;
+                                ctx.print_next_step().await;
+                                return Ok(());
+                            }
+                            (false, _) => {
+                                ctx.adopt_embedded_node(rpc).await?;
+                                tprintln!(ctx, "Using your own node. What it shows of the ledger is incomplete until it has");
+                                tprintln!(ctx, "caught up — 'node status' shows progress.");
+                                tprintln!(ctx, "");
+                                ctx.print_next_step().await;
+                                return Ok(());
+                            }
+                        }
+                    }
+                }
+            }
+
             // A remembered node that is not answering should not leave the
             // wallet with nothing. Typing an address is a statement of intent
             // and is reported as-is; a saved default is just a preference, so
@@ -162,7 +232,9 @@ impl Connect {
             // "run your own instead" is a question about a thing that might
             // not have worked.
             #[cfg(feature = "embedded-node")]
-            if want_local || fell_back {
+            if own_node_started {
+                tprintln!(ctx, "Public node connected. Your own takes over once it has caught up.");
+            } else if want_local || fell_back {
                 ctx.start_local_node_now().await?;
             } else if is_public {
                 ctx.offer_local_node().await?;
@@ -212,4 +284,11 @@ impl Connect {
         }
         Ok(())
     }
+}
+
+/// A node on this machine: the one this program can start.
+#[cfg(feature = "embedded-node")]
+fn is_local_target(url: &str) -> bool {
+    let url = url.to_ascii_lowercase();
+    ["localhost", "127.0.0.1", "[::1]", "0.0.0.0"].iter().any(|host| url.contains(host))
 }

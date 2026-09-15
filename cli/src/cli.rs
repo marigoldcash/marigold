@@ -497,7 +497,7 @@ impl KaspaCli {
     /// off the wallet's utxo processor, because the whole point here is to ask
     /// a node the wallet is *not* currently using.
     #[cfg(feature = "embedded-node")]
-    async fn node_is_synced(rpc: &Rpc) -> bool {
+    pub(crate) async fn node_is_synced(rpc: &Rpc) -> bool {
         matches!(rpc.rpc_api().get_server_info().await, Ok(info) if info.is_synced)
     }
 
@@ -656,7 +656,7 @@ impl KaspaCli {
 
     /// Watch the node we started, and move the wallet over when it is ready.
     #[cfg(feature = "embedded-node")]
-    fn start_node_handover_task(self: &Arc<Self>, rpc: Rpc) {
+    pub(crate) fn start_node_handover_task(self: &Arc<Self>, rpc: Rpc) {
         let this = self.clone();
         workflow_core::task::spawn(async move {
             loop {
@@ -1241,7 +1241,7 @@ impl KaspaCli {
 
         // Keep the prompt's figure in step, so it is right from the moment a
         // wallet opens rather than after the first minute tick.
-        self.prompt_total_petals.store(notes + ledger, Ordering::SeqCst);
+        self.prompt_total_petals.store(notes, Ordering::SeqCst);
         self.prompt_total_valid.store(true, Ordering::SeqCst);
         tprintln!(self, "");
         tprintln!(self, "notes:  {} {ticker}", kaspa_wallet_core::utils::sompi_to_kaspa_string(notes));
@@ -1659,8 +1659,8 @@ impl KaspaCli {
                     continue;
                 }
 
-                let (notes, ledger, _) = this.total_holdings().await;
-                this.prompt_total_petals.store(notes + ledger, Ordering::SeqCst);
+                let (notes, _ledger, _) = this.total_holdings().await;
+                this.prompt_total_petals.store(notes, Ordering::SeqCst);
                 this.prompt_total_valid.store(true, Ordering::SeqCst);
 
                 // The periodic run is NOT conditional on the opening sequence
@@ -1944,8 +1944,13 @@ impl KaspaCli {
                                 Events::PrvKeyDataCreate { .. } => { },
                                 Events::AccountDeactivation { .. } => { },
                                 Events::AccountActivation { .. } => {
-                                    // list all accounts
-                                    this.list().await.unwrap_or_else(|err|terrorln!(this, "{err}"));
+                                    // The ledger line, once there is a node to
+                                    // read it from. Offline it only repeated
+                                    // "not connected" under the line that had
+                                    // just said so.
+                                    if this.wallet.is_connected() {
+                                        this.list().await.unwrap_or_else(|err|terrorln!(this, "{err}"));
+                                    }
 
                                     // load default account if only one account exists
                                     this.wallet().autoselect_default_account_if_single().await.ok();
@@ -2410,21 +2415,26 @@ impl KaspaCli {
         while let Some(key) = keys.try_next().await? {
             let mut accounts = self.wallet.accounts(Some(key.id), &guard).await?;
             while let Some(account) = accounts.try_next().await? {
-                let receive_address = account.receive_address()?;
-                // An unknown ledger balance is not "N/A" — it means the coins
-                // have not been read yet. Say what is actually happening
-                // rather than printing a value that looks like zero.
+                // The ledger, by that name. The account's title and id said
+                // nothing to anyone — one wallet has one ledger — and the
+                // address is 'address''s to print, when it is wanted, not
+                // something to put on screen at every open (founder,
+                // 2026-09-15). An unknown balance is not "N/A": the coins
+                // have not been read yet, and that is what gets said.
                 if account.balance().is_none() {
-                    let status = if self.wallet.is_connected() {
-                        "connecting..."
-                    } else {
-                        "not connected — 'connect <node>' to read the ledger"
-                    };
-                    tprintln!(self, "• {}: {}", style(account.name_with_id()).blue(), style(status).dim());
+                    let status = if self.wallet.is_connected() { "reading..." } else { "not connected — 'connect' to read it" };
+                    tprintln!(self, "• ledger: {}", style(status).dim());
                 } else {
-                    tprintln!(self, "• {}", account.get_list_string()?);
+                    let pieces = account.utxo_context().mature_utxo_size();
+                    let pending = account.utxo_context().pending_utxo_size();
+                    let info = match (pieces, pending) {
+                        (0, 0) => String::new(),
+                        (_, 0) => format!("{} piece(s)", pieces.separated_string()),
+                        (0, _) => format!("{} piece(s) pending", pending.separated_string()),
+                        _ => format!("{} piece(s), {} pending", pieces.separated_string(), pending.separated_string()),
+                    };
+                    tprintln!(self, "• ledger: {}   {}", account.balance_as_strings(None)?, style(info).dim());
                 }
-                tprintln!(self, "  {}", style(receive_address.to_string()).blue());
                 printed_accounts += 1;
             }
         }
@@ -2506,21 +2516,21 @@ impl KaspaCli {
             match state {
                 SyncState::Proof { level } => {
                     if *level == 0 {
-                        Some([style("SYNC").red().to_string(), style("...").black().to_string()].join(" "))
+                        Some([crate::ui::paint(crate::ui::Ink::Gold, "SYNC"), style("...").black().to_string()].join(" "))
                     } else {
-                        Some([style("SYNC PROOF").red().to_string(), style(level.separated_string()).dim().to_string()].join(" "))
+                        Some([crate::ui::paint(crate::ui::Ink::Gold, "SYNC PROOF"), style(level.separated_string()).dim().to_string()].join(" "))
                     }
                 }
                 SyncState::Headers { headers, progress } => Some(
                     [
-                        style("SYNC IBD HDRS").red().to_string(),
+                        crate::ui::paint(crate::ui::Ink::Gold, "SYNC IBD HDRS"),
                         style(format!("{} ({}%)", headers.separated_string(), progress)).dim().to_string(),
                     ]
                     .join(" "),
                 ),
                 SyncState::Blocks { blocks, progress } => Some(
                     [
-                        style("SYNC IBD BLOCKS").red().to_string(),
+                        crate::ui::paint(crate::ui::Ink::Gold, "SYNC IBD BLOCKS"),
                         style(format!("{} ({}%)", blocks.separated_string(), progress)).dim().to_string(),
                     ]
                     .join(" "),
@@ -2529,28 +2539,28 @@ impl KaspaCli {
                     let progress = processed * 100 / total;
                     Some(
                         [
-                            style("SYNC TRUST").red().to_string(),
+                            crate::ui::paint(crate::ui::Ink::Gold, "SYNC TRUST"),
                             style(format!("{} ({}%)", processed.separated_string(), progress)).dim().to_string(),
                         ]
                         .join(" "),
                     )
                 }
                 SyncState::UtxoSync { total, .. } => {
-                    Some([style("SYNC UTXO").red().to_string(), style(total.separated_string()).dim().to_string()].join(" "))
+                    Some([crate::ui::paint(crate::ui::Ink::Gold, "SYNC UTXO"), style(total.separated_string()).dim().to_string()].join(" "))
                 }
                 SyncState::SmtSync { processed, total } => Some(
                     [
-                        style("SYNC SMT").red().to_string(),
+                        crate::ui::paint(crate::ui::Ink::Gold, "SYNC SMT"),
                         style(format!("{} of {}", processed.separated_string(), total.separated_string())).dim().to_string(),
                     ]
                     .join(" "),
                 ),
-                SyncState::UtxoResync => Some([style("SYNC").red().to_string(), style("UTXO").black().to_string()].join(" ")),
-                SyncState::NotSynced => Some([style("SYNC").red().to_string(), style("...").black().to_string()].join(" ")),
+                SyncState::UtxoResync => Some([crate::ui::paint(crate::ui::Ink::Gold, "SYNC"), style("UTXO").black().to_string()].join(" ")),
+                SyncState::NotSynced => Some([crate::ui::paint(crate::ui::Ink::Gold, "SYNC"), style("...").black().to_string()].join(" ")),
                 SyncState::Synced => None,
             }
         } else {
-            Some(style("SYNC").red().to_string())
+            Some(crate::ui::paint(crate::ui::Ink::Gold, "SYNC"))
         }
     }
 }
@@ -2686,8 +2696,9 @@ impl Cli for KaspaCli {
     }
 
     fn prompt(&self) -> Option<String> {
+        use crate::ui::{self, Ink};
         if self.shutdown.load(Ordering::SeqCst) {
-            return Some("halt $ ".to_string());
+            return Some(format!("halt {}", ui::paint(Ink::Gold, "› ")));
         }
 
         let mut prompt = vec![];
@@ -2697,19 +2708,13 @@ impl Cli for KaspaCli {
         #[cfg(feature = "embedded-node")]
         let node_running = self.embedded_node_running();
 
-        let _miner_running = if let Some(miner) = self.miner.lock().unwrap().as_ref() { miner.is_running() } else { false };
-
-        // match (node_running, miner_running) {
-        //     (true, true) => prompt.push(style("NM").green().to_string()),
-        //     (true, false) => prompt.push(style("N").green().to_string()),
-        //     (false, true) => prompt.push(style("M").green().to_string()),
-        //     _ => {}
-        // }
-
+        // Everything in the prompt is in the wallet's own inks. It used to
+        // borrow the terminal's red for DISCONNECTED and its blue for the
+        // account, which on the founder's screen came out as an alarm and an
+        // ochre nobody had chosen. Being offline is a state, not a fault;
+        // capitals say it plainly enough.
         if (self.wallet.is_open() && !self.wallet.is_connected()) || (node_running && !self.wallet.is_connected()) {
-            // "N/C" meant nothing to anyone who had not written it. The word
-            // costs a few columns and vanishes the moment you connect.
-            prompt.push(style("DISCONNECTED").red().to_string());
+            prompt.push(ui::paint(Ink::Gold, "DISCONNECTED"));
         } else if self.wallet.is_connected()
             && !self.wallet.is_synced()
             && let Some(state) = self.sync_state()
@@ -2718,41 +2723,34 @@ impl Cli for KaspaCli {
         }
 
         if let Some(descriptor) = self.wallet.descriptor() {
-            let title = descriptor.title.unwrap_or(descriptor.filename);
-            if title.to_lowercase().as_str() != "marigold" {
-                prompt.push(title);
-            }
+            // The file name — what 'open' listed and what was typed. A title
+            // is a description, and the account id meant nothing to anyone
+            // who had not written it.
+            prompt.push(ui::paint(Ink::Gold, descriptor.filename));
 
-            if let Ok(account) = self.wallet.account() {
-                prompt.push(style(account.name_with_id()).blue().to_string());
-
-                // Stable-width balance: fixed 8 decimals and a monotonic
-                // session pad, so the prompt (and the text being typed at it)
-                // never jumps as per-block balance updates change digit
-                // counts or the pending segment appears/disappears.
-                // What you hold, in one number: notes plus ledger, two
-                // decimals, refreshed once a minute. The ledger's piece count
-                // and its per-block churn are plumbing — 'balance' has the
-                // precise figures when they are wanted.
-                if self.prompt_total_valid.load(Ordering::SeqCst) {
-                    let petals = self.prompt_total_petals.load(Ordering::SeqCst);
-                    let whole = petals / 100_000_000;
-                    let hundredths = (petals % 100_000_000) / 1_000_000;
-                    let suffix = self
-                        .wallet
-                        .network_id()
-                        .map(|id| kaspa_wallet_core::utils::kaspa_suffix(&NetworkType::from(id)))
-                        .unwrap_or("");
-                    let segment = format!("{}.{:02} {suffix}", whole.separated_string(), hundredths);
-                    let width = self.prompt_balance_width.fetch_max(segment.len(), Ordering::SeqCst).max(segment.len());
-                    prompt.push(segment.pad_to_width(width));
-                } else {
-                    prompt.push("...".to_string());
-                }
+            // Notes, and said so. The ledger is a loading dock whose figure
+            // depends on a node being connected and read; folding it in here
+            // produced a number that was wrong whenever that was not the
+            // case, which is exactly when people look at the prompt. Stable
+            // width: a monotonic session pad, so the line being typed never
+            // jumps as the digits change.
+            if self.prompt_total_valid.load(Ordering::SeqCst) {
+                let petals = self.prompt_total_petals.load(Ordering::SeqCst);
+                let whole = petals / 100_000_000;
+                let hundredths = (petals % 100_000_000) / 1_000_000;
+                let suffix =
+                    self.wallet.network_id().map(|id| kaspa_wallet_core::utils::kaspa_suffix(&NetworkType::from(id))).unwrap_or("");
+                let segment = format!("{}.{:02} {suffix} in notes", whole.separated_string(), hundredths);
+                let width = self.prompt_balance_width.fetch_max(segment.len(), Ordering::SeqCst).max(segment.len());
+                prompt.push(ui::paint(Ink::Petal, segment.pad_to_width(width)));
+            } else {
+                prompt.push(ui::paint(Ink::Moss, "..."));
             }
         }
 
-        prompt.is_not_empty().then(|| prompt.join(" • ") + " $ ")
+        // A colon would read like every question the wallet asks; '›' is
+        // "your turn" and nothing else.
+        prompt.is_not_empty().then(|| prompt.join(&ui::paint(Ink::Moss, " • ")) + " " + &ui::paint(Ink::Gold, "› "))
     }
 }
 
@@ -2879,6 +2877,8 @@ pub async fn kaspa_cli(terminal_options: TerminalOptions, banner: Option<String>
     // browser it claims eighty by twenty-four until the first layout, which
     // would hand every window the compact mark meant for small ones.
     cli.term().fit().ok();
+    // The wallet speaks in its own ink, not the terminal's white.
+    cli.term().set_voice(crate::ui::voice());
 
     match banner {
         Some(banner) => cli.term().writeln(banner),
@@ -2888,8 +2888,11 @@ pub async fn kaspa_cli(terminal_options: TerminalOptions, banner: Option<String>
             // about to use. Loading twice is cheap; guessing is not.
             cli.wallet().load_settings().await.ok();
             let network = cli.wallet().settings().get::<String>(WalletSettings::Network);
+            // Whether there is a wallet to open decides the one line under
+            // the note: 'open' if there is, 'wallet create' if not.
+            let has_wallet = cli.store().wallet_list().await.map(|wallets| !wallets.is_empty()).ok();
             cli.term().writeln("");
-            crate::splash::show(&cli, env!("CARGO_PKG_VERSION"), network.as_deref());
+            crate::splash::show(&cli, env!("CARGO_PKG_VERSION"), network.as_deref(), has_wallet);
             cli.term().writeln("");
         }
     }

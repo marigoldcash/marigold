@@ -49,7 +49,7 @@ def run(c, command, timeout=120):
     the search to output that came after it."""
     c.send(command + "\r")
     c.expect_exact(command[:40], timeout=timeout)
-    c.expect_exact("$ ", timeout=timeout)
+    c.expect_exact("› ", timeout=timeout)
     return plain(c.before)
 
 
@@ -58,7 +58,7 @@ def command(c, line, timeout=240):
     c.expect_exact(line[:40], timeout=timeout)
     out = ""
     while True:
-        i = c.expect_exact(["Enter wallet password", "$ "], timeout=timeout)
+        i = c.expect_exact(["Enter wallet password", "› "], timeout=timeout)
         out += plain(c.before)
         if i == 0:
             c.send(PW + "\r")
@@ -70,7 +70,7 @@ def connect(c):
     c.send("connect\r")
     step(c, "[Y/n]", "n")
     c.expect_exact("Public node connected")
-    c.expect_exact("$")
+    c.expect_exact("›")
 
 
 def create_notes_only(c, name, words=None):
@@ -83,7 +83,7 @@ def create_notes_only(c, name, words=None):
     assert len(found) == 24, f"expected 24 painted words, found {len(found)}"
     c.send("\r")
     c.expect_exact("keeps notes only")
-    c.expect_exact("$")
+    c.expect_exact("›")
     wizard = transcript(c)
     assert "marigoldtest:" not in wizard, "a notes-only wizard printed a ledger address"
     assert "Default account title" not in wizard, "a notes-only wizard asked for an account title"
@@ -146,7 +146,7 @@ payer.send(f"note pay {request}\r")
 step(payer, "Enter wallet password", PW)
 payer.expect(r"paid (\d+) note\(s\) \(fee ([0-9.,]+) TMAGLD\)", timeout=240)
 verdict["payer_paid_notes"] = int(payer.match.group(1))
-payer.expect_exact("$")
+payer.expect_exact("›")
 
 def payer_notes():
     m = re.search(r"notes\s+([0-9,]+\.?\d*)\s+TMAGLD", run(payer, "balance", timeout=120))
@@ -157,7 +157,7 @@ def payer_notes():
 pure.expect(r"payment received: ([0-9.,]+) TMAGLD in (\d+) note\(s\)", timeout=300)
 verdict["pure_received"] = pure.match.group(1)
 verdict["pure_received_notes"] = int(pure.match.group(2))
-pure.expect_exact("$")
+pure.expect_exact("›")
 time.sleep(45)  # let the payment confirm before redeeming from it
 b1 = run(pure, "balance")
 m = re.search(r"notes\s+([0-9,]+\.?\d*)\s+TMAGLD", b1)

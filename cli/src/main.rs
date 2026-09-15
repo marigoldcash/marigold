@@ -6,7 +6,7 @@ cfg_if::cfg_if! {
 
         #[tokio::main]
         async fn main() {
-            let result = kaspa_cli(TerminalOptions::new().with_prompt("$ "), None).await;
+            let result = kaspa_cli(TerminalOptions::new().with_prompt("› "), None).await;
             if let Err(err) = result {
                 println!("{err}");
             }

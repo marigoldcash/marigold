@@ -213,7 +213,7 @@ fn framed(line: &str) -> String {
 }
 
 /// The full note. Callers should have checked it fits.
-pub fn banknote(ctx: &Arc<KaspaCli>, version: &str, network: &str) {
+pub fn banknote(ctx: &Arc<KaspaCli>, version: &str, network: &str, has_wallet: Option<bool>) {
     let term = ctx.term();
     term.writeln(ui::paint(Gold, NOTE_TOP));
     term.writeln(framed(&band(CORNERS[0].0, CORNERS[0].1)));
@@ -232,18 +232,18 @@ pub fn banknote(ctx: &Arc<KaspaCli>, version: &str, network: &str) {
     let site = ui::paint(Moss, "marigold.cash");
     let pad = NOTE_WIDTH.saturating_sub(ui::display_width(&serial) + ui::display_width(&site));
     term.writeln(format!("{serial}{}{site}", " ".repeat(pad)));
-    term.writeln(next_steps("  "));
+    term.writeln(next_steps("  ", has_wallet));
 }
 
 /// The compact mark, for anything the note will not fit.
-pub fn specimen(ctx: &Arc<KaspaCli>, version: &str, network: &str) {
+pub fn specimen(ctx: &Arc<KaspaCli>, version: &str, network: &str, has_wallet: Option<bool>) {
     let term = ctx.term();
     let facts = [
         ui::paint_bold(Petal, letterspaced("MARIGOLD").replace(' ', "  ")),
         ui::paint(Cream, "Digital cash in fixed notes."),
         ui::paint(Moss, "Notes you hold, hand over, and understand."),
         ui::paint(Gold, format!("{}  ·  V{version}  ·  MAGLD", network.to_uppercase())),
-        next_steps(""),
+        next_steps("", has_wallet),
     ];
 
     term.writeln("");
@@ -258,14 +258,23 @@ pub fn specimen(ctx: &Arc<KaspaCli>, version: &str, network: &str) {
 /// The one line that tells somebody what to do next. Two verbs, not thirty —
 /// the full list is one word away and a wall of commands at the door teaches
 /// nobody anything.
-fn next_steps(indent: &str) -> String {
+///
+/// It names the step for this machine: someone with a wallet opens it,
+/// someone without makes one, and a build that could not look (`about` from
+/// inside a session, a harness) gets the general pair.
+fn next_steps(indent: &str, has_wallet: Option<bool>) -> String {
+    let (first, first_hint, second, second_hint) = match has_wallet {
+        Some(true) => ("open", " to open your wallet · ", "help", " for a list of commands"),
+        Some(false) => ("wallet create", " to make one · ", "guide", " for a walkthrough"),
+        None => ("help", " for a list of commands · ", "guide", " for a walkthrough"),
+    };
     format!(
         "{indent}{}{}{}{}{}",
         ui::paint(Moss, "type "),
-        ui::paint(Petal, "help"),
-        ui::paint(Moss, " for a list of commands · "),
-        ui::paint(Petal, "guide"),
-        ui::paint(Moss, " for a walkthrough")
+        ui::paint(Petal, first),
+        ui::paint(Moss, first_hint),
+        ui::paint(Petal, second),
+        ui::paint(Moss, second_hint)
     )
 }
 
@@ -274,18 +283,18 @@ fn next_steps(indent: &str) -> String {
 /// The note needs its full eighty columns and enough rows not to scroll its
 /// own frame away as it prints. A terminal that cannot give both gets the
 /// specimen, which says the same thing in five rows.
-pub fn show(ctx: &Arc<KaspaCli>, version: &str, network: Option<&str>) {
+pub fn show(ctx: &Arc<KaspaCli>, version: &str, network: Option<&str>, has_wallet: Option<bool>) {
     let network = network.unwrap_or("unknown network");
 
     match (ui::measured(ctx.term().cols()), ui::measured(ctx.term().rows())) {
-        (Some(cols), Some(rows)) if cols < NOTE_WIDTH || rows < NOTE_ROWS => specimen(ctx, version, network),
+        (Some(cols), Some(rows)) if cols < NOTE_WIDTH || rows < NOTE_ROWS => specimen(ctx, version, network, has_wallet),
         // A terminal that will not say how big it is is not a small terminal.
         // It is a container, a pipe, or a test harness — `docker compose run`
         // hands the container a pty reporting zero by zero. Guessing "small"
         // there means no Docker tester ever sees the note, which is the one
         // thing this screen exists for; guessing "roomy" costs a wrapped line
         // in the rare case it is wrong.
-        _ => banknote(ctx, version, network),
+        _ => banknote(ctx, version, network, has_wallet),
     }
 }
 
