@@ -19,10 +19,12 @@ within a minute.
 address. If an exchange ever needs to pay you, `account create bip32` adds a ledger; the same 24
 words bring it back.
 
-PAYING. Shown a request code? `pay <code>` pays it. Handing a note to someone in person?
-`pay <serial>` prints it as a code, and `receive` on their side takes it (`note list`
-shows your serials). Paying someone who only gave you an address, such as an exchange?
-`exchange <address> <amount>` sends it straight from your notes in one go.
+PAYING. `pay 20` makes a code worth 20 — show it or send it, and `receive` on their side
+takes it; the wallet adds a 0.01 so they can make it theirs, and picks the fewest notes
+that cover it. Shown a request code instead? `pay <code>` pays it with nothing to hand
+over. Paying someone who only gave you an address, such as an exchange?
+`exchange <address> <amount>` sends it straight from your notes in one go. A code you
+hand over is cash: anyone who sees it can take it, so give it straight to the receiver.
 
 #[notesonly] Without a ledger there is nowhere to put change, so `exchange` needs notes that make
 up the amount to within 0.01 — pay 1.10, not 1.07, if you hold a 1 and a 0.1. The wallet tells

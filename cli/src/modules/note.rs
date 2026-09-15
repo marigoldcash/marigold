@@ -4,7 +4,7 @@ use kaspa_consensus_core::Hash;
 use kaspa_consensus_core::notepool::DENOMINATION_PETALS;
 use kaspa_wallet_core::account::notepool;
 use kaspa_wallet_core::account::notepool::{
-    BearerNote, PaymentRequest, await_payment_request, create_payment_request, deep_verify, export_active_entries,
+    PaymentRequest, await_payment_request, create_payment_request, deep_verify, export_active_entries,
     light_verify, light_verify_vault, paper_export_decode_page, paper_export_encode, paper_export_missing_pages,
     paper_export_peek_header, plan_restore_rotation,
 };
@@ -153,101 +153,6 @@ impl Note {
         Ok(())
     }
 
-    /// `note import <bearer-text>` — bearer-note import: verify on-chain, store
-    /// (Hot), immediately rotate to fresh Cold keys, report.
-    pub(crate) async fn import(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
-        let ticker = ctx.ticker();
-        if argv.is_empty() {
-            tprintln!(ctx, "usage: 'note import <bearer-text>'\r\n");
-            return Ok(());
-        }
-        let wallet = ctx.wallet();
-        let bearer = BearerNote::from_text(&argv[0])?;
-        let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(None).await?;
-        self.ensure_vault_interactive(ctx, &wallet_secret).await?;
-
-        let result = notepool::bearer_import(&wallet, wallet_secret.clone(), bearer).await?;
-        tprintln!(ctx, "imported note {} and immediately rotated it to fresh cold key(s):", result.imported_sn);
-        for note in &result.rotation.own_notes {
-            tprintln!(ctx, "  {} - {}", note.sn, sompi_to_kaspa_string(DENOMINATION_PETALS[note.d as usize]));
-        }
-        tprintln!(
-            ctx,
-            "rotation tx: {} (fee {} {ticker}); the note is yours once this confirms",
-            result.rotation.transaction_id,
-            sompi_to_kaspa_string(result.rotation.fee_petals)
-        );
-
-        // Housekeeping on receipt: ten notes of one size become one of the
-        // next, so a vault never accumulates a drawer full of small change.
-        match notepool::merge_held_notes(&wallet, wallet_secret, 4).await {
-            Ok((0, None)) => {}
-            Ok((merged, failure)) => {
-                if merged > 0 {
-                    tprintln!(ctx, "consolidated {merged} group(s) of ten notes into larger ones");
-                }
-                if let Some(reason) = failure {
-                    tprintln!(ctx, "(note consolidation stopped: {reason})");
-                }
-            }
-            Err(err) => tprintln!(ctx, "(note consolidation skipped: {err})"),
-        }
-        tprintln!(ctx, "");
-        Ok(())
-    }
-
-    /// `note export <serial>` — bearer-export a note: auto-isolate if its key is
-    /// shared, wait for the isolation to land on-chain, then show the handover
-    /// QR + text and mark the note handed over.
-    pub(crate) async fn export(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
-        let ticker = ctx.ticker();
-        if argv.is_empty() {
-            tprintln!(ctx, "usage: 'note export <serial>'\r\n");
-            return Ok(());
-        }
-        let sn = argv[0].parse::<Hash>().map_err(|_| Error::Custom(format!("'{}' is not a valid note serial (32-byte hex)", argv[0])))?;
-        let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(None).await?;
-
-        let result = notepool::bearer_export(&ctx.wallet(), wallet_secret, sn).await?;
-        if let Some(isolation) = &result.isolation {
-            tprintln!(
-                ctx,
-                "key was shared - isolated onto a fresh solo key first (tx {}, fee {} {ticker})",
-                isolation.transaction_id,
-                sompi_to_kaspa_string(isolation.fee_petals)
-            );
-            tprintln!(ctx, "waiting for the isolation to confirm before the receiver can verify it...");
-            let rpc = ctx.wallet().rpc_api();
-            let mut confirmed = false;
-            for _ in 0..120 {
-                if rpc.get_notes_by_serial(vec![result.bearer.sn]).await?.iter().any(|entry| entry.sn == result.bearer.sn) {
-                    confirmed = true;
-                    break;
-                }
-                workflow_core::task::sleep(Duration::from_millis(500)).await;
-            }
-            if !confirmed {
-                tprintln!(ctx, "isolation not yet confirmed - share the payload below only once it is (check 'note list')\r\n");
-            }
-        }
-
-        let text = result.bearer.to_text();
-        if let Some(qr) = qr_string(&text) {
-            tprintln!(ctx, "{}", qr);
-        }
-        tprintln!(ctx, "{text}");
-        tprintln!(
-            ctx,
-            "note {} ({} {ticker}) handed over - it is the receiver's once they rotate it; both of you can spend it until then",
-            result.bearer.sn,
-            sompi_to_kaspa_string(DENOMINATION_PETALS[result.bearer.d as usize])
-        );
-        tprintln!(ctx, "");
-        Ok(())
-    }
-
-    /// `note pos <amount>` — one POS checkout: fresh landing-pad `pk`, wait for
-    /// exact payment, sweep the instant it confirms.
     async fn pos(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
         let ticker = ctx.ticker();
         if argv.is_empty() {
@@ -391,7 +296,7 @@ impl Note {
     /// the creation wizard — replaces the lazy auto-create that logged the 24
     /// words as a passing warning (which is how the founder's vault words
     /// ended up in scrollback, 2026-09-05).
-    async fn ensure_vault_interactive(&self, ctx: &Arc<KaspaCli>, wallet_secret: &Secret) -> Result<()> {
+    pub(crate) async fn ensure_vault_interactive(&self, ctx: &Arc<KaspaCli>, wallet_secret: &Secret) -> Result<()> {
         let store = ctx.wallet().store().as_note_key_store()?;
         if store.vault_exists().await? {
             return Ok(());

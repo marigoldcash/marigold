@@ -555,6 +555,327 @@ impl BearerNote {
     }
 }
 
+/// Text-encoding prefix for a handover bundle — a payment handed over as one code.
+pub const HANDOVER_PREFIX: &str = "marigoldpay:";
+
+/// A payment handed to someone as one code (FORK-PLAN P8.0f, POOL-SPEC P5.6
+/// "Handover bundle"): every note in it sits under **one** fresh key made for
+/// this handover, so the code is 32 bytes plus 33 per note rather than 65 per
+/// note, and the receiver's import is one signature for the lot. It carries
+/// the receiver's 0.01 stamp, so the receiver can rotate it to a key only
+/// they hold without owning a note first — the sender pays.
+///
+/// Bearer, like cash: whoever holds this code holds the money until the
+/// receiver has rotated it away.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Handover {
+    pub sk: [u8; 32],
+    pub notes: Vec<(Hash, DenominationTag)>,
+}
+
+impl Handover {
+    pub fn value_petals(&self) -> u64 {
+        self.notes.iter().map(|(_, d)| DENOMINATION_PETALS[*d as usize]).sum()
+    }
+
+    pub fn encode(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(32 + 33 * self.notes.len());
+        bytes.extend_from_slice(&self.sk);
+        for (sn, d) in &self.notes {
+            bytes.extend_from_slice(&sn.as_bytes());
+            bytes.push(*d as u8);
+        }
+        bytes
+    }
+
+    pub fn decode(bytes: &[u8]) -> Result<Self> {
+        if bytes.len() < 65 || (bytes.len() - 32) % 33 != 0 {
+            return Err(Error::Custom(format!("a handover bundle is 32 bytes plus 33 per note, got {}", bytes.len())));
+        }
+        let sk: [u8; 32] = bytes[..32].try_into().unwrap();
+        let mut notes = Vec::with_capacity((bytes.len() - 32) / 33);
+        for chunk in bytes[32..].chunks(33) {
+            let sn = Hash::from_slice(&chunk[..32]);
+            let d = DenominationTag::try_from(chunk[32]).map_err(|_| Error::Custom(format!("unknown denomination tag {}", chunk[32])))?;
+            notes.push((sn, d));
+        }
+        Ok(Self { sk, notes })
+    }
+
+    pub fn to_text(&self) -> String {
+        format!("{HANDOVER_PREFIX}{}", self.encode().to_hex())
+    }
+
+    pub fn from_text(text: &str) -> Result<Self> {
+        let hex = text
+            .trim()
+            .strip_prefix(HANDOVER_PREFIX)
+            .ok_or_else(|| Error::Custom(format!("a handover bundle starts with '{HANDOVER_PREFIX}'")))?;
+        let bytes = Vec::<u8>::from_hex(hex).map_err(|e| Error::Custom(format!("invalid handover hex: {e}")))?;
+        Self::decode(&bytes)
+    }
+}
+
+/// What to hand over: an amount (the tight cover from what is held, larger
+/// notes split as needed) or one particular note.
+pub enum HandoverSelection {
+    Amount(u64),
+    Serial(Hash),
+}
+
+pub struct HandoverResult {
+    pub handover: Handover,
+    pub transfer: TransferResult,
+    /// The value handed over, not counting the stamp.
+    pub value_petals: u64,
+    pub stamp_petals: u64,
+}
+
+/// The tight cover of `target` from `available`: the least value at or above
+/// it, fewest notes first (see [`cover_amount`]).
+fn select_cover(available: &[Arc<NoteKeyInfo>], target_petals: u64) -> Option<Vec<Hash>> {
+    let mut counts = [0usize; DENOMINATION_PETALS.len()];
+    for info in available {
+        counts[info.d as usize] += 1;
+    }
+    let mut take = cover_amount(&counts, target_petals)?;
+    let mut selected = Vec::new();
+    for info in available {
+        let d = info.d as usize;
+        if take[d] > 0 {
+            take[d] -= 1;
+            selected.push(info.sn);
+        }
+    }
+    Some(selected)
+}
+
+/// Hand money over as one code: one transfer that consumes the tight cover
+/// (or the named note, plus whatever the stamp and fee need), produces the
+/// amount as notes under a fresh handover key together with a 0.01 stamp for
+/// the receiver, and returns any change to this wallet's own fresh keys.
+pub async fn hand_over(wallet: &Arc<Wallet>, wallet_secret: Secret, selection: HandoverSelection) -> Result<HandoverResult> {
+    let note_key_store = wallet.store().as_note_key_store()?;
+    let active: Vec<Arc<NoteKeyInfo>> = note_key_store
+        .iter()
+        .await?
+        .try_filter(|info| futures::future::ready(info.status == NoteStatus::Active))
+        .try_collect()
+        .await?;
+    let held_total: u64 = active.iter().map(|info| DENOMINATION_PETALS[info.d as usize]).sum();
+
+    let (value, mut denoms, forced) = match selection {
+        HandoverSelection::Amount(petals) => {
+            let denoms = decompose_amount(petals).ok_or_else(|| {
+                Error::Custom(format!("{petals} petals is not representable (must be a nonzero multiple of 0.01 MAGLD)"))
+            })?;
+            (petals, denoms, None)
+        }
+        HandoverSelection::Serial(sn) => {
+            let info = active
+                .iter()
+                .find(|info| info.sn == sn)
+                .ok_or_else(|| Error::Custom(format!("note {sn} is not one you hold (or is not active)")))?;
+            (DENOMINATION_PETALS[info.d as usize], vec![info.d], Some(sn))
+        }
+    };
+    let stamp = FEE_QUANTUM_PETALS;
+    denoms.push(DenominationTag::D0_01);
+    let handover_key = generate_fresh_notes(&[DenominationTag::D0_01]).remove(0);
+    let external: Vec<NewNote> = denoms.iter().map(|d| NewNote { d: *d, pk: handover_key.pk }).collect();
+
+    let network_id = wallet.network_id()?;
+    let mass_calculator = MassCalculator::new_with_consensus_params(&Params::from(network_id));
+    let server_info = wallet.rpc_api().get_server_info().await?;
+    let freshness = FreshnessAnchor { anchor_daa_score: server_info.virtual_daa_score };
+    let feerate = transfer_feerate(wallet).await;
+
+    let mut fee_quanta: u64 = 1;
+    for _ in 0..8 {
+        let fee_petals = fee_quanta * FEE_QUANTUM_PETALS;
+        let target = value + stamp + fee_petals;
+        let selection: Vec<Hash> = match forced {
+            None => select_cover(&active, target),
+            Some(sn) => {
+                let others: Vec<Arc<NoteKeyInfo>> = active.iter().filter(|info| info.sn != sn).cloned().collect();
+                let rest = target - value;
+                select_cover(&others, rest).map(|mut more| {
+                    more.insert(0, sn);
+                    more
+                })
+            }
+        }
+        .ok_or_else(|| {
+            Error::Custom(format!(
+                "not enough in notes: {} held, {} needed ({} plus a 0.01 stamp for the receiver plus {} fee)",
+                crate::utils::sompi_to_kaspa_string(held_total),
+                crate::utils::sompi_to_kaspa_string(target),
+                crate::utils::sompi_to_kaspa_string(value),
+                crate::utils::sompi_to_kaspa_string(fee_petals)
+            ))
+        })?;
+        let selected_total: u64 = selection
+            .iter()
+            .map(|sn| DENOMINATION_PETALS[active.iter().find(|info| info.sn == *sn).expect("from the active set").d as usize])
+            .sum();
+        let change_denoms = decompose_amount_allow_zero(selected_total - target).expect("change is denomination-quantized");
+
+        let placeholder_groups: Vec<Vec<Hash>> = (0..selection.len()).map(|i| vec![Hash::from_u64_word(i as u64)]).collect();
+        let mut placeholder_produced = external.clone();
+        placeholder_produced.extend(change_denoms.iter().map(|d| NewNote { d: *d, pk: [0u8; 32] }));
+        let mass = estimate_transfer_mass(&mass_calculator, &placeholder_groups, &placeholder_produced, freshness)?;
+        let required = required_fee_quanta(mass, feerate);
+        if required > fee_quanta {
+            fee_quanta = required;
+            continue;
+        }
+
+        let mut consumed_entries = Vec::with_capacity(selection.len());
+        for sn in &selection {
+            let entry = note_key_store
+                .load_key(&wallet_secret, sn)
+                .await?
+                .ok_or_else(|| Error::Custom(format!("serial {sn} has no stored key")))?;
+            consumed_entries.push(entry);
+        }
+        let own_fresh = generate_fresh_notes(&change_denoms);
+        let transfer = submit_transfer(
+            wallet,
+            &wallet_secret,
+            &consumed_entries,
+            &external,
+            &own_fresh,
+            NoteProvenance::Cold,
+            freshness,
+            fee_quanta * FEE_QUANTUM_PETALS,
+        )
+        .await?;
+        if transfer.external_serials.len() != denoms.len() {
+            return Err(Error::Custom("handover: the transfer did not produce the notes it was asked for".to_string()));
+        }
+        let notes = transfer.external_serials.iter().copied().zip(denoms.iter().copied()).collect();
+        return Ok(HandoverResult { handover: Handover { sk: handover_key.sk, notes }, transfer, value_petals: value, stamp_petals: stamp });
+    }
+    Err(Error::Custom("transfer fee sizing did not converge".to_string()))
+}
+
+pub struct ReceiveResult {
+    pub notes: Vec<(Hash, DenominationTag)>,
+    /// The value received, stamp included.
+    pub value_petals: u64,
+    /// The rotation to this wallet's own keys, paid with the bundle's stamp.
+    pub rotation: TransferResult,
+}
+
+/// Take a handover: check every note is on chain under the bundle's key,
+/// store the key, then rotate the notes to fresh keys only this wallet holds
+/// — with the bundle's 0.01 as the fee stamp, so the receiver starts from
+/// nothing and still ends up with money only they can spend.
+pub async fn receive_handover(wallet: &Arc<Wallet>, wallet_secret: Secret, handover: Handover) -> Result<ReceiveResult> {
+    let secret_key = SecretKey::from_slice(&handover.sk).map_err(|e| Error::Custom(format!("invalid handover key: {e}")))?;
+    let derived_pk = Keypair::from_secret_key(SECP256K1, &secret_key).x_only_public_key().0.serialize();
+    let serials: Vec<Hash> = handover.notes.iter().map(|(sn, _)| *sn).collect();
+    let on_chain = wallet.rpc_api().get_notes_by_serial(serials.clone()).await?;
+    for (sn, d) in &handover.notes {
+        let entry = on_chain
+            .iter()
+            .find(|entry| entry.sn == *sn)
+            .ok_or_else(|| Error::Custom(format!("note {sn} is not in the pool yet — if it was just handed over, try again in a moment")))?;
+        if entry.pk != derived_pk {
+            return Err(Error::Custom(format!("note {sn} is no longer under the handed-over key — it has already been taken")));
+        }
+        if entry.denomination != *d as u8 {
+            return Err(Error::Custom(format!("note {sn}: the code says one size, the chain another")));
+        }
+    }
+    let note_key_store = wallet.store().as_note_key_store()?;
+    for (sn, d) in &handover.notes {
+        note_key_store.import_bearer_key(&wallet_secret, *sn, handover.sk, *d).await?;
+    }
+    // Rotate everything but one 0.01, which is the stamp: left out of the
+    // rotation it is the smallest spare, and the rotation takes it as its fee.
+    let stamp = handover.notes.iter().position(|(_, d)| *d == DenominationTag::D0_01);
+    let mut to_rotate: Vec<Hash> = serials.clone();
+    if let Some(index) = stamp {
+        if to_rotate.len() > 1 {
+            to_rotate.remove(index);
+        }
+    }
+    let rotation = rotate_notes(wallet, wallet_secret, to_rotate).await?;
+    Ok(ReceiveResult { value_petals: handover.value_petals(), notes: handover.notes, rotation })
+}
+
+/// Offline: the keys of notes covering `selection`, for another wallet of
+/// yours. No transaction, no fee — and no isolation, so only notes on a key
+/// of their own qualify; a shared key would hand over its siblings too.
+/// The notes are marked handed over here; they stay spendable from this
+/// wallet until the other one has rotated them, which is why this is for
+/// wallets you control.
+pub async fn export_keys(wallet: &Arc<Wallet>, wallet_secret: Secret, selection: HandoverSelection) -> Result<Vec<BearerNote>> {
+    let note_key_store = wallet.store().as_note_key_store()?;
+    let all: Vec<Arc<NoteKeyInfo>> = note_key_store.iter().await?.try_collect().await?;
+    let solo = |info: &Arc<NoteKeyInfo>| {
+        info.status == NoteStatus::Active
+            && info.provenance != NoteProvenance::Hot
+            && !all.iter().any(|other| other.sn != info.sn && other.pk == info.pk && other.status != NoteStatus::Superseded)
+    };
+    let candidates: Vec<Arc<NoteKeyInfo>> = all.iter().filter(|info| solo(info)).cloned().collect();
+    let chosen: Vec<Hash> = match selection {
+        HandoverSelection::Serial(sn) => {
+            if !candidates.iter().any(|info| info.sn == sn) {
+                return Err(Error::Custom(format!(
+                    "note {sn} shares its key with other notes (or is not active); 'note rotate {sn}' puts it on its own first — that needs the network"
+                )));
+            }
+            vec![sn]
+        }
+        HandoverSelection::Amount(petals) => select_cover(&candidates, petals).ok_or_else(|| {
+            let held: u64 = candidates.iter().map(|info| DENOMINATION_PETALS[info.d as usize]).sum();
+            Error::Custom(format!(
+                "cannot cover {} from notes on keys of their own ({} available that way); 'note rotate all' isolates the rest — that needs the network",
+                crate::utils::sompi_to_kaspa_string(petals),
+                crate::utils::sompi_to_kaspa_string(held)
+            ))
+        })?,
+    };
+    let mut bearers = Vec::with_capacity(chosen.len());
+    for sn in &chosen {
+        let entry = note_key_store.load_key(&wallet_secret, sn).await?.ok_or_else(|| Error::Custom(format!("serial {sn} has no stored key")))?;
+        bearers.push(BearerNote { sn: *sn, sk: entry.sk, d: entry.d });
+    }
+    for sn in &chosen {
+        note_key_store.mark_status(sn, NoteStatus::HandedOver).await?;
+    }
+    Ok(bearers)
+}
+
+/// The other half of [`export_keys`]: store the keys as they are, no
+/// rotation. Verified against the chain when there is one to ask; returns
+/// how many were stored and whether they were verified.
+pub async fn import_keys(wallet: &Arc<Wallet>, wallet_secret: Secret, bearers: Vec<BearerNote>) -> Result<(usize, bool)> {
+    let verified = wallet.is_connected();
+    if verified {
+        let serials: Vec<Hash> = bearers.iter().map(|b| b.sn).collect();
+        let on_chain = wallet.rpc_api().get_notes_by_serial(serials).await?;
+        for bearer in &bearers {
+            let secret_key = SecretKey::from_slice(&bearer.sk).map_err(|e| Error::Custom(format!("invalid note key: {e}")))?;
+            let pk = Keypair::from_secret_key(SECP256K1, &secret_key).x_only_public_key().0.serialize();
+            let entry = on_chain
+                .iter()
+                .find(|entry| entry.sn == bearer.sn)
+                .ok_or_else(|| Error::Custom(format!("note {} is not in the pool", bearer.sn)))?;
+            if entry.pk != pk {
+                return Err(Error::Custom(format!("note {} is not under this key any more", bearer.sn)));
+            }
+        }
+    }
+    let note_key_store = wallet.store().as_note_key_store()?;
+    for bearer in &bearers {
+        note_key_store.import_bearer_key(&wallet_secret, bearer.sn, bearer.sk, bearer.d).await?;
+    }
+    Ok((bearers.len(), verified))
+}
+
 /// Like [`decompose_amount`] but maps zero to an empty list (a fee source consumed
 /// exactly as a stamp produces no change) instead of `None`.
 fn decompose_amount_allow_zero(petals: u64) -> Option<Vec<DenominationTag>> {
@@ -985,7 +1306,7 @@ pub async fn pay_payment_request(
     for _ in 0..8 {
         let fee_petals = fee_quanta * FEE_QUANTUM_PETALS;
         let target = amount + fee_petals;
-        let selection = select_covering(&active, target).ok_or_else(|| {
+        let selection = select_cover(&active, target).ok_or_else(|| {
             Error::Custom(format!(
                 "insufficient note balance: {held_total} petals held, {target} needed ({amount} payment + {fee_petals} fee)"
             ))
@@ -1783,6 +2104,22 @@ mod tests {
         let take = cover_amount(&counts, petals(0.02)).expect("covered");
         let total: u64 = (0..8).map(|i| take[i] as u64 * DENOMINATION_PETALS[i]).sum();
         assert!(total >= petals(0.02));
+    }
+
+    /// The bundle is one key and 33 bytes a note, and reads back exactly.
+    #[test]
+    fn handover_bundle_round_trips() {
+        let handover = Handover {
+            sk: [7u8; 32],
+            notes: vec![(Hash::from_u64_word(1), DenominationTag::D1), (Hash::from_u64_word(2), DenominationTag::D0_1), (Hash::from_u64_word(3), DenominationTag::D0_01)],
+        };
+        assert_eq!(handover.encode().len(), 32 + 3 * 33);
+        assert_eq!(handover.value_petals(), 111_000_000);
+        let text = handover.to_text();
+        assert!(text.starts_with(HANDOVER_PREFIX));
+        assert_eq!(Handover::from_text(&text).unwrap(), handover);
+        assert!(Handover::decode(&[0u8; 40]).is_err());
+        assert!(Handover::from_text("marigoldnote:00").is_err());
     }
 
     /// The keep line is where storage mass makes a change coin cost more

@@ -1,8 +1,9 @@
 use crate::imports::*;
+use kaspa_consensus_core::Hash;
 use kaspa_wallet_core::account::{Account, BIP32_ACCOUNT_KIND, MULTISIG_ACCOUNT_KIND, multisig::MultiSig};
 
 #[derive(Default, Handler)]
-#[help("Export a note's keys for another wallet, or the ledger's recovery phrase ("mnemonic")")]
+#[help("Export note keys for another wallet of yours (an amount or a serial; offline, no fee), or the ledger's phrase")]
 pub struct Export;
 
 impl Export {
@@ -10,13 +11,31 @@ impl Export {
         let ctx = ctx.clone().downcast_arc::<KaspaCli>()?;
 
         if argv.is_empty() || argv.first() == Some(&"help".to_string()) {
-            tprintln!(ctx, "usage: 'export <serial>' writes a note's keys for another wallet; 'export mnemonic' shows the ledger's phrase");
+            tprintln!(ctx, "usage: 'export <amount>' or 'export <serial>' writes note keys for another wallet of yours; 'export mnemonic' shows the ledger's phrase");
             return Ok(());
         }
 
         let what = argv.first().unwrap();
-        if what.len() == 64 && what.chars().all(|c| c.is_ascii_hexdigit()) {
-            return crate::modules::note::Note::default().export(&ctx, argv).await;
+        let selection = if what.len() == 64 && what.chars().all(|c| c.is_ascii_hexdigit()) {
+            Some(kaspa_wallet_core::account::notepool::HandoverSelection::Serial(what.parse::<Hash>().map_err(|_| Error::custom("that is not a note serial"))?))
+        } else if what.parse::<f64>().is_ok() {
+            Some(kaspa_wallet_core::account::notepool::HandoverSelection::Amount(try_parse_required_nonzero_kaspa_as_sompi_u64(argv.first())?))
+        } else {
+            None
+        };
+        if let Some(selection) = selection {
+            // Offline and free: the notes' own keys, for a wallet you control.
+            let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(None).await?;
+            let bearers = kaspa_wallet_core::account::notepool::export_keys(&ctx.wallet(), wallet_secret, selection).await?;
+            tprintln!(ctx, "");
+            for bearer in &bearers {
+                tprintln!(ctx, "{}", bearer.to_text());
+            }
+            tprintln!(ctx, "");
+            tprintln!(ctx, "{} note key(s), marked handed over here. 'import' takes them in the other wallet.", bearers.len());
+            tprintln!(ctx, "{}", crate::ui::warn("They stay spendable from this wallet until the other one has rotated them — this is for wallets you control."));
+            tprintln!(ctx, "");
+            return Ok(());
         }
         match what.as_str() {
             "mnemonic" => {
