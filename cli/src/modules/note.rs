@@ -4,7 +4,7 @@ use kaspa_consensus_core::Hash;
 use kaspa_consensus_core::notepool::DENOMINATION_PETALS;
 use kaspa_wallet_core::account::notepool;
 use kaspa_wallet_core::account::notepool::{
-    BearerNote, PaymentRequest, RedeemSelection, await_payment_request, create_payment_request, deep_verify, export_active_entries,
+    BearerNote, PaymentRequest, await_payment_request, create_payment_request, deep_verify, export_active_entries,
     light_verify, light_verify_vault, paper_export_decode_page, paper_export_encode, paper_export_missing_pages,
     paper_export_peek_header, plan_restore_rotation,
 };
@@ -48,7 +48,7 @@ pub(crate) fn qr_string(text: &str) -> Option<String> {
 }
 
 #[derive(Default, Handler)]
-#[help("Mint, redeem, send, receive, and list notes")]
+#[help("Expert note operations: list, mint, pos, rotate, unknown, vault, verify")]
 pub struct Note;
 
 impl Note {
@@ -63,21 +63,27 @@ impl Note {
         match action.as_str() {
             "mint" => self.mint(&ctx, argv).await,
             "rotate" => self.rotate(&ctx, argv).await,
-            "move" => self.move_notes(&ctx, argv).await,
-            "redeem" => self.redeem(&ctx, argv).await,
-            "request" => self.request(&ctx, argv).await,
-            "pay" => self.pay(&ctx, argv).await,
-            "import" => self.import(&ctx, argv).await,
-            "export" => self.export(&ctx, argv).await,
             "pos" => self.pos(&ctx, argv).await,
-            "balance" => self.balance(&ctx).await,
-            "mirror" => self.mirror(&ctx, argv).await,
             "verify" => self.verify(&ctx, argv).await,
             "list" => self.list(&ctx).await,
-            "history" => self.history(&ctx).await,
             "unknown" => self.unknown(&ctx).await,
             "vault" => self.vault(&ctx, argv).await,
             "help" => self.display_help(ctx, argv).await,
+            // Money moves from the top level now: 'pay', 'receive', 'request',
+            // 'move', 'mobile', and 'import'/'export' under advanced. The old
+            // spellings say so rather than fail.
+            "pay" | "request" | "move" | "mirror" | "import" | "export" | "balance" | "redeem" | "history" => {
+                let now = match action.as_str() {
+                    "mirror" => "mobile",
+                    "balance" => "balance",
+                    "history" => "history",
+                    "redeem" => "exchange",
+                    "import" => "receive (or 'import' under advanced)",
+                    other => other,
+                };
+                tprintln!(ctx, "'note {action}' is now just '{now}'.\r\n");
+                Ok(())
+            }
             v => {
                 tprintln!(ctx, "unknown command: '{v}'\r\n");
                 self.display_help(ctx, argv).await
@@ -87,7 +93,7 @@ impl Note {
 
     /// `note request [amount]` — create a payment request (fresh pk, persisted
     /// before display), show its QR + text, then watch for the payment.
-    async fn request(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
+    pub(crate) async fn request(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
         let ticker = ctx.ticker();
         // Amount is optional per POOL-SPEC.md P5.6's two QR forms: pinned (40-byte)
         // or left for the payer to fill in (32-byte, the printed/static form).
@@ -124,7 +130,7 @@ impl Note {
     }
 
     /// `note pay <request-text> [amount]` — pay a payment request from held notes.
-    async fn pay(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
+    pub(crate) async fn pay(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
         let ticker = ctx.ticker();
         if argv.is_empty() {
             tprintln!(ctx, "usage: 'note pay <request-text> [amount]'\r\n");
@@ -149,7 +155,7 @@ impl Note {
 
     /// `note import <bearer-text>` — bearer-note import: verify on-chain, store
     /// (Hot), immediately rotate to fresh Cold keys, report.
-    async fn import(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
+    pub(crate) async fn import(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
         let ticker = ctx.ticker();
         if argv.is_empty() {
             tprintln!(ctx, "usage: 'note import <bearer-text>'\r\n");
@@ -193,7 +199,7 @@ impl Note {
     /// `note export <serial>` — bearer-export a note: auto-isolate if its key is
     /// shared, wait for the isolation to land on-chain, then show the handover
     /// QR + text and mark the note handed over.
-    async fn export(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
+    pub(crate) async fn export(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
         let ticker = ctx.ticker();
         if argv.is_empty() {
             tprintln!(ctx, "usage: 'note export <serial>'\r\n");
@@ -516,7 +522,7 @@ impl Note {
     /// UTXO involvement (the litepaper's "move between wallets" promise). The
     /// destination stores them Hot (a key that crossed a wallet boundary), and
     /// an optional up-front rotation covers the compromised-vault case.
-    async fn move_notes(&self, ctx: &Arc<KaspaCli>, _argv: Vec<String>) -> Result<()> {
+    pub(crate) async fn move_notes(&self, ctx: &Arc<KaspaCli>, _argv: Vec<String>) -> Result<()> {
         let ticker = ctx.ticker();
         let wallet = ctx.wallet();
         let store = ctx.wallet().store().as_note_key_store()?;
@@ -638,86 +644,6 @@ impl Note {
         Ok(())
     }
 
-    async fn redeem(&self, ctx: &Arc<KaspaCli>, mut argv: Vec<String>) -> Result<()> {
-        let ticker = ctx.ticker();
-        if argv.is_empty() {
-            tprintln!(ctx, "usage: 'note redeem <serial> [<serial> ...]' or 'note redeem amount <amount>'\r\n");
-            return Ok(());
-        }
-
-        let account = match ctx.ledger_account().await {
-            Ok(account) => account,
-            Err(err) => {
-                tprintln!(ctx, "{err}");
-                tprintln!(ctx, "Notes can still be paid out to any address with 'exchange <address> <amount>'.");
-                return Ok(());
-            }
-        };
-
-        let selection = if argv[0] == "amount" {
-            if argv.len() != 2 {
-                tprintln!(ctx, "usage: 'note redeem amount <amount>'\r\n");
-                return Ok(());
-            }
-            let amount_petals = try_parse_required_nonzero_kaspa_as_sompi_u64(argv.get(1))?;
-            RedeemSelection::Amount(amount_petals)
-        } else {
-            let mut serials = Vec::with_capacity(argv.len());
-            for raw in argv.drain(..) {
-                let sn = raw.parse::<Hash>().map_err(|_| Error::Custom(format!("'{raw}' is not a valid note serial (32-byte hex)")))?;
-                serials.push(sn);
-            }
-            RedeemSelection::Serials(serials)
-        };
-
-        let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(Some(&account)).await?;
-        let result = account.redeem(wallet_secret, selection).await?;
-
-        tprintln!(
-            ctx,
-            "redeemed {} note(s) worth {} {ticker} (fee {} {ticker}); transparent balance +{} {ticker}",
-            result.serials.len(),
-            sompi_to_kaspa_string(result.redeemed_value_petals),
-            sompi_to_kaspa_string(result.fee_petals),
-            sompi_to_kaspa_string(result.redeemed_value_petals.saturating_sub(result.fee_petals)),
-        );
-        tprintln!(ctx, "tx: {}\r\n", result.transaction_id);
-
-        Ok(())
-    }
-
-    async fn balance(&self, ctx: &Arc<KaspaCli>) -> Result<()> {
-        let ticker = ctx.ticker();
-        let note_key_store = ctx.wallet().store().as_note_key_store()?;
-        let mut stream = note_key_store.iter().await?;
-        let mut counts = [0u64; DENOMINATION_PETALS.len()];
-        let mut total = 0u64;
-        while let Some(info) = stream.try_next().await? {
-            if info.status == NoteStatus::Active {
-                counts[info.d as usize] += 1;
-                total += DENOMINATION_PETALS[info.d as usize];
-            }
-        }
-
-        tprintln!(ctx, "note balance: {} {ticker}", sompi_to_kaspa_string(total));
-        for (index, count) in counts.iter().enumerate() {
-            if *count > 0 {
-                tprintln!(ctx, "  {} x {} {ticker}", count, sompi_to_kaspa_string(DENOMINATION_PETALS[index]));
-            }
-        }
-        tprintln!(ctx, "");
-
-        Ok(())
-    }
-
-    /// `note unknown` — notes a synced node has repeatedly said it has not got.
-    ///
-    /// They stopped being counted after three separate checks against a node
-    /// that reported itself caught up. This wallet cannot say which of two
-    /// things happened, and does not pretend to: either the transaction that
-    /// would have created the note never landed — in which case the money
-    /// never left the ledger and nothing was lost — or something holding the
-    /// same key spent it.
     async fn unknown(&self, ctx: &Arc<KaspaCli>) -> Result<()> {
         let ticker = ctx.ticker();
         let store = ctx.wallet().store().as_note_key_store()?;
@@ -838,7 +764,7 @@ impl Note {
     /// copies on a lost device. What changes is that nothing here will spend
     /// it — every spend, fee-source and merge selector filters on `Active`, so
     /// marking a note `Mirrored` takes it out of all of them at once.
-    async fn mirror(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
+    pub(crate) async fn mirror(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
         let ticker = ctx.ticker();
         let store = ctx.wallet().store().as_note_key_store()?;
         let mut mirrored: Vec<Arc<NoteKeyInfo>> = Vec::new();
@@ -1116,33 +1042,6 @@ impl Note {
         }
         tprintln!(ctx, "");
 
-        Ok(())
-    }
-
-    /// `note history` — notes this wallet once held and has since spent.
-    /// The vault keeps them as tombstones with the time they were last
-    /// rotated, which is the closest thing to a note-spend record: the pool
-    /// records that a serial was retired, never who retired it.
-    async fn history(&self, ctx: &Arc<KaspaCli>) -> Result<()> {
-        let ticker = ctx.ticker();
-        let note_key_store = ctx.wallet().store().as_note_key_store()?;
-        let mut stream = note_key_store.iter().await?;
-        let mut retired = Vec::new();
-        while let Some(info) = stream.try_next().await? {
-            if info.status == NoteStatus::Superseded {
-                retired.push(info);
-            }
-        }
-        if retired.is_empty() {
-            tprintln!(ctx, "no spent notes yet\r\n");
-            return Ok(());
-        }
-        retired.sort_by(|a, b| b.d.cmp(&a.d).then(a.sn.cmp(&b.sn)));
-        tprintln!(ctx, "spent notes ({}):", retired.len());
-        for info in &retired {
-            tprintln!(ctx, "  {} - {} {ticker}", info.sn, sompi_to_kaspa_string(DENOMINATION_PETALS[info.d as usize]));
-        }
-        tprintln!(ctx, "");
         Ok(())
     }
 
@@ -1444,23 +1343,13 @@ impl Note {
     async fn display_help(self: Arc<Self>, ctx: Arc<KaspaCli>, _argv: Vec<String>) -> Result<()> {
         ctx.term().help(
             &[
-                ("mint <amount> | all", "Mint notes from the transparent balance ('all' mints everything, fee-aware)"),
-                ("rotate all | <serial> ...", "Rotate notes to fresh keys on-chain (revokes old backups/stolen copies)"),
-                ("move", "Move ALL active notes into another wallet's vault - no chain transaction"),
-                ("redeem <serial> [<serial> ...]", "Redeem specific notes by serial"),
-                ("redeem amount <amount>", "Redeem enough owned notes to cover at least <amount> {ticker}"),
-                ("request [<amount>]", "Create a payment request (QR + text), then watch for the payment"),
-                ("pay <request-text> [<amount>]", "Pay a payment request from held notes"),
-                ("import <bearer-text>", "Import a bearer note and immediately rotate it to fresh keys"),
-                ("export <serial>", "Bearer-export a note (auto-isolates first if its key is shared)"),
-                ("pos <amount>", "One POS checkout: fresh landing-pad pk, wait for payment, auto-sweep"),
-                ("balance", "Show note balance by denomination"),
                 ("list", "List the notes you hold"),
-                ("verify [clear]", "Check your notes against the pool — proves the balance is real"),
-                ("mirror [<amount>|export|return|revoke]", "Put notes on your phone, take them back, or kill a lost phone's copies"),
-                ("history", "List notes this wallet has spent"),
+                ("mint <amount> | all", "Mint notes from the ledger ('all' mints everything, fee-aware)"),
+                ("pos <amount>", "One POS checkout: fresh landing-pad pk, wait for payment, auto-sweep"),
+                ("rotate all | <serial> ...", "Rotate notes to fresh keys on-chain (revokes old backups/stolen copies)"),
                 ("unknown", "Notes a synced node says it has not got, and what that means"),
                 ("vault <cmd>", "Note vault: create/backup/verify/restore/export/import (see 'note vault')"),
+                ("verify [clear]", "Check your notes against the pool — proves the balance is real"),
             ],
             None,
         )?;

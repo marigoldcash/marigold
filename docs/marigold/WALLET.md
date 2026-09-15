@@ -98,9 +98,9 @@ note balance
 note list
 ```
 
-`note balance` shows totals by denomination; `note list` shows every held note's serial, denomination, provenance (`Cold`/`Hot`), and status (`Active`/`HandedOver`/ `Superseded`).
+`balance` shows totals by denomination; `note list` shows every held note's serial, denomination, provenance (`Cold`/`Hot`), and status (`Active`/`HandedOver`/ `Superseded`).
 
-**A newly-submitted note-pool transaction needs a confirming block before it shows up in on-chain queries** (`note vault verify`, another wallet's `note import`, etc.) — on a real network this happens automatically as blocks keep arriving; on this local testnet, mine at least one more block after any note operation before checking its on-chain effects from elsewhere.
+**A newly-submitted note-pool transaction needs a confirming block before it shows up in on-chain queries** (`note vault verify`, another wallet's `receive`, etc.) — on a real network this happens automatically as blocks keep arriving; on this local testnet, mine at least one more block after any note operation before checking its on-chain effects from elsewhere.
 
 ## 6. The note vault: create, backup, verify, export
 
@@ -146,7 +146,7 @@ Shows a QR + text payload (`marigoldreq:...`), then waits (up to 120s, safely re
 note pay marigoldreq:<...text from above...>
 ```
 
-The moment the payment confirms (mine a block), the requester's `note request` returns showing the received notes.
+The moment the payment confirms (mine a block), the requester's `request` returns showing the received notes.
 
 ## 8. Hand a note to someone directly (bearer mode)
 
@@ -193,11 +193,11 @@ Copies the backup's files in, recovers `K` from the words, deep-verifies (report
 
 ## 12. Notes-only wallets
 
-Answer `n` to `Keep a ledger account too?` and the wallet has a vault and nothing else: no account key, no ledger address ever derived, `list` shows no account and the prompt carries no account name. Everything under `note` works exactly as above — `note request`, `note pay`, `note import`/`export`, `note pos`, `note verify`, `note vault backup`/`restore`, `note history` — because none of it ever needed the ledger; it only used the account as a handle. `balance` shows notes alone. The ledger commands (`mint`, `redeem`, `transfer`, `sweep`, `estimate`, `address`, `utxos`, `message sign`) refuse with one line: *This wallet keeps notes only — there is no ledger account. 'account create bip32' adds one.* That command attaches the ledger at any later time, derived from the same 24 words, so there is no new secret and backups need nothing extra.
+Answer `n` to `Keep a ledger account too?` and the wallet has a vault and nothing else: no account key, no ledger address ever derived, `list` shows no account and the prompt carries no account name. Everything under `note` works exactly as above — `request`, `pay`, `receive`/`export`, `note pos`, `note verify`, `note vault backup`/`restore`, `note history` — because none of it ever needed the ledger; it only used the account as a handle. `balance` shows notes alone. The ledger commands (`mint`, `redeem`, `transfer`, `sweep`, `estimate`, `address`, `utxos`, `message sign`) refuse with one line: *This wallet keeps notes only — there is no ledger account. 'account create bip32' adds one.* That command attaches the ledger at any later time, derived from the same 24 words, so there is no new secret and backups need nothing extra.
 
 Three things a notes-only wallet meets that a ledger wallet does not:
 
-- **Bootstrap.** It cannot mint or mine, so its first notes must arrive by `note pay` from someone else or by importing a bearer note (`note import`). On testnet the faucet hands out bearer notes with fee stamps.
+- **Bootstrap.** It cannot mint or mine, so its first notes must arrive by `pay` from someone else or by importing a bearer note (`receive`). On testnet the faucet hands out bearer notes with fee stamps.
 - **Fee stamps.** A pure note transfer pays its fee with a small note, so a wallet holding only large denominations cannot pay for anything — splitting included. A first payment to it should include some 0.01s.
 - **Paying out without change.** `exchange <address> <amount>` pays an exchange (or anyone) straight from notes, in one transaction, with no ledger involved. But a redeem cannot make a note, and there is no ledger for change, so the notes chosen must cover the amount to within one 0.01 note; the whole redeemed value less the fee goes to the address, so the deposit arrives a fraction over what was asked, never under. If the closest cover is further over than that the wallet says so and does nothing — pick an amount the notes cover, or `account create bip32`.
 
@@ -217,7 +217,7 @@ Walked every step above against a real local simnet node (`kaspad --simnet --ena
 
 - Created a wallet through the full interactive wizard exactly as documented; captured its mnemonic and receive address from the real terminal output.
 - Funded it (2,350 mined blocks, past `coinbase_maturity * 2`); `list` showed a mature transparent balance.
-- `note mint 5` → 5×1 MAGLD, auto-provisioning the vault (24 words logged); `note balance`/`note list` matched exactly.
+- `note mint 5` → 5×1 MAGLD, auto-provisioning the vault (24 words logged); `balance`/`note list` matched exactly.
 - `note vault create` correctly refused a second ceremony ("already exists"); `note vault backup`/`note vault verify backup <dir>` round-tripped cleanly (5 live, 0 stale); `note vault export` produced a real scannable QR + password.
 - `note redeem amount 2` redeemed 2 notes, correct fee and balance-gain math; `note list` showed the right mix of `Superseded`/`Active` rows afterward.
 - Created a second, completely independent wallet and ran `note vault restore` against the first wallet's backup + 24 words — recovered exactly the notes still live on chain (correctly excluding ones the first wallet had since redeemed), and — after mining confirmations for the first wallet's in-flight transactions — completed the full batched restore-rotation with zero failed batches on a clean run.

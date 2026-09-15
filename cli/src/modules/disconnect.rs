@@ -10,7 +10,8 @@ impl Disconnect {
         if let Some(wrpc_client) = ctx.wallet().try_wrpc_client().as_ref() {
             wrpc_client.disconnect().await?;
         } else {
-            terrorln!(ctx, "Unable to disconnect from non-wRPC client");
+            // No public node to let go of: the wallet is on its own node, or on nothing.
+            tprintln!(ctx, "Nothing to disconnect from. If your own node is running, 'node stop' stops it.");
         }
         Ok(())
     }

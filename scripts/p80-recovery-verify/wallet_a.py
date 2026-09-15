@@ -29,7 +29,7 @@ address = c.match.group(1)
 c.expect_exact("›"); c.send("connect\r"); step("[Y/n]", "n")
 c.expect_exact("Public node connected")
 for p in payloads:
-    c.expect_exact("›"); c.send(f"note import {p}\r")
+    c.expect_exact("›"); c.send(f"receive {p}\r")
     c.expect_exact("Enter wallet password"); c.send("hunter2hunter2\r")
     c.expect_exact("$", timeout=180)
 time.sleep(45)  # let the import rotations confirm before the backup is judged against the chain

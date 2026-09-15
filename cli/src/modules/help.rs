@@ -13,10 +13,11 @@ impl Help {
         let handlers = ctx.handlers().collect();
         // Everyday commands only; the expert surface lives behind 'advanced'.
         let advanced = ctx.advanced();
+        let everyday = crate::modules::advanced::everyday(&ctx).await;
         let handlers = handlers
             .into_iter()
             .filter_map(|h| h.verb(dyn_ctx).map(|verb| (verb, get_handler_help(h, dyn_ctx))))
-            .filter(|(verb, _)| advanced || crate::modules::advanced::EVERYDAY.contains(verb))
+            .filter(|(verb, _)| advanced || everyday.contains(verb))
             .collect::<Vec<_>>();
 
         term.help(&handlers, None)?;

@@ -8,7 +8,13 @@ impl Mine {
     async fn main(self: Arc<Self>, ctx: &Arc<dyn Context>, argv: Vec<String>, _cmd: &str) -> Result<()> {
         let ctx = ctx.clone().downcast_arc::<KaspaCli>()?;
         match argv.first().map(|s| s.as_str()) {
-            Some("start") => ctx.start_mining(argv.get(1).cloned()).await,
+            Some("start") => {
+                let started = ctx.start_mining(argv.get(1).cloned()).await;
+                if started.is_ok() {
+                    ctx.remember_mined().await;
+                }
+                started
+            }
             Some("stop") => ctx.stop_mining().await,
             Some("status") => {
                 ctx.mining_status().await;

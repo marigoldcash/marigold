@@ -1,7 +1,7 @@
 use crate::imports::*;
 
 #[derive(Default, Handler)]
-#[help("Send a Marigold transaction to a public exchange")]
+#[help("Sends Marigold to a public exchange")]
 pub struct Exchange;
 
 impl Exchange {

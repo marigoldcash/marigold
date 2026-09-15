@@ -2,7 +2,7 @@ use crate::imports::*;
 use kaspa_wallet_core::account::{Account, BIP32_ACCOUNT_KIND, MULTISIG_ACCOUNT_KIND, multisig::MultiSig};
 
 #[derive(Default, Handler)]
-#[help("Export transactions, a wallet or a private key")]
+#[help("Export a note's keys for another wallet, or the ledger's recovery phrase ("mnemonic")")]
 pub struct Export;
 
 impl Export {
@@ -10,11 +10,14 @@ impl Export {
         let ctx = ctx.clone().downcast_arc::<KaspaCli>()?;
 
         if argv.is_empty() || argv.first() == Some(&"help".to_string()) {
-            tprintln!(ctx, "usage: export [mnemonic]");
+            tprintln!(ctx, "usage: 'export <serial>' writes a note's keys for another wallet; 'export mnemonic' shows the ledger's phrase");
             return Ok(());
         }
 
         let what = argv.first().unwrap();
+        if what.len() == 64 && what.chars().all(|c| c.is_ascii_hexdigit()) {
+            return crate::modules::note::Note::default().export(&ctx, argv).await;
+        }
         match what.as_str() {
             "mnemonic" => {
                 let account = ctx.account().await?;

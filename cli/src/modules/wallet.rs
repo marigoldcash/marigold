@@ -217,8 +217,10 @@ impl Wallet {
                     // Offline is a perfectly good state to open in: notes live
                     // in the local vault and can be counted without a node.
                     ctx.report_holdings().await;
-                    tprintln!(ctx, "The above are only your local notes in your vault, since the network is disconnected.");
-                    tprintln!(ctx, "To see whether you hold anything more on the ledger, a network connection is needed.");
+                    tprintln!(ctx, "The above are the notes in your vault.");
+                    if ctx.has_ledger_account().await {
+                        tprintln!(ctx, "To see whether you hold anything on the ledger, a network connection is needed.");
+                    }
                     // One dialog for this decision, not two. 'connect' owns
                     // it — public node first, then the single question about
                     // running your own — and this path just calls that, with
@@ -469,6 +471,7 @@ impl Wallet {
                             auto_sweep: true,
                             auto_sweep_utxo_threshold: 0,
                             auto_configured: false,
+                            mined: false,
                         };
                         ctx.store().set_client_metadata(&descriptor.filename, Some(meta)).await?;
                         tprintln!(ctx, "Autoconnect on: this wallet remembers its network and node, and offers to reconnect when opened.");
@@ -663,7 +666,7 @@ impl Wallet {
         ctx.term().help(
             &[
                 ("list", "List available local wallet files"),
-                ("create [<name>]", "Create a new bip32 wallet"),
+                ("create [<name>]", "Create a new wallet"),
                 ("import [<name>]", "Create a wallet from an existing mnemonic (bip32 only)"),
                 ("open [<name>]", "Open an existing wallet (shorthand: 'open [<name>]'; no name shows a picker)"),
                 ("close", "Close an opened wallet (shorthand: 'close')"),

@@ -99,7 +99,7 @@ words = create_notes_only(pure, "pure")
 connect(pure)
 verdict["list_shows_no_account"] = "No accounts yet" in run(pure, "list")
 refusals = {}
-for refused in ["note mint 1", "address", "sweep", "note redeem amount 1"]:
+for refused in ["note mint 1", "address", "sweep"]:
     out = run(pure, refused)
     refusals[refused] = "keeps notes only" in out and "account create bip32" in out
 verdict["ledger_commands_refuse"] = refusals
@@ -134,15 +134,15 @@ if not connected and "Public node connected" not in transcript(payer):
 payer_address = re.search(r"(marigoldtest:[a-z0-9]{50,})", run(payer, "address")).group(1)
 run(payer, "balance", timeout=120)
 # --- 3. the request, then the payment, inside the request's 120 s window ---
-# `note request` asks the password, prints the QR and its text form, then waits.
-pure.send("note request 1.12\r")
+# `request` asks the password, prints the QR and its text form, then waits.
+pure.send("request 1.12\r")
 step(pure, "Enter wallet password", PW)
 pure.expect_exact("requesting 1.12")
 lines = [l.strip() for l in plain(pure.before).splitlines() if l.strip()]
 request = next(l for l in reversed(lines) if re.fullmatch(r"[A-Za-z0-9:_\-]{40,}", l))
 pure.expect_exact("watching for payment")
 
-payer.send(f"note pay {request}\r")
+payer.send(f"pay {request}\r")
 step(payer, "Enter wallet password", PW)
 payer.expect(r"paid (\d+) note\(s\) \(fee ([0-9.,]+) TMAGLD\)", timeout=240)
 verdict["payer_paid_notes"] = int(payer.match.group(1))

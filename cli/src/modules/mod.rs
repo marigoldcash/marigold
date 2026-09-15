@@ -38,6 +38,13 @@ pub mod node;
 #[cfg(feature = "embedded-node")]
 pub mod mine;
 pub mod note;
+pub mod pay;
+pub mod receive;
+pub mod request;
+pub mod mv;
+pub mod mobile;
+pub mod backup;
+pub mod import;
 pub mod open;
 pub mod otp;
 pub mod ping;
@@ -73,7 +80,8 @@ pub fn register_handlers(cli: &Arc<KaspaCli>) -> Result<()> {
         cli,
         cli.handlers(),
         [
-            about, account, address, advanced, auto, balance, close, connect, details, disconnect, estimate, exchange, exit, export, guide, help, history, rpc, list,
+            about, account, address, advanced, auto, backup, balance, close, connect, details, disconnect, estimate, exchange, exit, export, guide, help, history, import, rpc, list,
+            mobile, mv, pay, receive, request,
             miner, message, monitor, mute, network, node, note, open, otp, ping, pskb, quit, reload, select, server, settings, sweep,
             track, transfer, utxos, wallet,
             // halt,

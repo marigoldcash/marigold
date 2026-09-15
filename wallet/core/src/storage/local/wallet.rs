@@ -43,6 +43,10 @@ pub struct ClientMetadata {
     /// UTXO count above which a sweep is triggered (0 = use the default).
     #[serde(default)]
     pub auto_sweep_utxo_threshold: u64,
+    /// Mining has been started on this wallet at least once; 'mine' then
+    /// belongs in the everyday help.
+    #[serde(default)]
+    pub mined: bool,
     /// Set once the user has touched the `auto` command. Until then the
     /// automation defaults are ON — housekeeping the ledger is not a thing a
     /// person should have to discover, and an untouched wallet must not be

@@ -355,6 +355,24 @@ impl KaspaCli {
         }
     }
 
+    /// Has mining ever been started on the open wallet? Decides whether
+    /// 'mine' is an everyday command here.
+    pub async fn has_mined(&self) -> bool {
+        let Some(descriptor) = self.wallet.store().descriptor() else { return false };
+        self.wallet.store().client_metadata(&descriptor.filename).await.ok().flatten().map(|m| m.mined).unwrap_or(false)
+    }
+
+    pub async fn remember_mined(&self) {
+        let Some(descriptor) = self.wallet.store().descriptor() else { return };
+        if let Ok(meta) = self.wallet.store().client_metadata(&descriptor.filename).await {
+            let mut meta = meta.unwrap_or_default();
+            if !meta.mined {
+                meta.mined = true;
+                self.wallet.store().set_client_metadata(&descriptor.filename, Some(meta)).await.ok();
+            }
+        }
+    }
+
     pub fn ledger_is_known(&self) -> bool {
         self.ledger_known.load(Ordering::SeqCst)
     }

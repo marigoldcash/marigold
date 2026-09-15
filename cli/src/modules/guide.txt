@@ -7,9 +7,9 @@ that you hold and hand over, like cash. A note has no owner on record anywhere: 
 key holds the money. This wallet keeps those keys in its vault.
 
 YOUR FIRST NOTES. On the test network, faucet.marigold.cash gives out real notes: paste each one
-into `note import`, biggest first. Otherwise someone pays you: `note request` prints a code to
-show them (add an amount, `note request 5`, to ask for exactly that), and the wallet waits for
-the payment to land.
+into `receive`, biggest first. Otherwise someone pays you: `request` prints a code to
+show them (add an amount, `request 5`, to ask for exactly that), and the wallet waits for
+the payment to land. Handed a code instead? `receive <code>` takes the money.
 
 #[ledger] An exchange pays to an address instead. That is what your ledger is for: `address`
 shows it, and whatever arrives there is turned into notes by the wallet on its own, usually
@@ -19,8 +19,8 @@ within a minute.
 address. If an exchange ever needs to pay you, `account create bip32` adds a ledger; the same 24
 words bring it back.
 
-PAYING. Shown a request code? `note pay <code>` pays it. Handing a note to someone in person?
-`note export <serial>` prints it as a code, and `note import` on their side takes it (`note list`
+PAYING. Shown a request code? `pay <code>` pays it. Handing a note to someone in person?
+`pay <serial>` prints it as a code, and `receive` on their side takes it (`note list`
 shows your serials). Paying someone who only gave you an address, such as an exchange?
 `exchange <address> <amount>` sends it straight from your notes in one go.
 
@@ -29,7 +29,7 @@ up the amount to within 0.01 — pay 1.10, not 1.07, if you hold a 1 and a 0.1. 
 you when they do not fit.
 
 CHECKING. `balance` is the whole answer: your notes, by size. The prompt shows the same figure.
-`note list` lists every note you hold; `note history` what you have spent and received.
+`note list` lists every note you hold.
 
 KEEPING IT SAFE. Two things bring your money back: the 24 words the wizard showed you, and a
 copy of the vault files. Write the words on paper — they are never shown again — and make the

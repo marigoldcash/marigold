@@ -100,7 +100,7 @@ impl Node {
 
         tprintln!(ctx, "");
         if mine {
-            tprintln!(ctx, "Using: {}", style("your own local node, running inside this wallet, all in sync with the network.").bold());
+            tprintln!(ctx, "Using: {}", style("your own wallet node, all in sync with the network.").bold());
             tprintln!(ctx, "Your wallet notes are not announced to a public node.");
             tprintln!(ctx, "");
             return;

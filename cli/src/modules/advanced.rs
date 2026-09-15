@@ -1,11 +1,23 @@
 use crate::imports::*;
 
-/// Verbs shown by the plain `help`. Everything else lives behind `advanced` —
-/// the CLI's front page should read like a wallet, not like a node console.
-pub const EVERYDAY: &[&str] = &[
-    "balance", "note", "exchange", "node", "mine", "address", "list", "open", "close", "wallet", "connect", "network", "guide", "help", "advanced",
-    "exit", "quit",
-];
+/// Verbs shown by the plain `help`, for this wallet as it is. Everything
+/// else lives behind `advanced` — the front page should read like a wallet,
+/// not like a node console. 'address' only means something with a ledger;
+/// 'mine' only once mining has been started on this wallet (founder,
+/// 2026-09-15: the basics, without the techno-babble).
+pub async fn everyday(ctx: &Arc<KaspaCli>) -> Vec<&'static str> {
+    let mut verbs = vec![
+        "balance", "pay", "receive", "request", "exchange", "move", "mobile", "backup", "wallet", "open", "close", "connect", "disconnect",
+        "node", "guide", "help", "advanced", "exit",
+    ];
+    if ctx.wallet().is_open() && ctx.has_ledger_account().await {
+        verbs.push("address");
+        if ctx.has_mined().await {
+            verbs.push("mine");
+        }
+    }
+    verbs
+}
 
 #[derive(Default, Handler)]
 #[help("Show the expert commands; 'advanced on' shows the technical side everywhere, 'advanced off' hides it")]
@@ -46,11 +58,12 @@ impl Advanced {
         let state = if ctx.advanced() { "on" } else { "off" };
         term.writeln(format!("\nAdvanced commands — you rarely need these. Advanced mode is {state} ('advanced on' / 'advanced off').").crlf());
 
+        let everyday = everyday(&ctx).await;
         let handlers = ctx.handlers().collect();
         let handlers = handlers
             .into_iter()
             .filter_map(|h| h.verb(dyn_ctx).map(|verb| (verb, get_handler_help(h, dyn_ctx))))
-            .filter(|(verb, _)| !EVERYDAY.contains(verb))
+            .filter(|(verb, _)| !everyday.contains(verb))
             .collect::<Vec<_>>();
 
         term.help(&handlers, None)?;
