@@ -115,6 +115,7 @@ impl Note {
         tprintln!(ctx, "watching for payment (up to {}s; the request stays claimable after a timeout)...", timeout.as_secs());
         match await_payment_request(&ctx.wallet(), &wallet_secret, request.pk, timeout).await {
             Ok(claimed) => {
+                ctx.record("received", claimed.total_petals, 0, "request", "");
                 tprintln!(ctx, "payment received: {} {ticker} in {} note(s):", sompi_to_kaspa_string(claimed.total_petals), claimed.notes.len());
                 for note in &claimed.notes {
                     tprintln!(ctx, "  {} - {}", note.sn, sompi_to_kaspa_string(DENOMINATION_PETALS[note.d as usize]));
@@ -141,7 +142,9 @@ impl Note {
             if argv.len() > 1 { Some(try_parse_required_nonzero_kaspa_as_sompi_u64(argv.get(1))?) } else { None };
         let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(None).await?;
 
+        let paid = request.amount_petals.or(amount_override).unwrap_or(0);
         let result = notepool::pay_payment_request(&ctx.wallet(), wallet_secret, request, amount_override).await?;
+        ctx.record("paid", paid, result.fee_petals, "request", result.transaction_id.to_string());
         tprintln!(
             ctx,
             "paid {} note(s) (fee {} {ticker}); tx: {}",
@@ -173,6 +176,8 @@ impl Note {
             tprintln!(ctx_for_qr, "{text}");
         });
         let result = notepool::pos_checkout(&ctx.wallet(), wallet_secret, amount_petals, timeout, Some(on_request)).await?;
+
+        ctx.record("received", result.claimed.total_petals, 0, "checkout", "");
 
         tprintln!(
             ctx,
@@ -282,6 +287,7 @@ impl Note {
             (amount_petals, result)
         };
 
+        ctx.record("minted", amount_petals, 0, format!("{} notes, by hand", result.notes.len()), "");
         tprintln!(ctx, "minted {} {ticker} into {} note(s):", sompi_to_kaspa_string(amount_petals), result.notes.len());
         for entry in &result.notes {
             tprintln!(ctx, "  {} - {}", entry.sn, sompi_to_kaspa_string(DENOMINATION_PETALS[entry.d as usize]));
@@ -427,7 +433,7 @@ impl Note {
     /// UTXO involvement (the litepaper's "move between wallets" promise). The
     /// destination stores them Hot (a key that crossed a wallet boundary), and
     /// an optional up-front rotation covers the compromised-vault case.
-    pub(crate) async fn move_notes(&self, ctx: &Arc<KaspaCli>, _argv: Vec<String>) -> Result<()> {
+    pub(crate) async fn move_notes(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
         let ticker = ctx.ticker();
         let wallet = ctx.wallet();
         let store = ctx.wallet().store().as_note_key_store()?;
@@ -435,12 +441,48 @@ impl Note {
             tprintln!(ctx, "Unable to resolve the open wallet's file\r\n");
             return Ok(());
         };
+        // 'move 500' or 'move all' (founder, 2026-09-15): an amount takes the
+        // tight cover of what is held, the fewest notes that make it.
+        let want: Option<u64> = match argv.first().map(|s| s.as_str()) {
+            None => {
+                tprintln!(ctx, "usage: 'move <amount>' or 'move all' — into another wallet on this machine\r\n");
+                return Ok(());
+            }
+            Some("all") => None,
+            Some(_) => Some(try_parse_required_nonzero_kaspa_as_sompi_u64(argv.first())?),
+        };
+        let pick = |active: Vec<Arc<NoteKeyInfo>>| -> Result<Vec<Hash>> {
+            match want {
+                None => Ok(active.iter().map(|info| info.sn).collect()),
+                Some(petals) => notepool::select_cover(&active, petals).ok_or_else(|| {
+                    let held: u64 = active.iter().map(|info| DENOMINATION_PETALS[info.d as usize]).sum();
+                    Error::custom(format!(
+                        "not enough in notes: {} held, {} asked for",
+                        sompi_to_kaspa_string(held),
+                        sompi_to_kaspa_string(petals)
+                    ))
+                }),
+            }
+        };
+        let active = || async {
+            let mut stream = store.iter().await?;
+            let mut active: Vec<Arc<NoteKeyInfo>> = Vec::new();
+            while let Some(info) = stream.try_next().await? {
+                if info.status == NoteStatus::Active {
+                    active.push(info);
+                }
+            }
+            Ok::<_, Error>(active)
+        };
+        let what = match want {
+            None => "all your notes".to_string(),
+            Some(petals) => format!("{} {ticker}", sompi_to_kaspa_string(petals)),
+        };
 
-        // Destination picker (other wallets only).
         let wallets = ctx.store().wallet_list().await?;
         let others: Vec<_> = wallets.into_iter().filter(|w| w.filename != descriptor.filename).collect();
         if others.is_empty() {
-            tprintln!(ctx, "No other wallet exists to move notes into — create one first with 'wallet create <name>', then re-run 'note move'.\r\n");
+            tprintln!(ctx, "No other wallet exists to move notes into — create one first with 'wallet create <name>', then 'move' again.\r\n");
             return Ok(());
         }
         tprintln!(ctx, "");
@@ -453,7 +495,7 @@ impl Note {
         }
         tprintln!(ctx, "");
         let selection =
-            ctx.term().ask(false, &format!("Move all active notes to which wallet [1..{}]? ", others.len())).await?.trim().to_string();
+            ctx.term().ask(false, &format!("Move {what} to which wallet [1..{}]? ", others.len())).await?.trim().to_string();
         let dest = match selection.parse::<usize>() {
             Ok(i) if i >= 1 && i <= others.len() => others[i - 1].filename.clone(),
             _ => {
@@ -492,13 +534,7 @@ impl Note {
             .trim()
             .to_lowercase();
         if answer.is_empty() || answer == "y" || answer == "yes" {
-            let mut stream = store.iter().await?;
-            let mut serials = Vec::new();
-            while let Some(info) = stream.try_next().await? {
-                if info.status == NoteStatus::Active {
-                    serials.push(info.sn);
-                }
-            }
+            let serials = pick(active().await?)?;
             tprintln!(ctx, "rotating {} note(s) first...", serials.len());
             self.rotate_serials(ctx, &wallet, &wallet_secret, serials).await?;
         }
@@ -516,13 +552,8 @@ impl Note {
 
         // The move itself: dest write, verify, source delete — per note, so an
         // interruption leaves at most one duplicate, cleaned by re-running.
-        let mut stream = store.iter().await?;
-        let mut serials = Vec::new();
-        while let Some(info) = stream.try_next().await? {
-            if info.status == NoteStatus::Active {
-                serials.push(info.sn);
-            }
-        }
+        // Picked again after the rotation: the notes are new serials now.
+        let serials = pick(active().await?)?;
         if serials.is_empty() {
             tprintln!(ctx, "no active notes to move\r\n");
             return Ok(());
@@ -544,6 +575,10 @@ impl Note {
             }
         }
         tprintln!(ctx, "");
+        // The key store marks the wallet modified on every removal and expects
+        // a commit; without one, 'close' straight after a move panicked.
+        ctx.wallet().store().commit(&wallet_secret).await?;
+        ctx.record("moved", moved_petals, 0, format!("{moved} notes to '{dest}'"), "");
         tprintln!(ctx, "moved {} note(s) ({} {ticker}) into '{dest}' — no chain transaction involved.", moved, sompi_to_kaspa_string(moved_petals));
         tprintln!(ctx, "They no longer exist in this wallet. Open '{dest}' to use them (it holds them as imported Hot keys).\r\n");
         Ok(())

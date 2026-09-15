@@ -373,6 +373,25 @@ impl KaspaCli {
         }
     }
 
+    /// This wallet's payments journal, when a wallet is open.
+    pub fn journal(&self) -> Option<kaspa_wallet_core::storage::local::journal::Journal> {
+        let descriptor = self.wallet.store().descriptor()?;
+        let folder: String = self
+            .wallet
+            .settings()
+            .get(WalletSettings::Folder)
+            .unwrap_or_else(|| kaspa_wallet_core::storage::local::default_storage_folder().to_string());
+        Some(kaspa_wallet_core::storage::local::journal::Journal::new(&folder, &descriptor.filename))
+    }
+
+    /// Note money moving, for 'history'. Never fails the caller: a payment
+    /// that went through is not undone by a line that could not be written.
+    pub fn record(&self, kind: &str, petals: u64, stamp_petals: u64, detail: impl Into<String>, tx: impl Into<String>) {
+        if let Some(journal) = self.journal() {
+            let _ = journal.append(&kaspa_wallet_core::storage::local::journal::JournalEntry::now(kind, petals, stamp_petals, detail, tx));
+        }
+    }
+
     pub fn ledger_is_known(&self) -> bool {
         self.ledger_known.load(Ordering::SeqCst)
     }
@@ -1540,6 +1559,7 @@ impl KaspaCli {
                     .await;
                     match minted {
                         Ok(Some((amount, notes))) => {
+                            self.record("minted", amount, 0, format!("{notes} notes, on its own"), "");
                             if loud {
                                 tprintln!(
                                     self,

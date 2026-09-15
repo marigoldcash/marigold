@@ -31,7 +31,7 @@ up the amount to within 0.01 — pay 1.10, not 1.07, if you hold a 1 and a 0.1. 
 you when they do not fit.
 
 CHECKING. `balance` is the whole answer: your notes, by size. The prompt shows the same figure.
-`note list` lists every note you hold.
+`history` lists what you have paid and received; `note list` lists every note you hold.
 
 KEEPING IT SAFE. Two things bring your money back: the 24 words the wizard showed you, and a
 copy of the vault files. Write the words on paper — they are never shown again — and make the

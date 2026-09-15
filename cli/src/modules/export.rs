@@ -32,6 +32,8 @@ impl Export {
                 tprintln!(ctx, "{}", bearer.to_text());
             }
             tprintln!(ctx, "");
+            let total: u64 = bearers.iter().map(|b| kaspa_consensus_core::notepool::DENOMINATION_PETALS[b.d as usize]).sum();
+            ctx.record("exported", total, 0, format!("{} note keys for another wallet", bearers.len()), "");
             tprintln!(ctx, "{} note key(s), marked handed over here. 'import' takes them in the other wallet.", bearers.len());
             tprintln!(ctx, "{}", crate::ui::warn("They stay spendable from this wallet until the other one has rotated them — this is for wallets you control."));
             tprintln!(ctx, "");

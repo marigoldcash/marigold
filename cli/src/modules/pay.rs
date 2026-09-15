@@ -33,6 +33,7 @@ impl Pay {
         let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(None).await?;
         let result = notepool::hand_over(&ctx.wallet(), wallet_secret, selection).await?;
         let text = result.handover.to_text();
+        ctx.record("paid", result.value_petals, result.stamp_petals + result.transfer.fee_petals, "code handed over", result.transfer.transaction_id.to_string());
 
         tprintln!(ctx, "");
         if let Some(qr) = crate::modules::note::qr_string(&text) {

@@ -4,12 +4,59 @@ use kaspa_wallet_core::error::Error as WalletError;
 use kaspa_wallet_core::storage::Binding;
 use kaspa_wallet_core::storage::local::transactions_dir_name;
 #[derive(Default, Handler)]
-#[help("Display transaction history")]
+#[help("What you have paid and received ('history ledger' has the ledger's transactions)")]
 pub struct History;
 
 impl History {
+    async fn journal(ctx: &Arc<KaspaCli>, arg: Option<&str>) -> Result<()> {
+        use crate::ui::{self, Ink};
+        if arg == Some("help") || arg == Some("?") {
+            tprintln!(ctx, "");
+            tprintln!(ctx, "'history' lists what this wallet has paid and received, newest last.");
+            tprintln!(ctx, "'history ledger ...' is the ledger's own transaction list (list, details, lookup, clear, detail).");
+            tprintln!(ctx, "");
+            return Ok(());
+        }
+        let Some(journal) = ctx.journal() else {
+            tprintln!(ctx, "Open a wallet first.");
+            return Ok(());
+        };
+        let entries = journal.read().map_err(|e| Error::custom(format!("could not read the journal: {e}")))?;
+        let ticker = ctx.ticker();
+        tprintln!(ctx, "");
+        if entries.is_empty() {
+            tprintln!(ctx, "Nothing yet. Payments made and received from now on are listed here.");
+            tprintln!(ctx, "");
+            return Ok(());
+        }
+        for entry in entries {
+            let when = chrono::DateTime::<chrono::Utc>::from_timestamp(entry.at as i64, 0)
+                .map(|t| t.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M").to_string())
+                .unwrap_or_else(|| "----------- --:--".to_string());
+            let amount = kaspa_wallet_core::utils::sompi_to_kaspa_string(entry.petals);
+            let stamp = if entry.stamp_petals > 0 {
+                ui::paint(Ink::Moss, format!("  ({} {ticker} stamp and fee, paid by you)", kaspa_wallet_core::utils::sompi_to_kaspa_string(entry.stamp_petals)))
+            } else {
+                String::new()
+            };
+            let kind = ui::paint(if entry.kind == "received" { Ink::Petal } else { Ink::Cream }, format!("{:<9}", entry.kind));
+            tprintln!(ctx, "{}  {kind} {:>14} {ticker}{stamp}  {}", ui::paint(Ink::Moss, when), amount, ui::paint(Ink::Moss, entry.detail));
+        }
+        tprintln!(ctx, "");
+        Ok(())
+    }
+
     async fn main(self: Arc<Self>, ctx: &Arc<dyn Context>, mut argv: Vec<String>, _cmd: &str) -> Result<()> {
         let ctx = ctx.clone().downcast_arc::<KaspaCli>()?;
+
+        // Bare 'history' is the payments journal: what you paid and received,
+        // as a person would put it. The ledger's transaction list — the
+        // account's UTXO history, useful to a miner or an expert — sits behind
+        // 'history ledger' with all its old sub-commands.
+        if argv.first().map(|s| s.as_str()) != Some("ledger") {
+            return Self::journal(&ctx, argv.first().map(|s| s.as_str())).await;
+        }
+        argv.remove(0);
 
         let guard = ctx.wallet().guard();
         let guard = guard.lock().await;

@@ -22,7 +22,9 @@ impl Import {
             .collect::<std::result::Result<Vec<_>, kaspa_wallet_core::error::Error>>()?;
         let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(None).await?;
         crate::modules::note::Note::default().ensure_vault_interactive(&ctx, &wallet_secret).await?;
+        let total: u64 = bearers.iter().map(|b| kaspa_consensus_core::notepool::DENOMINATION_PETALS[b.d as usize]).sum();
         let (count, verified) = notepool::import_keys(&ctx.wallet(), wallet_secret, bearers).await?;
+        ctx.record("imported", total, 0, format!("{count} note keys from another wallet"), "");
         tprintln!(ctx, "");
         tprintln!(ctx, "Imported {count} note key(s){}.", if verified { ", checked against the chain" } else { " — not checked, no network; 'note verify' does that once connected" });
         tprintln!(

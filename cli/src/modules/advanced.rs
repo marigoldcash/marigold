@@ -7,8 +7,8 @@ use crate::imports::*;
 /// 2026-09-15: the basics, without the techno-babble).
 pub async fn everyday(ctx: &Arc<KaspaCli>) -> Vec<&'static str> {
     let mut verbs = vec![
-        "balance", "pay", "receive", "request", "exchange", "move", "mobile", "backup", "wallet", "open", "close", "connect", "disconnect",
-        "node", "guide", "help", "advanced", "exit",
+        "balance", "pay", "receive", "request", "exchange", "move", "mobile", "backup", "history", "wallet", "open", "close", "connect",
+        "disconnect", "node", "guide", "help", "advanced", "exit",
     ];
     if ctx.wallet().is_open() && ctx.has_ledger_account().await {
         verbs.push("address");

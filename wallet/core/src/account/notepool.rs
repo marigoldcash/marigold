@@ -633,7 +633,7 @@ pub struct HandoverResult {
 
 /// The tight cover of `target` from `available`: the least value at or above
 /// it, fewest notes first (see [`cover_amount`]).
-fn select_cover(available: &[Arc<NoteKeyInfo>], target_petals: u64) -> Option<Vec<Hash>> {
+pub fn select_cover(available: &[Arc<NoteKeyInfo>], target_petals: u64) -> Option<Vec<Hash>> {
     let mut counts = [0usize; DENOMINATION_PETALS.len()];
     for info in available {
         counts[info.d as usize] += 1;
@@ -792,6 +792,7 @@ pub async fn receive_handover(wallet: &Arc<Wallet>, wallet_secret: Secret, hando
     for (sn, d) in &handover.notes {
         note_key_store.import_bearer_key(&wallet_secret, *sn, handover.sk, *d).await?;
     }
+    wallet.store().commit(&wallet_secret).await?;
     // Rotate everything but one 0.01, which is the stamp: left out of the
     // rotation it is the smallest spare, and the rotation takes it as its fee.
     let stamp = handover.notes.iter().position(|(_, d)| *d == DenominationTag::D0_01);
@@ -846,6 +847,7 @@ pub async fn export_keys(wallet: &Arc<Wallet>, wallet_secret: Secret, selection:
     for sn in &chosen {
         note_key_store.mark_status(sn, NoteStatus::HandedOver).await?;
     }
+    wallet.store().commit(&wallet_secret).await?;
     Ok(bearers)
 }
 
@@ -873,6 +875,7 @@ pub async fn import_keys(wallet: &Arc<Wallet>, wallet_secret: Secret, bearers: V
     for bearer in &bearers {
         note_key_store.import_bearer_key(&wallet_secret, bearer.sn, bearer.sk, bearer.d).await?;
     }
+    wallet.store().commit(&wallet_secret).await?;
     Ok((bearers.len(), verified))
 }
 
@@ -899,56 +902,6 @@ fn generate_fresh_notes(denominations: &[DenominationTag]) -> Vec<FreshNote> {
             FreshNote { d: *d, sk: sk.secret_bytes(), pk }
         })
         .collect()
-}
-
-/// Exact-sum note selection over the fixed ladder, greedy largest-first — optimal for
-/// a canonical powers-of-ten system: taking as many of the largest usable
-/// denomination as possible never forecloses an exact representation that skipping
-/// them would have allowed. Returns `None` when the held multiset cannot represent
-/// the amount exactly (the covering planner below then takes over).
-fn select_exact(available: &[Arc<NoteKeyInfo>], amount_petals: u64) -> Option<Vec<Hash>> {
-    let mut by_denom: Vec<Vec<Hash>> = vec![Vec::new(); DENOMINATION_PETALS.len()];
-    for info in available {
-        by_denom[info.d as usize].push(info.sn);
-    }
-    let mut remaining = amount_petals;
-    let mut selected = Vec::new();
-    for (index, value) in DENOMINATION_PETALS.iter().enumerate().rev() {
-        let want = (remaining / value) as usize;
-        let take = want.min(by_denom[index].len());
-        for sn in by_denom[index].drain(..take) {
-            selected.push(sn);
-        }
-        remaining -= take as u64 * value;
-    }
-    (remaining == 0).then_some(selected)
-}
-
-/// Covering selection (FORK-PLAN P7.4's split planning): notes summing to at least
-/// `target_petals`. An exact representation is preferred (no change, fewest moving
-/// parts); otherwise notes accumulate smallest-first until the target is covered —
-/// deliberately sweeping small denominations into the transfer's change, which the
-/// change decomposition then re-issues in canonical largest-first form (organic
-/// merge hygiene: paying with dust consolidates it, POOL-SPEC.md P5.6's merge
-/// motivation, without a dedicated merge step). The overshoot comes back as change
-/// in the same `TransferOp` — "split then pay" is one transaction, not two (P5.2's
-/// `produced` list already allows it), so no separate split planning stage exists.
-fn select_covering(available: &[Arc<NoteKeyInfo>], target_petals: u64) -> Option<Vec<Hash>> {
-    if let Some(exact) = select_exact(available, target_petals) {
-        return Some(exact);
-    }
-    let mut sorted: Vec<&Arc<NoteKeyInfo>> = available.iter().collect();
-    sorted.sort_by_key(|info| DENOMINATION_PETALS[info.d as usize]);
-    let mut total: u64 = 0;
-    let mut selected = Vec::new();
-    for info in sorted {
-        if total >= target_petals {
-            break;
-        }
-        total += DENOMINATION_PETALS[info.d as usize];
-        selected.push(info.sn);
-    }
-    (total >= target_petals).then_some(selected)
 }
 
 /// Estimate the consensus mass of a transfer with the given shape. A `SignedGroup`'s
@@ -1965,36 +1918,6 @@ mod tests {
 
     fn info(byte: u8, d: DenominationTag) -> Arc<NoteKeyInfo> {
         Arc::new(NoteKeyInfo::new(Hash::from_bytes([byte; 32]), [byte; 32], d, NoteProvenance::Cold))
-    }
-
-    #[test]
-    fn select_exact_greedy_over_the_ladder() {
-        let available =
-            vec![info(1, DenominationTag::D0_1), info(2, DenominationTag::D0_01), info(3, DenominationTag::D0_01), info(4, DenominationTag::D1)];
-        // 0.12 = 0.1 + 2x0.01
-        let selected = select_exact(&available, 12_000_000).unwrap();
-        assert_eq!(selected.len(), 3);
-        // 0.05 needs 5x0.01 but only 2 held — and greedy must NOT grab the 0.1 or 1.
-        assert!(select_exact(&available, 5_000_000).is_none());
-        // The full holdings sum exactly.
-        assert!(select_exact(&available, 112_000_000).is_some());
-        assert!(select_exact(&available, 113_000_000).is_none());
-    }
-
-    #[test]
-    fn select_covering_prefers_exact_then_sweeps_smallest_first() {
-        let available =
-            vec![info(1, DenominationTag::D1), info(2, DenominationTag::D0_1), info(3, DenominationTag::D0_01), info(4, DenominationTag::D0_01)];
-        // Exact representation exists: 0.11 = 0.1 + 0.01 (2 notes, no overshoot).
-        let exact = select_covering(&available, 11_000_000).unwrap();
-        assert_eq!(exact.len(), 2);
-        // 0.05 has no exact representation — the smallest-first sweep covers it:
-        // 0.01 + 0.01 + 0.1 = 0.12 >= 0.05 (3 notes, overshoot 0.07 becomes change).
-        let covering = select_covering(&available, 5_000_000).unwrap();
-        assert_eq!(covering.len(), 3);
-        assert!(!covering.contains(&Hash::from_bytes([1u8; 32])), "the 1-MAGLD note must stay untouched");
-        // More than everything held.
-        assert!(select_covering(&available, 200_000_000).is_none());
     }
 
     #[test]

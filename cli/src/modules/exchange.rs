@@ -70,6 +70,7 @@ impl Exchange {
                     amount_sompi,
                 )
                 .await?;
+                ctx.record("paid", amount_sompi, fee, format!("to {address}"), transaction_id.to_string());
                 tprintln!(
                     ctx,
                     "\nSent {} {ticker} to {address} from {utxos} ledger coin(s) and {notes} note(s) (fee {} {ticker}); tx: {}\n",
@@ -106,6 +107,7 @@ impl Exchange {
                     change,
                 )
                 .await?;
+                ctx.record("paid", amount_sompi, result.fee_petals, format!("to {address}"), result.transaction_id.to_string());
                 tprintln!(
                     ctx,
                     "\nSent {} {ticker} to {address} from {} note(s) (fee {} {ticker}); tx: {}\n",

@@ -27,6 +27,7 @@ impl Receive {
             let result = notepool::receive_handover(&wallet, wallet_secret.clone(), handover).await?;
             let stamp = result.notes.iter().any(|(_, d)| *d == kaspa_consensus_core::notepool::DenominationTag::D0_01);
             let value = if stamp { result.value_petals - DENOMINATION_PETALS[0] } else { result.value_petals };
+            ctx.record("received", value, 0, "code", result.rotation.transaction_id.to_string());
             tprintln!(ctx, "");
             tprintln!(ctx, "Received {} {ticker} in {} note(s).", sompi_to_kaspa_string(value), result.notes.len() - usize::from(stamp));
             tprintln!(
@@ -42,6 +43,7 @@ impl Receive {
             // costs one of our own stamps.
             let bearer = BearerNote::from_text(code)?;
             let result = notepool::bearer_import(&wallet, wallet_secret.clone(), bearer).await?;
+            ctx.record("received", DENOMINATION_PETALS[bearer.d as usize], result.rotation.fee_petals, "note", result.rotation.transaction_id.to_string());
             tprintln!(ctx, "");
             tprintln!(ctx, "Received {} {ticker}.", sompi_to_kaspa_string(DENOMINATION_PETALS[bearer.d as usize]));
             tprintln!(
