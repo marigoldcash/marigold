@@ -277,27 +277,30 @@ pub async fn redeem_with(
             serials
         }
         RedeemSelection::Amount(target_petals) => {
-            let mut candidates: Vec<_> = note_key_store
+            let candidates: Vec<_> = note_key_store
                 .iter()
                 .await?
                 .try_filter(|info| futures::future::ready(info.status == NoteStatus::Active))
                 .try_collect()
                 .await?;
-            candidates.sort_by_key(|info| std::cmp::Reverse(DENOMINATION_PETALS[info.d as usize]));
-
-            let mut selected = Vec::new();
-            let mut total = 0u64;
-            for info in candidates {
-                if total >= target_petals {
-                    break;
-                }
-                total += DENOMINATION_PETALS[info.d as usize];
-                selected.push(info.sn);
+            let mut counts = [0usize; DENOMINATION_PETALS.len()];
+            for info in &candidates {
+                counts[info.d as usize] += 1;
             }
-            if total < target_petals {
+            let total: u64 = candidates.iter().map(|info| DENOMINATION_PETALS[info.d as usize]).sum();
+            let Some(take) = cover_amount(&counts, target_petals) else {
                 return Err(Error::Custom(format!(
                     "insufficient note balance: {total} petals available, {target_petals} requested"
                 )));
+            };
+            let mut take = take;
+            let mut selected = Vec::new();
+            for info in candidates {
+                let d = info.d as usize;
+                if take[d] > 0 {
+                    take[d] -= 1;
+                    selected.push(info.sn);
+                }
             }
             selected
         }
@@ -1747,6 +1750,41 @@ mod tests {
         assert!(paper_export_decode_page(&pages[0], &wrong).is_err());
     }
 
+    fn petals(magld: f64) -> u64 {
+        (magld * 100_000_000.0).round() as u64
+    }
+
+    /// Two 1s and a 0.1 must pay 1.1 with 1 + 0.1, not with both 1s.
+    #[test]
+    fn cover_amount_prefers_the_tight_cover_over_largest_first() {
+        // counts by denomination: 0.01, 0.1, 1, 10, ...
+        let counts = [1, 1, 2, 0, 0, 0, 0, 0];
+        assert_eq!(cover_amount(&counts, petals(1.1)), Some([0, 1, 1, 0, 0, 0, 0, 0]));
+        assert_eq!(cover_amount(&counts, petals(1.11)), Some([1, 1, 1, 0, 0, 0, 0, 0]));
+        // 1.12 cannot be met to the penny: the least over it is 2.
+        assert_eq!(cover_amount(&counts, petals(1.12)), Some([0, 0, 2, 0, 0, 0, 0, 0]));
+        // Three 1s beat a 10 for 2.5.
+        assert_eq!(cover_amount(&[0, 0, 3, 1, 0, 0, 0, 0], petals(2.5)), Some([0, 0, 3, 0, 0, 0, 0, 0]));
+        // Not enough at all.
+        assert_eq!(cover_amount(&counts, petals(5.0)), None);
+        // Exactly enough.
+        assert_eq!(cover_amount(&counts, petals(2.11)), Some([1, 1, 2, 0, 0, 0, 0, 0]));
+        // With plenty of 0.01s the cover still takes 1 + 0.1, not 1 + ten
+        // stamps (the live run of 2026-09-15 did exactly that).
+        assert_eq!(cover_amount(&[18, 5, 8, 0, 0, 0, 0, 0], petals(1.1)), Some([0, 1, 1, 0, 0, 0, 0, 0]));
+        assert_eq!(cover_amount(&[18, 5, 8, 0, 0, 0, 0, 0], petals(0.25)), Some([5, 2, 0, 0, 0, 0, 0, 0]));
+    }
+
+    /// Past the cap the greedy fallback still covers, and says so by sum.
+    #[test]
+    fn cover_amount_falls_back_to_greed_when_the_space_is_huge() {
+        // one 100,000-MAGLD note and a few small ones
+        let counts = [3, 0, 0, 0, 0, 0, 0, 1];
+        let take = cover_amount(&counts, petals(0.02)).expect("covered");
+        let total: u64 = (0..8).map(|i| take[i] as u64 * DENOMINATION_PETALS[i]).sum();
+        assert!(total >= petals(0.02));
+    }
+
     /// The keep line is where storage mass makes a change coin cost more
     /// than it is worth; the 0.04 burned on 2026-09-15 sits below it and a
     /// whole MAGLD sits above it.
@@ -1768,6 +1806,83 @@ mod tests {
         assert_eq!(header.chunk_count, 1);
         assert!(entries.is_empty());
     }
+}
+
+/// How many notes of each denomination to consume to cover `target_petals`
+/// with the least value over it — the smallest reachable sum at or above the
+/// target. `None` when the notes do not add up to it.
+///
+/// Largest-first greed is wrong here: asked for 1.1 with two 1s and a 0.1 in
+/// hand it took both 1s and never looked at the 0.1 (2026-09-15). On a ledger
+/// wallet that only means more change; on a notes-only wallet, where a
+/// payout must cover the amount to within one 0.01 (FORK-PLAN P8.0b), it
+/// turned a payable amount into a refusal. A bounded knapsack over 0.01
+/// units answers exactly; the space is the target plus the largest note held,
+/// since any cover further over can drop a note and still cover.
+pub fn cover_amount(counts: &[usize; DENOMINATION_PETALS.len()], target_petals: u64) -> Option<[usize; DENOMINATION_PETALS.len()]> {
+    const N: usize = DENOMINATION_PETALS.len();
+    let quantum = DENOMINATION_PETALS[0];
+    let held: u64 = (0..N).map(|i| counts[i] as u64 * DENOMINATION_PETALS[i]).sum();
+    if held < target_petals {
+        return None;
+    }
+    let target = target_petals.div_ceil(quantum);
+    let largest = (0..N).rev().find(|&i| counts[i] > 0).map(|i| DENOMINATION_PETALS[i] / quantum).unwrap_or(0);
+    // Past this the exact answer is not worth the memory; largest-first greed
+    // is the old behaviour and still correct, just not tight.
+    const CAP: u64 = 4_000_000;
+    let limit = target + largest;
+    if limit > CAP {
+        let mut take = [0usize; N];
+        let mut remaining = target_petals;
+        for i in (0..N).rev() {
+            let d = DENOMINATION_PETALS[i];
+            let n = (remaining.div_ceil(d) as usize).min(counts[i]);
+            take[i] = n;
+            remaining = remaining.saturating_sub(n as u64 * d);
+            if remaining == 0 {
+                break;
+            }
+        }
+        return Some(take);
+    }
+    let len = limit as usize + 1;
+    let mut reach = vec![false; len];
+    reach[0] = true;
+    // used[i][s]: how many of denomination i the cover of sum s takes, so the
+    // answer can be read back. Denominations go largest first, and a sum the
+    // larger ones already reach is kept rather than rebuilt from smaller
+    // notes: among equal covers this picks the fewest notes, and in
+    // particular leaves the 0.01s alone — they are the fee stamps, and the
+    // first cut spent ten of them on a 1.1 that a 1 and a 0.1 covered.
+    let mut used: Vec<Vec<u32>> = Vec::with_capacity(N);
+    for i in (0..N).rev() {
+        let d = (DENOMINATION_PETALS[i] / quantum) as usize;
+        let count = counts[i] as u32;
+        let mut next = vec![false; len];
+        let mut used_i = vec![0u32; len];
+        for sum in 0..len {
+            if reach[sum] {
+                next[sum] = true;
+            } else if count > 0 && sum >= d && next[sum - d] && used_i[sum - d] < count {
+                next[sum] = true;
+                used_i[sum] = used_i[sum - d] + 1;
+            }
+        }
+        reach = next;
+        used.push(used_i);
+    }
+    // `used` is in processing order: used[0] is the largest denomination.
+    let mut sum = (target as usize..len).find(|&s| reach[s])?;
+    let mut take = [0usize; N];
+    for i in 0..N {
+        let d = (DENOMINATION_PETALS[i] / quantum) as usize;
+        let n = used[N - 1 - i][sum] as usize;
+        take[i] = n;
+        sum -= n * d;
+    }
+    debug_assert_eq!(sum, 0);
+    Some(take)
 }
 
 /// The smallest change output worth keeping. KIP-9 prices an output at
