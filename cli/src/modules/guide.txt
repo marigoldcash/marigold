@@ -1,59 +1,52 @@
-#[networks]
+#[nowallet] You do not have a wallet open yet. Type `wallet create` to make one — it asks a few
+questions and shows you 24 words to write down — or `open` if you have made one before. Then
+come back to `guide`.
 
-The `server` command configures the target server.  You can connect to any Marigold
-node that has wRPC enabled with `--rpclisten-borsh=0.0.0.0`. If the server setting 
-is set to 'public' the node will connect to the public node infrastructure.
+WHAT YOU ARE HOLDING. Marigold money comes as notes of fixed sizes — 0.01, 0.1, 1, 10 and up —
+that you hold and hand over, like cash. A note has no owner on record anywhere: whoever holds its
+key holds the money. This wallet keeps those keys in its vault.
 
-Both network and server values are stored in the application settings and are 
-used when running a local node or connecting to a remote node.
+YOUR FIRST NOTES. On the test network, faucet.marigold.cash gives out real notes: paste each one
+into `note import`, biggest first. Otherwise someone pays you: `note request` prints a code to
+show them (add an amount, `note request 5`, to ask for exactly that), and the wallet waits for
+the payment to land.
 
----
+#[ledger] An exchange pays to an address instead. That is what your ledger is for: `address`
+shows it, and whatever arrives there is turned into notes by the wallet on its own, usually
+within a minute.
 
-`wallet create [<name>]` Use this command to create a local wallet. The <name> argument 
-is optional (the default wallet name is "marigold") and allows you to create multiple 
-named wallets.  Only one wallet can be opened at a time. Keep in mind that a wallet can have multiple
-accounts, as such you only need one wallet, unless, for example, you want to separate wallets for 
-personal and business needs (but you can also create isolated accounts within a wallet).
+#[notesonly] This wallet keeps notes only — it has no ledger, so nothing can be paid to it by
+address. If an exchange ever needs to pay you, `account create bip32` adds a ledger; the same 24
+words bring it back.
 
-Make sure to record your mnemonic, even if working with a testnet, not to lose your
-testnet MAGLD.
+PAYING. Shown a request code? `note pay <code>` pays it. Handing a note to someone in person?
+`note export <serial>` prints it as a code, and `note import` on their side takes it (`note list`
+shows your serials). Paying someone who only gave you an address, such as an exchange?
+`exchange <address> <amount>` sends it straight from your notes in one go.
 
-`open <name>` - opens the wallet (the wallet is open automatically after creation).
+#[notesonly] Without a ledger there is nowhere to put change, so `exchange` needs notes that make
+up the amount to within 0.01 — pay 1.10, not 1.07, if you hold a 1 and a 0.1. The wallet tells
+you when they do not fit.
 
-`list` - Lists all wallet accounts and their balances.
+CHECKING. `balance` is the whole answer: your notes, by size. The prompt shows the same figure.
+`note list` lists every note you hold; `note history` what you have spent and received.
 
-`select <account-name>` - Selects an active account. The <account-name> can be the first few letters of the name or id of the account.
+KEEPING IT SAFE. Two things bring your money back: the 24 words the wizard showed you, and a
+copy of the vault files. Write the words on paper — they are never shown again — and make the
+copy with `note vault backup <folder>` after you receive anything new. `wallet backup <file>`
+puts everything into one file under a passphrase of your choosing; that file alone rebuilds the
+wallet anywhere with `wallet restore <file>`. Anyone holding the words and the files, or the
+backup file and its passphrase, can spend your money — treat them as cash. `otp on` makes the
+wallet ask for a code from your phone before it spends.
 
-`account create bip32 [<name>]` - Creates another account inside this wallet, sharing its recovery phrase. Every account is derived from that one phrase, so backing it up backs up all of them — you never need a second backup.
+#[ledger] IF YOU MINE. `mine start` mines with spare CPU on your own node. Rewards land on your
+ledger and the wallet turns them into notes by itself; `balance` shows the ledger line while it
+does. If it ever says there is too much to tidy on its own, `sweep <amount>` does part of it at
+a time.
 
-`address` - shows your selected account address
+YOUR OWN NODE. The wallet can run a Marigold node on this machine, so nobody else sees which
+notes you ask about. `connect` offers it; the first sync takes a while and the wallet says so.
+Until then it can use a public node if you say yes — it never does that unasked.
 
-Before you transact: `mute` option (enabled by default) toggles mute on/off. Mute enables terminal
-output of internal framework events.  Rust and JavaScript/TypeScript applications integrating with this platform 
-are meant to update their state by monitoring event notifications. Mute allows you to see these events in
-the terminal.  When mute is off, all events are displayed in the terminal.  When mute is on, you can use 'track'
-command to enable specific event notification.
-
-`transfer <account-name> <amount>` - Transfers from the active to a different local account. For example 'transfer p 1' will transfer 1 MAGLD from
-the selected account to an account named 'pete' (starts with a 'p' letter)
-
-`send <address> <amount>` - Send funds to a destination address .
-
-`estimate <amount>` - Provides a fee and UTXO consumption estimate for a transaction of a given amount.
-
-`sweep` - Sweeps account UTXOs to reduce the UTXO size.
-
-`history list` - Shows previous account transactions.
-
-`history details` - Show previous account transactions with extended information.
-
-`monitor` - A test screen environment that periodically updates account balances.
-
-`rpc` - Allows you to execute RPC methods against the node (not all methods are currently available)
-
-
-The Marigold cash flow: mining rewards and regular transfers arrive as transparent "ledger" balance (`balance` and `utxos` show it). Turn ledger balance into bearer notes with `note mint <amount>` (or `note mint all`) — notes are the cash of Marigold: fixed denominations, no owner on record, transferred by handing over their keys. `note balance` and `note list` show what you hold; `note export` hands a note over as a QR/text bearer code and `note import` claims one; `note request` and `note pay` cover invoice-style payments; `note redeem` turns notes back into ledger balance.
-
-Where is my money? `wallet where` shows the files on disk that ARE your wallet and your notes — back them up like cash in a safe. `balance` shows everything you hold at a glance.
-
-Backups: `wallet backup <file>` writes the whole wallet — keys, notes and all — into one file encrypted under a passphrase you choose, separate from your wallet password. That file is safe to keep somewhere you do not control (a cloud drive, a chat with yourself), and it is the only backup that needs no second ingredient: `wallet restore <file>` rebuilds the wallet from it anywhere. `wallet backup verify <file>` checks an old one still opens. Anyone holding the file and its passphrase can spend your money — treat it as cash.
+EVERYTHING ELSE. `help` lists the everyday commands. `advanced on` shows the technical side —
+every command, addresses, and the reason behind an error — and `advanced off` hides it again.
