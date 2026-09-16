@@ -17,6 +17,7 @@ pub mod modules;
 mod notifier;
 pub mod result;
 pub mod space;
+pub mod platform;
 pub mod splash;
 pub mod ui;
 pub mod utils;
