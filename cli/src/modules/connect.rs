@@ -358,10 +358,14 @@ async fn start_network_sync(ctx: &Arc<KaspaCli>, public_available: bool) -> Resu
         return Ok(SyncStart::Settled);
     }
     ctx.announce_sync_started();
-    tprintln!(ctx, "Until sync has caught up, we can't tell what is on the ledger — and notes can't be");
-    tprintln!(ctx, "paid or received either.");
-    tprintln!(ctx, "{}", style("We could connect to a public computer that has all the data already, but whoever").dim());
-    tprintln!(ctx, "{}", style("runs it sees which notes your wallet asks about.").dim());
+    // Wrapped to the terminal, not by hand: hand-broken lines spilled a word
+    // onto the next line on an 80-column screen (founder, 2026-09-16).
+    tpara!(ctx, "Until sync has caught up, we can't tell what is on the ledger, and some things don't work without it.");
+    tpara!(
+        ctx,
+        "{}",
+        style("We could connect to a public computer that has all the data already, but whoever runs it sees which notes your wallet asks about.").dim()
+    );
     let answer = ctx.term().ask(false, "Use a public computer until sync has caught up? [y/N]: ").await?.trim().to_lowercase();
     tprintln!(ctx, "");
     if answer.starts_with('y') {
@@ -371,8 +375,7 @@ async fn start_network_sync(ctx: &Arc<KaspaCli>, public_available: bool) -> Resu
         }
         tprintln!(ctx, "There is no public computer to use. Staying on your own copy while it catches up.");
     } else {
-        tprintln!(ctx, "Staying on your own. Nothing can be seen or paid until sync has caught up —");
-        tprintln!(ctx, "'connect status' shows progress.");
+        tpara!(ctx, "Staying on your own. The ledger stays unread and some things wait until sync has caught up — 'connect status' shows progress.");
     }
     ctx.adopt_embedded_node(rpc).await?;
     tprintln!(ctx, "");

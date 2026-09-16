@@ -42,7 +42,10 @@ impl Node {
             Some(SyncProgress::Blocks { percent, .. }) => (3, percent),
             None => (1, 0),
         };
-        format!("Step {step} of 3, {}% done", percent.min(100))
+        // Never 100: a figure that says done while the wallet is still not
+        // on its own copy reads as stuck. 99 reads as almost there, which is
+        // what it is (founder, 2026-09-16).
+        format!("Step {step} of 3, {}% done", percent.min(99))
     }
 
     /// How long the sync has been stuck, if long enough to be worth saying.
@@ -92,8 +95,7 @@ impl Node {
                 tprintln!(ctx, "is complete.");
             } else {
                 tprintln!(ctx, "Using: {} Your own sync: {}.", style("nothing yet.").bold(), Self::sync_step(ctx));
-                tprintln!(ctx, "Your notes are safe on this disk, but nothing can be seen or paid until the");
-                tprintln!(ctx, "sync has caught up. Nothing is being announced to anyone in the meantime.");
+                tpara!(ctx, "Your notes are safe on this disk, but the ledger stays unread and some things wait until the sync has caught up. Nothing is being announced to anyone in the meantime.");
             }
             // The one thing worth interrupting for. A stalled sync looks
             // identical to a working one — the numbers simply stop — and
