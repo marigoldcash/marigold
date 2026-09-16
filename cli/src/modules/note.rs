@@ -519,6 +519,13 @@ impl Note {
             .get(WalletSettings::Folder)
             .unwrap_or_else(|| kaspa_wallet_core::storage::local::default_storage_folder().to_string());
         let dest_storage = Storage::try_new_with_folder(&folder, &wallet_file_name(&dest))?;
+        // Two programs on one folder is fine as long as they hold different
+        // wallets; writing into one that is open elsewhere is not — it would
+        // not see the notes, or would overwrite them (founder, 2026-09-16).
+        if kaspa_wallet_core::storage::local::interface::wallet_is_open_elsewhere(dest_storage.filename()) {
+            tprintln!(ctx, "'{dest}' is open in another Marigold program. Close it there first, then 'move' again.\r\n");
+            return Ok(());
+        }
         let dest_wallet = WalletStorage::try_load(&dest_storage).await?;
         if dest_wallet.payload(&dest_secret).is_err() {
             tprintln!(ctx, "Unable to decrypt '{dest}' with that password — nothing was moved.\r\n");

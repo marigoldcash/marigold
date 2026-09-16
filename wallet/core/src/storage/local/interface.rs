@@ -143,6 +143,20 @@ impl WalletLock {
     }
 }
 
+/// Is this wallet open in another Marigold program right now? Asked before
+/// writing into a wallet this process has not opened — 'move' puts notes
+/// straight into another wallet's vault, and a wallet that is open elsewhere
+/// would not see them, or would overwrite them.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn wallet_is_open_elsewhere(wallet_file: &std::path::Path) -> bool {
+    WalletLock::acquire(wallet_file).is_err()
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn wallet_is_open_elsewhere(_wallet_file: &std::path::Path) -> bool {
+    false
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 impl Drop for WalletLock {
     fn drop(&mut self) {

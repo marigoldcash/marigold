@@ -224,7 +224,13 @@ impl UserInput {
             }
             Key::Char(ch) => {
                 self.buffer.lock().unwrap().push(ch);
-                if !self.is_secret() {
+                // A password shows a star per keystroke rather than nothing:
+                // silence at a prompt reads as a broken keyboard to anyone who
+                // has not typed passwords into terminals before (Marigold,
+                // founder 2026-09-16).
+                if self.is_secret() {
+                    term.write('*');
+                } else {
                     term.write(ch);
                 }
                 if self.is_kbhit() {
@@ -233,8 +239,7 @@ impl UserInput {
                 }
             }
             Key::Backspace => {
-                self.buffer.lock().unwrap().pop();
-                if !self.is_secret() {
+                if self.buffer.lock().unwrap().pop().is_some() {
                     term.write("\x08 \x08");
                 }
             }
@@ -417,7 +422,9 @@ impl Terminal {
                 if let Some(prompt) = self.user_input.get_prompt() {
                     self.write(format!("{}{}\n\r", ClearLine, s.to_string()));
                     self.write(prompt);
-                    if !self.user_input.secret.load(Ordering::SeqCst) {
+                    if self.user_input.secret.load(Ordering::SeqCst) {
+                        self.write("*".repeat(self.user_input.get_buffer().chars().count()));
+                    } else {
                         self.write(self.user_input.get_buffer());
                     }
                 } else {

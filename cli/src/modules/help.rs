@@ -22,11 +22,9 @@ impl Help {
 
         term.help(&handlers, None)?;
 
-        term.writeln("New to Marigold? 'guide' walks the basics — fund your wallet, 'note mint' to turn balance into bearer notes, hold and spend them like cash.".crlf());
+        term.writeln("New to Marigold? 'guide' walks you through the basics.".crlf());
         if advanced {
             term.writeln("Advanced mode is on: this is every command. 'advanced off' shows the everyday ones only.".crlf());
-        } else {
-            term.writeln("Expert commands (accounts, node, RPC, diagnostics): type 'advanced'.".crlf());
         }
 
         Ok(())
