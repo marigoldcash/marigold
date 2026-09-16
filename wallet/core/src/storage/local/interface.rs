@@ -938,20 +938,17 @@ impl NoteKeyStore for LocalStoreInner {
     async fn store(&self, wallet_secret: &Secret, entry: NoteKeyEntry) -> Result<()> {
         self.ensure_note_vault(wallet_secret).await?;
         self.notevault.store(wallet_secret, entry).await?;
-        self.set_modified(true);
         Ok(())
     }
 
     async fn remove(&self, wallet_secret: &Secret, sn: &Hash) -> Result<()> {
         self.notevault.remove(wallet_secret, sn).await?;
-        self.set_modified(true);
         Ok(())
     }
 
     async fn import_bearer_key(&self, wallet_secret: &Secret, sn: Hash, sk: [u8; 32], d: DenominationTag) -> Result<()> {
         self.ensure_note_vault(wallet_secret).await?;
         self.notevault.import_bearer_key(wallet_secret, sn, sk, d).await?;
-        self.set_modified(true);
         Ok(())
     }
 
@@ -965,7 +962,6 @@ impl NoteKeyStore for LocalStoreInner {
 
     async fn mark_status(&self, sn: &Hash, status: NoteStatus) -> Result<()> {
         self.notevault.mark_status(sn, status).await?;
-        self.set_modified(true);
         Ok(())
     }
 
@@ -974,11 +970,13 @@ impl NoteKeyStore for LocalStoreInner {
         wallet_secret: Option<&Secret>,
         notification: &NotesChangedNotification,
     ) -> Result<NotesChangedApplyResult> {
-        let result = self.notevault.apply_notes_changed(wallet_secret, notification).await?;
-        if !result.superseded.is_empty() || !result.added.is_empty() {
-            self.set_modified(true);
-        }
-        Ok(result)
+        // The vault persists every change itself, file by file; nothing in the
+        // wallet file moves. Flagging it modified here (and in the methods
+        // above) was a leftover from when note keys lived in that file
+        // (P7.1-P7.5), and it made 'close' panic after any status flip that
+        // had no secret in hand to commit with — a note superseded on-chain,
+        // a strike moved to Unknown by 'balance' (founder, 2026-09-16).
+        self.notevault.apply_notes_changed(wallet_secret, notification).await
     }
 
     async fn vault_exists(&self) -> Result<bool> {
@@ -1180,6 +1178,27 @@ mod note_key_store_tests {
         assert!(NoteKeyStore::load_key(&store, &wallet_secret, &sn).await?.is_none());
         assert!(NoteKeyStore::load_info(&store, &sn).await?.is_none());
 
+        Ok(())
+    }
+
+    /// The vault writes itself; a note-key change must not leave the wallet
+    /// file flagged modified, or 'close' panics on a wallet nobody changed.
+    #[tokio::test]
+    async fn note_changes_do_not_dirty_the_wallet_file() -> Result<()> {
+        let wallet_secret = Secret::from("note-key-db-test-secret");
+        let store = resident_store(&wallet_secret).await;
+        let sn = Hash::from([0x88u8; 32]);
+        let entry = NoteKeyEntry::new(sn, [0x99u8; 32], DenominationTag::D1, NoteProvenance::Cold);
+        let pk = entry.derive_pk()?;
+        NoteKeyStore::store(&store, &wallet_secret, entry).await?;
+        NoteKeyStore::mark_status(&store, &sn, NoteStatus::Unknown).await?;
+        let notification = kaspa_rpc_core::message::NotesChangedNotification {
+            added: Arc::new(vec![]),
+            removed: Arc::new(vec![RpcNoteEntry { sn, denomination: DenominationTag::D1 as u8, pk }]),
+        };
+        NoteKeyStore::apply_notes_changed(&store, None, &notification).await?;
+        NoteKeyStore::remove(&store, &wallet_secret, &sn).await?;
+        assert!(!store.is_modified(), "note-vault changes are persisted by the vault, not the wallet file");
         Ok(())
     }
 
