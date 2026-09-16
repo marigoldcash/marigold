@@ -217,7 +217,6 @@ impl Wallet {
                     // Offline is a perfectly good state to open in: notes live
                     // in the local vault and can be counted without a node.
                     ctx.report_holdings().await;
-                    tprintln!(ctx, "The above are the notes in your vault.");
                     if ctx.has_ledger_account().await {
                         tprintln!(ctx, "To see whether you hold anything on the ledger, a network connection is needed.");
                     }

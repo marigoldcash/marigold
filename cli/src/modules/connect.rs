@@ -366,6 +366,7 @@ async fn start_network_sync(ctx: &Arc<KaspaCli>, public_available: bool) -> Resu
         "{}",
         style("We could connect to a public computer that has all the data already, but whoever runs it sees which notes your wallet asks about.").dim()
     );
+    tprintln!(ctx, "");
     let answer = ctx.term().ask(false, "Use a public computer until sync has caught up? [y/N]: ").await?.trim().to_lowercase();
     tprintln!(ctx, "");
     if answer.starts_with('y') {

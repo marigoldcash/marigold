@@ -668,8 +668,10 @@ impl KaspaCli {
     pub fn announce_sync_started(self: &Arc<Self>) {
         tprintln!(self, "");
         tprintln!(self, "{}", style("Network sync started!").green());
+        tprintln!(self, "");
         tprintln!(self, "A first sync takes anywhere from half an hour to a few hours. Leaving the");
         tprintln!(self, "wallet before it finishes discards it — after that, restarts are free.");
+        tprintln!(self, "");
         tprintln!(self, "Type 'connect status' for progress info.");
         tprintln!(self, "");
     }
@@ -690,7 +692,6 @@ impl KaspaCli {
         } else {
             tprintln!(self, "Type 'wallet create' to create a wallet or 'help' for list of commands.");
         }
-        tprintln!(self, "");
     }
 
     /// Start the node without touching the wallet's connection.
@@ -1980,7 +1981,7 @@ impl KaspaCli {
                                     // No URL means the node is inside this process — there is no
                                     // address to print, and "at N/A" reads like a fault.
                                     match url {
-                                        Some(url) => tprintln!(this, "Connected to a public computer, Marigold version {server_version}, at {url}"),
+                                        Some(url) => tprintln!(this, "Connected to {url}, Marigold version {server_version}"),
                                         None => tprintln!(this, "Using your own copy of the network, Marigold version {server_version}"),
                                     }
 
