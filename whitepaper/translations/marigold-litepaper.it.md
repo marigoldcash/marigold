@@ -73,7 +73,7 @@ Dato che una banconota Marigold non è altro che una chiave, usarla nel mondo re
 
 ### Stampala, spendila
 
-Ogni banconota nell'app del portafoglio può essere mostrata come **codice QR**. Quel codice QR puoi stamparlo su un foglio, piegarlo e metterlo nel portafoglio di pelle — accanto alle carte di credito e alla patente. Quel pezzo di carta *è* il denaro. Lo passi a qualcuno, quello lo scansiona, cambia la serratura e la banconota è sua. Tu non hai più una chiave che funziona. Il foglio che ha in tasca ormai non vale niente — il valore si è spostato.
+Ogni banconota nell'app del portafoglio può essere mostrata come **codice QR**. Quel codice QR puoi stamparlo su un foglio, piegarlo e metterlo nel portafoglio di pelle — accanto alle carte di credito e alla patente. Quel pezzo di carta *è* il denaro. Lo mostri a qualcuno, quello lo scansiona, cambia la serratura e la banconota è sua. Tu non hai più una chiave che funziona. Il foglio che hai in tasca ormai non vale niente — il valore è passato a lui.
 
 Non è una metafora. Il codice QR stampato contiene la chiave vera. Perderlo è come perdere una banconota da cento dollari: chi la trova può spenderla. Tenerlo al sicuro è la stessa responsabilità che hai con i contanti. Non c'è un numero verde per il recupero, non c'è il pulsante «segnala il furto», non c'è una banca che annulla la transazione. Questo vuol dire essere al portatore, ed è tutto il punto.
 

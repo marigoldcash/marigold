@@ -73,7 +73,7 @@ Weil ein Marigold-Schein nichts weiter ist als ein Schlüssel, ist der Umgang da
 
 ### Ausdrucken und ausgeben
 
-Jeder Schein in deiner Wallet-App lässt sich als **QR-Code** anzeigen. Du kannst diesen QR-Code auf ein Blatt Papier drucken, es zusammenfalten und in deine Brieftasche stecken — direkt neben die Kreditkarten und den Führerschein. Dieses Stück Papier *ist* das Geld. Gib es jemandem, er scannt es, tauscht das Schloss aus, und der Schein gehört ihm. Dein Schlüssel passt nicht mehr. Das Papier in seiner Tasche ist jetzt wertlos — der Wert ist weitergewandert.
+Jeder Schein in deiner Wallet-App lässt sich als **QR-Code** anzeigen. Du kannst diesen QR-Code auf ein Blatt Papier drucken, es zusammenfalten und in deine Brieftasche stecken — direkt neben die Kreditkarten und den Führerschein. Dieses Stück Papier *ist* das Geld. Zeig es jemandem, er scannt es, tauscht das Schloss aus, und der Schein gehört ihm. Dein Schlüssel passt nicht mehr. Das Papier in deiner Tasche ist jetzt wertlos — der Wert ist zu ihm gewandert.
 
 Das ist kein Bild. Im gedruckten QR-Code steckt der echte Schlüssel. Ihn zu verlieren ist, als würdest du einen Hundert-Euro-Schein verlieren: Wer ihn findet, kann ihn ausgeben. Ihn sicher zu verwahren ist dieselbe Verantwortung wie bei Bargeld. Es gibt keine Hotline, keinen Knopf „als gestohlen melden“, keine Bank, die die Zahlung zurückholt. Genau das heißt Inhaberpapier, und darum geht es hier.
 

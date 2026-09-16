@@ -73,7 +73,7 @@ Como uma cédula Marigold não passa de uma chave, usá-la no mundo real é tão
 
 ### Imprima e gaste
 
-Toda cédula do seu aplicativo de carteira pode ser exibida como um **QR code**. Você pode imprimir esse QR code num pedaço de papel, dobrar e guardar na carteira de couro — bem ao lado dos cartões de crédito e da carteira de motorista. Esse pedaço de papel *é* o dinheiro. Entregue a alguém: a pessoa escaneia, troca a fechadura, e a cédula é dela. A sua chave não funciona mais. O papel que ficou no bolso dela agora não vale nada — o valor já mudou de lugar.
+Toda cédula do seu aplicativo de carteira pode ser exibida como um **QR code**. Você pode imprimir esse QR code num pedaço de papel, dobrar e guardar na carteira de couro — bem ao lado dos cartões de crédito e da carteira de motorista. Esse pedaço de papel *é* o dinheiro. Mostre a alguém: a pessoa escaneia, troca a fechadura, e a cédula é dela. A sua chave não funciona mais. O papel que continua no seu bolso agora não vale nada — o valor passou para quem escaneou.
 
 Isso não é metáfora. O QR code impresso guarda a chave de verdade. Perdê-lo é como perder uma cédula de cem dólares: quem achar pode gastar. Guardá-lo bem é a mesma responsabilidade de guardar dinheiro vivo. Não existe central de recuperação, não existe botão de "informar roubo", não existe banco para estornar a transação. É exatamente isso que quer dizer ser ao portador, e é justamente esse o ponto.
 

@@ -73,7 +73,7 @@ Como un billete Marigold no es más que una llave, usarlo en el mundo real es ta
 
 ### Imprímelo, gástalo
 
-Cada billete de tu aplicación de monedero se puede mostrar como un **código QR**. Puedes imprimir ese código QR en un papel, doblarlo y meterlo en tu cartera de cuero, justo al lado de las tarjetas de crédito y el carné de conducir. Ese papel *es* el dinero. Se lo entregas a alguien, lo escanea, cambia la cerradura y el billete es suyo. Tú ya no tienes una llave que funcione. El papel que ahora lleva en el bolsillo no vale nada: el valor se ha movido.
+Cada billete de tu aplicación de monedero se puede mostrar como un **código QR**. Puedes imprimir ese código QR en un papel, doblarlo y meterlo en tu cartera de cuero, justo al lado de las tarjetas de crédito y el carné de conducir. Ese papel *es* el dinero. Se lo enseñas a alguien, lo escanea, cambia la cerradura y el billete es suyo. Tú ya no tienes una llave que funcione. El papel que te queda en el bolsillo ya no vale nada: el valor ha pasado a esa persona.
 
 Esto no es una metáfora. El código QR impreso contiene la llave de verdad. Perderlo es como perder un billete de cien dólares: quien lo encuentre puede gastarlo. Guardarlo a salvo es la misma responsabilidad que guardar efectivo a salvo. No hay teléfono de atención para recuperarlo, ni botón de «denunciar robo», ni banco que revierta la transacción. Eso es lo que significa ser un instrumento al portador, y en eso consiste todo.
 

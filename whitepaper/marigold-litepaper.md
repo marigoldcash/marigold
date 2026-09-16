@@ -73,7 +73,7 @@ Because a Marigold note is nothing more than a key, using one in the real world 
 
 ### Print It, Spend It
 
-Every note in your wallet app can be displayed as a **QR code**. You can print that QR code on a piece of paper, fold it up, and put it in your leather wallet — right next to your credit cards and your driver's license. That piece of paper *is* the money. Hand it to someone, and they scan it, swap the lock, and the note is theirs. You no longer hold a working key. The paper in their pocket is now worthless — the value has moved.
+Every note in your wallet app can be displayed as a **QR code**. You can print that QR code on a piece of paper, fold it up, and put it in your leather wallet — right next to your credit cards and your driver's license. That piece of paper *is* the money. Show it to someone, and they scan it, swap the lock, and the note is theirs. You no longer hold a working key. The paper in your pocket is now worthless — the value has moved to them.
 
 This is not a metaphor. The printed QR code holds the actual key. Losing it is like losing a hundred-dollar bill: whoever finds it can spend it. Keeping it safe is the same responsibility as keeping cash safe. There is no recovery hotline, no "report this stolen" button, no bank to reverse the transaction. That is what bearer means, and it is the entire point.
 

@@ -73,7 +73,7 @@ Parce qu'un billet Marigold n'est rien d'autre qu'une clé, s'en servir dans la 
 
 ### Imprimez-le, dépensez-le
 
-Chaque billet de votre application de portefeuille peut s'afficher sous forme de **QR code**. Vous pouvez imprimer ce QR code sur une feuille de papier, la plier et la glisser dans votre portefeuille en cuir — juste à côté de vos cartes bancaires et de votre permis de conduire. Ce bout de papier *est* l'argent. Tendez-le à quelqu'un : il le scanne, change la serrure, et le billet est à lui. Vous ne détenez plus de clé qui fonctionne. Le papier qu'il a en poche ne vaut plus rien — la valeur est passée ailleurs.
+Chaque billet de votre application de portefeuille peut s'afficher sous forme de **QR code**. Vous pouvez imprimer ce QR code sur une feuille de papier, la plier et la glisser dans votre portefeuille en cuir — juste à côté de vos cartes bancaires et de votre permis de conduire. Ce bout de papier *est* l'argent. Montrez-le à quelqu'un : il le scanne, change la serrure, et le billet est à lui. Vous ne détenez plus de clé qui fonctionne. Le papier que vous avez en poche ne vaut plus rien — la valeur est passée entre ses mains.
 
 Ce n'est pas une métaphore. Le QR code imprimé contient la clé elle-même. Le perdre, c'est comme perdre un billet de cent dollars : celui qui le trouve peut le dépenser. Le garder en sécurité est exactement la même responsabilité que garder de l'argent liquide en sécurité. Il n'y a pas de numéro d'assistance, pas de bouton « signaler un vol », pas de banque pour annuler la transaction. C'est cela, être au porteur, et c'est tout l'intérêt.
 
