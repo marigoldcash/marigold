@@ -4259,3 +4259,166 @@ impl Deserializer for NotesChangedNotification {
         Ok(Self { added: Arc::new(added), removed: Arc::new(removed) })
     }
 }
+
+/// What the miner inside a node is doing (FORK-PLAN P8.3c). `available` is
+/// false on a node with no miner program in it, such as marigoldd; the wallet
+/// uses that to tell a background miner from any other node on the machine.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RpcMinerStatus {
+    pub available: bool,
+    pub mining: bool,
+    pub percent: u32,
+    pub threads: u32,
+    pub cores: u32,
+    pub hashrate: f64,
+    pub blocks_found: u64,
+    pub blocks_accepted: u64,
+    pub blocks_rejected: u64,
+    /// Where the rewards go. Empty when nothing is mining.
+    pub address: String,
+    pub uptime_seconds: u64,
+}
+
+impl Serializer for RpcMinerStatus {
+    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        store!(u16, &1, writer)?;
+        store!(bool, &self.available, writer)?;
+        store!(bool, &self.mining, writer)?;
+        store!(u32, &self.percent, writer)?;
+        store!(u32, &self.threads, writer)?;
+        store!(u32, &self.cores, writer)?;
+        store!(f64, &self.hashrate, writer)?;
+        store!(u64, &self.blocks_found, writer)?;
+        store!(u64, &self.blocks_accepted, writer)?;
+        store!(u64, &self.blocks_rejected, writer)?;
+        store!(String, &self.address, writer)?;
+        store!(u64, &self.uptime_seconds, writer)?;
+        Ok(())
+    }
+}
+
+impl Deserializer for RpcMinerStatus {
+    fn deserialize<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
+        let _version = load!(u16, reader)?;
+        let available = load!(bool, reader)?;
+        let mining = load!(bool, reader)?;
+        let percent = load!(u32, reader)?;
+        let threads = load!(u32, reader)?;
+        let cores = load!(u32, reader)?;
+        let hashrate = load!(f64, reader)?;
+        let blocks_found = load!(u64, reader)?;
+        let blocks_accepted = load!(u64, reader)?;
+        let blocks_rejected = load!(u64, reader)?;
+        let address = load!(String, reader)?;
+        let uptime_seconds = load!(u64, reader)?;
+        Ok(Self { available, mining, percent, threads, cores, hashrate, blocks_found, blocks_accepted, blocks_rejected, address, uptime_seconds })
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetMinerStatusRequest {}
+
+impl Serializer for GetMinerStatusRequest {
+    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        store!(u16, &1, writer)?;
+        Ok(())
+    }
+}
+
+impl Deserializer for GetMinerStatusRequest {
+    fn deserialize<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
+        let _version = load!(u16, reader)?;
+        Ok(Self {})
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetMinerStatusResponse {
+    pub status: RpcMinerStatus,
+}
+
+impl GetMinerStatusResponse {
+    pub fn new(status: RpcMinerStatus) -> Self {
+        Self { status }
+    }
+}
+
+impl Serializer for GetMinerStatusResponse {
+    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        store!(u16, &1, writer)?;
+        serialize!(RpcMinerStatus, &self.status, writer)?;
+        Ok(())
+    }
+}
+
+impl Deserializer for GetMinerStatusResponse {
+    fn deserialize<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
+        let _version = load!(u16, reader)?;
+        let status = deserialize!(RpcMinerStatus, reader)?;
+        Ok(Self { status })
+    }
+}
+
+/// Start (`mining: true`, with an optional share of the machine in percent),
+/// or stop (`mining: false`) the miner inside this node.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ControlMinerRequest {
+    pub mining: bool,
+    pub percent: Option<u32>,
+}
+
+impl ControlMinerRequest {
+    pub fn new(mining: bool, percent: Option<u32>) -> Self {
+        Self { mining, percent }
+    }
+}
+
+impl Serializer for ControlMinerRequest {
+    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        store!(u16, &1, writer)?;
+        store!(bool, &self.mining, writer)?;
+        store!(Option<u32>, &self.percent, writer)?;
+        Ok(())
+    }
+}
+
+impl Deserializer for ControlMinerRequest {
+    fn deserialize<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
+        let _version = load!(u16, reader)?;
+        let mining = load!(bool, reader)?;
+        let percent = load!(Option<u32>, reader)?;
+        Ok(Self { mining, percent })
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ControlMinerResponse {
+    pub status: RpcMinerStatus,
+}
+
+impl ControlMinerResponse {
+    pub fn new(status: RpcMinerStatus) -> Self {
+        Self { status }
+    }
+}
+
+impl Serializer for ControlMinerResponse {
+    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        store!(u16, &1, writer)?;
+        serialize!(RpcMinerStatus, &self.status, writer)?;
+        Ok(())
+    }
+}
+
+impl Deserializer for ControlMinerResponse {
+    fn deserialize<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
+        let _version = load!(u16, reader)?;
+        let status = deserialize!(RpcMinerStatus, reader)?;
+        Ok(Self { status })
+    }
+}

@@ -669,6 +669,8 @@ impl RpcApi for KaspaRpcClient {
             GetNotesBySerial,
             GetPoolStats,
             GetFinalityAnchorStatus,
+            GetMinerStatus,
+            ControlMiner,
         ]
     );
 

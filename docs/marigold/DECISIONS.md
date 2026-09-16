@@ -330,3 +330,21 @@ six thousand dust inputs to chew through.
 
 This lands where the design story already points: the ledger is plumbing and
 is priced like plumbing; notes are money and cost a penny to move.
+
+## The miner as a service (2026-09-16)
+
+**Decision.** The CPU miner ships as a mode of the one binary, `marigold-cli mine-to <address> <percent>`, not as a second program. It runs a node and a miner with no terminal and no wallet, stays in the foreground, logs to stdout, and stops on SIGTERM; systemd or Docker keep it running. Its node listens on 127.0.0.1 only. A wallet on the same machine joins that node rather than syncing a second copy, and steers the miner through two RPC calls added for it, `GetMinerStatus` and `ControlMiner`.
+
+**Why one binary.** A miner is the wallet's node plus the wallet's miner minus the wallet. Cutting a separate program would have meant a second release artefact, a second version to trace, and a second copy of the mining loop to keep in step; instead the loop moved into `miner::spawn_session` and both call it. The founder's phrasing of the ask was exactly this — the CLI, given an address and a percentage.
+
+**Why not daemonise.** Forking into the background is what init systems are for, and they do it better: restart on failure, journald for the log, a unit file people already know how to read. A program that daemonises itself fights every one of those. `Type=simple` and a foreground process is the whole integration.
+
+**Why the wallet finds it by itself.** Bare `connect` means "the network here". If a node is already syncing the network here, starting another beside it would fail on the p2p port and, worse, would double the disk. So `connect` first asks 127.0.0.1 on the network's wRPC port; whatever answers is used. A node that says it has a miner is the background miner, and its miner is the wallet's to steer. A node that says it has none is a marigoldd and is used as a plain node.
+
+**Why the node answers "no miner" instead of erroring.** marigoldd has no miner in it and never will. The wallet needs to tell "a node with a miner" from "a node" from "nothing", and an error would blur the first two. `available: false` is the honest answer and costs nothing.
+
+**Where the rewards go.** To the address given when the miner was started, and nowhere else: the miner never sees a wallet. `mine status` shows that address and says it is not necessarily this wallet's. Anyone pointing a miner at a friend's address is doing exactly what they typed.
+
+**The own lane still holds.** The background miner's node is started with `accept_own_below_floor`, the same as the wallet's own node, so a wallet on it takes the own lane (P8.3b) for sweep and mint, using the miner's reported hash rate for the hour bound. The transactions are withheld from relay by that node and mined by that miner; the fee comes back as block reward to the miner's address — which is the same household, not necessarily the same wallet, and the status line says so.
+
+**What this is not.** Not a pool, not a stratum bridge, not remote control from another machine: the RPC is bound to loopback and there is no authentication on it, because there is nothing to authenticate on a socket only this machine can reach. A garage's or a pool's remote node with the own lane is the next thing (P8.3b's "next, if wanted") and would need a bearer secret on the wire first.

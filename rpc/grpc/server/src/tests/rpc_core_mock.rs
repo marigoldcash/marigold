@@ -222,6 +222,18 @@ impl RpcApi for RpcCoreMock {
         Err(RpcError::NotImplemented)
     }
 
+    async fn get_miner_status_call(
+        &self,
+        _connection: Option<&DynRpcConnection>,
+        _request: GetMinerStatusRequest,
+    ) -> RpcResult<GetMinerStatusResponse> {
+        Err(RpcError::NotImplemented)
+    }
+
+    async fn control_miner_call(&self, _connection: Option<&DynRpcConnection>, _request: ControlMinerRequest) -> RpcResult<ControlMinerResponse> {
+        Err(RpcError::NotImplemented)
+    }
+
     async fn get_pool_stats_call(
         &self,
         _connection: Option<&DynRpcConnection>,

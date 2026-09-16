@@ -752,6 +752,23 @@ async fn sanity_test() {
                 })
             }
 
+            KaspadPayloadOps::GetMinerStatus => {
+                let rpc_client = client.clone();
+                tst!(op, {
+                    // marigoldd has no miner in it, and says so rather than erroring.
+                    let status = rpc_client.get_miner_status().await.unwrap();
+                    assert!(!status.available);
+                })
+            }
+
+            KaspadPayloadOps::ControlMiner => {
+                let rpc_client = client.clone();
+                tst!(op, {
+                    let result = rpc_client.control_miner(true, Some(50)).await;
+                    assert!(result.is_err());
+                })
+            }
+
             KaspadPayloadOps::GetPoolStats => {
                 let rpc_client = client.clone();
                 tst!(op, {

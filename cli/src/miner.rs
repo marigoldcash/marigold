@@ -27,7 +27,12 @@
 use kaspa_consensus_core::block::Block;
 use kaspa_consensus_core::header::Header;
 use kaspa_pow::State;
+use kaspa_addresses::Address;
+use kaspa_rpc_core::api::miner::MinerControl;
 use kaspa_rpc_core::model::RpcRawBlock;
+use kaspa_rpc_core::{RpcError, RpcMinerStatus, RpcResult};
+use kaspa_wallet_core::rpc::DynRpcApi;
+use workflow_log::log_warn;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread::JoinHandle;
@@ -269,6 +274,159 @@ impl Miner {
     pub fn hashrate(&self) -> f64 {
         let seconds = self.started.elapsed().as_secs_f64();
         if seconds <= 0.0 { 0.0 } else { self.hashes.load(Ordering::Relaxed) as f64 / seconds }
+    }
+
+    pub fn uptime(&self) -> std::time::Duration {
+        self.started.elapsed()
+    }
+}
+
+/// Run a mining session against `rpc`, paying to `address`, until the miner
+/// is stopped or `shutdown` is raised.
+///
+/// One task owns both halves: fetching work and submitting what comes back.
+/// Keeping them together means there is a single place where the job
+/// generation is advanced, so a solution can never be matched against a
+/// template that has already been replaced. The same loop serves the wallet's
+/// own miner and the background miner program (FORK-PLAN P8.3c).
+pub fn spawn_session(
+    rpc: Arc<DynRpcApi>,
+    address: Address,
+    miner: Arc<Miner>,
+    solutions: std::sync::mpsc::Receiver<Solution>,
+    shutdown: Arc<AtomicBool>,
+) {
+    workflow_core::task::spawn(async move {
+        let extra = format!("marigold-wallet/{}", env!("CARGO_PKG_VERSION")).into_bytes();
+        let mut last_refresh = std::time::Instant::now() - std::time::Duration::from_secs(60);
+        loop {
+            if !miner.is_running() || shutdown.load(Ordering::SeqCst) {
+                break;
+            }
+            if last_refresh.elapsed() >= std::time::Duration::from_millis(TEMPLATE_REFRESH_MS) {
+                last_refresh = std::time::Instant::now();
+                match rpc.get_block_template(address.clone(), extra.clone()).await {
+                    Ok(response) => {
+                        // Building on a chain the node has not finished
+                        // reading produces blocks nobody will accept.
+                        if response.is_synced {
+                            match Block::try_from(response.block) {
+                                Ok(block) => miner.set_job(block),
+                                Err(err) => log_warn!("mine: unusable block template ({err})"),
+                            }
+                        }
+                    }
+                    Err(err) => log_warn!("mine: could not get work ({err})"),
+                }
+            }
+            // Drain whatever the threads found since the last pass.
+            while let Ok(solution) = solutions.try_recv() {
+                let Some(rpc_block) = miner.block_for(&solution) else { continue };
+                match rpc.submit_block(rpc_block, false).await {
+                    Ok(_) => {
+                        // Deliberately silent. Announcing each block put a
+                        // three-line interruption on the terminal every time
+                        // one landed, on top of whatever the person was
+                        // typing. 'mine status' reports the total.
+                        miner.record_accepted();
+                    }
+                    Err(err) => {
+                        miner.record_rejected();
+                        log_warn!("mine: block not accepted ({err})");
+                    }
+                }
+            }
+            workflow_core::task::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    });
+}
+
+/// A miner with a fixed payout address that a node's RPC can read and steer
+/// (FORK-PLAN P8.3c): what `marigold-cli mine-to` runs, and what a wallet on
+/// the same machine finds when it connects.
+pub struct MinerHost {
+    address: Address,
+    rpc: std::sync::OnceLock<Arc<DynRpcApi>>,
+    miner: std::sync::Mutex<Option<Arc<Miner>>>,
+    shutdown: Arc<AtomicBool>,
+}
+
+impl MinerHost {
+    pub fn new(address: Address, shutdown: Arc<AtomicBool>) -> Arc<Self> {
+        Arc::new(Self { address, rpc: std::sync::OnceLock::new(), miner: std::sync::Mutex::new(None), shutdown })
+    }
+
+    /// The node to mine against, once it exists. The host is created before
+    /// the node so the node's RPC can be handed the host at birth.
+    pub fn bind(&self, rpc: Arc<DynRpcApi>) {
+        let _ = self.rpc.set(rpc);
+    }
+
+    pub fn address(&self) -> &Address {
+        &self.address
+    }
+
+    pub fn miner(&self) -> Option<Arc<Miner>> {
+        self.miner.lock().unwrap().clone()
+    }
+
+    /// Start at `percent` of the machine; a running miner is replaced by a
+    /// fresh thread set at the new share.
+    pub fn start(&self, percent: u32) -> RpcResult<RpcMinerStatus> {
+        if !(1..=100).contains(&percent) {
+            return Err(RpcError::General(format!("{percent}% is not a share of the machine between 1 and 100")));
+        }
+        let Some(rpc) = self.rpc.get().cloned() else {
+            return Err(RpcError::General("the node is not up yet".to_string()));
+        };
+        if let Some(old) = self.miner.lock().unwrap().take() {
+            old.stop();
+        }
+        let (miner, solutions) = Miner::start(percent);
+        spawn_session(rpc, self.address.clone(), miner.clone(), solutions, self.shutdown.clone());
+        self.miner.lock().unwrap().replace(miner);
+        Ok(self.status())
+    }
+
+    pub fn stop(&self) -> RpcMinerStatus {
+        if let Some(miner) = self.miner.lock().unwrap().take() {
+            miner.stop();
+        }
+        self.status()
+    }
+
+    pub fn status(&self) -> RpcMinerStatus {
+        let mut status = RpcMinerStatus { available: true, cores: cores() as u32, address: self.address.to_string(), ..Default::default() };
+        if let Some(miner) = self.miner() {
+            status.mining = true;
+            status.percent = miner.percent();
+            status.threads = miner.thread_count() as u32;
+            status.hashrate = miner.hashrate();
+            status.blocks_found = miner.blocks_found();
+            status.blocks_accepted = miner.blocks_accepted();
+            status.blocks_rejected = miner.blocks_rejected();
+            status.uptime_seconds = miner.uptime().as_secs();
+        }
+        status
+    }
+}
+
+impl MinerControl for MinerHost {
+    fn status(&self) -> RpcMinerStatus {
+        MinerHost::status(self)
+    }
+
+    fn control(&self, mining: bool, percent: Option<u32>) -> RpcResult<RpcMinerStatus> {
+        if !mining {
+            return Ok(self.stop());
+        }
+        let current = self.miner().map(|m| m.percent());
+        match (percent, current) {
+            // Already mining at that share, or asked to keep whatever it is at.
+            (Some(wanted), Some(now)) if wanted == now => Ok(self.status()),
+            (None, Some(_)) => Ok(self.status()),
+            (wanted, _) => self.start(wanted.unwrap_or(50)),
+        }
     }
 }
 

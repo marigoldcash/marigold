@@ -65,12 +65,30 @@ impl Connect {
             // A remembered "public", or a remembered address on this machine,
             // is not a target either: bare 'connect' means the network here.
             let typed_a_target = argv.first().is_some();
-            let arg_or_server_address = argv.first().cloned().or_else(|| {
+            let mut arg_or_server_address = argv.first().cloned().or_else(|| {
                 ctx.wallet()
                     .settings()
                     .get::<String>(WalletSettings::Server)
                     .filter(|s| !s.trim().is_empty() && s != "public" && !is_local_target(s))
             });
+
+            // Something on this machine may already be syncing the network:
+            // the background miner (FORK-PLAN P8.3c), or a marigoldd. Use it
+            // rather than start a second sync beside it.
+            #[cfg(feature = "embedded-node")]
+            let own_sync_running = ctx.embedded_node_running();
+            #[cfg(not(feature = "embedded-node"))]
+            let own_sync_running = false;
+            if arg_or_server_address.is_none() && !own_sync_running {
+                if let Some(status) = probe_local_node(network_id).await {
+                    if status.available {
+                        tpara!(ctx, "Found the Marigold miner running in the background on this machine — using its copy of the network.");
+                    } else {
+                        tpara!(ctx, "A Marigold node is already running on this machine — using it.");
+                    }
+                    arg_or_server_address = Some(format!("127.0.0.1:{}", network_id.default_borsh_rpc_port()));
+                }
+            }
 
             // Bare 'connect' with the network compiled in: start syncing here.
             #[cfg(feature = "embedded-node")]
@@ -267,6 +285,25 @@ impl Connect {
             if is_public {
                 tprintln!(ctx, "Public computer connected.");
             }
+
+            // A node on this machine may have the miner program in it. If so
+            // it is ours to steer, and the own lane counts on it. Asked
+            // through a throwaway client, not the wallet's: a node from before
+            // this call existed drops the connection on a question it does
+            // not know, and the wallet's own link is not the place for that.
+            if is_local_target(&url_label) {
+                let status = probe_local_node(network_id).await.filter(|status| status.available);
+                ctx.note_remote_miner(status.as_ref());
+                if let Some(status) = status {
+                    if status.mining {
+                        tprintln!(ctx, "The background miner is at work: {} — 'mine status' for more.", crate::miner::format_hashrate(status.hashrate));
+                    } else {
+                        tprintln!(ctx, "The background miner is idle — 'mine start' sets it going.");
+                    }
+                }
+            } else {
+                ctx.note_remote_miner(None);
+            }
             ctx.print_next_step().await;
 
             // Connecting by hand, after opening a wallet offline, is a normal
@@ -308,6 +345,27 @@ impl Connect {
         }
         Ok(())
     }
+}
+
+/// Is a node answering on this machine's wRPC port, and does it have a miner
+/// in it? `None` when nothing answers. A node too old to know the question is
+/// treated as a node without a miner.
+async fn probe_local_node(network_id: NetworkId) -> Option<kaspa_rpc_core::RpcMinerStatus> {
+    let url = format!("ws://127.0.0.1:{}", network_id.default_borsh_rpc_port());
+    let client = kaspa_wrpc_client::KaspaRpcClient::new(WrpcEncoding::Borsh, Some(&url), None, Some(network_id), None).ok()?;
+    let options = ConnectOptions {
+        block_async_connect: true,
+        strategy: ConnectStrategy::Fallback,
+        url: Some(url),
+        connect_timeout: Some(std::time::Duration::from_secs(2)),
+        ..Default::default()
+    };
+    if client.connect(Some(options)).await.is_err() {
+        return None;
+    }
+    let status = client.get_miner_status().await.unwrap_or_default();
+    client.disconnect().await.ok();
+    Some(status)
 }
 
 /// An address on this machine: the network sync this program runs itself.

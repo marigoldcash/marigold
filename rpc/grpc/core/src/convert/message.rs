@@ -635,6 +635,32 @@ from!(item: RpcResult<&kaspa_rpc_core::GetNotesBySerialResponse>, protowire::Get
 });
 
 from!(&kaspa_rpc_core::GetPoolStatsRequest, protowire::GetPoolStatsRequestMessage);
+
+from!(item: &kaspa_rpc_core::RpcMinerStatus, protowire::RpcMinerStatusMessage, {
+    Self {
+        available: item.available,
+        mining: item.mining,
+        percent: item.percent,
+        threads: item.threads,
+        cores: item.cores,
+        hashrate: item.hashrate,
+        blocks_found: item.blocks_found,
+        blocks_accepted: item.blocks_accepted,
+        blocks_rejected: item.blocks_rejected,
+        address: item.address.clone(),
+        uptime_seconds: item.uptime_seconds,
+    }
+});
+from!(&kaspa_rpc_core::GetMinerStatusRequest, protowire::GetMinerStatusRequestMessage);
+from!(item: RpcResult<&kaspa_rpc_core::GetMinerStatusResponse>, protowire::GetMinerStatusResponseMessage, {
+    Self { status: Some((&item.status).into()), error: None }
+});
+from!(item: &kaspa_rpc_core::ControlMinerRequest, protowire::ControlMinerRequestMessage, {
+    Self { mining: item.mining, percent: item.percent }
+});
+from!(item: RpcResult<&kaspa_rpc_core::ControlMinerResponse>, protowire::ControlMinerResponseMessage, {
+    Self { status: Some((&item.status).into()), error: None }
+});
 from!(item: RpcResult<&kaspa_rpc_core::GetPoolStatsResponse>, protowire::GetPoolStatsResponseMessage, {
     Self { counts: item.counts.to_vec(), error: None }
 });
@@ -1247,6 +1273,44 @@ try_from!(item: &protowire::GetNotesBySerialResponseMessage, RpcResult<kaspa_rpc
 });
 
 try_from!(&protowire::GetPoolStatsRequestMessage, kaspa_rpc_core::GetPoolStatsRequest);
+
+try_from!(item: &protowire::RpcMinerStatusMessage, kaspa_rpc_core::RpcMinerStatus, {
+    Self {
+        available: item.available,
+        mining: item.mining,
+        percent: item.percent,
+        threads: item.threads,
+        cores: item.cores,
+        hashrate: item.hashrate,
+        blocks_found: item.blocks_found,
+        blocks_accepted: item.blocks_accepted,
+        blocks_rejected: item.blocks_rejected,
+        address: item.address.clone(),
+        uptime_seconds: item.uptime_seconds,
+    }
+});
+try_from!(&protowire::GetMinerStatusRequestMessage, kaspa_rpc_core::GetMinerStatusRequest);
+try_from!(item: &protowire::GetMinerStatusResponseMessage, RpcResult<kaspa_rpc_core::GetMinerStatusResponse>, {
+    Self {
+        status: item
+            .status
+            .as_ref()
+            .ok_or_else(|| RpcError::MissingRpcFieldError("GetMinerStatusResponseMessage".to_string(), "status".to_string()))?
+            .try_into()?,
+    }
+});
+try_from!(item: &protowire::ControlMinerRequestMessage, kaspa_rpc_core::ControlMinerRequest, {
+    Self { mining: item.mining, percent: item.percent }
+});
+try_from!(item: &protowire::ControlMinerResponseMessage, RpcResult<kaspa_rpc_core::ControlMinerResponse>, {
+    Self {
+        status: item
+            .status
+            .as_ref()
+            .ok_or_else(|| RpcError::MissingRpcFieldError("ControlMinerResponseMessage".to_string(), "status".to_string()))?
+            .try_into()?,
+    }
+});
 try_from!(&protowire::GetFinalityAnchorStatusRequestMessage, kaspa_rpc_core::GetFinalityAnchorStatusRequest);
 try_from!(item: &protowire::GetFinalityAnchorStatusResponseMessage, RpcResult<kaspa_rpc_core::GetFinalityAnchorStatusResponse>, {
     Self {

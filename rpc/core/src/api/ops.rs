@@ -153,6 +153,10 @@ pub enum RpcApiOps {
     GetPoolStats = 155,
     /// The node's finality-anchor status (POOL-SPEC.md P5.8's `finality_anchor_stale` visibility flag and friends)
     GetFinalityAnchorStatus = 156,
+    /// The miner running inside this node, if any: speed, share of the machine, blocks (FORK-PLAN P8.3c)
+    GetMinerStatus = 157,
+    /// Start, stop or resize the miner running inside this node (FORK-PLAN P8.3c)
+    ControlMiner = 158,
 }
 
 impl RpcApiOps {

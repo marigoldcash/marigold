@@ -30,6 +30,7 @@ impl Disconnect {
                 if let Some(wrpc_client) = ctx.wallet().try_wrpc_client().as_ref() {
                     wrpc_client.disconnect().await?;
                 }
+                ctx.note_remote_miner(None);
                 tprintln!(ctx, "Disconnected from the public computer.");
             } else {
                 tprintln!(ctx, "Still connected.");

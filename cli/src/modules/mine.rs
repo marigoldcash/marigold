@@ -31,6 +31,10 @@ impl Mine {
                     ],
                     None,
                 )?;
+                tprintln!(ctx, "");
+                tprintln!(ctx, "{}", style("To mine without a wallet open — as a service that stays running — start the miner").dim());
+                tprintln!(ctx, "{}", style("program instead:  marigold-cli mine-to <address> 50   (the number is the share of the machine)").dim());
+                tprintln!(ctx, "");
                 Ok(())
             }
             Some(other) => {

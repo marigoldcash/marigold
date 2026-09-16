@@ -109,6 +109,12 @@ impl Node {
             tprintln!(ctx, "");
             return;
         }
+        if connected && ctx.remote_miner_present() {
+            tprintln!(ctx, "Using: {}", style("the miner program running in the background on this machine.").bold());
+            tprintln!(ctx, "Its copy of the network is yours; nobody else sees your notes. 'mine status' for the miner.");
+            tprintln!(ctx, "");
+            return;
+        }
         if connected {
             tprintln!(ctx, "Using: {}", style("a public computer.").bold());
             tprintln!(ctx, "Whoever runs it can see which notes your wallet asks about.");

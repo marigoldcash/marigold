@@ -4,6 +4,7 @@
 
 pub mod connection;
 pub mod ctl;
+pub mod miner;
 pub mod notifications;
 pub mod ops;
 pub mod rpc;

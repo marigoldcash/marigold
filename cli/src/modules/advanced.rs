@@ -10,9 +10,13 @@ pub async fn everyday(ctx: &Arc<KaspaCli>) -> Vec<&'static str> {
         "balance", "pay", "receive", "request", "exchange", "move", "mobile", "backup", "history", "wallet", "open", "close", "connect",
         "disconnect", "guide", "help", "advanced", "exit",
     ];
+    // ...or when the background miner on this machine is the wallet's to steer.
+    if ctx.remote_miner_present() {
+        verbs.push("mine");
+    }
     if ctx.wallet().is_open() && ctx.has_ledger_account().await {
         verbs.push("address");
-        if ctx.has_mined().await {
+        if ctx.has_mined().await && !ctx.remote_miner_present() {
             verbs.push("mine");
         }
     }

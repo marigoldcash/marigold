@@ -88,6 +88,8 @@ impl Factory {
                 GetNotesBySerial,
                 GetPoolStats,
                 GetFinalityAnchorStatus,
+                GetMinerStatus,
+                ControlMiner,
                 NotifyBlockAdded,
                 NotifyNewBlockTemplate,
                 NotifyFinalityConflict,

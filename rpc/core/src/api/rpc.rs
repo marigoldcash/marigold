@@ -261,6 +261,27 @@ pub trait RpcApi: Sync + Send + AnySync {
         request: GetNotesBySerialRequest,
     ) -> RpcResult<GetNotesBySerialResponse>;
 
+    /// The miner inside this node, if there is one (FORK-PLAN P8.3c). A node
+    /// without a miner program answers with `available: false`.
+    async fn get_miner_status(&self) -> RpcResult<RpcMinerStatus> {
+        Ok(self.get_miner_status_call(None, GetMinerStatusRequest {}).await?.status)
+    }
+    async fn get_miner_status_call(
+        &self,
+        connection: Option<&DynRpcConnection>,
+        request: GetMinerStatusRequest,
+    ) -> RpcResult<GetMinerStatusResponse>;
+
+    /// Start, stop or resize the miner inside this node (FORK-PLAN P8.3c).
+    async fn control_miner(&self, mining: bool, percent: Option<u32>) -> RpcResult<RpcMinerStatus> {
+        Ok(self.control_miner_call(None, ControlMinerRequest::new(mining, percent)).await?.status)
+    }
+    async fn control_miner_call(
+        &self,
+        connection: Option<&DynRpcConnection>,
+        request: ControlMinerRequest,
+    ) -> RpcResult<ControlMinerResponse>;
+
     /// Get live note-pool stats: note count per denomination (FORK-PLAN P6.9).
     async fn get_pool_stats(&self) -> RpcResult<[u64; 8]> {
         Ok(self.get_pool_stats_call(None, GetPoolStatsRequest {}).await?.counts)

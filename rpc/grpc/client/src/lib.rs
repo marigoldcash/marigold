@@ -281,6 +281,8 @@ impl RpcApi for GrpcClient {
     route!(get_virtual_chain_from_block_v2_call, GetVirtualChainFromBlockV2);
     route!(get_seq_commit_lane_proof_call, GetSeqCommitLaneProof);
     route!(get_notes_by_serial_call, GetNotesBySerial);
+    route!(get_miner_status_call, GetMinerStatus);
+    route!(control_miner_call, ControlMiner);
     route!(get_pool_stats_call, GetPoolStats);
     route!(get_finality_anchor_status_call, GetFinalityAnchorStatus);
 

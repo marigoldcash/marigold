@@ -91,6 +91,12 @@ pub struct KaspaCli {
     /// its own node — see `start_mining`.
     #[cfg(feature = "embedded-node")]
     cpu_miner: Mutex<Option<Arc<crate::miner::Miner>>>,
+    /// A miner program running in the background on this machine, on the
+    /// node this wallet is connected to (FORK-PLAN P8.3c). Its miner is ours:
+    /// 'mine' steers it and the own lane counts on it. `remote_mining` is
+    /// what it last said it was doing.
+    remote_miner: Arc<AtomicBool>,
+    remote_mining: Arc<AtomicBool>,
     /// True while the UTXO set is being read in, which on a wallet that has
     /// been mined into is minutes of work with nothing to show for it.
     loading: Arc<AtomicBool>,
@@ -273,6 +279,8 @@ impl KaspaCli {
             embedded_node_adopted: Arc::new(AtomicBool::new(false)),
             #[cfg(feature = "embedded-node")]
             cpu_miner: Mutex::new(None),
+            remote_miner: Arc::new(AtomicBool::new(false)),
+            remote_mining: Arc::new(AtomicBool::new(false)),
             loading: Arc::new(AtomicBool::new(false)),
             auto_payment_secret: Mutex::new(None),
             auto_threshold_petals: Arc::new(AtomicU64::new(0)),
@@ -421,7 +429,7 @@ impl KaspaCli {
         #[cfg(feature = "embedded-node")]
         {
             if !self.embedded_node_in_use() {
-                return OwnLane::NotOwnCopy;
+                return self.remote_own_lane().await;
             }
             let hashrate = match self.cpu_miner.lock().unwrap().as_ref() {
                 Some(miner) => miner.hashrate(),
@@ -437,7 +445,178 @@ impl KaspaCli {
             if every <= OWN_LANE_MAX_WAIT { OwnLane::Use { every } } else { OwnLane::TooSlow { every } }
         }
         #[cfg(not(feature = "embedded-node"))]
-        OwnLane::NotOwnCopy
+        self.remote_own_lane().await
+    }
+
+    /// The own lane through the background miner on this machine: the node
+    /// we are on has a miner in it, and that miner is ours.
+    async fn remote_own_lane(&self) -> OwnLane {
+        if !self.remote_miner_present() {
+            return OwnLane::NotOwnCopy;
+        }
+        let Some(status) = self.detect_remote_miner().await else { return OwnLane::NotOwnCopy };
+        if !status.mining || status.hashrate <= 0.0 {
+            return OwnLane::NoMiner;
+        }
+        let Ok(info) = self.wallet.rpc_api().get_block_dag_info().await else { return OwnLane::NoMiner };
+        let every = Duration::from_secs_f64((info.difficulty / status.hashrate).clamp(1.0, 1.0e9));
+        if every <= OWN_LANE_MAX_WAIT { OwnLane::Use { every } } else { OwnLane::TooSlow { every } }
+    }
+
+    pub fn remote_miner_present(&self) -> bool {
+        self.remote_miner.load(Ordering::SeqCst)
+    }
+
+    /// A background miner is there but not mining.
+    pub fn remote_miner_idle(&self) -> bool {
+        self.remote_miner.load(Ordering::SeqCst) && !self.remote_mining.load(Ordering::SeqCst)
+    }
+
+    /// Remember what the node we are on said about its miner; `None` forgets.
+    pub fn note_remote_miner(&self, status: Option<&kaspa_rpc_core::RpcMinerStatus>) {
+        match status {
+            Some(status) if status.available => {
+                self.remote_miner.store(true, Ordering::SeqCst);
+                self.remote_mining.store(status.mining, Ordering::SeqCst);
+            }
+            _ => {
+                self.remote_miner.store(false, Ordering::SeqCst);
+                self.remote_mining.store(false, Ordering::SeqCst);
+            }
+        }
+    }
+
+    /// Ask the node the wallet is on whether it has a miner in it, and
+    /// remember the answer. `Some` only when it does.
+    pub async fn detect_remote_miner(&self) -> Option<kaspa_rpc_core::RpcMinerStatus> {
+        let status = match self.try_rpc_api() {
+            Some(rpc) if self.wallet.is_connected() => rpc.get_miner_status().await.ok(),
+            _ => None,
+        };
+        self.note_remote_miner(status.as_ref());
+        status.filter(|status| status.available)
+    }
+
+    /// How much of the machine to mine with, from the argument or by asking.
+    /// `None` means nothing should start; the reason has been printed.
+    async fn mining_share(&self, arg: Option<String>) -> Result<Option<u32>> {
+        Ok(match arg {
+            Some(text) => match text.trim().trim_end_matches('%').parse::<u32>() {
+                Ok(value) if (1..=100).contains(&value) => Some(value),
+                _ => {
+                    tprintln!(self, "'{text}' is not a percentage between 1 and 100.");
+                    None
+                }
+            },
+            None => {
+                tprintln!(self, "");
+                tpara!(
+                    self,
+                    "Mining runs on whatever your machine is not otherwise using. It is set to the \
+                    lowest priority the system has, so it steps aside the moment anything else wants \
+                    the processor — you should not be able to feel it. "
+                );
+                tprintln!(self, "");
+                let answer = self
+                    .term()
+                    .ask(false, "How much of this machine may it use? [1-100%, default 50]: ")
+                    .await?
+                    .trim()
+                    .trim_end_matches('%')
+                    .to_string();
+                if answer.is_empty() {
+                    Some(50)
+                } else {
+                    match answer.parse::<u32>() {
+                        Ok(value) if (1..=100).contains(&value) => Some(value),
+                        _ => {
+                            tprintln!(self, "'{answer}' is not a percentage between 1 and 100 — nothing started.");
+                            None
+                        }
+                    }
+                }
+            }
+        })
+    }
+
+    fn print_remote_miner(&self, status: &kaspa_rpc_core::RpcMinerStatus) {
+        tprintln!(self, "");
+        if !status.mining {
+            tprintln!(self, "The background miner on this machine is idle — 'mine start' sets it going.");
+            tprintln!(self, "Rewards go to: {}", status.address);
+            tprintln!(self, "");
+            return;
+        }
+        tprintln!(
+            self,
+            "Mining: {} of {} cores ({}% of this machine) — {}",
+            status.threads,
+            status.cores,
+            status.percent,
+            style("the miner program running in the background").dim()
+        );
+        tprintln!(self, "Speed:  {}", crate::miner::format_hashrate(status.hashrate));
+        if status.blocks_found == 0 {
+            tprintln!(self, "Blocks: none yet");
+            tprintln!(self, "{}", style("Finding one is luck. Leaving it running is the whole technique.").dim());
+        } else {
+            tprintln!(
+                self,
+                "Blocks: {} found, {} accepted{}",
+                status.blocks_found.separated_string(),
+                status.blocks_accepted.separated_string(),
+                match status.blocks_rejected {
+                    0 => String::new(),
+                    n => format!(", {} rejected", n.separated_string()),
+                }
+            );
+        }
+        tprintln!(self, "Rewards go to: {}", status.address);
+        tprintln!(self, "{}", style("That is the address the miner was started with, not necessarily this wallet's.").dim());
+        tprintln!(self, "");
+    }
+
+    /// 'mine start' when the miner is the background program on this machine.
+    pub async fn start_remote_mining(self: &Arc<Self>, arg: Option<String>) -> Result<()> {
+        let Some(percent) = self.mining_share(arg).await? else { return Ok(()) };
+        match self.wallet.rpc_api().control_miner(true, Some(percent)).await {
+            Ok(status) => {
+                self.note_remote_miner(Some(&status));
+                tprintln!(self, "");
+                tprintln!(self, "{}", style(format!("Mining started in the background program — {percent}% of this machine ({} of {} cores).", status.threads, status.cores)).green());
+                tprintln!(self, "Rewards go to: {}", status.address);
+                tprintln!(self, "'mine status' to check, 'mine stop' to stop.");
+                tprintln!(self, "");
+            }
+            Err(err) => {
+                tprintln!(self, "{}", style(format!("The background miner did not start: {}", self.describe_error(&err.to_string()))).yellow());
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn stop_remote_mining(self: &Arc<Self>) -> Result<()> {
+        match self.wallet.rpc_api().control_miner(false, None).await {
+            Ok(status) => {
+                self.note_remote_miner(Some(&status));
+                tprintln!(self, "Mining stopped in the background program. It stays running, idle, until 'mine start'.");
+            }
+            Err(err) => {
+                tprintln!(self, "{}", style(format!("Could not stop the background miner: {}", self.describe_error(&err.to_string()))).yellow());
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn remote_mining_status(self: &Arc<Self>) {
+        match self.detect_remote_miner().await {
+            Some(status) => self.print_remote_miner(&status),
+            None => {
+                tprintln!(self, "");
+                tprintln!(self, "The background miner is not answering any more.");
+                tprintln!(self, "");
+            }
+        }
     }
 
     /// The fee rate to pay: as good as nothing when our own miner will mine
@@ -455,10 +634,10 @@ impl KaspaCli {
     pub fn own_lane_wants_a_miner(&self) -> bool {
         #[cfg(feature = "embedded-node")]
         {
-            return self.embedded_node_in_use() && self.cpu_miner.lock().unwrap().is_none();
+            return (self.embedded_node_in_use() && self.cpu_miner.lock().unwrap().is_none()) || self.remote_miner_idle();
         }
         #[cfg(not(feature = "embedded-node"))]
-        false
+        self.remote_miner_idle()
     }
 
     pub fn ledger_is_known(&self) -> bool {
@@ -828,6 +1007,9 @@ impl KaspaCli {
     /// take is "whatever nothing else wanted".
     #[cfg(feature = "embedded-node")]
     pub async fn start_mining(self: &Arc<Self>, arg: Option<String>) -> Result<()> {
+        if self.remote_miner_present() {
+            return self.start_remote_mining(arg).await;
+        }
         if self.cpu_miner.lock().unwrap().is_some() {
             tprintln!(self, "Already mining — 'mine status' for how it is going.");
             return Ok(());
@@ -874,43 +1056,7 @@ impl KaspaCli {
         let address = account.receive_address()?;
 
         let cores = crate::miner::cores();
-        let percent = match arg {
-            Some(text) => match text.trim().trim_end_matches('%').parse::<u32>() {
-                Ok(value) if (1..=100).contains(&value) => value,
-                _ => {
-                    tprintln!(self, "'{text}' is not a percentage between 1 and 100.");
-                    return Ok(());
-                }
-            },
-            None => {
-                tprintln!(self, "");
-                tpara!(
-                    self,
-                    "Mining runs on whatever your machine is not otherwise using. It is set to the \
-                    lowest priority the system has, so it steps aside the moment anything else wants \
-                    the processor — you should not be able to feel it. "
-                );
-                tprintln!(self, "");
-                let answer = self
-                    .term()
-                    .ask(false, &format!("How much of this machine may it use? [1-100%, default 50]: "))
-                    .await?
-                    .trim()
-                    .trim_end_matches('%')
-                    .to_string();
-                if answer.is_empty() {
-                    50
-                } else {
-                    match answer.parse::<u32>() {
-                        Ok(value) if (1..=100).contains(&value) => value,
-                        _ => {
-                            tprintln!(self, "'{answer}' is not a percentage between 1 and 100 — nothing started.");
-                            return Ok(());
-                        }
-                    }
-                }
-            }
-        };
+        let Some(percent) = self.mining_share(arg).await? else { return Ok(()) };
 
         let (miner, solutions) = crate::miner::Miner::start(percent);
         self.cpu_miner.lock().unwrap().replace(miner.clone());
@@ -926,60 +1072,15 @@ impl KaspaCli {
         tprintln!(self, "'mine status' to check, 'mine stop' to stop.");
         tprintln!(self, "");
 
-        // One task owns both halves: fetching work and submitting what comes
-        // back. Keeping them together means there is a single place where the
-        // job generation is advanced, so a solution can never be matched
-        // against a template that has already been replaced.
-        let this = self.clone();
-        let miner_task = miner.clone();
-        workflow_core::task::spawn(async move {
-            let extra = format!("marigold-wallet/{}", env!("CARGO_PKG_VERSION")).into_bytes();
-            let mut last_refresh = std::time::Instant::now() - std::time::Duration::from_secs(60);
-            loop {
-                if !miner_task.is_running() || this.shutdown.load(Ordering::SeqCst) {
-                    break;
-                }
-                if last_refresh.elapsed() >= std::time::Duration::from_millis(crate::miner::TEMPLATE_REFRESH_MS) {
-                    last_refresh = std::time::Instant::now();
-                    match this.wallet.rpc_api().get_block_template(address.clone(), extra.clone()).await {
-                        Ok(response) => {
-                            // Building on a chain the node has not finished
-                            // reading produces blocks nobody will accept.
-                            if response.is_synced {
-                                match kaspa_consensus_core::block::Block::try_from(response.block) {
-                                    Ok(block) => miner_task.set_job(block),
-                                    Err(err) => log_warn!("mine: unusable block template ({err})"),
-                                }
-                            }
-                        }
-                        Err(err) => log_warn!("mine: could not get work ({err})"),
-                    }
-                }
-                // Drain whatever the threads found since the last pass.
-                while let Ok(solution) = solutions.try_recv() {
-                    let Some(rpc_block) = miner_task.block_for(&solution) else { continue };
-                    match this.wallet.rpc_api().submit_block(rpc_block, false).await {
-                        Ok(_) => {
-                            // Deliberately silent. Announcing each block put a
-                            // three-line interruption on the terminal every
-                            // time one landed, on top of whatever the person
-                            // was typing. 'mine status' reports the total.
-                            miner_task.record_accepted();
-                        }
-                        Err(err) => {
-                            miner_task.record_rejected();
-                            log_warn!("mine: block not accepted ({err})");
-                        }
-                    }
-                }
-                workflow_core::task::sleep(Duration::from_millis(100)).await;
-            }
-        });
+        crate::miner::spawn_session(self.wallet.rpc_api(), address, miner, solutions, self.shutdown.clone());
         Ok(())
     }
 
     #[cfg(feature = "embedded-node")]
     pub async fn stop_mining(self: &Arc<Self>) -> Result<()> {
+        if self.remote_miner_present() && self.cpu_miner.lock().unwrap().is_none() {
+            return self.stop_remote_mining().await;
+        }
         let miner = self.cpu_miner.lock().unwrap().take();
         match miner {
             Some(miner) => {
@@ -1000,6 +1101,9 @@ impl KaspaCli {
 
     #[cfg(feature = "embedded-node")]
     pub async fn mining_status(self: &Arc<Self>) {
+        if self.remote_miner_present() && self.cpu_miner.lock().unwrap().is_none() {
+            return self.remote_mining_status().await;
+        }
         let miner = self.cpu_miner.lock().unwrap().clone();
         tprintln!(self, "");
         match miner {

@@ -75,6 +75,8 @@ impl Router {
                 GetNotesBySerial,
                 GetPoolStats,
                 GetFinalityAnchorStatus,
+                GetMinerStatus,
+                ControlMiner,
                 ResolveFinalityConflict,
                 Shutdown,
                 SubmitBlock,

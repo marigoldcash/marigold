@@ -1252,3 +1252,41 @@ message GetFinalityAnchorStatusResponseMessage {
 
   RPCError error = 1000;
 }
+
+// The miner inside a node, if any (FORK-PLAN P8.3c). `available` is false on a
+// node that has no miner program in it.
+message RpcMinerStatusMessage {
+  bool available = 1;
+  bool mining = 2;
+  uint32 percent = 3;
+  uint32 threads = 4;
+  uint32 cores = 5;
+  double hashrate = 6;
+  uint64 blocksFound = 7;
+  uint64 blocksAccepted = 8;
+  uint64 blocksRejected = 9;
+  string address = 10;
+  uint64 uptimeSeconds = 11;
+}
+
+message GetMinerStatusRequestMessage {
+}
+
+message GetMinerStatusResponseMessage {
+  RpcMinerStatusMessage status = 1;
+
+  RPCError error = 1000;
+}
+
+// Start (mining = true, optionally with a share of the machine in percent) or
+// stop (mining = false) the miner inside this node.
+message ControlMinerRequestMessage {
+  bool mining = 1;
+  optional uint32 percent = 2;
+}
+
+message ControlMinerResponseMessage {
+  RpcMinerStatusMessage status = 1;
+
+  RPCError error = 1000;
+}

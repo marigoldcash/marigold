@@ -60,6 +60,7 @@ use kaspa_rpc_core::{
     Notification, RpcError, RpcResult,
     api::{
         connection::DynRpcConnection,
+        miner::MinerControl,
         ops::{RPC_API_REVISION, RPC_API_VERSION},
         rpc::{MAX_SAFE_WINDOW_SIZE, RpcApi},
     },
@@ -125,6 +126,9 @@ pub struct RpcCoreService {
     fee_estimate_cache: ExpiringCache<RpcFeeEstimate>,
     fee_estimate_verbose_cache: ExpiringCache<kaspa_mining::errors::MiningManagerResult<GetFeeEstimateExperimentalResponse>>,
     mining_rule_engine: Arc<MiningRuleEngine>,
+    /// A miner living in this process, when there is one (FORK-PLAN P8.3c).
+    /// marigoldd never sets it; the wallet's background miner does.
+    miner_control: std::sync::RwLock<Option<Arc<dyn MinerControl>>>,
 }
 
 const RPC_CORE: &str = "rpc-core";
@@ -244,7 +248,13 @@ impl RpcCoreService {
             fee_estimate_cache: ExpiringCache::new(Duration::from_millis(500), Duration::from_millis(1000)),
             fee_estimate_verbose_cache: ExpiringCache::new(Duration::from_millis(500), Duration::from_millis(1000)),
             mining_rule_engine,
+            miner_control: std::sync::RwLock::new(None),
         }
+    }
+
+    /// Let this node's RPC reach a miner running in the same process.
+    pub fn set_miner_control(&self, control: Arc<dyn MinerControl>) {
+        *self.miner_control.write().unwrap() = Some(control);
     }
 
     pub fn start_impl(&self) {
@@ -550,6 +560,26 @@ NOTE: This error usually indicates an RPC conversion error between the node and 
             .filter_map(|(sn, note)| note.map(|n| RpcNoteEntry { sn: *sn, denomination: n.d as u8, pk: n.pk }))
             .collect();
         Ok(GetNotesBySerialResponse::new(entries))
+    }
+
+    async fn get_miner_status_call(
+        &self,
+        _connection: Option<&DynRpcConnection>,
+        _request: GetMinerStatusRequest,
+    ) -> RpcResult<GetMinerStatusResponse> {
+        // A node with no miner in it answers honestly rather than erroring:
+        // "no miner here" is the ordinary case for marigoldd, and the wallet
+        // uses it to tell a background miner from any other local node.
+        let control = self.miner_control.read().unwrap().clone();
+        Ok(GetMinerStatusResponse::new(control.map(|c| c.status()).unwrap_or_default()))
+    }
+
+    async fn control_miner_call(&self, _connection: Option<&DynRpcConnection>, request: ControlMinerRequest) -> RpcResult<ControlMinerResponse> {
+        let control = self.miner_control.read().unwrap().clone();
+        match control {
+            Some(control) => Ok(ControlMinerResponse::new(control.control(request.mining, request.percent)?)),
+            None => Err(RpcError::General("this node has no miner in it".to_string())),
+        }
     }
 
     async fn get_pool_stats_call(

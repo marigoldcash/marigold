@@ -4,6 +4,8 @@ mod backup;
 mod cli;
 #[cfg(feature = "embedded-node")]
 pub mod embedded;
+#[cfg(feature = "embedded-node")]
+pub mod headless;
 pub mod error;
 pub(crate) mod log_sink;
 pub mod extensions;

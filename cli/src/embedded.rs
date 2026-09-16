@@ -67,6 +67,18 @@ impl EmbeddedNode {
     /// while. Callers run this off the terminal's task so the prompt keeps
     /// responding.
     pub fn start(network_id: NetworkId, appdir: &Path) -> Result<(Arc<Self>, Rpc)> {
+        Self::start_with(network_id, appdir, None)
+    }
+
+    /// The same node with a miner in it (FORK-PLAN P8.3c): the RPC answers
+    /// `get_miner_status` and `control_miner` through `miner`, and listens on
+    /// 127.0.0.1 — this machine only — so a wallet here can find it and steer
+    /// it. The wallet's own node passes `None` and opens no socket at all.
+    pub fn start_with(
+        network_id: NetworkId,
+        appdir: &Path,
+        miner: Option<Arc<dyn kaspa_rpc_core::api::miner::MinerControl>>,
+    ) -> Result<(Arc<Self>, Rpc)> {
         // The p2p listener panics from inside a tokio worker if the port is
         // taken, which aborts the whole process — wallet included. Someone
         // already running marigoldd on this machine is the ordinary way to hit
@@ -98,6 +110,9 @@ impl EmbeddedNode {
             // thing for a server to do and a rude thing for a wallet to do
             // unasked, and it fails noisily where there is no UPnP router.
             disable_upnp: true,
+            // Only the background miner listens, and only on this machine:
+            // "default" is 127.0.0.1 on the network's wRPC port.
+            rpclisten_borsh: if miner.is_some() { Some("default".parse().expect("a fixed listen address")) } else { None },
             // The wallet needs the UTXO index to see ledger balance at all.
             // Everything else stays at kaspad's defaults, deliberately: this is
             // an ordinary node, not a special one, and the fewer knobs the
@@ -164,6 +179,9 @@ impl EmbeddedNode {
         // clamping here regardless silently undid it.
 
         let (core, rpc_service) = create_core_with_runtime(&runtime, &args, fd_total_budget);
+        if let Some(miner) = miner {
+            rpc_service.set_miner_control(miner);
+        }
         let workers = core.start();
 
         let ctl = RpcCtl::new();
