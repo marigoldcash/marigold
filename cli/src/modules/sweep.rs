@@ -24,6 +24,19 @@ impl Sweep {
         let (wallet_secret, payment_secret) = ctx.ask_wallet_secret(Some(&account)).await?;
 
         let utxo_count = account.utxo_context().mature_utxo_size();
+        // Zero coins means one of two things, and only one of them is "nothing
+        // to do". Right after connecting, or while the sync is still catching
+        // up, the ledger simply has not been read yet — a sweep then reported
+        // "0 coin(s)" and a fee for zero transactions (founder, 2026-09-16).
+        if utxo_count == 0 {
+            if !ctx.ledger_is_known() {
+                tprintln!(ctx, "The ledger has not been read yet — still connecting, or the sync is still catching up.");
+                tprintln!(ctx, "{}", ui::dim("Try again in a moment; 'connect status' shows where it is."));
+            } else {
+                tprintln!(ctx, "Nothing to consolidate — the ledger holds no coins.");
+            }
+            return Ok(());
+        }
         let ticker = ctx.ticker();
 
         // A sweep of several million coins is hours of work, and finding out
