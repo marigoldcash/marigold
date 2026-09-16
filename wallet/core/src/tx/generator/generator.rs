@@ -80,6 +80,10 @@ use std::collections::VecDeque;
 // other conditions), we attempt to accumulate additional
 // inputs to reduce storage mass/fees
 const TRANSACTION_MASS_BOUNDARY_FOR_ADDITIONAL_INPUT_ACCUMULATION: u64 = MAXIMUM_STANDARD_TRANSACTION_MASS / 5 * 4;
+
+/// The relay floor in sompi per gram; a requested rate under it is a deliberate
+/// choice, not a mistake to correct upward (see `calc_transaction_fees`).
+const OWN_LANE_FLOOR_SOMPI_PER_GRAM: f64 = 100.0;
 // optimization boundary - when aggregating inputs,
 // we don't perform any checks until we reach this mass
 // or the aggregate input amount reaches the requested
@@ -657,7 +661,16 @@ impl Generator {
     /// compute mass, but its payload component is hardened to account for normalized
     /// transient byte mass.
     fn calc_transaction_fees(&self, compute_mass: u64, transaction_mass: u64) -> u64 {
-        self.inner.mass_calculator.calc_minimum_transaction_fee_from_mass(compute_mass).max(self.calc_fee_rate(transaction_mass))
+        // A fee rate asked for BELOW the relay floor is meant: the own lane
+        // (FORK-PLAN P8.3b) asks for 1 sompi per gram on transactions its own
+        // node will mine and keep out of relay. Applying the floor on top of
+        // it made the lane pay the network fee after all — and, worse, a fee
+        // the node then relayed, so any miner could take it. Rates at or above
+        // the floor keep the old behaviour: the larger of the two.
+        match self.inner.fee_rate {
+            Some(rate) if rate < OWN_LANE_FLOOR_SOMPI_PER_GRAM => ((rate * transaction_mass as f64) as u64).max(1),
+            _ => self.inner.mass_calculator.calc_minimum_transaction_fee_from_mass(compute_mass).max(self.calc_fee_rate(transaction_mass)),
+        }
     }
 
     /// Main UTXO entry processing loop. This function sources UTXOs from [`Generator::get_utxo_entry()`] and

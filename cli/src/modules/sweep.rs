@@ -125,6 +125,9 @@ impl Sweep {
 
         tprintln!(ctx, "  submitted {} transaction(s) in total", submitted.load(Ordering::Relaxed));
         tprintln!(ctx, "Sweep: {summary}");
+        // The consolidated coins are on the ledger line as pending until they
+        // confirm; that is the whole of what happens in the background.
+        tprintln!(ctx, "{}", ui::dim("The new coins show as pending on the ledger until they confirm — 'balance' shows it."));
 
         Ok(())
     }
