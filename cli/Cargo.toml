@@ -111,3 +111,7 @@ tempfile.workspace = true
 
 [lints]
 workspace = true
+
+# Idle thread priority for the CPU miner on Windows (see miner.rs).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.52.0", features = ["Win32_Foundation", "Win32_System_Threading"] }

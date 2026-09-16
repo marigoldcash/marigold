@@ -46,9 +46,13 @@ pub fn report() -> String {
         out,
         "mining:        {}",
         if cfg!(target_os = "linux") {
-            "threads run at the lowest priority the system has"
+            "threads run at idle priority (SCHED_IDLE)"
+        } else if cfg!(target_os = "macos") {
+            "threads run in the background quality-of-service class"
+        } else if cfg!(windows) {
+            "threads run at idle priority (THREAD_PRIORITY_IDLE)"
         } else {
-            "threads run at NORMAL priority on this platform — mining will compete with other work"
+            "threads are niced (setpriority 19) — the whole process, on this platform"
         }
     );
     let _ = writeln!(

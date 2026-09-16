@@ -105,8 +105,28 @@ fn deprioritise_current_thread() {
     }
 }
 
-/// Other platforms get the strongest thing they have, which is weaker.
-#[cfg(not(target_os = "linux"))]
+/// macOS: the background quality-of-service class, which is the closest thing
+/// to Linux's idle scheduling — the scheduler starves it whenever anything
+/// user-facing wants the core. Per thread: `setpriority` here would nice the
+/// whole process, wallet included, which is the wrong thread to slow down.
+#[cfg(target_os = "macos")]
+fn deprioritise_current_thread() {
+    unsafe {
+        libc::pthread_set_qos_class_self_np(libc::qos_class_t::QOS_CLASS_BACKGROUND, 0);
+    }
+}
+
+/// Windows: idle thread priority, the lowest the scheduler offers a thread.
+#[cfg(windows)]
+fn deprioritise_current_thread() {
+    use windows_sys::Win32::System::Threading::{GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_IDLE};
+    unsafe {
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_IDLE);
+    }
+}
+
+/// Anything else gets the strongest thing it has, which is weaker.
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 fn deprioritise_current_thread() {
     unsafe {
         libc::setpriority(libc::PRIO_PROCESS, 0, 19);
