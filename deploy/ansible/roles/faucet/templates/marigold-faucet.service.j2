@@ -21,7 +21,9 @@ ExecStart={{ marigold_install_root }}/bin/marigold-faucet \
   --listen {{ faucet_listen }} \
   --buffer-bundles {{ faucet_buffer_bundles }} \
   --per-ip-cooldown-secs {{ faucet_per_ip_cooldown_secs }} \
-  --daily-cap {{ faucet_daily_cap }}
+  --daily-cap {{ faucet_daily_cap }} \
+  --cors-origin {{ faucet_cors_origin }} \
+  --telegram-bot-token-file {{ faucet_telegram_bot_token_file }}
 Restart=on-failure
 RestartSec=10
 

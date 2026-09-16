@@ -94,6 +94,16 @@ enum Command {
         /// Maximum claims per UTC day across all IPs
         #[arg(long, default_value_t = 500)]
         daily_cap: u64,
+        /// Origins allowed to call the API from a browser (the Telegram Mini App
+        /// at marigold.cash). Repeatable.
+        #[arg(long = "cors-origin", default_values_t = vec!["https://marigold.cash".to_string()])]
+        cors_origins: Vec<String>,
+        /// File holding the Telegram bot token (BotFather). With it, a claim
+        /// from the Mini App is rate-limited per Telegram user instead of per
+        /// IP — a phone on a carrier's NAT shares its address with thousands.
+        /// Missing file: per-IP only, and a warning at start.
+        #[arg(long)]
+        telegram_bot_token_file: Option<std::path::PathBuf>,
     },
 }
 
@@ -178,13 +188,93 @@ struct FaucetState {
     wallet_secret: Secret,
     ready: Mutex<ReadyNotes>,
     confirmed: Mutex<HashSet<Hash>>,
-    last_claim_by_ip: Mutex<HashMap<IpAddr, Instant>>,
+    // "tg:<user id>" for a claim from the Mini App, "ip:<addr>" otherwise.
+    last_claim: Mutex<HashMap<String, Instant>>,
     // (utc day number, claims so far that day)
     daily: Mutex<(u64, u64)>,
     claims_served: Mutex<u64>,
     per_ip_cooldown: Duration,
     daily_cap: u64,
     buffer_bundles: usize,
+    cors_origins: Vec<String>,
+    telegram_bot_token: Option<String>,
+}
+
+/// Who is claiming: the Telegram user behind a Mini App launch when the launch
+/// data verifies against the bot token, else the IP. Telegram signs the launch
+/// data (`initData`) with HMAC-SHA256 keyed by HMAC-SHA256("WebAppData", token),
+/// so a valid signature is proof the user id came from Telegram, not from the
+/// page.
+fn claimant(state: &FaucetState, headers: &HeaderMap, ip: IpAddr) -> String {
+    if let (Some(token), Some(init)) = (state.telegram_bot_token.as_deref(), headers.get("x-telegram-init-data").and_then(|v| v.to_str().ok())) {
+        if let Some(user_id) = telegram_user_id(init, token) {
+            return format!("tg:{user_id}");
+        }
+    }
+    format!("ip:{ip}")
+}
+
+fn percent_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'%' if i + 2 < bytes.len() => match u8::from_str_radix(&s[i + 1..i + 3], 16) {
+                Ok(b) => {
+                    out.push(b);
+                    i += 3;
+                }
+                Err(_) => {
+                    out.push(b'%');
+                    i += 1;
+                }
+            },
+            b'+' => {
+                out.push(b' ');
+                i += 1;
+            }
+            b => {
+                out.push(b);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// The Telegram user id in verified Mini App launch data, or None if the
+/// signature does not check out or the data is older than a day.
+fn telegram_user_id(init_data: &str, bot_token: &str) -> Option<i64> {
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+    let mut pairs: Vec<(String, String)> = Vec::new();
+    let mut hash = None;
+    for part in init_data.split('&') {
+        let (k, v) = part.split_once('=')?;
+        let (k, v) = (percent_decode(k), percent_decode(v));
+        if k == "hash" {
+            hash = Some(v);
+        } else {
+            pairs.push((k, v));
+        }
+    }
+    let hash = hex::decode(hash?).ok()?;
+    pairs.sort();
+    let check = pairs.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join("\n");
+    let mut secret = Hmac::<Sha256>::new_from_slice(b"WebAppData").ok()?;
+    secret.update(bot_token.as_bytes());
+    let secret = secret.finalize().into_bytes();
+    let mut mac = Hmac::<Sha256>::new_from_slice(&secret).ok()?;
+    mac.update(check.as_bytes());
+    mac.verify_slice(&hash).ok()?;
+    let auth_date: u64 = pairs.iter().find(|(k, _)| k == "auth_date")?.1.parse().ok()?;
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
+    if now.saturating_sub(auth_date) > 86_400 {
+        return None;
+    }
+    let user = pairs.iter().find(|(k, _)| k == "user")?;
+    serde_json::from_str::<serde_json::Value>(&user.1).ok()?.get("id")?.as_i64()
 }
 
 fn utc_day() -> u64 {
@@ -296,6 +386,7 @@ async fn claim(
     headers: HeaderMap,
 ) -> impl IntoResponse {
     let ip = client_ip(&headers, peer.ip());
+    let who = claimant(&state, &headers, ip);
 
     // Global daily cap.
     {
@@ -310,11 +401,11 @@ async fn claim(
         daily.1 += 1;
     }
 
-    // Per-IP cooldown.
+    // Cooldown per claimant: a Telegram user from the Mini App, an IP otherwise.
     {
-        let mut last = state.last_claim_by_ip.lock().await;
+        let mut last = state.last_claim.lock().await;
         let now = Instant::now();
-        if let Some(prev) = last.get(&ip) {
+        if let Some(prev) = last.get(&who) {
             let elapsed = now.duration_since(*prev);
             if elapsed < state.per_ip_cooldown {
                 let wait = (state.per_ip_cooldown - elapsed).as_secs().max(1);
@@ -325,7 +416,7 @@ async fn claim(
                     .into_response();
             }
         }
-        last.insert(ip, now);
+        last.insert(who.clone(), now);
         last.retain(|_, t| now.duration_since(*t) < state.per_ip_cooldown * 2);
     }
 
@@ -371,7 +462,7 @@ async fn claim(
         let mut served = state.claims_served.lock().await;
         *served += 1;
     }
-    log::info!("claim served to {ip} ({} notes)", notes.len());
+    log::info!("claim served to {who} ({} notes)", notes.len());
 
     Json(ClaimResponse {
         notes,
@@ -395,6 +486,27 @@ async fn index() -> Html<&'static str> {
     Html(include_str!("page.html"))
 }
 
+/// Browser cross-origin rules for the Mini App at marigold.cash: the page
+/// there may POST a claim here with its Telegram launch data. Origins not on
+/// the list get no CORS headers, and the browser refuses on their behalf.
+async fn cors(State(state): State<Arc<FaucetState>>, req: axum::extract::Request, next: axum::middleware::Next) -> axum::response::Response {
+    let origin = req.headers().get("origin").and_then(|v| v.to_str().ok()).map(str::to_owned);
+    let mut resp = next.run(req).await;
+    if let Some(origin) = origin.filter(|o| state.cors_origins.iter().any(|allowed| allowed == o)) {
+        let h = resp.headers_mut();
+        h.insert("access-control-allow-origin", origin.parse().expect("origin is a header value"));
+        h.insert("access-control-allow-methods", "GET, POST, OPTIONS".parse().unwrap());
+        h.insert("access-control-allow-headers", "content-type, x-telegram-init-data".parse().unwrap());
+        h.insert("access-control-max-age", "600".parse().unwrap());
+        h.insert("vary", "Origin".parse().unwrap());
+    }
+    resp
+}
+
+async fn preflight() -> StatusCode {
+    StatusCode::NO_CONTENT
+}
+
 async fn cmd_serve(
     network: &str,
     wrpc_url: &str,
@@ -402,8 +514,27 @@ async fn cmd_serve(
     buffer_bundles: usize,
     per_ip_cooldown_secs: u64,
     daily_cap: u64,
+    cors_origins: Vec<String>,
+    telegram_bot_token_file: Option<std::path::PathBuf>,
 ) -> anyhow::Result<()> {
     let wallet_secret = wallet_secret_from_env();
+    let telegram_bot_token = match telegram_bot_token_file {
+        Some(path) => match std::fs::read_to_string(&path) {
+            Ok(token) if !token.trim().is_empty() => {
+                log::info!("Telegram bot token loaded; Mini App claims are rate-limited per Telegram user");
+                Some(token.trim().to_string())
+            }
+            Ok(_) => {
+                log::warn!("{} is empty — Mini App claims are rate-limited per IP", path.display());
+                None
+            }
+            Err(err) => {
+                log::warn!("cannot read {} ({err}) — Mini App claims are rate-limited per IP", path.display());
+                None
+            }
+        },
+        None => None,
+    };
     let wallet = connect_wallet(network, wrpc_url).await?;
 
     let descriptors = wallet
@@ -422,12 +553,14 @@ async fn cmd_serve(
         wallet_secret,
         ready: Mutex::new(ReadyNotes::new()),
         confirmed: Mutex::new(HashSet::new()),
-        last_claim_by_ip: Mutex::new(HashMap::new()),
+        last_claim: Mutex::new(HashMap::new()),
         daily: Mutex::new((utc_day(), 0)),
         claims_served: Mutex::new(0),
         per_ip_cooldown: Duration::from_secs(per_ip_cooldown_secs),
         daily_cap,
         buffer_bundles,
+        cors_origins,
+        telegram_bot_token,
     });
 
     let buffer_state = state.clone();
@@ -442,8 +575,9 @@ async fn cmd_serve(
 
     let app = Router::new()
         .route("/", get(index))
-        .route("/api/claim", post(claim))
-        .route("/api/status", get(status))
+        .route("/api/claim", post(claim).options(preflight))
+        .route("/api/status", get(status).options(preflight))
+        .layer(axum::middleware::from_fn_with_state(state.clone(), cors))
         .with_state(state);
 
     log::info!("faucet listening on http://{listen}");
@@ -458,8 +592,33 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Init => cmd_init(&cli.network, &cli.wrpc_url).await,
-        Command::Serve { listen, buffer_bundles, per_ip_cooldown_secs, daily_cap } => {
-            cmd_serve(&cli.network, &cli.wrpc_url, listen, buffer_bundles, per_ip_cooldown_secs, daily_cap).await
+        Command::Serve { listen, buffer_bundles, per_ip_cooldown_secs, daily_cap, cors_origins, telegram_bot_token_file } => {
+            cmd_serve(&cli.network, &cli.wrpc_url, listen, buffer_bundles, per_ip_cooldown_secs, daily_cap, cors_origins, telegram_bot_token_file).await
         }
+    }
+}
+
+#[cfg(test)]
+mod telegram_tests {
+    use super::telegram_user_id;
+
+    // Vector computed with Python's hmac the way Telegram's docs specify:
+    // secret = HMAC_SHA256("WebAppData", token); hash = HMAC_SHA256(secret,
+    // sorted "k=v" pairs joined by newline, hash excluded). auth_date is in
+    // 2100 so the freshness check does not expire the vector.
+    const TOKEN: &str = "123456:TEST-TOKEN";
+    const INIT: &str = "auth_date=4102444800&user=%7B%22id%22%3A4242%2C%22first_name%22%3A%22Test%22%7D&query_id=AAH&hash=f82dc9b3ce4adba9d4bf029727e681e78c2dfc993348f1550cc9837b0871baf3";
+
+    #[test]
+    fn verified_launch_data_yields_the_user_id() {
+        assert_eq!(telegram_user_id(INIT, TOKEN), Some(4242));
+    }
+
+    #[test]
+    fn a_wrong_token_or_a_tampered_field_is_refused() {
+        assert_eq!(telegram_user_id(INIT, "123456:OTHER"), None);
+        let tampered = INIT.replace("4242", "4243");
+        assert_eq!(telegram_user_id(&tampered, TOKEN), None);
+        assert_eq!(telegram_user_id("auth_date=1&user=x", TOKEN), None);
     }
 }

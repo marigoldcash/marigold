@@ -10,3 +10,10 @@ faucet_daily_cap: 500
 # not started by default; loopback binding keeps the locked-down posture).
 faucet_wrpc_url: "ws://127.0.0.1:27210"
 faucet_network: "testnet-10"
+# The Telegram Mini App at marigold.cash/app is the faucet's front inside
+# Telegram; the browser lets it call the API only if the faucet says so.
+faucet_cors_origin: "https://marigold.cash"
+# The bot token, placed by hand on the host (never in this tree): with it the
+# faucet verifies the Mini App's launch data and rate-limits per Telegram user
+# rather than per IP. Absent file: per-IP only, and a warning at start.
+faucet_telegram_bot_token_file: "/etc/marigold/telegram-bot.token"

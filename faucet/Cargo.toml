@@ -29,6 +29,10 @@ serde_json.workspace = true
 clap.workspace = true
 log.workspace = true
 qrcode = { workspace = true, features = ["svg"] }
+# Telegram Mini App launch data is HMAC-SHA256 over the bot token.
+hmac.workspace = true
+sha2.workspace = true
+hex.workspace = true
 # Not workspace dependencies — the faucet is the only axum HTTP server in the
 # tree (the node's RPC stacks are tonic/workflow-rpc), and the only crate that
 # wants anyhow (the rest use per-crate thiserror enums).
