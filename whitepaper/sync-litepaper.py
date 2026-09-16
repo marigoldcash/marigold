@@ -232,21 +232,47 @@ def sync_web(md, chrome, write: bool) -> int:
     body_start, body_end = english_span(text, "main")
     region = text[body_start:body_end]
 
+    elements = [(s, e, i) for s, e, i in html_elements(region, base=body_start) if normalise(html_to_text(i))]
+    at: dict[int, int] = {}  # element index -> block index
+
     cursor = 0
-    for start, end, inner in html_elements(region, base=body_start):
+    for n, (_, _, inner) in enumerate(elements):
         key = normalise(html_to_text(inner))
-        if not key:
-            continue
         hit = next((i for i, k in enumerate(keys) if k == key and i >= cursor), None)
         if hit is None:
             hit = next((i for i, k in enumerate(keys) if k == key and i not in used), None)
         if hit is None:
             hit = next((i for i, k in enumerate(keys) if i not in used and heading_matches(k, key)), None)
         if hit is None:
-            orphans.append(key)
             continue
+        at[n] = hit
         used.add(hit)
         cursor = hit + 1
+
+    # A sentence REWORDED in the master matches nothing by text, which is the
+    # one edit this tool exists to propagate — so fill the gaps by position.
+    # Between two elements that did match, if the number of unmatched elements
+    # equals the number of unplaced blocks, the correspondence is forced and
+    # the rewording is carried across. Anything else is left for a person.
+    anchors = sorted(at)
+    for left, right in zip([None] + anchors, anchors + [None]):
+        lo_el = 0 if left is None else left + 1
+        hi_el = len(elements) if right is None else right
+        lo_bl = 0 if left is None else at[left] + 1
+        hi_bl = len(md) if right is None else at[right]
+        gap_els = [n for n in range(lo_el, hi_el) if n not in at]
+        gap_bls = [i for i in range(lo_bl, hi_bl) if i not in used]
+        if gap_els and len(gap_els) == len(gap_bls):
+            for n, i in zip(gap_els, gap_bls):
+                if md[i][0] == "li" or "<li" not in elements[n][2]:
+                    at[n] = i
+                    used.add(i)
+
+    for n, (start, end, inner) in enumerate(elements):
+        hit = at.get(n)
+        if hit is None:
+            orphans.append(normalise(html_to_text(inner)))
+            continue
         rendered = md_to_html(heading_key(md[hit][0], md[hit][1]), bold="b" if "<b>" in inner else "strong")
         if "<br>" in inner:  # a hand-placed break carries no words; keep it
             rendered = inner
