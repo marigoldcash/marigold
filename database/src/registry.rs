@@ -93,6 +93,14 @@ pub enum DatabaseStorePrefixes {
     /// IBD peers.
     PruningNotePool = 95,
     NotePoolSyncFlag = 96,
+    /// Locks beside the pool state map (POOL-SPEC.md P5.9): `sn -> NoteLock` for the
+    /// notes that carry one, under their own prefixes so the v1.1 rows stay readable.
+    NotePoolLocks = 101,
+    PruningNotePoolLocks = 102,
+    /// Per-block pool diffs and virtual's own diff carry `PoolEntry` values since
+    /// P5.9; a fresh prefix rather than a migration of the old `NewNote` rows.
+    NotePoolDiffsV2 = 103,
+    VirtualNotePoolDiffV2 = 104,
 
     // ---- Finality anchors (POOL-SPEC.md P5.8, FORK-PLAN P6.11) ----
     /// The node's highest-scoring accepted anchor (the ratchet — monotone, never

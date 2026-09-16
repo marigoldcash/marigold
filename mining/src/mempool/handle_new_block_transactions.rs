@@ -90,6 +90,7 @@ impl Mempool {
         }
         let consumed_serials = match PoolOp::decode_payload(&transaction.payload) {
             Some(PoolOp::Transfer(op)) => op.consumed,
+            Some(PoolOp::TransferLocked(op)) => op.consumed,
             Some(PoolOp::Redeem(op)) => op.consumed,
             Some(PoolOp::Mint(_)) | None => return Ok(()),
         };

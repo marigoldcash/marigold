@@ -30,7 +30,7 @@
 //! [`validate_stateful`] (P6.4) is the second half: full P5.3 validation against a live
 //! composed [`PoolStateView`].
 
-use super::{FreshnessAnchor, MintOp, POOL_FRESHNESS_WINDOW, PoolDiff, PoolOp, RedeemOp, SignedGroup, TransferOp};
+use super::{FreshnessAnchor, MintOp, POOL_FRESHNESS_WINDOW, PoolDiff, PoolEntry, PoolOp, ProducedLock, RedeemOp, SignedGroup, TransferLockedOp, TransferOp};
 use super::{PoolStateView, hashing};
 use crate::Hash;
 use crate::errors::notepool::{PoolOpContextError, PoolOpValidationError};
@@ -52,7 +52,40 @@ pub fn validate_stateless(op: &PoolOp) -> Result<(), PoolOpValidationError> {
         PoolOp::Mint(mint) => validate_mint(mint),
         PoolOp::Transfer(transfer) => validate_transfer(transfer),
         PoolOp::Redeem(redeem) => validate_redeem(redeem),
+        PoolOp::TransferLocked(transfer) => validate_transfer_locked(transfer),
     }
+}
+
+fn validate_transfer_locked(transfer: &TransferLockedOp) -> Result<(), PoolOpValidationError> {
+    if transfer.consumed.is_empty() {
+        return Err(PoolOpValidationError::EmptyCollection("consumed"));
+    }
+    if transfer.produced.len() > MAX_POOL_OP_COLLECTION_LEN {
+        return Err(PoolOpValidationError::TooManyItems(transfer.produced.len(), "produced", MAX_POOL_OP_COLLECTION_LEN));
+    }
+    // A locked transfer with no locks is a plain transfer wearing the wrong tag.
+    if transfer.locks.is_empty() {
+        return Err(PoolOpValidationError::EmptyCollection("locks"));
+    }
+    validate_locks(&transfer.locks, transfer.produced.len())?;
+    validate_consumed_groups(&transfer.consumed)
+}
+
+/// Locks are canonical: strictly ascending indices, each naming a produced note.
+fn validate_locks(locks: &[ProducedLock], produced_len: usize) -> Result<(), PoolOpValidationError> {
+    let mut last: Option<u32> = None;
+    for l in locks {
+        if l.index as usize >= produced_len {
+            return Err(PoolOpValidationError::LockIndexOutOfRange(l.index, produced_len));
+        }
+        if let Some(prev) = last {
+            if l.index <= prev {
+                return Err(PoolOpValidationError::LockIndicesNotAscending);
+            }
+        }
+        last = Some(l.index);
+    }
+    Ok(())
 }
 
 fn validate_mint(mint: &MintOp) -> Result<(), PoolOpValidationError> {
@@ -144,12 +177,41 @@ pub fn validate_stateful<V: PoolStateView>(
     pool_view: &V,
     pov_daa_score: u64,
     skip_signature_and_freshness: bool,
+    locks_active: bool,
 ) -> Result<ValidatedPoolOp, PoolOpContextError> {
     debug_assert_eq!(validate_stateless(op), Ok(()), "stateless validity is enforced at block body validation");
     match op {
         PoolOp::Mint(mint) => validate_mint_stateful(mint, tx_id, pool_view),
-        PoolOp::Transfer(transfer) => {
-            validate_transfer_stateful(transfer, tx_id, tx_outputs, pool_view, pov_daa_score, skip_signature_and_freshness)
+        PoolOp::Transfer(transfer) => validate_transfer_stateful(
+            &transfer.consumed,
+            &transfer.produced,
+            &[],
+            &transfer.freshness,
+            /* op_type */ 1,
+            tx_id,
+            tx_outputs,
+            pool_view,
+            pov_daa_score,
+            skip_signature_and_freshness,
+        ),
+        PoolOp::TransferLocked(transfer) => {
+            // Before activation a locked transfer is invalid everywhere: no node that
+            // has not upgraded could read the lock, so none may hold the note.
+            if !locks_active {
+                return Err(PoolOpContextError::LocksNotActive { pov: pov_daa_score });
+            }
+            validate_transfer_stateful(
+                &transfer.consumed,
+                &transfer.produced,
+                &transfer.locks,
+                &transfer.freshness,
+                /* op_type */ 3,
+                tx_id,
+                tx_outputs,
+                pool_view,
+                pov_daa_score,
+                skip_signature_and_freshness,
+            )
         }
         PoolOp::Redeem(redeem) => validate_redeem_stateful(redeem, tx_outputs, pool_view, pov_daa_score, skip_signature_and_freshness),
     }
@@ -170,7 +232,7 @@ fn validate_mint_stateful<V: PoolStateView>(mint: &MintOp, tx_id: Hash, pool_vie
         // rather than removed, since it's one map lookup and the invariant is still
         // worth asserting explicitly.
         check_produced_serial_is_fresh(sn, pool_view)?;
-        validated.diff.add_note(sn, *note)?;
+        validated.diff.add_note(sn, PoolEntry::unlocked(*note))?;
         validated.produced_petals += note.d.petals();
     }
     Ok(validated)
@@ -186,8 +248,13 @@ fn check_produced_serial_is_fresh<V: PoolStateView>(sn: Hash, pool_view: &V) -> 
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn validate_transfer_stateful<V: PoolStateView>(
-    transfer: &TransferOp,
+    consumed: &[SignedGroup],
+    produced: &[super::NewNote],
+    locks: &[ProducedLock],
+    freshness: &FreshnessAnchor,
+    op_type: u8,
     tx_id: Hash,
     tx_outputs: &[TransactionOutput],
     pool_view: &V,
@@ -195,29 +262,33 @@ fn validate_transfer_stateful<V: PoolStateView>(
     skip_signature_and_freshness: bool,
 ) -> Result<ValidatedPoolOp, PoolOpContextError> {
     if !skip_signature_and_freshness {
-        check_freshness(&transfer.freshness, pov_daa_score)?;
+        check_freshness(freshness, pov_daa_score)?;
     }
-
     let mut validated = ValidatedPoolOp::default();
     let outputs_hash = hashing::transparent_outputs_hash(tx_outputs);
     validated.consumed_petals = validate_consumed_groups_stateful(
-        &transfer.consumed,
-        /* op_type */ 1, // PoolOp borsh tag: Transfer
-        &transfer.produced,
+        consumed,
+        op_type,
+        produced,
+        locks,
         outputs_hash,
-        transfer.freshness.anchor_daa_score,
+        freshness.anchor_daa_score,
         pool_view,
+        pov_daa_score,
         skip_signature_and_freshness,
         &mut validated.diff,
     )?;
-
-    for (i, note) in transfer.produced.iter().enumerate() {
+    // The produced notes, locks joined in by index (canonical per stateless validation).
+    let mut entries: Vec<PoolEntry> = produced.iter().map(|n| PoolEntry::unlocked(*n)).collect();
+    for l in locks {
+        entries[l.index as usize].lock = Some(l.lock);
+    }
+    for (i, entry) in entries.iter().enumerate() {
         let sn = hashing::serial_hash(&tx_id, i as u32);
         check_produced_serial_is_fresh(sn, pool_view)?;
-        validated.diff.add_note(sn, *note)?;
-        validated.produced_petals += note.d.petals();
+        validated.diff.add_note(sn, *entry)?;
+        validated.produced_petals += entry.note.d.petals();
     }
-
     // Conservation (P5.3 Transfer step 5): the difference is the op's fee (crediting it
     // to the miner is P6.6's job; the inequality is consensus now).
     if validated.consumed_petals < validated.produced_petals {
@@ -228,7 +299,6 @@ fn validate_transfer_stateful<V: PoolStateView>(
     }
     Ok(validated)
 }
-
 fn validate_redeem_stateful<V: PoolStateView>(
     redeem: &RedeemOp,
     tx_outputs: &[TransactionOutput],
@@ -246,9 +316,11 @@ fn validate_redeem_stateful<V: PoolStateView>(
         &redeem.consumed,
         /* op_type */ 2, // PoolOp borsh tag: Redeem
         /* produced (always empty for Redeem) */ &[],
+        /* locks */ &[],
         outputs_hash,
         redeem.freshness.anchor_daa_score,
         pool_view,
+        pov_daa_score,
         skip_signature_and_freshness,
         &mut validated.diff,
     )?;
@@ -266,9 +338,11 @@ fn validate_consumed_groups_stateful<V: PoolStateView>(
     groups: &[SignedGroup],
     op_type: u8,
     produced: &[super::NewNote],
+    locks: &[ProducedLock],
     outputs_hash: Hash,
     anchor_daa_score: u64,
     pool_view: &V,
+    pov_daa_score: u64,
     skip_signature: bool,
     diff: &mut PoolDiff,
 ) -> Result<u64, PoolOpContextError> {
@@ -276,20 +350,26 @@ fn validate_consumed_groups_stateful<V: PoolStateView>(
     for (i, group) in groups.iter().enumerate() {
         let mut group_pk: Option<[u8; 32]> = None;
         for &sn in &group.serials {
-            let note = pool_view.get_note(&sn).ok_or(PoolOpContextError::SerialNotFound(sn))?;
-            match group_pk {
-                None => group_pk = Some(note.pk),
-                Some(pk) if pk != note.pk => return Err(PoolOpContextError::MixedKeysInGroup(i)),
-                Some(_) => {}
+            let entry = pool_view.get_note(&sn).ok_or(PoolOpContextError::SerialNotFound(sn))?;
+            // A locked note answers to its own key until the lock lapses and to the
+            // refund key after (P5.9). On the selected-parent replay the parent's
+            // verdict stands: the key question is skipped with the signature.
+            if !skip_signature {
+                let pk = entry.spending_pk(pov_daa_score);
+                match group_pk {
+                    None => group_pk = Some(pk),
+                    Some(seen) if seen != pk => return Err(PoolOpContextError::MixedKeysInGroup(i)),
+                    Some(_) => {}
+                }
             }
-            diff.remove_note(sn, note)?;
-            consumed_petals += note.d.petals();
+            diff.remove_note(sn, entry)?;
+            consumed_petals += entry.note.d.petals();
         }
         if !skip_signature {
             let pk = group_pk.expect("groups are non-empty (stateless validation)");
             let xonly = secp256k1::XOnlyPublicKey::from_slice(&pk).map_err(|_| PoolOpContextError::BadPublicKey(i))?;
             let sig = secp256k1::schnorr::Signature::from_slice(&group.signature).expect("[u8; 64] is always length-valid");
-            let msg_hash = hashing::signing_hash(op_type, &group.serials, produced, outputs_hash, anchor_daa_score);
+            let msg_hash = hashing::signing_hash_with_locks(op_type, &group.serials, produced, locks, outputs_hash, anchor_daa_score);
             let msg = secp256k1::Message::from_digest(msg_hash.into());
             sig.verify(&msg, &xonly).map_err(|_| PoolOpContextError::BadSignature(i))?;
         }
@@ -488,7 +568,7 @@ mod tests {
         }
 
         fn pool_with(entries: &[(Hash, NewNote)]) -> PoolCollection {
-            entries.iter().copied().collect()
+            entries.iter().map(|(sn, note)| (*sn, PoolEntry::unlocked(*note))).collect()
         }
 
         fn owned_note(wallet: &Wallet, d: DenominationTag) -> NewNote {
@@ -505,6 +585,127 @@ mod tests {
             })
         }
 
+        // ---- Time-locked notes (POOL-SPEC.md P5.9) ----
+
+        use crate::notepool::{NoteLock, ProducedLock, TransferLockedOp};
+
+        impl Wallet {
+            fn sign_locked(&self, serials: &[Hash], produced: &[NewNote], locks: &[ProducedLock], anchor: u64) -> [u8; 64] {
+                let outputs_hash = hashing::transparent_outputs_hash(&[]);
+                let msg_hash = hashing::signing_hash_with_locks(3, serials, produced, locks, outputs_hash, anchor);
+                let msg = secp256k1::Message::from_digest(msg_hash.into());
+                *self.keypair.sign_schnorr(msg).as_ref()
+            }
+        }
+
+        /// `sn` rotated by `wallet` into a note for `receiver`, locked until `until`
+        /// with `refund` as the way back.
+        fn locked_rotate_op(wallet: &Wallet, sn: Hash, receiver: NewNote, refund: &Wallet, until: u64, anchor: u64) -> PoolOp {
+            let locks = vec![ProducedLock { index: 0, lock: NoteLock { refund_pk: refund.pk, until_daa: until } }];
+            let signature = wallet.sign_locked(&[sn], &[receiver], &locks, anchor);
+            PoolOp::TransferLocked(TransferLockedOp {
+                consumed: vec![SignedGroup { serials: vec![sn], signature }],
+                produced: vec![receiver],
+                locks,
+                freshness: FreshnessAnchor { anchor_daa_score: anchor },
+            })
+        }
+
+        #[test]
+        fn locked_transfer_lands_with_its_lock() {
+            let payer = Wallet::new(1);
+            let receiver = Wallet::new(2);
+            let sn = hash(10);
+            let view = pool_with(&[(sn, owned_note(&payer, DenominationTag::D1))]);
+            let op = locked_rotate_op(&payer, sn, owned_note(&receiver, DenominationTag::D1), &payer, 5_000, 50);
+            assert_eq!(validate_stateless(&op), Ok(()));
+            let validated = validate_stateful(&op, hash(0xAA), &[], &view, 100, false, true).unwrap();
+            let produced_sn = hashing::serial_hash(&hash(0xAA), 0);
+            let entry = validated.diff.add[&produced_sn];
+            assert_eq!(entry.note.pk, receiver.pk);
+            assert_eq!(entry.lock, Some(NoteLock { refund_pk: payer.pk, until_daa: 5_000 }));
+        }
+
+        #[test]
+        fn locked_transfer_is_refused_before_activation() {
+            let payer = Wallet::new(1);
+            let receiver = Wallet::new(2);
+            let sn = hash(10);
+            let view = pool_with(&[(sn, owned_note(&payer, DenominationTag::D1))]);
+            let op = locked_rotate_op(&payer, sn, owned_note(&receiver, DenominationTag::D1), &payer, 5_000, 50);
+            assert_eq!(validate_stateful(&op, hash(0xAA), &[], &view, 100, false, false), Err(PoolOpContextError::LocksNotActive { pov: 100 }));
+        }
+
+        /// The receiver's key takes a locked note before the lock lapses; the refund
+        /// key cannot. From the lock on, the roles swap. Checked at the boundary:
+        /// `until_daa` itself belongs to the refund side.
+        #[test]
+        fn who_may_spend_a_locked_note_depends_on_the_score() {
+            let payer = Wallet::new(1);
+            let receiver = Wallet::new(2);
+            let elsewhere = note(9);
+            let sn = hash(10);
+            let locked = PoolEntry::locked(owned_note(&receiver, DenominationTag::D1), NoteLock { refund_pk: payer.pk, until_daa: 5_000 });
+            let view: PoolCollection = [(sn, locked)].into();
+            let by_receiver = rotate_op(&receiver, sn, elsewhere, 50);
+            let by_payer = rotate_op(&payer, sn, elsewhere, 50);
+            // Before the lock lapses.
+            assert!(validate_stateful(&by_receiver, hash(0xAA), &[], &view, 4_999, false, true).is_ok());
+            assert_eq!(validate_stateful(&by_payer, hash(0xAA), &[], &view, 4_999, false, true), Err(PoolOpContextError::BadSignature(0)));
+            // From the lock on: the refund key, and only it. Anchors must be fresh at
+            // that score, so re-sign against a matching anchor.
+            let by_receiver = rotate_op(&receiver, sn, elsewhere, 5_000);
+            let by_payer = rotate_op(&payer, sn, elsewhere, 5_000);
+            assert!(validate_stateful(&by_payer, hash(0xAA), &[], &view, 5_000, false, true).is_ok());
+            assert_eq!(validate_stateful(&by_receiver, hash(0xAA), &[], &view, 5_000, false, true), Err(PoolOpContextError::BadSignature(0)));
+        }
+
+        #[test]
+        fn a_lock_altered_after_signing_breaks_the_signature() {
+            let payer = Wallet::new(1);
+            let receiver = Wallet::new(2);
+            let sn = hash(10);
+            let view = pool_with(&[(sn, owned_note(&payer, DenominationTag::D1))]);
+            let PoolOp::TransferLocked(mut op) = locked_rotate_op(&payer, sn, owned_note(&receiver, DenominationTag::D1), &payer, 5_000, 50) else { unreachable!() };
+            op.locks[0].lock.until_daa = 6_000;
+            let tampered = PoolOp::TransferLocked(op);
+            assert_eq!(validate_stateful(&tampered, hash(0xAA), &[], &view, 100, false, true), Err(PoolOpContextError::BadSignature(0)));
+        }
+
+        #[test]
+        fn lock_lists_must_be_canonical() {
+            let wallet = Wallet::new(1);
+            let lock = NoteLock { refund_pk: wallet.pk, until_daa: 5_000 };
+            let mk = |locks: Vec<ProducedLock>| {
+                PoolOp::TransferLocked(TransferLockedOp {
+                    consumed: vec![SignedGroup { serials: vec![hash(1)], signature: sig(0x11) }],
+                    produced: vec![note(1), note(2)],
+                    locks,
+                    freshness: anchor(),
+                })
+            };
+            assert_eq!(validate_stateless(&mk(vec![])), Err(PoolOpValidationError::EmptyCollection("locks")));
+            assert_eq!(validate_stateless(&mk(vec![ProducedLock { index: 2, lock }])), Err(PoolOpValidationError::LockIndexOutOfRange(2, 2)));
+            assert_eq!(
+                validate_stateless(&mk(vec![ProducedLock { index: 1, lock }, ProducedLock { index: 0, lock }])),
+                Err(PoolOpValidationError::LockIndicesNotAscending)
+            );
+            assert_eq!(
+                validate_stateless(&mk(vec![ProducedLock { index: 1, lock }, ProducedLock { index: 1, lock }])),
+                Err(PoolOpValidationError::LockIndicesNotAscending)
+            );
+            assert_eq!(validate_stateless(&mk(vec![ProducedLock { index: 0, lock }, ProducedLock { index: 1, lock }])), Ok(()));
+        }
+
+        #[test]
+        fn a_plain_transfer_signs_the_same_message_as_before() {
+            let outputs_hash = hashing::transparent_outputs_hash(&[]);
+            assert_eq!(
+                hashing::signing_hash(1, &[hash(1)], &[note(1)], outputs_hash, 7),
+                hashing::signing_hash_with_locks(1, &[hash(1)], &[note(1)], &[], outputs_hash, 7)
+            );
+        }
+
         #[test]
         fn valid_rotate_produces_expected_diff() {
             let wallet = Wallet::new(1);
@@ -514,7 +715,7 @@ mod tests {
             let view = pool_with(&[(sn, consumed_note)]);
             let op = rotate_op(&wallet, sn, dest, 50);
 
-            let validated = validate_stateful(&op, hash(0xAA), &[], &view, 100, false).unwrap();
+            let validated = validate_stateful(&op, hash(0xAA), &[], &view, 100, false, true).unwrap();
             assert_eq!(validated.consumed_petals, DenominationTag::D1.petals());
             assert_eq!(validated.produced_petals, DenominationTag::D1.petals());
             assert_eq!(validated.diff.remove, pool_with(&[(sn, consumed_note)]));
@@ -526,7 +727,7 @@ mod tests {
             let wallet = Wallet::new(1);
             let op = rotate_op(&wallet, hash(10), note(2), 50);
             let empty = PoolCollection::default();
-            assert_eq!(validate_stateful(&op, hash(0xAA), &[], &empty, 100, false), Err(PoolOpContextError::SerialNotFound(hash(10))));
+            assert_eq!(validate_stateful(&op, hash(0xAA), &[], &empty, 100, false, true), Err(PoolOpContextError::SerialNotFound(hash(10))));
         }
 
         #[test]
@@ -537,7 +738,7 @@ mod tests {
             let view = pool_with(&[(sn, owned_note(&owner, DenominationTag::D1))]);
             // Signed by a key that is NOT the serial's current pk.
             let op = rotate_op(&thief, sn, note(2), 50);
-            assert_eq!(validate_stateful(&op, hash(0xAA), &[], &view, 100, false), Err(PoolOpContextError::BadSignature(0)));
+            assert_eq!(validate_stateful(&op, hash(0xAA), &[], &view, 100, false, true), Err(PoolOpContextError::BadSignature(0)));
         }
 
         #[test]
@@ -553,7 +754,7 @@ mod tests {
                 produced: vec![note(3)], // attacker swapped the destination
                 freshness: FreshnessAnchor { anchor_daa_score: 50 },
             });
-            assert_eq!(validate_stateful(&op, hash(0xAA), &[], &view, 100, false), Err(PoolOpContextError::BadSignature(0)));
+            assert_eq!(validate_stateful(&op, hash(0xAA), &[], &view, 100, false, true), Err(PoolOpContextError::BadSignature(0)));
         }
 
         #[test]
@@ -567,7 +768,7 @@ mod tests {
                 produced: vec![note(2)],
                 freshness: FreshnessAnchor { anchor_daa_score: 50 },
             });
-            assert_eq!(validate_stateful(&op, hash(0xAA), &[], &view, 100, false), Err(PoolOpContextError::MixedKeysInGroup(0)));
+            assert_eq!(validate_stateful(&op, hash(0xAA), &[], &view, 100, false, true), Err(PoolOpContextError::MixedKeysInGroup(0)));
         }
 
         #[test]
@@ -578,18 +779,18 @@ mod tests {
             let view = pool_with(&[(sn, owned_note(&wallet, DenominationTag::D1))]);
 
             // pov - anchor == 0: valid.
-            assert!(validate_stateful(&make(100), hash(0xAA), &[], &view, 100, false).is_ok());
+            assert!(validate_stateful(&make(100), hash(0xAA), &[], &view, 100, false, true).is_ok());
             // pov - anchor == WINDOW exactly: valid (inclusive).
-            assert!(validate_stateful(&make(100), hash(0xAA), &[], &view, 100 + POOL_FRESHNESS_WINDOW, false).is_ok());
+            assert!(validate_stateful(&make(100), hash(0xAA), &[], &view, 100 + POOL_FRESHNESS_WINDOW, false, true).is_ok());
             // pov - anchor == WINDOW + 1: stale.
             let pov = 100 + POOL_FRESHNESS_WINDOW + 1;
             assert_eq!(
-                validate_stateful(&make(100), hash(0xAA), &[], &view, pov, false),
+                validate_stateful(&make(100), hash(0xAA), &[], &view, pov, false, true),
                 Err(PoolOpContextError::StaleAnchor { anchor: 100, pov, window: POOL_FRESHNESS_WINDOW })
             );
             // anchor > pov: future anchor.
             assert_eq!(
-                validate_stateful(&make(101), hash(0xAA), &[], &view, 100, false),
+                validate_stateful(&make(101), hash(0xAA), &[], &view, 100, false, true),
                 Err(PoolOpContextError::AnchorInFuture { anchor: 101, pov: 100 })
             );
         }
@@ -603,8 +804,8 @@ mod tests {
             let view = pool_with(&[(sn, owned_note(&wallet, DenominationTag::D1))]);
             let op = rotate_op(&wallet, sn, note(2), 100);
             let stale_pov = 100 + POOL_FRESHNESS_WINDOW + 1;
-            assert!(validate_stateful(&op, hash(0xAA), &[], &view, stale_pov, false).is_err());
-            assert!(validate_stateful(&op, hash(0xAA), &[], &view, stale_pov, true).is_ok());
+            assert!(validate_stateful(&op, hash(0xAA), &[], &view, stale_pov, false, true).is_err());
+            assert!(validate_stateful(&op, hash(0xAA), &[], &view, stale_pov, true, true).is_ok());
         }
 
         #[test]
@@ -616,7 +817,7 @@ mod tests {
             let inflated = NewNote { d: DenominationTag::D10, pk: [2; 32] };
             let op = rotate_op(&wallet, sn, inflated, 50);
             assert_eq!(
-                validate_stateful(&op, hash(0xAA), &[], &view, 100, false),
+                validate_stateful(&op, hash(0xAA), &[], &view, 100, false, true),
                 Err(PoolOpContextError::InsufficientConsumedValue {
                     consumed: DenominationTag::D1.petals(),
                     produced: DenominationTag::D10.petals()
@@ -637,7 +838,7 @@ mod tests {
                 produced: produced.clone(),
                 freshness: FreshnessAnchor { anchor_daa_score: 50 },
             });
-            let validated = validate_stateful(&op, hash(0xAA), &[], &view, 100, false).unwrap();
+            let validated = validate_stateful(&op, hash(0xAA), &[], &view, 100, false, true).unwrap();
             assert_eq!(validated.consumed_petals - validated.produced_petals, DenominationTag::D0_1.petals());
             assert_eq!(validated.diff.add.len(), 9);
         }
@@ -656,7 +857,7 @@ mod tests {
                 produced,
                 freshness: FreshnessAnchor { anchor_daa_score: 50 },
             });
-            let validated = validate_stateful(&op, hash(0xAA), &[], &view, 100, false).unwrap();
+            let validated = validate_stateful(&op, hash(0xAA), &[], &view, 100, false, true).unwrap();
             assert_eq!(validated.diff.remove.len(), 5);
             assert_eq!(validated.diff.add.len(), 5);
         }
@@ -665,7 +866,7 @@ mod tests {
         fn mint_derives_serials_and_adds_notes() {
             let view = PoolCollection::default();
             let op = PoolOp::Mint(MintOp { new_notes: vec![note(1), note(2)] });
-            let validated = validate_stateful(&op, hash(0xAA), &[], &view, 100, false).unwrap();
+            let validated = validate_stateful(&op, hash(0xAA), &[], &view, 100, false, true).unwrap();
             assert_eq!(validated.produced_petals, 2 * DenominationTag::D1.petals());
             assert_eq!(validated.diff.remove.len(), 0);
             assert_eq!(
@@ -688,7 +889,7 @@ mod tests {
                 consumed: vec![SignedGroup { serials: vec![sn], signature }],
                 freshness: FreshnessAnchor { anchor_daa_score: 50 },
             });
-            let validated = validate_stateful(&op, hash(0xAA), &[], &view, 100, false).unwrap();
+            let validated = validate_stateful(&op, hash(0xAA), &[], &view, 100, false, true).unwrap();
             assert_eq!(validated.consumed_petals, DenominationTag::D1.petals());
             assert_eq!(validated.diff.remove, pool_with(&[(sn, consumed_note)]));
             assert!(validated.diff.add.is_empty());
@@ -706,7 +907,7 @@ mod tests {
                 consumed: vec![SignedGroup { serials: vec![sn], signature: transfer_sig }],
                 freshness: FreshnessAnchor { anchor_daa_score: 50 },
             });
-            assert_eq!(validate_stateful(&op, hash(0xAA), &[], &view, 100, false), Err(PoolOpContextError::BadSignature(0)));
+            assert_eq!(validate_stateful(&op, hash(0xAA), &[], &view, 100, false, true), Err(PoolOpContextError::BadSignature(0)));
         }
     }
 }

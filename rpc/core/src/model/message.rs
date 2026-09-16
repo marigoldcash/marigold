@@ -3939,31 +3939,45 @@ impl Deserializer for GetSeqCommitLaneProofResponse {
 /// `PoolStateView::get_note` returns (`d`, `pk`) — `denomination` is
 /// `DenominationTag`'s declaration-order ordinal (0..=7, see `DenominationTag`'s own
 /// `TryFrom<u8>`, added in P6.8 for exactly this wire shape).
+/// A note's lock (POOL-SPEC.md P5.9): until `until_daa` only the note's key spends it,
+/// from then on only `refund_pk`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RpcNoteLock {
+    pub refund_pk: [u8; 32],
+    pub until_daa: u64,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RpcNoteEntry {
     pub sn: RpcHash,
     pub denomination: u8,
     pub pk: [u8; 32],
+    /// Present on a locked note (P5.9). Version 2 of this record; a version-1 reader
+    /// simply does not see it.
+    pub lock: Option<RpcNoteLock>,
 }
 
 impl Serializer for RpcNoteEntry {
     fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
-        store!(u16, &1, writer)?;
+        store!(u16, &2, writer)?;
         store!(RpcHash, &self.sn, writer)?;
         store!(u8, &self.denomination, writer)?;
         store!([u8; 32], &self.pk, writer)?;
+        store!(Option<RpcNoteLock>, &self.lock, writer)?;
         Ok(())
     }
 }
 
 impl Deserializer for RpcNoteEntry {
     fn deserialize<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
-        let _version = load!(u16, reader)?;
+        let version = load!(u16, reader)?;
         let sn = load!(RpcHash, reader)?;
         let denomination = load!(u8, reader)?;
         let pk = load!([u8; 32], reader)?;
-        Ok(Self { sn, denomination, pk })
+        let lock = if version >= 2 { load!(Option<RpcNoteLock>, reader)? } else { None };
+        Ok(Self { sn, denomination, pk, lock })
     }
 }
 

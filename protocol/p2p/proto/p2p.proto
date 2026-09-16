@@ -350,6 +350,9 @@ message PoolStateEntry {
   bytes sn = 1;             // 32 bytes: note serial
   uint32 denomination = 2;  // DenominationTag ordinal (0..=7)
   bytes pk = 3;             // 32 bytes: x-only note pubkey
+  // The note's lock, when it carries one (POOL-SPEC.md P5.9): both fields or neither.
+  optional bytes refundPk = 4;   // 32 bytes
+  optional uint64 untilDaa = 5;
 }
 
 message PruningPointPoolStateChunkMessage {

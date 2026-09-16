@@ -1090,7 +1090,7 @@ impl ConsensusApi for Consensus {
         from_sn: Option<Hash>,
         chunk_size: usize,
         skip_first: bool,
-    ) -> ConsensusResult<Vec<(Hash, kaspa_consensus_core::notepool::NewNote)>> {
+    ) -> ConsensusResult<Vec<(Hash, kaspa_consensus_core::notepool::PoolEntry)>> {
         // Mirrors `get_pruning_point_utxos` exactly, including the re-check of the
         // pruning point after the read — see the comments there.
         if self.pruning_point_store.read().pruning_point().unwrap() != expected_pruning_point {
@@ -1107,14 +1107,14 @@ impl ConsensusApi for Consensus {
         Ok(entries)
     }
 
-    fn append_imported_pruning_point_pool_entries(&self, chunk: &[(Hash, kaspa_consensus_core::notepool::NewNote)]) {
+    fn append_imported_pruning_point_pool_entries(&self, chunk: &[(Hash, kaspa_consensus_core::notepool::PoolEntry)]) {
         let mut pruning_meta_write = self.pruning_meta_stores.write();
         pruning_meta_write.pool_state.write_many(chunk).unwrap();
     }
 
     fn import_pruning_point_pool_state(&self, new_pruning_point: Hash, entry_count: u64) -> PruningImportResult<()> {
         use kaspa_consensus_core::errors::pruning::PruningImportError;
-        use kaspa_consensus_core::notepool::{PoolDiff, leaf_hash};
+        use kaspa_consensus_core::notepool::{PoolDiff, leaf_hash_entry};
 
         info!("Importing the note-pool state of the pruning point {} ({} notes)", new_pruning_point, entry_count);
         let expected_root = self.headers_store.get_header(new_pruning_point).unwrap().pool_commitment;
@@ -1137,7 +1137,7 @@ impl ConsensusApi for Consensus {
             .map_err(|e| PruningImportError::PoolStoreError(e.to_string()))?;
 
         const COPY_CHUNK: usize = 1024;
-        let mut copy_buf: Vec<(Hash, kaspa_consensus_core::notepool::NewNote)> = Vec::with_capacity(COPY_CHUNK);
+        let mut copy_buf: Vec<(Hash, kaspa_consensus_core::notepool::PoolEntry)> = Vec::with_capacity(COPY_CHUNK);
         let mut copy_err: Option<PruningImportError> = None;
         {
             let pool_state_ref = &mut *pool_state;
@@ -1155,7 +1155,7 @@ impl ConsensusApi for Consensus {
                 if copy_buf.len() >= COPY_CHUNK {
                     copy_buf.clear();
                 }
-                (sn, leaf_hash(note.d, &note.pk))
+                (sn, leaf_hash_entry(&note))
             });
 
             let computed_root = pool_smt
@@ -1181,12 +1181,12 @@ impl ConsensusApi for Consensus {
         Ok(())
     }
 
-    fn get_pool_note(&self, sn: Hash) -> Option<kaspa_consensus_core::notepool::NewNote> {
+    fn get_pool_note(&self, sn: Hash) -> Option<kaspa_consensus_core::notepool::PoolEntry> {
         use crate::model::stores::notepool::NotePoolStoreReader;
         self.virtual_stores.read().pool_state.get(sn).optional().unwrap()
     }
 
-    fn get_pool_notes(&self, sns: &[Hash]) -> Vec<Option<kaspa_consensus_core::notepool::NewNote>> {
+    fn get_pool_notes(&self, sns: &[Hash]) -> Vec<Option<kaspa_consensus_core::notepool::PoolEntry>> {
         use crate::model::stores::notepool::NotePoolStoreReader;
         let virtual_read = self.virtual_stores.read();
         sns.iter().map(|&sn| virtual_read.pool_state.get(sn).optional().unwrap()).collect()
@@ -1196,7 +1196,7 @@ impl ConsensusApi for Consensus {
         let mut counts = [0u64; 8];
         for res in self.virtual_stores.read().pool_state.iterator() {
             let (_, note) = res.expect("live pool state must be readable");
-            counts[note.d as usize] += 1;
+            counts[note.note.d as usize] += 1;
         }
         kaspa_consensus_core::notepool::PoolStats { counts }
     }

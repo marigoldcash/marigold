@@ -152,6 +152,7 @@ impl BlockBodyProcessor {
             let consumed_groups = match &op {
                 PoolOp::Mint(_) => continue,
                 PoolOp::Transfer(transfer) => &transfer.consumed,
+                PoolOp::TransferLocked(transfer) => &transfer.consumed,
                 PoolOp::Redeem(redeem) => &redeem.consumed,
             };
             for &serial in consumed_groups.iter().flat_map(|g| &g.serials) {

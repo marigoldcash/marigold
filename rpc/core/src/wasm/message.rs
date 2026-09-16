@@ -1424,6 +1424,8 @@ declare! {
         denomination : number;
         /** 32 bytes, as numbers */
         pk : number[];
+        /** Present on a locked note: until untilDaa only pk spends it, then only refundPk. */
+        lock? : { refundPk : number[]; untilDaa : number };
     }
 
     /**

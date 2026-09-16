@@ -300,7 +300,7 @@ impl PruningProcessor {
     /// The pool analog of [`Self::assert_utxo_commitment`] (FORK-PLAN P6.8): the advanced
     /// pruning-position pool state must hash to the pruning point header's `pool_commitment`.
     fn assert_pool_commitment(&self, pruning_point: Hash) {
-        use kaspa_consensus_core::notepool::leaf_hash;
+        use kaspa_consensus_core::notepool::leaf_hash_entry;
         use kaspa_hashes::NotePoolSmt;
         use kaspa_smt::SmtHasher;
         use kaspa_smt::store::{BTreeSmtStore, LeafUpdate, SortedLeafUpdates};
@@ -314,7 +314,7 @@ impl PruningProcessor {
                 .pool_state
                 .iterator()
                 .map(|r| r.unwrap())
-                .map(|(sn, note)| LeafUpdate { key: sn, leaf_hash: leaf_hash(note.d, &note.pk) }),
+                .map(|(sn, note)| LeafUpdate { key: sn, leaf_hash: leaf_hash_entry(&note) }),
         );
         let empty_store = BTreeSmtStore::new();
         let (root, _) = compute_root_update::<NotePoolSmt, _>(&empty_store, NotePoolSmt::empty_root(), leaf_updates).unwrap();

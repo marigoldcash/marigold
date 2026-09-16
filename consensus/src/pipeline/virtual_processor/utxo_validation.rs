@@ -30,7 +30,7 @@ use kaspa_consensus_core::{
     hashing,
     header::Header,
     muhash::MuHashExtensions,
-    notepool::{PoolCollection, PoolDiff, PoolOp, PoolStateView, PoolViewComposition, leaf_hash, validate_stateful},
+    notepool::{PoolCollection, PoolDiff, PoolOp, PoolStateView, PoolViewComposition, leaf_hash_entry, validate_stateful},
     subnets::SUBNETWORK_ID_NOTE_POOL,
     tx::{MutableTransaction, PopulatedTransaction, Transaction, ValidatedTransaction, VerifiableTransaction},
     utxo::{
@@ -428,7 +428,7 @@ impl VirtualStateProcessor {
             // rather than unwrap so direct callers (e.g. templates) stay total.
             let op = PoolOp::decode_payload(&transaction.payload).ok_or(TxRuleError::MalformedNotePoolPayload)?;
             let skip = flags == TxValidationFlags::SkipScriptChecks;
-            match validate_stateful(&op, transaction.id(), &transaction.outputs, pool_view, pov_daa_score, skip) {
+            match validate_stateful(&op, transaction.id(), &transaction.outputs, pool_view, pov_daa_score, skip, self.note_locks_activation.is_active(pov_daa_score)) {
                 Ok(validated) => Some(validated),
                 Err(e) => {
                     info!("Rejecting note-pool transaction {} due to context error: {}", transaction.id(), e);
@@ -520,7 +520,7 @@ impl VirtualStateProcessor {
         // NOTES.md's P6.7 entry), not an oversight.
         let validated_pool_op = if mutable_tx.tx.subnetwork_id == SUBNETWORK_ID_NOTE_POOL {
             let op = PoolOp::decode_payload(&mutable_tx.tx.payload).ok_or(TxRuleError::MalformedNotePoolPayload)?;
-            match validate_stateful(&op, mutable_tx.tx.id(), &mutable_tx.tx.outputs, pool_view, pov_daa_score, false) {
+            match validate_stateful(&op, mutable_tx.tx.id(), &mutable_tx.tx.outputs, pool_view, pov_daa_score, false, self.note_locks_activation.is_active(pov_daa_score)) {
                 Ok(validated) => Some(validated),
                 Err(e) => {
                     info!("Rejecting note-pool transaction {} due to context error: {}", mutable_tx.tx.id(), e);
@@ -802,7 +802,7 @@ impl VirtualStateProcessor {
         }
 
         let leaf_updates = SortedLeafUpdates::from_unsorted(
-            entries.iter().map(|(sn, note)| LeafUpdate { key: *sn, leaf_hash: leaf_hash(note.d, &note.pk) }),
+            entries.iter().map(|(sn, note)| LeafUpdate { key: *sn, leaf_hash: leaf_hash_entry(note) }),
         );
         let empty_store = BTreeSmtStore::new();
         let (root, _) = compute_root_update::<NotePoolSmt, _>(&empty_store, NotePoolSmt::empty_root(), leaf_updates).unwrap();

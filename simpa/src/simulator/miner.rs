@@ -310,7 +310,7 @@ impl Miner {
         }
 
         let mut live: Vec<(Hash, NewNote)> =
-            possible_notes.iter().filter_map(|&sn| pool_state.get(sn).ok().map(|note| (sn, note))).collect();
+            possible_notes.iter().filter_map(|&sn| pool_state.get(sn).ok().map(|entry| (sn, entry.note))).collect();
         live.sort_by_key(|(_, note)| note.d as u8);
 
         if let Some(pair) = live.windows(2).find(|w| w[0].1.d == w[1].1.d) {

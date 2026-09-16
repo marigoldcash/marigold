@@ -1208,6 +1208,9 @@ message RpcNoteEntryMessage {
   bytes sn = 1;
   uint32 denomination = 2;
   bytes pk = 3;
+  // The note's lock, when it carries one (POOL-SPEC.md P5.9): both or neither.
+  optional bytes refundPk = 4;
+  optional uint64 untilDaa = 5;
 }
 
 // GetNotesBySerialRequestMessage requests the current pool notes for the given

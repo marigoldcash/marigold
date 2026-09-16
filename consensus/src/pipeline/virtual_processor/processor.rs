@@ -180,6 +180,7 @@ pub struct VirtualStateProcessor {
 
     // Toccata activation
     pub(crate) toccata_activation: ForkActivation,
+    pub(crate) note_locks_activation: ForkActivation,
     pub(crate) toccata_logger: ForkLogger,
 
     // Finality anchors (POOL-SPEC.md P5.8, FORK-PLAN P6.11)
@@ -302,6 +303,7 @@ impl VirtualStateProcessor {
             notification_root,
             counters,
             toccata_activation: params.toccata_activation,
+            note_locks_activation: params.note_locks_activation,
             toccata_logger: ForkLogger::new("virtual state processing rules", true),
             finality_anchor_params: params.finality_anchor,
             finality_anchor_store: storage.finality_anchor_store.clone(),

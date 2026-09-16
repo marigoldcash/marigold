@@ -615,7 +615,13 @@ from!(item: RpcResult<&kaspa_rpc_core::GetSeqCommitLaneProofResponse>, protowire
 });
 
 from!(item: &kaspa_rpc_core::RpcNoteEntry, protowire::RpcNoteEntryMessage, {
-    Self { sn: item.sn.as_bytes().to_vec(), denomination: item.denomination as u32, pk: item.pk.to_vec() }
+    Self {
+        sn: item.sn.as_bytes().to_vec(),
+        denomination: item.denomination as u32,
+        pk: item.pk.to_vec(),
+        refund_pk: item.lock.map(|l| l.refund_pk.to_vec()),
+        until_daa: item.lock.map(|l| l.until_daa),
+    }
 });
 
 from!(item: &kaspa_rpc_core::NotifyNotesChangedRequest, protowire::NotifyNotesChangedRequestMessage, {
@@ -1253,6 +1259,10 @@ try_from!(item: &protowire::RpcNoteEntryMessage, kaspa_rpc_core::RpcNoteEntry, {
         sn: hash_from_bytes(&item.sn)?,
         denomination: item.denomination as u8,
         pk: array_from_bytes(&item.pk)?,
+        lock: match (&item.refund_pk, item.until_daa) {
+            (Some(refund), Some(until_daa)) => Some(kaspa_rpc_core::RpcNoteLock { refund_pk: array_from_bytes(refund)?, until_daa }),
+            _ => None,
+        },
     }
 });
 

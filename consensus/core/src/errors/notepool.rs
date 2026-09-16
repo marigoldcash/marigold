@@ -18,6 +18,12 @@ pub enum PoolOpValidationError {
 
     #[error("serial {0} appears more than once across the op's consumed set")]
     DuplicateSerial(Hash),
+
+    #[error("lock index {0} is out of range for {1} produced notes")]
+    LockIndexOutOfRange(u32, usize),
+
+    #[error("lock indices must be strictly ascending")]
+    LockIndicesNotAscending,
 }
 
 /// Stateful `PoolOp` validation failures (POOL-SPEC.md P5.3's validation orders, FORK-PLAN
@@ -52,6 +58,9 @@ pub enum PoolOpContextError {
 
     #[error("conservation violated: consumed {consumed} petals < produced {produced} petals")]
     InsufficientConsumedValue { consumed: u64, produced: u64 },
+
+    #[error("locked notes are not active yet at POV DAA score {pov}")]
+    LocksNotActive { pov: u64 },
 
     #[error("pool diff algebra violation: {0}")]
     Algebra(#[from] PoolAlgebraError),

@@ -214,7 +214,7 @@ impl<'a, 'b> PruningPointUtxosetChunkStream<'a, 'b> {
 }
 
 /// A chunk of note-pool entries
-pub type PoolStateChunk = Vec<(Hash, kaspa_consensus_core::notepool::NewNote)>;
+pub type PoolStateChunk = Vec<(Hash, kaspa_consensus_core::notepool::PoolEntry)>;
 
 /// Stream of pruning-point note-pool state chunks (FORK-PLAN P6.8) — a structural clone
 /// of [`PruningPointUtxosetChunkStream`]: Done-sentinel terminated, flow-controlled every

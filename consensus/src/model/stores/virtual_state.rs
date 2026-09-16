@@ -221,7 +221,7 @@ impl VirtualStores {
             // sizes make the hit rate matter (P8.3 calibration territory).
             pool_state: DbNotePoolStore::new(db.clone(), CachePolicy::Count(100_000)),
             pool_smt: DbNotePoolSmtStore::new(db.clone(), CachePolicy::Count(100_000)),
-            pool_diff: CachedDbItem::new(db, DatabaseStorePrefixes::VirtualNotePoolDiff.into()),
+            pool_diff: CachedDbItem::new(db, DatabaseStorePrefixes::VirtualNotePoolDiffV2.into()),
         }
     }
 

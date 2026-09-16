@@ -244,6 +244,11 @@ impl TestConsensus {
 
     /// A note from the virtual pool state map (`sn -> (d, pk)`), if live.
     pub fn pool_note(&self, sn: Hash) -> Option<kaspa_consensus_core::notepool::NewNote> {
+        self.pool_entry(sn).map(|e| e.note)
+    }
+
+    /// The live entry with its lock, if any (POOL-SPEC.md P5.9).
+    pub fn pool_entry(&self, sn: Hash) -> Option<kaspa_consensus_core::notepool::PoolEntry> {
         use kaspa_consensus_core::notepool::PoolStateView;
         self.consensus.storage.virtual_stores.read().pool_state.get_note(&sn)
     }

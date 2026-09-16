@@ -8,7 +8,7 @@
 //! `crypto/smt/build.rs`) handle the tree's internal hashing and are never called
 //! directly from this module.
 
-use super::{DenominationTag, NewNote, POOL_PROTOCOL_VERSION};
+use super::{DenominationTag, NewNote, POOL_PROTOCOL_VERSION, PoolEntry, ProducedLock};
 use crate::Hash;
 use crate::tx::TransactionOutput;
 use kaspa_hashes::{HasherBase, NotePoolLeafHash, NotePoolOutputsHash, NotePoolSerialHash, NotePoolSigningHash};
@@ -19,6 +19,21 @@ pub fn leaf_hash(d: DenominationTag, pk: &[u8; 32]) -> Hash {
     let mut hasher = NotePoolLeafHash::new();
     hasher.update([d as u8]).update(pk);
     hasher.finalize()
+}
+
+/// The leaf for a pool entry: `H(d || pk)` unlocked — unchanged from v1.1, so every
+/// existing commitment stands — and `H(d || pk || refund_pk || until_daa)` locked
+/// (POOL-SPEC.md P5.9). The lengths differ, so the two can never collide.
+#[inline]
+pub fn leaf_hash_entry(entry: &PoolEntry) -> Hash {
+    match entry.lock {
+        None => leaf_hash(entry.note.d, &entry.note.pk),
+        Some(lock) => {
+            let mut hasher = NotePoolLeafHash::new();
+            hasher.update([entry.note.d as u8]).update(entry.note.pk).update(lock.refund_pk).update(lock.until_daa.to_le_bytes());
+            hasher.finalize()
+        }
+    }
 }
 
 /// A note's serial: `sn = H_serial(creating_tx_id || index)` where `index` is the note's
@@ -82,6 +97,22 @@ pub fn signing_hash(
     transparent_outputs_hash: Hash,
     anchor_daa_score: u64,
 ) -> Hash {
+    signing_hash_with_locks(op_type, group_serials, produced, &[], transparent_outputs_hash, anchor_daa_score)
+}
+
+/// [`signing_hash`] for a `TransferLockedOp` (POOL-SPEC.md P5.9): the locks follow
+/// `produced` in the preimage — `count (u32 LE) || (index u32 LE || refund_pk ||
+/// until_daa u64 LE)*` — so a relay can neither strip nor alter them. With no locks
+/// the preimage is byte-for-byte the v1.1 one, which is how every existing
+/// signature keeps verifying.
+pub fn signing_hash_with_locks(
+    op_type: u8,
+    group_serials: &[Hash],
+    produced: &[NewNote],
+    locks: &[ProducedLock],
+    transparent_outputs_hash: Hash,
+    anchor_daa_score: u64,
+) -> Hash {
     let mut sorted_serials: Vec<Hash> = group_serials.to_vec();
     sorted_serials.sort_unstable_by_key(|h| h.as_bytes());
 
@@ -92,6 +123,12 @@ pub fn signing_hash(
     }
     for note in produced {
         hasher.update([note.d as u8]).update(note.pk);
+    }
+    if !locks.is_empty() {
+        hasher.update((locks.len() as u32).to_le_bytes());
+        for l in locks {
+            hasher.update(l.index.to_le_bytes()).update(l.lock.refund_pk).update(l.lock.until_daa.to_le_bytes());
+        }
     }
     hasher.update(transparent_outputs_hash.as_bytes()).update(anchor_daa_score.to_le_bytes());
     hasher.finalize()

@@ -35,6 +35,7 @@ impl MempoolPoolNoteSet {
         }
         match PoolOp::decode_payload(&transaction.tx.payload) {
             Some(PoolOp::Transfer(op)) => op.consumed.iter().flat_map(|g| g.serials.iter().copied()).collect(),
+            Some(PoolOp::TransferLocked(op)) => op.consumed.iter().flat_map(|g| g.serials.iter().copied()).collect(),
             Some(PoolOp::Redeem(op)) => op.consumed.iter().flat_map(|g| g.serials.iter().copied()).collect(),
             Some(PoolOp::Mint(_)) | None => Vec::new(),
         }

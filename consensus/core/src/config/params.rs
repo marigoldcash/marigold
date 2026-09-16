@@ -378,6 +378,9 @@ pub struct OverrideParams {
     /// Note-pool activation DAA score (POOL-SPEC.md P5.1, FORK-PLAN P6.5)
     pub pool_activation: Option<ForkActivation>,
 
+    /// Time-locked notes activation DAA score (POOL-SPEC.md P5.9, FORK-PLAN P8.0g)
+    pub note_locks_activation: Option<ForkActivation>,
+
     /// Launch finality-anchor params (POOL-SPEC.md P5.8, FORK-PLAN P6.11)
     pub finality_anchor: Option<FinalityAnchorParams>,
 }
@@ -413,6 +416,7 @@ impl From<Params> for OverrideParams {
             crescendo_activation: Some(p.crescendo_activation),
             toccata_activation: Some(p.toccata_activation),
             pool_activation: Some(p.pool_activation),
+            note_locks_activation: Some(p.note_locks_activation),
             finality_anchor: Some(p.finality_anchor),
         }
     }
@@ -493,6 +497,11 @@ pub struct Params {
     /// this activates no earlier than Toccata on every network, but it is a genuinely
     /// separate switch.
     pub pool_activation: ForkActivation,
+
+    /// Time-locked notes (POOL-SPEC.md P5.9, FORK-PLAN P8.0g): from this DAA score
+    /// onward a `TransferLocked` op is valid and a note may carry a lock. Its own
+    /// switch, after `pool_activation`, so every node reading locks has upgraded.
+    pub note_locks_activation: ForkActivation,
 
     /// Launch finality-anchor params (POOL-SPEC.md P5.8, FORK-PLAN P6.11): the pinned
     /// trustee keys, anchoring depth, staged cadence schedule, and the unconditional
@@ -744,6 +753,7 @@ impl Params {
             crescendo_activation: overrides.crescendo_activation.unwrap_or(self.crescendo_activation),
             toccata_activation: overrides.toccata_activation.unwrap_or(self.toccata_activation),
             pool_activation: overrides.pool_activation.unwrap_or(self.pool_activation),
+            note_locks_activation: overrides.note_locks_activation.unwrap_or(self.note_locks_activation),
             finality_anchor: overrides.finality_anchor.unwrap_or(self.finality_anchor),
         }
     }
@@ -788,6 +798,11 @@ impl From<NetworkId> for Params {
         }
     }
 }
+
+/// Testnet-10's time-locked-notes activation (POOL-SPEC.md P5.9). Set past the score
+/// at which every node the founder runs has the reading code, with a margin for the
+/// testers' embedded nodes; an older node stops at the first locked transfer.
+pub const TESTNET_NOTE_LOCKS_ACTIVATION_DAA_SCORE: u64 = 11_400_000;
 
 pub const MAINNET_PARAMS: Params = Params {
     // Kaspa's DNS seeders removed (P2.4) — this is a different network, their seeders
@@ -845,6 +860,7 @@ pub const MAINNET_PARAMS: Params = Params {
     crescendo_activation: ForkActivation::always(),
     toccata_activation: ForkActivation::always(),
     pool_activation: ForkActivation::always(),
+    note_locks_activation: ForkActivation::never(),
     finality_anchor: FinalityAnchorParams::LAUNCH_UNKEYED,
 };
 
@@ -898,6 +914,7 @@ pub const TESTNET_PARAMS: Params = Params {
     crescendo_activation: ForkActivation::always(),
     toccata_activation: ForkActivation::always(),
     pool_activation: ForkActivation::always(),
+    note_locks_activation: ForkActivation::new(TESTNET_NOTE_LOCKS_ACTIVATION_DAA_SCORE),
     finality_anchor: FinalityAnchorParams::LAUNCH_UNKEYED,
 };
 
@@ -954,6 +971,7 @@ pub const SIMNET_PARAMS: Params = Params {
     crescendo_activation: ForkActivation::always(),
     toccata_activation: ForkActivation::always(),
     pool_activation: ForkActivation::always(),
+    note_locks_activation: ForkActivation::always(),
     finality_anchor: FinalityAnchorParams::LAUNCH_UNKEYED,
 };
 
@@ -1000,6 +1018,7 @@ pub const DEVNET_PARAMS: Params = Params {
     crescendo_activation: ForkActivation::always(),
     toccata_activation: ForkActivation::never(),
     pool_activation: ForkActivation::never(),
+    note_locks_activation: ForkActivation::never(),
     finality_anchor: FinalityAnchorParams::LAUNCH_UNKEYED,
 };
 

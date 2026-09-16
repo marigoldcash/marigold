@@ -122,7 +122,15 @@ impl From<&consensus_notify::NewBlockTemplateNotification> for NewBlockTemplateN
 impl From<&consensus_notify::NotesChangedNotification> for NotesChangedNotification {
     fn from(item: &consensus_notify::NotesChangedNotification) -> Self {
         let to_entries = |collection: &kaspa_consensus_core::notepool::PoolCollection| {
-            collection.iter().map(|(sn, note)| RpcNoteEntry { sn: *sn, denomination: note.d as u8, pk: note.pk }).collect()
+            collection
+                .iter()
+                .map(|(sn, entry)| RpcNoteEntry {
+                    sn: *sn,
+                    denomination: entry.note.d as u8,
+                    pk: entry.note.pk,
+                    lock: entry.lock.map(|l| crate::RpcNoteLock { refund_pk: l.refund_pk, until_daa: l.until_daa }),
+                })
+                .collect()
         };
         Self {
             added: Arc::new(to_entries(item.accumulated_pool_diff.added())),

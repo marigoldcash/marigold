@@ -13,7 +13,7 @@ pub mod validate;
 pub mod view;
 
 pub use diff::{ImmutablePoolDiff, PoolCollection, PoolDiff};
-pub use hashing::{leaf_hash, serial_hash, signing_hash, transparent_outputs_hash};
+pub use hashing::{leaf_hash, leaf_hash_entry, serial_hash, signing_hash, signing_hash_with_locks, transparent_outputs_hash};
 pub use validate::{MAX_POOL_OP_COLLECTION_LEN, ValidatedPoolOp, validate_stateful, validate_stateless};
 pub use view::{ComposedPoolView, PoolStateView, PoolViewComposition};
 
@@ -150,6 +150,78 @@ impl MemSizeEstimator for NewNote {
     }
 }
 
+/// A lock on a note (POOL-SPEC.md P5.9, FORK-PLAN P8.0g): until `until_daa` only the
+/// note's own `pk` may consume it; from `until_daa` on, only `refund_pk` may. The
+/// escrow a payment to someone who cannot get to their wallet today rests on: theirs
+/// to take for a while, the payer's to take back after.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
+pub struct NoteLock {
+    pub refund_pk: [u8; 32],
+    pub until_daa: u64,
+}
+
+/// A live pool entry: `sn -> (d, pk, lock)`. The value type of the pool state map,
+/// the diffs, and the views; `NewNote` stays the wire shape inside payloads, with a
+/// `TransferLockedOp`'s locks joined to it here at validation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PoolEntry {
+    pub note: NewNote,
+    pub lock: Option<NoteLock>,
+}
+
+impl PoolEntry {
+    pub const fn unlocked(note: NewNote) -> Self {
+        Self { note, lock: None }
+    }
+
+    pub const fn locked(note: NewNote, lock: NoteLock) -> Self {
+        Self { note, lock: Some(lock) }
+    }
+
+    pub fn d(&self) -> DenominationTag {
+        self.note.d
+    }
+
+    pub fn pk(&self) -> [u8; 32] {
+        self.note.pk
+    }
+
+    /// The key that may consume this note at `pov_daa_score`: its own `pk`, or the
+    /// refund key once the lock has lapsed. Monotone in the score — a lapsed lock
+    /// never un-lapses.
+    pub fn spending_pk(&self, pov_daa_score: u64) -> [u8; 32] {
+        match self.lock {
+            Some(lock) if pov_daa_score >= lock.until_daa => lock.refund_pk,
+            _ => self.note.pk,
+        }
+    }
+}
+
+impl MemSizeEstimator for NoteLock {
+    fn estimate_mem_bytes(&self) -> usize {
+        size_of::<Self>()
+    }
+}
+
+impl From<NewNote> for PoolEntry {
+    fn from(note: NewNote) -> Self {
+        Self::unlocked(note)
+    }
+}
+
+impl MemSizeEstimator for PoolEntry {
+    fn estimate_mem_bytes(&self) -> usize {
+        size_of::<Self>()
+    }
+}
+
+/// A lock on one of a `TransferLockedOp`'s produced notes, by index into `produced`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
+pub struct ProducedLock {
+    pub index: u32,
+    pub lock: NoteLock,
+}
+
 /// One or more serials currently sharing a single `pk`, authorized in one `PoolOp` by
 /// one Schnorr signature from that shared key (POOL-SPEC.md P5.2). Multiple groups in
 /// one op exist because a wallet may need to spend notes under different keys in a
@@ -196,6 +268,32 @@ pub struct TransferOp {
     pub freshness: FreshnessAnchor,
 }
 
+/// A `TransferOp` some of whose produced notes carry a lock (POOL-SPEC.md P5.9). A
+/// separate wire shape rather than a field on `TransferOp`, so every op already on
+/// the chain decodes exactly as before; valid only once `note_locks_activation` is
+/// active. `locks` is canonical: ascending unique indices, each below
+/// `produced.len()`, at least one.
+#[derive(Debug, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
+pub struct TransferLockedOp {
+    pub consumed: Vec<SignedGroup>,
+    pub produced: Vec<NewNote>,
+    pub locks: Vec<ProducedLock>,
+    pub freshness: FreshnessAnchor,
+}
+
+impl TransferLockedOp {
+    /// The produced notes as pool entries, locks joined in.
+    pub fn produced_entries(&self) -> Vec<PoolEntry> {
+        let mut entries: Vec<PoolEntry> = self.produced.iter().map(|n| PoolEntry::unlocked(*n)).collect();
+        for l in &self.locks {
+            if let Some(entry) = entries.get_mut(l.index as usize) {
+                entry.lock = Some(l.lock);
+            }
+        }
+        entries
+    }
+}
+
 /// Withdraw notes from the pool as transparent coins (POOL-SPEC.md P5.2) — the
 /// transparent-side mirror of `MintOp`. The enclosing transaction's ordinary
 /// transparent outputs hold what the redeemed notes become;
@@ -220,6 +318,8 @@ pub enum PoolOp {
     Mint(MintOp),
     Transfer(TransferOp),
     Redeem(RedeemOp),
+    /// Borsh tag 3 (POOL-SPEC.md P5.9).
+    TransferLocked(TransferLockedOp),
 }
 
 impl PoolOp {
@@ -245,6 +345,7 @@ impl PoolOp {
             PoolOp::Mint(_) => 0,
             PoolOp::Transfer(_) => 1,
             PoolOp::Redeem(_) => 2,
+            PoolOp::TransferLocked(_) => 3,
         }
     }
 
@@ -255,6 +356,7 @@ impl PoolOp {
             PoolOp::Mint(_) => Vec::new(),
             PoolOp::Transfer(op) => op.consumed.iter().flat_map(|g| g.serials.iter().copied()).collect(),
             PoolOp::Redeem(op) => op.consumed.iter().flat_map(|g| g.serials.iter().copied()).collect(),
+            PoolOp::TransferLocked(op) => op.consumed.iter().flat_map(|g| g.serials.iter().copied()).collect(),
         }
     }
 }

@@ -1615,8 +1615,8 @@ async fn daemon_notes_changed_notification_test() {
     assert_eq!(
         fetched,
         vec![
-            RpcNoteEntry { sn: mint_serials[0], denomination: DenominationTag::D1 as u8, pk: miner_note_pk },
-            RpcNoteEntry { sn: mint_serials[1], denomination: DenominationTag::D0_01 as u8, pk: miner_note_pk },
+            RpcNoteEntry { sn: mint_serials[0], denomination: DenominationTag::D1 as u8, pk: miner_note_pk, lock: None },
+            RpcNoteEntry { sn: mint_serials[1], denomination: DenominationTag::D0_01 as u8, pk: miner_note_pk, lock: None },
         ]
     );
 
@@ -1857,7 +1857,7 @@ async fn daemon_notepool_multi_node_agreement_test() {
     assert_eq!(stats1.iter().sum::<u64>(), 1, "no other denomination should have a live note");
 
     let merged = rpc_client1.get_notes_by_serial(vec![merged_sn]).await.unwrap();
-    assert_eq!(merged, vec![RpcNoteEntry { sn: merged_sn, denomination: DenominationTag::D0_01 as u8, pk: bob_pk }]);
+    assert_eq!(merged, vec![RpcNoteEntry { sn: merged_sn, denomination: DenominationTag::D0_01 as u8, pk: bob_pk, lock: None }]);
 
     rpc_client1.disconnect().await.unwrap();
     rpc_client2.disconnect().await.unwrap();

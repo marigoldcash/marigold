@@ -1,5 +1,5 @@
 use kaspa_consensus_core::Hash;
-use kaspa_consensus_core::notepool::{PoolDiff, leaf_hash};
+use kaspa_consensus_core::notepool::{PoolDiff, leaf_hash_entry};
 use kaspa_database::prelude::{BatchDbWriter, CachePolicy, CachedDbAccess, CachedDbItem, DB, StoreError, StoreResult};
 use kaspa_database::registry::DatabaseStorePrefixes;
 use kaspa_hashes::{NotePoolSmt, ZERO_HASH};
@@ -152,7 +152,7 @@ impl DbNotePoolSmtStore {
     /// Applies a [`PoolDiff`] directly: `add`'s `NewNote`s are hashed via
     /// [`kaspa_consensus_core::notepool::leaf_hash`] and set, `remove`'s serials are cleared.
     pub fn apply_diff(&mut self, diff: &PoolDiff) -> StoreResult<Hash> {
-        self.apply_note_diff(diff.add.iter().map(|(sn, note)| (*sn, leaf_hash(note.d, &note.pk))), diff.remove.keys().copied())
+        self.apply_note_diff(diff.add.iter().map(|(sn, entry)| (*sn, leaf_hash_entry(entry))), diff.remove.keys().copied())
     }
 
     /// Batch variant of [`Self::apply_diff`] — stages into the caller's `WriteBatch` so
@@ -163,8 +163,8 @@ impl DbNotePoolSmtStore {
         for sn in diff.remove.keys() {
             updates.insert(*sn, ZERO_HASH);
         }
-        for (sn, note) in diff.add.iter() {
-            updates.insert(*sn, leaf_hash(note.d, &note.pk));
+        for (sn, entry) in diff.add.iter() {
+            updates.insert(*sn, leaf_hash_entry(entry));
         }
         self.apply_leaf_updates_batch(batch, updates)
     }
@@ -370,7 +370,7 @@ mod tests {
         let (_lifetime, db) = create_temp_db!(ConnBuilder::default().with_files_limit(10));
         let mut store = DbNotePoolSmtStore::new(db, CachePolicy::Count(16));
 
-        let note = |byte: u8| NewNote { d: DenominationTag::D1, pk: [byte; 32] };
+        let note = |byte: u8| kaspa_consensus_core::notepool::PoolEntry::unlocked(NewNote { d: DenominationTag::D1, pk: [byte; 32] });
         let root0 = store.current_root().unwrap();
 
         let diff = PoolDiff::new(HashMap::from([(hash(1), note(1)), (hash(2), note(2))]), HashMap::new());
@@ -468,7 +468,7 @@ mod history_independence_tests {
 
     #[test]
     fn same_final_leaf_set_same_root_regardless_of_history() {
-        let note = |b: u8| NewNote { d: DenominationTag::D1, pk: [b; 32] };
+        let note = |b: u8| kaspa_consensus_core::notepool::PoolEntry::unlocked(NewNote { d: DenominationTag::D1, pk: [b; 32] });
         let h = |b: u8| Hash::from_bytes([b; 32]);
         let diff = |add: &[u8], remove: &[u8]| {
             PoolDiff::new(

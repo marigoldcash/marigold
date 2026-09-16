@@ -33,7 +33,7 @@ pub struct DbNotePoolDiffsStore {
 
 impl DbNotePoolDiffsStore {
     pub fn new(db: Arc<DB>, cache_policy: CachePolicy) -> Self {
-        Self { db: Arc::clone(&db), access: CachedDbAccess::new(db, cache_policy, DatabaseStorePrefixes::NotePoolDiffs.into()) }
+        Self { db: Arc::clone(&db), access: CachedDbAccess::new(db, cache_policy, DatabaseStorePrefixes::NotePoolDiffsV2.into()) }
     }
 
     pub fn clone_with_new_cache(&self, cache_policy: CachePolicy) -> Self {

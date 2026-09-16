@@ -1,4 +1,5 @@
 use super::coinbase_mock::CoinbaseManagerMock;
+use kaspa_consensus_core::notepool::PoolEntry;
 use kaspa_consensus_core::{
     api::{
         ConsensusApi,
@@ -78,16 +79,19 @@ impl ConsensusMock {
             && let Some(op) = PoolOp::decode_payload(&transaction.tx.payload)
         {
             let mut notes = self.notes.write();
-            let (consumed, produced) = match &op {
-                PoolOp::Mint(op) => (Vec::new(), op.new_notes.as_slice()),
-                PoolOp::Transfer(op) => (op.consumed.iter().flat_map(|g| g.serials.iter().copied()).collect(), op.produced.as_slice()),
-                PoolOp::Redeem(op) => (op.consumed.iter().flat_map(|g| g.serials.iter().copied()).collect(), [].as_slice()),
+            let (consumed, produced): (Vec<Hash>, Vec<PoolEntry>) = match &op {
+                PoolOp::Mint(op) => (Vec::new(), op.new_notes.iter().map(|n| PoolEntry::unlocked(*n)).collect()),
+                PoolOp::Transfer(op) => {
+                    (op.consumed.iter().flat_map(|g| g.serials.iter().copied()).collect(), op.produced.iter().map(|n| PoolEntry::unlocked(*n)).collect())
+                }
+                PoolOp::TransferLocked(op) => (op.consumed.iter().flat_map(|g| g.serials.iter().copied()).collect(), op.produced_entries()),
+                PoolOp::Redeem(op) => (op.consumed.iter().flat_map(|g| g.serials.iter().copied()).collect(), Vec::new()),
             };
             for sn in consumed {
                 notes.remove(&sn);
             }
-            for (i, note) in produced.iter().enumerate() {
-                notes.insert(serial_hash(&transaction.id(), i as u32), *note);
+            for (i, entry) in produced.iter().enumerate() {
+                notes.insert(serial_hash(&transaction.id(), i as u32), *entry);
             }
         }
         // Register the transaction
@@ -175,6 +179,7 @@ impl ConsensusApi for ConsensusMock {
                 &*self.notes.read(),
                 self.get_virtual_daa_score(),
                 false,
+                true,
             )
             .map_err(TxRuleError::InvalidNotePoolOpInContext)?;
             (validated.consumed_petals, validated.produced_petals)

@@ -2,7 +2,7 @@
 
 Phase 5 of [FORK-PLAN.md](../../FORK-PLAN.md). A complete written spec of the note pool, frozen and externally reviewed (P5.9) before any implementation begins (Phase 6+). Each `## P5.N` section below is that plan step's deliverable — do not implement against this document until P5.9 has closed.
 
-**Version: v1.1** (2026-08-15, tag `pool-spec-v1.1`). `pool-spec-v1` (tag, commit `9d93ab32`) was the frozen review baseline. This version folds in the accepted findings of two external reviews plus a cross-review concurrence and a confirmation pass — the full trail, with finding-by-finding triages, is under [reviews/](reviews/). P5.9's review gate closed on reviewer 1's confirmation verdict ("none of these should block tagging v1.1"); three non-blocking items are carried forward as standing obligations (the `[Open]`-flagged consumed-group-set malleability → Phase 6 review item; gas-semantics confirmation → Phase 6; the T/M/K quantitative model → P9.5 hard gate). Changes from v1:
+**Version: v1.2** (2026-09-16: P5.9 time-locked notes added below, activated by its own DAA score; everything before it is v1.1 unchanged). **v1.1** (2026-08-15, tag `pool-spec-v1.1`). `pool-spec-v1` (tag, commit `9d93ab32`) was the frozen review baseline. This version folds in the accepted findings of two external reviews plus a cross-review concurrence and a confirmation pass — the full trail, with finding-by-finding triages, is under [reviews/](reviews/). P5.9's review gate closed on reviewer 1's confirmation verdict ("none of these should block tagging v1.1"); three non-blocking items are carried forward as standing obligations (the `[Open]`-flagged consumed-group-set malleability → Phase 6 review item; gas-semantics confirmation → Phase 6; the T/M/K quantitative model → P9.5 hard gate). Changes from v1:
 
 1. **P5.2/P5.3 (critical fix)**: the pool-op signing hash now covers the enclosing transaction's transparent outputs, closing a Redeem transaction-malleability vector (an interceptor of a signed `RedeemOp` could previously redirect the redeemed value to their own transparent output; the signature didn't cover the outputs).
 2. **P5.8 (tightened)**: anchor cadence is now defined in DAA-score units rather than wall-clock, which makes the equivocation rule exactly decidable (a precise overlap criterion replaces the previous informal "depth/timing windows overlap") and keeps trustee behavior well-defined when block production stalls; anchor staleness (fail-open trigger) is likewise DAA-score-defined.
@@ -672,3 +672,33 @@ Review 2 correctly observes that anchor-aware IBD makes trustee signatures and a
 - **Anchor-free chain offered to a syncing node**: IBD requires learning the current latest valid anchor *before* evaluating any candidate chain (from hardcoded trustee keys shipped in software, cross-checked against multiple independent bootstrap peers/seeders) — any candidate chain not building at-or-beyond that anchored block is rejected outright regardless of accumulated work, so a higher-work anchor-free attacker chain loses during sync, exactly as the plan requires.
 
 ✅ *Verify:* exact values stated for every named parameter — k=3, n=5, cadence=300 DAA-score-units at launch (~30s at nominal 10 BPS), depth=600 DAA-score-units, T=10⁶×genesis difficulty, M=6 months (157,788,000 DAA-score-units), K=5 years (1,577,880,000 DAA-score-units), the 5-stage cadence-decay schedule (all intervals DAA-score-defined), and the hard maximum DAA score (6,311,520,000, 20 years). Every named attack case answered explicitly, including an honest (not overstated) account of what a genuine majority-quorum compromise can and cannot do, and an exactly-decidable equivocation rule that structurally excludes honest partition disagreement.
+
+## P5.9 — Time-locked notes (v1.2, FORK-PLAN P8.0g)
+
+**What.** A note may carry a lock, `(refund_pk: [u8; 32], until_daa: u64)`. Until `until_daa` the note answers to its own `pk` exactly as any note; from `until_daa` on, and only then, it answers to `refund_pk` instead. The rule is monotone in the DAA score — a lapsed lock never un-lapses — and it is consensus, evaluated against the validation context's POV DAA score like the freshness anchor (P5.3). Nothing else about the note changes: its denomination, its serial, its place in the pool and its counting toward the pool's size are those of any note, and the notes it rotates into are plain.
+
+**Why.** It turns a handover into a promise with a deadline: the payer rotates their notes to a key only the receiver holds (P8.0g's share keys, a wallet matter), locked with the payer's own refund key behind it. The receiver can take the money any time before the deadline, and knows nobody else can; the payer gets it back after, if it was never taken. Nothing done in a code alone could refuse the payer's own key for a while — only the chain can — which is why the condition lives on the note.
+
+**Wire.** A fourth `PoolOp` variant, borsh tag 3:
+
+```rust
+struct ProducedLock { index: u32, lock: NoteLock }          // index into `produced`
+struct TransferLockedOp {
+    consumed:  Vec<SignedGroup>,
+    produced:  Vec<NewNote>,
+    locks:     Vec<ProducedLock>,   // canonical: strictly ascending indices, each < produced.len(), at least one
+    freshness: FreshnessAnchor,
+}
+```
+
+A separate shape rather than a field on `TransferOp`, so every payload already on the chain decodes exactly as before. A `TransferLockedOp` with no locks is invalid (it is a `Transfer` wearing the wrong tag); a lock index out of range or a non-ascending list is invalid. Consumption, conservation and freshness are `Transfer`'s.
+
+**Signing.** `op_type = 3`, and the locks join the preimage after `produced`: `count (u32 LE) || (index u32 LE || refund_pk || until_daa u64 LE)*`. With no locks the preimage is byte-for-byte the v1.1 one, which is how every existing signature keeps verifying; with locks, a relay can neither strip nor alter them.
+
+**State.** The pool map's value becomes `(d, pk, lock?)`. The leaf is unchanged for an unlocked note, `H_leaf(d || pk)`, so every existing commitment stands; a locked note's leaf is `H_leaf(d || pk || refund_pk || until_daa LE)` — a different length, so the two cannot collide. The pruning-point pool sync carries the lock as two optional fields on the entry; a peer that omits them for a locked note produces the wrong root and is rejected, the same way a corrupt chunk is.
+
+**Spending.** For each serial in a signed group the validator takes `spending_pk = if pov_daa_score >= until_daa { refund_pk } else { pk }` (unlocked: `pk`), requires the group's serials to agree on it, and verifies the group's signature against it. On the selected-parent replay (P5.3's `skip_signature_and_freshness`) the parent's verdict stands and neither the key question nor the signature is re-asked.
+
+**Activation.** `note_locks_activation`, a `ForkActivation` of its own after `pool_activation`: before it a `TransferLockedOp` is invalid everywhere, since a node that cannot read the lock must never hold the note. Testnet-10 activates at `TESTNET_NOTE_LOCKS_ACTIVATION_DAA_SCORE`; mainnet is unset until decided.
+
+**Bound.** A maximum lock length is a wallet-side default (about the pruning period, "when to give up"), not consensus: the pool is state, not history, so a locked note survives pruning and nothing in the protocol needs the lock short.

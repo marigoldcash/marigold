@@ -93,6 +93,23 @@ impl Wallet {
         })
     }
 
+    /// A signed locked rotate (POOL-SPEC.md P5.9): `serials` to `produced`, the first
+    /// produced note locked until `until` with `refund_pk` as the way back.
+    fn rotate_locked(&self, serials: Vec<Hash>, produced: Vec<NewNote>, refund_pk: [u8; 32], until: u64, anchor: u64) -> PoolOp {
+        use kaspa_consensus_core::notepool::{NoteLock, ProducedLock, TransferLockedOp};
+        let locks = vec![ProducedLock { index: 0, lock: NoteLock { refund_pk, until_daa: until } }];
+        let outputs_hash = pool_hashing::transparent_outputs_hash(&[]);
+        let msg_hash = pool_hashing::signing_hash_with_locks(3, &serials, &produced, &locks, outputs_hash, anchor);
+        let msg = secp256k1::Message::from_digest(msg_hash.into());
+        let signature = *secp256k1::SECP256K1.sign_schnorr_no_aux_rand(&msg, &self.keypair).as_ref();
+        PoolOp::TransferLocked(TransferLockedOp {
+            consumed: vec![SignedGroup { serials, signature }],
+            produced,
+            locks,
+            freshness: FreshnessAnchor { anchor_daa_score: anchor },
+        })
+    }
+
     /// A signed redeem of `serials` (all under this wallet's pk) into `outputs`.
     fn redeem(&self, serials: Vec<Hash>, outputs: &[TransactionOutput], anchor: u64) -> PoolOp {
         let outputs_hash = pool_hashing::transparent_outputs_hash(outputs);
@@ -118,6 +135,8 @@ fn config() -> crate::config::Config {
         .edit_consensus_params(|p| {
             p.max_block_parents = 4;
             p.mergeset_size_limit = 10;
+            // Locked notes (P5.9) from the start, so their tests need no 11M blocks.
+            p.note_locks_activation = kaspa_consensus_core::config::params::ForkActivation::always();
             // These tests fund real mint transactions from real mined coinbase rewards
             // (FORK-PLAN P6.6 requires mint's transparent inputs to actually cover the
             // notes it creates); zeroing maturity avoids mining ~1000 throwaway blocks
@@ -942,6 +961,74 @@ async fn value_conservation_across_mint_transfer_redeem() {
         emitted,
         "the pool is empty again — all value must be back in the transparent supply"
     );
+
+    consensus.shutdown(join_handles);
+}
+
+/// POOL-SPEC.md P5.9 through the real pipeline: a locked note lands with its lock in
+/// the state and the commitment, the receiver can take it while the lock holds, and
+/// the refund key cannot; with a lock already lapsed the roles are the other way.
+#[tokio::test]
+async fn locked_note_lands_and_answers_to_the_right_key() {
+    use kaspa_consensus_core::notepool::NoteLock;
+    let consensus = TestConsensus::new(&config());
+    let join_handles = consensus.init();
+    let genesis = consensus.params().genesis.hash;
+    let alice = Wallet::new(1);
+    let bob = Wallet::new(2);
+    let carol = Wallet::new(3);
+
+    let funding = fund(&consensus, &alice, genesis, 5.into(), 10.into()).await;
+    let tip = funding.2;
+    let mint = mint_funded(&alice, (funding.0, funding.1), vec![alice.note(DenominationTag::D0_01)]);
+    let sn = produced_serial(&mint, 0);
+    consensus.add_utxo_valid_block_with_parents(11.into(), vec![tip], vec![mint]).await.unwrap();
+    let root_before = consensus.pool_root();
+
+    // Alice pays bob, locked far into the future, alice's own key as the refund.
+    let pay = pool_tx(&alice.rotate_locked(vec![sn], vec![bob.note(DenominationTag::D0_01)], alice.pk, u64::MAX, 0));
+    let locked_sn = produced_serial(&pay, 0);
+    consensus.add_utxo_valid_block_with_parents(12.into(), vec![11.into()], vec![pay]).await.unwrap();
+    let entry = consensus.pool_entry(locked_sn).expect("the locked note is live");
+    assert_eq!(entry.note, bob.note(DenominationTag::D0_01));
+    assert_eq!(entry.lock, Some(NoteLock { refund_pk: alice.pk, until_daa: u64::MAX }));
+    assert_ne!(consensus.pool_root(), root_before, "a locked note moves the commitment");
+
+    // Alice cannot take it back while the lock holds: her rotate is refused in
+    // context (the block builder panics on it, as it does for a stale anchor).
+    let miner_data = kaspa_consensus_core::coinbase::MinerData::new(kaspa_consensus_core::tx::ScriptPublicKey::from_vec(0, vec![]), vec![]);
+    let refused = |tx: Transaction, hash: u64| {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            consensus.build_utxo_valid_block_with_parents(hash.into(), vec![12.into()], miner_data.clone(), vec![tx])
+        }))
+        .is_err()
+    };
+    let refund_early = pool_tx(&alice.rotate(vec![locked_sn], vec![alice.note(DenominationTag::D0_01)], 0));
+    assert!(refused(refund_early, 13), "the refund key must not consume a note whose lock holds");
+    assert!(consensus.pool_entry(locked_sn).is_some());
+
+    // Bob takes it.
+    let take = pool_tx(&bob.rotate(vec![locked_sn], vec![carol.note(DenominationTag::D0_01)], 0));
+    let taken_sn = produced_serial(&take, 0);
+    consensus.add_utxo_valid_block_with_parents(14.into(), vec![12.into()], vec![take]).await.unwrap();
+    assert_eq!(consensus.pool_entry(locked_sn), None, "bob's key consumes the locked note");
+    let taken = consensus.pool_entry(taken_sn).expect("bob's rotation landed");
+    assert_eq!(taken.lock, None, "what a locked note rotates into is a plain note");
+
+    // A lock already lapsed (until 0): only the refund key may take it.
+    let pay_lapsed = pool_tx(&carol.rotate_locked(vec![taken_sn], vec![bob.note(DenominationTag::D0_01)], alice.pk, 0, 0));
+    let lapsed_sn = produced_serial(&pay_lapsed, 0);
+    consensus.add_utxo_valid_block_with_parents(15.into(), vec![14.into()], vec![pay_lapsed]).await.unwrap();
+    assert!(consensus.pool_entry(lapsed_sn).is_some());
+    let bob_late = pool_tx(&bob.rotate(vec![lapsed_sn], vec![bob.note(DenominationTag::D0_01)], 0));
+    let refused_late = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        consensus.build_utxo_valid_block_with_parents(16.into(), vec![15.into()], miner_data.clone(), vec![bob_late])
+    }))
+    .is_err();
+    assert!(refused_late, "the receiver's key is refused once the lock has lapsed");
+    let refund = pool_tx(&alice.rotate(vec![lapsed_sn], vec![alice.note(DenominationTag::D0_01)], 0));
+    consensus.add_utxo_valid_block_with_parents(17.into(), vec![15.into()], vec![refund]).await.unwrap();
+    assert_eq!(consensus.pool_entry(lapsed_sn), None, "the refund key takes a lapsed note back");
 
     consensus.shutdown(join_handles);
 }

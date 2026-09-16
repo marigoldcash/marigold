@@ -557,7 +557,7 @@ NOTE: This error usually indicates an RPC conversion error between the node and 
             .serials
             .iter()
             .zip(notes)
-            .filter_map(|(sn, note)| note.map(|n| RpcNoteEntry { sn: *sn, denomination: n.d as u8, pk: n.pk }))
+            .filter_map(|(sn, entry)| entry.map(|e| RpcNoteEntry { sn: *sn, denomination: e.note.d as u8, pk: e.note.pk, lock: e.lock.map(|l| kaspa_rpc_core::RpcNoteLock { refund_pk: l.refund_pk, until_daa: l.until_daa }) }))
             .collect();
         Ok(GetNotesBySerialResponse::new(entries))
     }

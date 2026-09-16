@@ -12,7 +12,7 @@ use kaspa_consensus_core::{
     block::Block,
     finality_anchor::FinalityAnchor,
     header::Header,
-    notepool::{DenominationTag, NewNote},
+    notepool::{DenominationTag, NewNote, NoteLock, PoolEntry},
     pruning::{PruningPointProof, PruningPointsList},
     tx::{TransactionId, TransactionOutpoint, UtxoEntry},
 };
@@ -188,24 +188,35 @@ impl TryFrom<protowire::RequestPruningPointPoolStateMessage> for Hash {
     }
 }
 
-impl TryFrom<protowire::PoolStateEntry> for (Hash, NewNote) {
+impl TryFrom<protowire::PoolStateEntry> for (Hash, PoolEntry) {
     type Error = ConversionError;
 
     fn try_from(entry: protowire::PoolStateEntry) -> Result<Self, Self::Error> {
         let sn = Hash::from_bytes(entry.sn.as_slice().try_into()?);
         let d = DenominationTag::try_from(u8::try_from(entry.denomination)?).map_err(|_| ConversionError::General)?;
         let pk: [u8; 32] = entry.pk.as_slice().try_into()?;
-        Ok((sn, NewNote { d, pk }))
+        let lock = match (entry.refund_pk, entry.until_daa) {
+            (None, None) => None,
+            (Some(refund), Some(until_daa)) => Some(NoteLock { refund_pk: refund.as_slice().try_into()?, until_daa }),
+            _ => return Err(ConversionError::General),
+        };
+        Ok((sn, PoolEntry { note: NewNote { d, pk }, lock }))
     }
 }
 
-impl From<&(Hash, NewNote)> for protowire::PoolStateEntry {
-    fn from((sn, note): &(Hash, NewNote)) -> Self {
-        Self { sn: sn.as_bytes().to_vec(), denomination: note.d as u32, pk: note.pk.to_vec() }
+impl From<&(Hash, PoolEntry)> for protowire::PoolStateEntry {
+    fn from((sn, entry): &(Hash, PoolEntry)) -> Self {
+        Self {
+            sn: sn.as_bytes().to_vec(),
+            denomination: entry.note.d as u32,
+            pk: entry.note.pk.to_vec(),
+            refund_pk: entry.lock.map(|l| l.refund_pk.to_vec()),
+            until_daa: entry.lock.map(|l| l.until_daa),
+        }
     }
 }
 
-impl TryFrom<protowire::PruningPointPoolStateChunkMessage> for Vec<(Hash, NewNote)> {
+impl TryFrom<protowire::PruningPointPoolStateChunkMessage> for Vec<(Hash, PoolEntry)> {
     type Error = ConversionError;
 
     fn try_from(msg: protowire::PruningPointPoolStateChunkMessage) -> Result<Self, Self::Error> {

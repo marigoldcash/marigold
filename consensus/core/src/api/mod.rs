@@ -501,7 +501,7 @@ pub trait ConsensusApi: Send + Sync {
         from_sn: Option<Hash>,
         chunk_size: usize,
         skip_first: bool,
-    ) -> ConsensusResult<Vec<(Hash, crate::notepool::NewNote)>> {
+    ) -> ConsensusResult<Vec<(Hash, crate::notepool::PoolEntry)>> {
         unimplemented!()
     }
 
@@ -509,7 +509,7 @@ pub trait ConsensusApi: Send + Sync {
     /// of [`Self::append_imported_pruning_point_utxos`], minus the multiset argument:
     /// the pool's commitment is an SMT root, recomputed in one pass at import rather
     /// than folded incrementally per chunk.
-    fn append_imported_pruning_point_pool_entries(&self, chunk: &[(Hash, crate::notepool::NewNote)]) {
+    fn append_imported_pruning_point_pool_entries(&self, chunk: &[(Hash, crate::notepool::PoolEntry)]) {
         unimplemented!()
     }
 
@@ -526,7 +526,7 @@ pub trait ConsensusApi: Send + Sync {
     /// (FORK-PLAN P6.9) — `None` if `sn` doesn't currently exist in the pool. This is the
     /// first single-key live-state RPC-facing query this trait exposes (the UTXO side has
     /// no equivalent either — `get_virtual_utxos` is chunk/scan-only).
-    fn get_pool_note(&self, _sn: Hash) -> Option<crate::notepool::NewNote> {
+    fn get_pool_note(&self, _sn: Hash) -> Option<crate::notepool::PoolEntry> {
         unimplemented!()
     }
 
@@ -534,7 +534,7 @@ pub trait ConsensusApi: Send + Sync {
     /// wallet checking many serials at once (the plan's own "get note(s)", plural).
     /// Returns one `Option` per input `sn`, same order, `None` for serials not (currently)
     /// in the pool.
-    fn get_pool_notes(&self, _sns: &[Hash]) -> Vec<Option<crate::notepool::NewNote>> {
+    fn get_pool_notes(&self, _sns: &[Hash]) -> Vec<Option<crate::notepool::PoolEntry>> {
         unimplemented!()
     }
 

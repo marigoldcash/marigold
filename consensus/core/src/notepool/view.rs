@@ -4,13 +4,13 @@
 //! parent's state *plus* the mergeset diff accumulated so far, without materializing
 //! intermediate states (POOL-SPEC.md P5.3's composed view, FORK-PLAN P6.4).
 
-use super::NewNote;
+use super::PoolEntry;
 use super::diff::{ImmutablePoolDiff, PoolCollection};
 use crate::Hash;
 
 /// An abstraction for read-only queries over pool state (`sn -> (d, pk)`).
 pub trait PoolStateView {
-    fn get_note(&self, sn: &Hash) -> Option<NewNote>;
+    fn get_note(&self, sn: &Hash) -> Option<PoolEntry>;
 }
 
 /// Composes a pool view from a base view and a pool diff. Nests, like
@@ -27,7 +27,7 @@ impl<V: PoolStateView, D: ImmutablePoolDiff> ComposedPoolView<V, D> {
 }
 
 impl<V: PoolStateView, D: ImmutablePoolDiff> PoolStateView for ComposedPoolView<V, D> {
-    fn get_note(&self, sn: &Hash) -> Option<NewNote> {
+    fn get_note(&self, sn: &Hash) -> Option<PoolEntry> {
         if let Some(note) = self.diff.added().get(sn) {
             return Some(*note);
         }
@@ -39,14 +39,14 @@ impl<V: PoolStateView, D: ImmutablePoolDiff> PoolStateView for ComposedPoolView<
 }
 
 impl<T: PoolStateView> PoolStateView for &T {
-    fn get_note(&self, sn: &Hash) -> Option<NewNote> {
+    fn get_note(&self, sn: &Hash) -> Option<PoolEntry> {
         (*self).get_note(sn)
     }
 }
 
 /// A bare `PoolCollection` is a valid base view (used by tests and any in-memory state).
 impl PoolStateView for PoolCollection {
-    fn get_note(&self, sn: &Hash) -> Option<NewNote> {
+    fn get_note(&self, sn: &Hash) -> Option<PoolEntry> {
         self.get(sn).copied()
     }
 }
@@ -66,8 +66,8 @@ mod tests {
     use super::*;
     use crate::notepool::{DenominationTag, PoolDiff};
 
-    fn note(byte: u8) -> NewNote {
-        NewNote { d: DenominationTag::D1, pk: [byte; 32] }
+    fn note(byte: u8) -> PoolEntry {
+        PoolEntry::unlocked(crate::notepool::NewNote { d: DenominationTag::D1, pk: [byte; 32] })
     }
 
     fn hash(byte: u8) -> Hash {

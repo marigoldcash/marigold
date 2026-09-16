@@ -7,6 +7,8 @@
 //! POOL-SPEC.md P5.1), so where `UtxoDiff` must compare entries' DAA scores to tell "same
 //! logical UTXO" from "recreated at a different score", the pool needs only the serial.
 
+use super::PoolEntry;
+#[cfg(test)]
 use super::NewNote;
 use crate::Hash;
 use crate::errors::notepool::PoolAlgebraError;
@@ -18,7 +20,7 @@ use std::collections::hash_map::Entry::Vacant;
 /// `sn -> (d, pk)` — mirrors `crate::utxo::utxo_collection::UtxoCollection`'s role
 /// exactly (`TransactionOutpoint -> UtxoEntry`), just keyed by note serial instead of
 /// a transaction outpoint.
-pub type PoolCollection = HashMap<Hash, NewNote>;
+pub type PoolCollection = HashMap<Hash, PoolEntry>;
 
 /// Read-only view over a diff's two sides — the pool analog of
 /// `crate::utxo::utxo_diff::ImmutableUtxoDiff`, existing for the same reason: reorg
@@ -54,7 +56,7 @@ pub struct PoolDiff {
 
 impl MemSizeEstimator for PoolDiff {
     fn estimate_mem_bytes(&self) -> usize {
-        size_of::<Self>() + (self.add.len() + self.remove.len()) * (size_of::<Hash>() + size_of::<NewNote>())
+        size_of::<Self>() + (self.add.len() + self.remove.len()) * (size_of::<Hash>() + size_of::<PoolEntry>())
     }
 }
 
@@ -136,7 +138,7 @@ impl PoolDiff {
     }
 
     /// Records one produced note — mirrors `UtxoDiff::add_entry`.
-    pub fn add_note(&mut self, sn: Hash, note: NewNote) -> Result<(), PoolAlgebraError> {
+    pub fn add_note(&mut self, sn: Hash, note: PoolEntry) -> Result<(), PoolAlgebraError> {
         if self.remove.remove(&sn).is_some() {
             Ok(())
         } else if let Vacant(e) = self.add.entry(sn) {
@@ -148,7 +150,7 @@ impl PoolDiff {
     }
 
     /// Records one consumed note — mirrors `UtxoDiff::remove_entry`.
-    pub fn remove_note(&mut self, sn: Hash, note: NewNote) -> Result<(), PoolAlgebraError> {
+    pub fn remove_note(&mut self, sn: Hash, note: PoolEntry) -> Result<(), PoolAlgebraError> {
         if self.add.remove(&sn).is_some() {
             Ok(())
         } else if let Vacant(e) = self.remove.entry(sn) {
@@ -165,8 +167,8 @@ mod tests {
     use super::*;
     use crate::notepool::DenominationTag;
 
-    fn note(byte: u8) -> NewNote {
-        NewNote { d: DenominationTag::D1, pk: [byte; 32] }
+    fn note(byte: u8) -> PoolEntry {
+        PoolEntry::unlocked(NewNote { d: DenominationTag::D1, pk: [byte; 32] })
     }
 
     fn hash(byte: u8) -> Hash {

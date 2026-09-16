@@ -378,6 +378,7 @@ impl MassCalculator {
         let pool_signature_mass = if tx.subnetwork_id == SUBNETWORK_ID_NOTE_POOL {
             match PoolOp::decode_payload(&tx.payload) {
                 Some(PoolOp::Transfer(op)) => GRAMS_PER_COMPUTE_BUDGET_UNIT * op.consumed.len() as u64,
+                Some(PoolOp::TransferLocked(op)) => GRAMS_PER_COMPUTE_BUDGET_UNIT * op.consumed.len() as u64,
                 Some(PoolOp::Redeem(op)) => GRAMS_PER_COMPUTE_BUDGET_UNIT * op.consumed.len() as u64,
                 Some(PoolOp::Mint(_)) | None => 0,
             }
