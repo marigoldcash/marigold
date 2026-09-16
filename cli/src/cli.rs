@@ -34,6 +34,25 @@ impl Options {
     }
 }
 
+/// One sompi per gram: the own lane's fee rate — a rounding error, and paid to ourselves.
+pub const OWN_LANE_FEE_RATE: f64 = 1.0;
+/// The longest a block of our own may be expected to take before the wallet
+/// pays the network fee instead of waiting for it.
+pub const OWN_LANE_MAX_WAIT: Duration = Duration::from_secs(3600);
+
+/// Whether transactions this wallet submits will be mined by its own miner.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum OwnLane {
+    /// Yes, with a block of our own expected about this often.
+    Use { every: Duration },
+    /// We mine, but a block of our own is too rare to wait for.
+    TooSlow { every: Duration },
+    /// On our own copy of the network, but not mining.
+    NoMiner,
+    /// Not on our own copy of the network at all.
+    NotOwnCopy,
+}
+
 pub struct KaspaCli {
     term: Arc<Mutex<Option<Arc<Terminal>>>>,
     wallet: Arc<Wallet>,
@@ -192,7 +211,7 @@ fn coins_per_minute() -> u64 {
 
 /// "about 4 hours", "about 20 minutes" — a figure somebody can plan around,
 /// not one they should hold us to.
-fn humanised_minutes(minutes: u64) -> String {
+pub(crate) fn humanised_minutes(minutes: u64) -> String {
     match minutes {
         0 => "a moment".to_string(),
         1 => "a minute".to_string(),
@@ -390,6 +409,56 @@ impl KaspaCli {
         if let Some(journal) = self.journal() {
             let _ = journal.append(&kaspa_wallet_core::storage::local::journal::JournalEntry::now(kind, petals, stamp_petals, detail, tx));
         }
+    }
+
+    /// Whether this wallet's own miner will mine what it submits, and how
+    /// long that takes (FORK-PLAN P8.3b). The lane is taken only on our own
+    /// copy of the network, only while mining here, and only when a block of
+    /// our own is expected within the hour: a transaction below the relay
+    /// floor is kept out of relay by our node, so nobody else will ever mine
+    /// it, and a CPU against a network of ASICs might wait for days.
+    pub async fn own_lane(&self) -> OwnLane {
+        #[cfg(feature = "embedded-node")]
+        {
+            if !self.embedded_node_in_use() {
+                return OwnLane::NotOwnCopy;
+            }
+            let hashrate = match self.cpu_miner.lock().unwrap().as_ref() {
+                Some(miner) => miner.hashrate(),
+                None => return OwnLane::NoMiner,
+            };
+            if hashrate <= 0.0 {
+                return OwnLane::NoMiner;
+            }
+            // The network's difficulty is the expected number of hashes a
+            // block takes; at our rate that is a time.
+            let Ok(info) = self.wallet.rpc_api().get_block_dag_info().await else { return OwnLane::NoMiner };
+            let every = Duration::from_secs_f64((info.difficulty / hashrate).clamp(1.0, 1.0e9));
+            if every <= OWN_LANE_MAX_WAIT { OwnLane::Use { every } } else { OwnLane::TooSlow { every } }
+        }
+        #[cfg(not(feature = "embedded-node"))]
+        OwnLane::NotOwnCopy
+    }
+
+    /// The fee rate to pay: as good as nothing when our own miner will mine
+    /// it, the network's otherwise.
+    pub async fn own_lane_fee_rate(&self) -> Option<f64> {
+        match self.own_lane().await {
+            OwnLane::Use { .. } => Some(OWN_LANE_FEE_RATE),
+            _ => None,
+        }
+    }
+
+    /// Whether the own lane could apply but does not, because nothing is
+    /// mining here: on our own copy of the network, miner off. The moment to
+    /// say that mining would make the tidying free.
+    pub fn own_lane_wants_a_miner(&self) -> bool {
+        #[cfg(feature = "embedded-node")]
+        {
+            return self.embedded_node_in_use() && self.cpu_miner.lock().unwrap().is_none();
+        }
+        #[cfg(not(feature = "embedded-node"))]
+        false
     }
 
     pub fn ledger_is_known(&self) -> bool {
@@ -1464,11 +1533,22 @@ impl KaspaCli {
                     tprintln!(self, "{}", crate::ui::dim("  'sweep'            consolidate all of it in one run"));
                     tprintln!(self, "");
                     tprintln!(self, "{}", crate::ui::dim("Minting is paused until the ledger is back to a workable size."));
+                    if self.own_lane_wants_a_miner() {
+                        tprintln!(self, "{}", crate::ui::dim("Mining here makes all of it free — 'mine start' — your own blocks mine it and the fee comes back to you."));
+                    }
                     tprintln!(self, "");
                 }
                 self.auto_busy.store(false, Ordering::SeqCst);
                 return;
             }
+
+            // Whether our own miner will mine what follows (FORK-PLAN P8.3b):
+            // decided once for the pass, used by the mint and the sweep alike.
+            let lane = self.own_lane().await;
+            let lane_fee_rate = match lane {
+                OwnLane::Use { .. } => Some(OWN_LANE_FEE_RATE),
+                _ => None,
+            };
 
             // --- 1. turn the ledger into notes ---
             // Minting comes FIRST because a mint IS a consolidation: it takes many
@@ -1516,6 +1596,31 @@ impl KaspaCli {
                         );
                     }
                 }
+                if loud && mature > 0 {
+                    match lane {
+                        OwnLane::Use { every } => tprintln!(
+                            self,
+                            "{}",
+                            crate::ui::dim(format!(
+                                "Your own miner will mine the tidying (a block about every {}), so the fee comes back to you.",
+                                humanised_minutes((every.as_secs() / 60).max(1))
+                            ))
+                        ),
+                        OwnLane::TooSlow { every } => tprintln!(
+                            self,
+                            "{}",
+                            crate::ui::dim(format!(
+                                "Your miner finds a block about every {} — too rare to wait for, so the network fee is paid.",
+                                humanised_minutes((every.as_secs() / 60).max(1))
+                            ))
+                        ),
+                        OwnLane::NoMiner => {
+                            tprintln!(self, "{}", crate::ui::dim("Turning the ledger into notes costs the network fee. Mining here makes it free — 'mine start' —"));
+                            tprintln!(self, "{}", crate::ui::dim("because your own blocks mine your own tidying and the fee comes back to you."));
+                        }
+                        OwnLane::NotOwnCopy => {}
+                    }
+                }
                 if mature >= threshold {
                     let minted = async {
                         // mint_max owns the sizing: the estimate cannot predict the
@@ -1525,7 +1630,7 @@ impl KaspaCli {
                             account.clone(),
                             secret.clone(),
                             payment_secret.clone(),
-                            None,
+                            lane_fee_rate,
                             &abortable,
                             None,
                         )
@@ -1603,7 +1708,7 @@ impl KaspaCli {
                 const SWEEP_TRANSACTIONS_PER_PASS: usize = SWEEP_TRANSACTIONS_PER_PASS_CONST;
                 match account
                     .clone()
-                    .sweep(secret.clone(), payment_secret.clone(), None, &abortable, notifier, None, Some(SWEEP_TRANSACTIONS_PER_PASS))
+                    .sweep(secret.clone(), payment_secret.clone(), lane_fee_rate, &abortable, notifier, None, Some(SWEEP_TRANSACTIONS_PER_PASS))
                     .await
                 {
                     Ok(summary) => {

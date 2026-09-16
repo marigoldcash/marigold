@@ -72,10 +72,12 @@ impl MiningManager {
         ram_scale: f64,
         cache_lifetime: Option<u64>,
         counters: Arc<MiningCounters>,
+        accept_own_below_floor: bool,
     ) -> Self {
         let config =
             Config::build_default(target_time_per_block, relay_non_std_transactions, mempool_block_mass_limits, block_lane_limits)
-                .apply_ram_scale(ram_scale);
+                .apply_ram_scale(ram_scale)
+                .with_accept_own_below_floor(accept_own_below_floor);
         Self::with_config(config, toccata_activation, cache_lifetime, counters)
     }
 
@@ -562,6 +564,12 @@ impl MiningManager {
         self.mempool.read().has_transaction(transaction_id, query)
     }
 
+    /// Accepted from this node's own wallet below the relay floor: for this
+    /// node's blocks only, never announced (FORK-PLAN P8.3b).
+    pub fn is_withheld_from_relay(&self, transaction_id: &TransactionId) -> bool {
+        self.mempool.read().is_withheld_from_relay(transaction_id)
+    }
+
     pub fn get_all_transactions(&self, query: TransactionQuery) -> (Vec<MutableTransaction>, Vec<MutableTransaction>) {
         const TRANSACTION_CHUNK_SIZE: usize = 1000;
         // read lock on mempool by transaction chunks
@@ -878,6 +886,10 @@ impl MiningManagerProxy {
     /// Returns realtime feerate estimations based on internal mempool state
     pub async fn get_realtime_feerate_estimations(self) -> FeerateEstimations {
         spawn_blocking(move || self.inner.get_realtime_feerate_estimations()).await.unwrap()
+    }
+
+    pub async fn is_withheld_from_relay(self, transaction_id: TransactionId) -> bool {
+        spawn_blocking(move || self.inner.is_withheld_from_relay(&transaction_id)).await.unwrap()
     }
 
     /// Returns realtime feerate estimations based on internal mempool state with additional verbose data

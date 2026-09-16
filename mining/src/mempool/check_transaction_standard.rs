@@ -136,6 +136,16 @@ impl Mempool {
             return Ok(());
         }
 
+        // The node's own wallet, on a node that has opted in (FORK-PLAN P8.3b):
+        // no floor. RPC submissions are the only high-priority ones, and what
+        // comes in this way is kept out of relay (see `withheld_from_relay`),
+        // so only this node's own blocks can include it and the fee goes to
+        // this node's own coinbase. Consensus has no fee floor; the floor is
+        // relay policy, and this transaction is not relayed.
+        if priority == Priority::High && self.config.accept_own_below_floor {
+            return Ok(());
+        }
+
         // Minimum relay fee applies to normalized non-contextual mass so block-space usage has a
         // minimum cost, whether dominated by compute or by transient byte footprint.
         // Storage mass does not require an additional relay-fee floor here since storage growth is
@@ -170,6 +180,18 @@ impl Mempool {
         // end-TODO
 
         Ok(())
+    }
+
+    /// Would the ordinary relay floor have refused this transaction? Used to
+    /// decide what is kept out of relay on a node that accepts its own
+    /// wallet's transactions below the floor (FORK-PLAN P8.3b).
+    pub(crate) fn fee_is_below_relay_floor(&self, transaction: &MutableTransaction) -> bool {
+        let (Some(masses), Some(fee)) = (transaction.calculated_non_contextual_masses, transaction.calculated_fee) else {
+            return false;
+        };
+        let cofactors = self.config.mempool_mass_cofactors.raw_post();
+        let fee_mass = masses.compute_mass.max(masses.normalized_transient(&cofactors));
+        fee < self.minimum_required_transaction_relay_fee(fee_mass, self.config.minimum_relay_transaction_fee)
     }
 
     /// minimum_required_transaction_relay_fee returns the minimum transaction fee required
@@ -691,5 +713,51 @@ mod tests {
         );
         // Within the window the storage cap is lifted; the well-funded, standard tx is accepted.
         assert_eq!(mempool.check_transaction_standard_in_context(&high_storage, Priority::High, in_window), Ok(()));
+    }
+
+    /// FORK-PLAN P8.3b: a node that accepts its own wallet's transactions
+    /// below the relay floor does so only for RPC submissions, and knows
+    /// which ones to keep out of relay.
+    #[test]
+    fn own_lane_accepts_below_floor_only_from_rpc_and_withholds_it() {
+        fn new_mtx(script_public_key: ScriptPublicKey, masses: NonContextualMasses, fee: u64) -> MutableTransaction {
+            let prev_out = TransactionOutpoint::new(kaspa_hashes::Hash::from_u64_word(1), 1);
+            let input = TransactionInput::new(prev_out, vec![], MAX_TX_IN_SEQUENCE_NUM, 1);
+            let tx = Transaction::new(
+                TX_VERSION,
+                vec![input],
+                vec![TransactionOutput::new(SOMPI_PER_KASPA, script_public_key.clone())],
+                0,
+                SUBNETWORK_ID_NATIVE,
+                0,
+                vec![],
+            );
+            let mut mtx = MutableTransaction::with_entries(
+                tx.into(),
+                vec![UtxoEntry::new(2 * SOMPI_PER_KASPA, script_public_key, 0, false, None)],
+            );
+            mtx.calculated_non_contextual_masses = Some(masses);
+            mtx.calculated_fee = Some(fee);
+            mtx
+        }
+        let addr = Address::new(Prefix::Mainnet, Version::PubKey, &[1u8; 32]);
+        let script_public_key = kaspa_txscript::pay_to_address_script(&addr);
+        let params: Params = NetworkType::Mainnet.into();
+        let masses = NonContextualMasses::new(3_000, 0);
+        let insufficient_fee = 1u64;
+        let counters = Arc::new(MiningCounters::default());
+
+        let plain =
+            Config::build_default(params.target_time_per_block(), false, params.mempool_block_mass_limits(), params.block_lane_limits);
+        let mempool = Mempool::new(Arc::new(plain), params.toccata_activation, counters.clone());
+        let mtx = new_mtx(script_public_key, masses, insufficient_fee);
+        assert!(mempool.check_transaction_standard_in_context(&mtx, Priority::High, u64::MAX).is_err(), "off: the floor holds");
+
+        let own = Config::build_default(params.target_time_per_block(), false, params.mempool_block_mass_limits(), params.block_lane_limits)
+            .with_accept_own_below_floor(true);
+        let mempool = Mempool::new(Arc::new(own), params.toccata_activation, counters);
+        assert_eq!(mempool.check_transaction_standard_in_context(&mtx, Priority::High, u64::MAX), Ok(()), "on: our own wallet may");
+        assert!(mempool.check_transaction_standard_in_context(&mtx, Priority::Low, u64::MAX).is_err(), "on: a peer's transaction may not");
+        assert!(mempool.fee_is_below_relay_floor(&mtx), "and it is known to be below the floor, so it is withheld from relay");
     }
 }

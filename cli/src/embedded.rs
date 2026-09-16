@@ -80,7 +80,10 @@ impl EmbeddedNode {
             )));
         }
 
+        // Our own wallet's transactions may sit below the relay floor: only
+        // our blocks will mine them, and the fee comes back to us.
         let mut args = Args {
+            accept_own_below_floor: true,
             appdir: Some(appdir.to_string_lossy().to_string()),
             utxoindex: true,
             // The node writes no log files of its own: without its logger

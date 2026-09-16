@@ -48,6 +48,12 @@ pub struct Config {
     pub block_lane_limits: BlockLaneLimits,
     pub minimum_relay_transaction_fee: u64,
     pub network_blocks_per_second: u64,
+    /// Accept transactions submitted over RPC — this node's own wallet — below
+    /// the relay-fee floor, and keep them out of relay. Only the node's own
+    /// blocks can then include them, and the fee, whatever it is, goes to the
+    /// node's own coinbase: a miner tidying its own rewards pays itself
+    /// (FORK-PLAN P8.3b). Off by default; the wallet's embedded node turns it on.
+    pub accept_own_below_floor: bool,
 }
 
 impl Config {
@@ -94,6 +100,7 @@ impl Config {
             block_lane_limits,
             minimum_relay_transaction_fee,
             network_blocks_per_second,
+            accept_own_below_floor: false,
         }
     }
 
@@ -130,7 +137,13 @@ impl Config {
             block_lane_limits,
             minimum_relay_transaction_fee: DEFAULT_MINIMUM_RELAY_TRANSACTION_FEE,
             network_blocks_per_second: 1000 / target_milliseconds_per_block,
+            accept_own_below_floor: false,
         }
+    }
+
+    pub fn with_accept_own_below_floor(mut self, on: bool) -> Self {
+        self.accept_own_below_floor = on;
+        self
     }
 
     pub fn apply_ram_scale(mut self, ram_scale: f64) -> Self {

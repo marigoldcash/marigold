@@ -663,6 +663,7 @@ Do you confirm? (y/n)";
         config.ram_scale,
         config.block_template_cache_lifetime,
         mining_counters.clone(),
+        args.accept_own_below_floor,
     )));
     let mining_monitor =
         Arc::new(MiningMonitor::new(mining_manager.clone(), mining_counters, tx_script_cache_counters.clone(), tick_service.clone()));

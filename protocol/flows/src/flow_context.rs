@@ -633,13 +633,21 @@ impl FlowContext {
                 mining_manager.clone().expire_low_priority_transactions(&consensus_clone).await;
                 if context.should_rebroadcast().await {
                     let (tx, mut rx) = unbounded_channel();
+                    let manager = mining_manager.clone();
                     tokio::spawn(async move {
                         mining_manager.revalidate_high_priority_transactions(&consensus_clone, tx).await;
                     });
                     while let Some(transactions) = rx.recv().await {
+                        // Own-wallet transactions below the floor are not rebroadcast either.
+                        let mut kept = Vec::with_capacity(transactions.len());
+                        for id in transactions {
+                            if !manager.clone().is_withheld_from_relay(id).await {
+                                kept.push(id);
+                            }
+                        }
                         let _ = context
                             .broadcast_transactions(
-                                transactions,
+                                kept,
                                 true, // We throttle high priority even when the network is not flooded since they will be rebroadcast if not accepted within reasonable time.
                             )
                             .await;
@@ -689,8 +697,17 @@ impl FlowContext {
             .clone()
             .validate_and_insert_transaction(consensus, transaction, Priority::High, orphan, RbfPolicy::Forbidden)
             .await?;
+        // What the mempool accepted below the relay floor from this node's own
+        // wallet stays here for this node's own blocks (FORK-PLAN P8.3b).
+        let mut to_broadcast = Vec::with_capacity(transaction_insertion.accepted.len());
+        for tx in transaction_insertion.accepted.iter() {
+            let id = tx.id();
+            if !self.mining_manager().clone().is_withheld_from_relay(id).await {
+                to_broadcast.push(id);
+            }
+        }
         self.broadcast_transactions(
-            transaction_insertion.accepted.iter().map(|x| x.id()),
+            to_broadcast,
             false, // RPC transactions are considered high priority, so we don't want to throttle them
         )
         .await;

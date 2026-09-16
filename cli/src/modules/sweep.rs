@@ -63,8 +63,27 @@ impl Sweep {
                 utxo_count.separated_string()
             ),
         }
-        // TODO fee_rate
-        let fee_rate = None;
+        // As good as free when this wallet's own miner will mine it: the fee
+        // comes back to our own coinbase (FORK-PLAN P8.3b).
+        let lane = ctx.own_lane().await;
+        let fee_rate = match lane {
+            crate::cli::OwnLane::Use { .. } => Some(crate::cli::OWN_LANE_FEE_RATE),
+            _ => None,
+        };
+        match lane {
+            crate::cli::OwnLane::Use { every } => tprintln!(
+                ctx,
+                "{}",
+                ui::dim(format!("Your own miner will mine these (a block about every {}), so the fee comes back to you.", crate::cli::humanised_minutes((every.as_secs() / 60).max(1))))
+            ),
+            crate::cli::OwnLane::TooSlow { every } => tprintln!(
+                ctx,
+                "{}",
+                ui::dim(format!("Your miner finds a block about every {} — too rare to wait for, so this pays the network fee.", crate::cli::humanised_minutes((every.as_secs() / 60).max(1))))
+            ),
+            crate::cli::OwnLane::NoMiner => tprintln!(ctx, "{}", ui::dim("This costs the network fee. Mining here would make it free — 'mine start' first, then sweep.")),
+            crate::cli::OwnLane::NotOwnCopy => {}
+        }
         let abortable = Abortable::default();
         let ctx_ = ctx.clone();
         let submitted = Arc::new(AtomicU64::new(0));

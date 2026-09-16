@@ -79,6 +79,13 @@ impl Mempool {
         // Perform mempool in-context validations prior to possible RBF replacements
         self.validate_transaction_limits_in_context(&transaction, virtual_daa_score)?;
         self.validate_transaction_std_in_context(&transaction, priority, virtual_daa_score)?;
+        // Accepted under the own-wallet exemption? Then it stays here: only
+        // this node's blocks may include it, so the fee comes back to this
+        // node (FORK-PLAN P8.3b).
+        let withheld = priority == Priority::High && self.config.accept_own_below_floor && self.fee_is_below_relay_floor(&transaction);
+        if withheld {
+            self.withheld_from_relay.insert(transaction_id);
+        }
 
         // Re-check note-pool serial conflicts under the write lock (race protection,
         // mirroring the outpoint side's re-check pattern below) — no RBF variant exists here.
@@ -133,7 +140,12 @@ impl Mempool {
 
         // Add the transaction to the mempool as a MempoolTransaction and return a clone of the embedded Arc<Transaction>
         let accepted_transaction =
-            self.transaction_pool.add_transaction(transaction, virtual_daa_score, priority, transaction_size)?.mtx.tx.clone();
+            // Withheld transactions go in as low priority: a high-priority
+            // transaction never expires and is rebroadcast — neither is right
+            // for something only this node's own miner will ever include. As
+            // low priority it expires like anything else if that miner stops
+            // or is too slow, and the wallet simply tidies again later.
+            self.transaction_pool.add_transaction(transaction, virtual_daa_score, if withheld { Priority::Low } else { priority }, transaction_size)?.mtx.tx.clone();
         Ok(TransactionPostValidation { removed: removed_transaction, accepted: Some(accepted_transaction) })
     }
 

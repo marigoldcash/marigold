@@ -15,6 +15,7 @@ impl Mempool {
         reason: TxRemovalReason,
         extra_info: &str,
     ) -> RuleResult<()> {
+        self.withheld_from_relay.remove(transaction_id);
         if self.orphan_pool.has(transaction_id) {
             return self.orphan_pool.remove_orphan(transaction_id, true, reason, extra_info).map(|_| ());
         }

@@ -211,7 +211,7 @@ impl Note {
                 let abortable = Abortable::default();
                 tprintln!(ctx, "Estimating the largest mintable amount — this dry-runs a sweep of your entire ledger balance and can take a while on a large wallet...");
                 let progress = Self::progress_printer(ctx);
-                let max = notepool::max_mintable_petals(account.clone(), None, &abortable, Some(progress)).await?;
+                let max = notepool::max_mintable_petals(account.clone(), ctx.own_lane_fee_rate().await, &abortable, Some(progress)).await?;
                 if max == 0 {
                     tprintln!(ctx, "usage: 'note mint <amount>' or 'note mint all'  (no mintable balance right now)\r\n");
                     return Ok(());
@@ -233,7 +233,7 @@ impl Note {
                 let abortable = Abortable::default();
                 tprintln!(ctx, "Estimating the largest mintable amount — this dry-runs a sweep of your entire ledger balance and can take a while on a large wallet...");
                 let progress = Self::progress_printer(ctx);
-                let max = notepool::max_mintable_petals(account.clone(), None, &abortable, Some(progress)).await?;
+                let max = notepool::max_mintable_petals(account.clone(), ctx.own_lane_fee_rate().await, &abortable, Some(progress)).await?;
                 if max == 0 {
                     tprintln!(ctx, "no mintable balance right now\r\n");
                     return Ok(());
@@ -266,7 +266,7 @@ impl Note {
         // shaped differently from the real mint and cannot be made exact. An
         // explicit amount is taken literally: the user asked for a number.
         let (amount_petals, result) = if all.is_some() {
-            match notepool::mint_max(account.clone(), wallet_secret, payment_secret, None, &abortable, Some(progress)).await? {
+            match notepool::mint_max(account.clone(), wallet_secret, payment_secret, ctx.own_lane_fee_rate().await, &abortable, Some(progress)).await? {
                 Some((amount, result)) => (amount, result),
                 None => {
                     tprintln!(ctx, "Nothing could be minted — the fee would exceed what is on the ledger.\r\n");
@@ -279,7 +279,7 @@ impl Note {
                 wallet_secret,
                 payment_secret,
                 amount_petals,
-                None,
+                ctx.own_lane_fee_rate().await,
                 &abortable,
                 Some(progress),
             )
