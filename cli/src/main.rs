@@ -17,6 +17,12 @@ cfg_if::cfg_if! {
                 println!("marigold-cli {}", env!("CARGO_PKG_VERSION"));
                 return;
             }
+            // Whoever gets the binary should be able to start without docs:
+            // the wallet, and the miner on its own, on one screen.
+            if args.first().map(|a| a.as_str()).is_some_and(|a| a == "--help" || a == "-h" || a == "help") {
+                println!("{}", kaspa_cli_lib::HELP.replace("{version}", env!("CARGO_PKG_VERSION")));
+                return;
+            }
             // The miner as a service: no terminal, no wallet, stays in the
             // foreground for systemd or Docker to look after.
             if args.first().map(|a| a.as_str()) == Some("mine-to") {
