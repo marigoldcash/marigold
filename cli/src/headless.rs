@@ -14,15 +14,19 @@ use crate::result::Result;
 use kaspa_addresses::{Address, Prefix};
 use kaspa_consensus_core::network::{NetworkId, NetworkType};
 use kaspa_core::signals::{Shutdown, Signals};
+use kaspa_rpc_core::api::rpc::RpcApi;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-pub const USAGE: &str = "usage: marigold-cli mine-to <address> [<percent>] [--network <id>]
+pub const USAGE: &str = "usage: marigold-cli mine-to <address> [<percent>] [--network <id>] [--node <url>]
 
   <address>        where the rewards go — an address from 'address' in your wallet
   <percent>        share of this machine to use, 1-100 (default 50); '--cpu 50' means the same
   --network <id>   mainnet, testnet-10, ... (default: the one the address belongs to)
+  --node <url>     mine against a node already running instead of syncing one here:
+                   ws://127.0.0.1:27210 (wRPC) or grpc://127.0.0.1:26210 (gRPC, what a
+                   marigoldd has on by default). No wallet can steer the miner then.
 
 Runs in the foreground and logs to stdout; stop it with Ctrl-C or SIGTERM.
 A wallet on this machine finds it when it connects and steers it with 'mine'.";
@@ -39,12 +43,14 @@ struct Options {
     address: Address,
     percent: u32,
     network_id: NetworkId,
+    node: Option<String>,
 }
 
 fn parse(args: &[String]) -> std::result::Result<Options, String> {
     let mut address = None;
     let mut percent = 50u32;
     let mut network = None;
+    let mut node = None;
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
         let (flag, inline) = match arg.split_once('=') {
@@ -59,6 +65,10 @@ fn parse(args: &[String]) -> std::result::Result<Options, String> {
             "--network" => {
                 let value = inline.or_else(|| iter.next().cloned()).ok_or("--network needs a network id")?;
                 network = Some(value.parse::<NetworkId>().map_err(|err| format!("'{value}' is not a network: {err}"))?);
+            }
+            "--node" => {
+                let value = inline.or_else(|| iter.next().cloned()).ok_or("--node needs a url, e.g. ws://127.0.0.1:27210")?;
+                node = Some(if value.contains("://") { value } else { format!("ws://{value}") });
             }
             "--help" | "-h" => return Err(USAGE.to_string()),
             other if other.starts_with('-') => return Err(format!("unknown option '{other}'\n\n{USAGE}")),
@@ -89,7 +99,14 @@ fn parse(args: &[String]) -> std::result::Result<Options, String> {
             Prefix::Devnet => NetworkId::new(NetworkType::Devnet),
         },
     };
-    Ok(Options { address, percent, network_id })
+    Ok(Options { address, percent, network_id, node })
+}
+
+/// The miner's node: one started here, or one already running elsewhere.
+enum Node {
+    Own(Arc<crate::embedded::EmbeddedNode>),
+    Remote(Arc<kaspa_wrpc_client::KaspaRpcClient>),
+    Grpc(Arc<kaspa_grpc_client::GrpcClient>),
 }
 
 pub async fn mine_to(args: Vec<String>) -> Result<()> {
@@ -100,7 +117,7 @@ pub async fn mine_to(args: Vec<String>) -> Result<()> {
             std::process::exit(2);
         }
     };
-    let Options { address, percent, network_id } = options;
+    let Options { address, percent, network_id, node: node_url } = options;
 
     // Plain lines on stdout, one per record, for journald or a log file.
     kaspa_core::log::init_logger(None, "info");
@@ -109,20 +126,66 @@ pub async fn mine_to(args: Vec<String>) -> Result<()> {
     let stop = Arc::new(Stop(shutdown.clone()));
     Arc::new(Signals::new(&stop)).init();
 
-    let appdir = crate::embedded::default_appdir(network_id)?;
     let host = MinerHost::new(address.clone(), shutdown.clone());
-    let control: Arc<dyn kaspa_rpc_core::api::miner::MinerControl> = host.clone();
-    let (node, rpc) = crate::embedded::EmbeddedNode::start_with(network_id, &appdir, Some(control))?;
-    host.bind(rpc.rpc_api().clone());
-
-    let port = network_id.default_borsh_rpc_port();
     log::info!(
         "Marigold miner {}: paying to {address}, {percent}% of this machine ({} of {} cores), {network_id}",
         env!("CARGO_PKG_VERSION"),
         crate::miner::threads_for_percent(percent),
         crate::miner::cores()
     );
-    log::info!("A wallet on this machine reaches this miner at 127.0.0.1:{port} — 'connect' finds it by itself.");
+    let (node, rpc): (Node, Arc<kaspa_wallet_core::rpc::DynRpcApi>) = match node_url {
+        // A node already running — a marigoldd on this machine, say. Nothing
+        // to sync here, and no RPC of our own for a wallet to steer.
+        Some(url) if url.starts_with("grpc://") => {
+            let client = kaspa_grpc_client::GrpcClient::connect_with_args(
+                kaspa_rpc_core::notify::mode::NotificationMode::Direct,
+                url.clone(),
+                None,
+                true,
+                None,
+                false,
+                None,
+                Default::default(),
+            )
+            .await
+            .map_err(|err| crate::error::Error::custom(format!("cannot reach {url}: {err}")))?;
+            let client = Arc::new(client);
+            log::info!("Mining against the node at {url}; it keeps reconnecting if that node goes away.");
+            if let Ok(info) = client.get_server_info().await {
+                if info.network_id != network_id {
+                    return Err(crate::error::Error::custom(format!("{url} is on {}, but {address} is a {network_id} address", info.network_id)));
+                }
+            }
+            let rpc: Arc<kaspa_wallet_core::rpc::DynRpcApi> = client.clone();
+            (Node::Grpc(client), rpc)
+        }
+        Some(url) => {
+            use kaspa_wallet_core::rpc::{ConnectOptions, ConnectStrategy, WrpcEncoding};
+            let client = Arc::new(
+                kaspa_wrpc_client::KaspaRpcClient::new(WrpcEncoding::Borsh, Some(&url), None, Some(network_id), None)
+                    .map_err(|err| crate::error::Error::custom(format!("{url}: {err}")))?,
+            );
+            let options = ConnectOptions { block_async_connect: true, strategy: ConnectStrategy::Retry, url: Some(url.clone()), ..Default::default() };
+            log::info!("Mining against the node at {url}; it keeps reconnecting if that node goes away.");
+            client.connect(Some(options)).await.map_err(|err| crate::error::Error::custom(format!("cannot reach {url}: {err}")))?;
+            if let Ok(info) = client.get_server_info().await {
+                if info.network_id != network_id {
+                    return Err(crate::error::Error::custom(format!("{url} is on {}, but {address} is a {network_id} address", info.network_id)));
+                }
+            }
+            let rpc: Arc<kaspa_wallet_core::rpc::DynRpcApi> = client.clone();
+            (Node::Remote(client), rpc)
+        }
+        None => {
+            let appdir = crate::embedded::default_appdir(network_id)?;
+            let control: Arc<dyn kaspa_rpc_core::api::miner::MinerControl> = host.clone();
+            let (node, rpc) = crate::embedded::EmbeddedNode::start_with(network_id, &appdir, Some(control))?;
+            let port = network_id.default_borsh_rpc_port();
+            log::info!("A wallet on this machine reaches this miner at 127.0.0.1:{port} — 'connect' finds it by itself.");
+            (Node::Own(node), rpc.rpc_api().clone())
+        }
+    };
+    host.bind(rpc.clone());
 
     // Mine only on a synced copy: templates built on a chain the node has not
     // finished reading make blocks nobody accepts.
@@ -133,7 +196,7 @@ pub async fn mine_to(args: Vec<String>) -> Result<()> {
     let mut started_once = false;
     let mut last_report = std::time::Instant::now();
     while !shutdown.load(Ordering::SeqCst) {
-        let synced = matches!(rpc.rpc_api().get_server_info().await, Ok(info) if info.is_synced);
+        let synced = matches!(rpc.get_server_info().await, Ok(info) if info.is_synced);
         // A wallet may have started it already, before the sync caught up.
         if host.miner().is_some() {
             started_once = true;
@@ -176,7 +239,19 @@ pub async fn mine_to(args: Vec<String>) -> Result<()> {
 
     let status = host.stop();
     log::info!("Mining stopped: {} blocks found this run, {} accepted.", status.blocks_found, status.blocks_accepted);
-    node.stop().await?;
-    log::info!("Node stopped.");
+    match node {
+        Node::Own(node) => {
+            node.stop().await?;
+            log::info!("Node stopped.");
+        }
+        Node::Remote(client) => {
+            client.disconnect().await.ok();
+            log::info!("Disconnected from the node.");
+        }
+        Node::Grpc(client) => {
+            client.disconnect().await.ok();
+            log::info!("Disconnected from the node.");
+        }
+    }
     Ok(())
 }

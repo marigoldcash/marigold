@@ -62,6 +62,7 @@ kaspa-utils.workspace = true
 kaspa-wallet-core.workspace = true
 kaspa-wallet-keys.workspace = true
 kaspa-wallet-pskt.workspace = true
+kaspa-grpc-client.workspace = true
 kaspa-wrpc-client.workspace = true
 nw-sys.workspace = true
 num_cpus.workspace = true

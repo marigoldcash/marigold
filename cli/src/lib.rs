@@ -59,6 +59,9 @@ Mining without a wallet open:
               the lowest priority the system has, so 100 still steps aside
               the moment anything else wants the processor.
   --network   mainnet, testnet-10, ...; by default the one the address is on
+  --node      mine against a node already running instead of syncing one
+              here: grpc://127.0.0.1:26210 (a marigoldd's default) or
+              ws://127.0.0.1:27210
 
   It first syncs a copy of the network on this machine (several gigabytes,
   a while the first time), then mines, logging to this terminal a line a
