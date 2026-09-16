@@ -12,7 +12,7 @@ pub mod hashing;
 pub mod validate;
 pub mod view;
 
-pub use diff::{ImmutablePoolDiff, PoolCollection, PoolDiff};
+pub use diff::{ImmutablePoolDiff, LegacyPoolDiff, PoolCollection, PoolDiff};
 pub use hashing::{leaf_hash, leaf_hash_entry, serial_hash, signing_hash, signing_hash_with_locks, transparent_outputs_hash};
 pub use validate::{MAX_POOL_OP_COLLECTION_LEN, ValidatedPoolOp, validate_stateful, validate_stateless};
 pub use view::{ComposedPoolView, PoolStateView, PoolViewComposition};

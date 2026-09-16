@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use kaspa_consensus_core::{BlockHasher, notepool::PoolDiff};
+use kaspa_consensus_core::{
+    BlockHasher,
+    notepool::{LegacyPoolDiff, PoolDiff},
+};
 use kaspa_database::prelude::CachePolicy;
 use kaspa_database::prelude::DB;
 use kaspa_database::prelude::StoreError;
@@ -29,11 +32,18 @@ pub trait NotePoolDiffsStore: NotePoolDiffsStoreReader {
 pub struct DbNotePoolDiffsStore {
     db: Arc<DB>,
     access: CachedDbAccess<Hash, Arc<PoolDiff>, BlockHasher>,
+    /// The v1.1 rows (POOL-SPEC.md P5.9): read when a block has no diff under
+    /// the new prefix, so blocks from before the upgrade still unwind.
+    legacy: CachedDbAccess<Hash, Arc<LegacyPoolDiff>, BlockHasher>,
 }
 
 impl DbNotePoolDiffsStore {
     pub fn new(db: Arc<DB>, cache_policy: CachePolicy) -> Self {
-        Self { db: Arc::clone(&db), access: CachedDbAccess::new(db, cache_policy, DatabaseStorePrefixes::NotePoolDiffsV2.into()) }
+        Self {
+            db: Arc::clone(&db),
+            access: CachedDbAccess::new(Arc::clone(&db), cache_policy, DatabaseStorePrefixes::NotePoolDiffsV2.into()),
+            legacy: CachedDbAccess::new(db, cache_policy, DatabaseStorePrefixes::NotePoolDiffs.into()),
+        }
     }
 
     pub fn clone_with_new_cache(&self, cache_policy: CachePolicy) -> Self {
@@ -55,7 +65,10 @@ impl DbNotePoolDiffsStore {
 
 impl NotePoolDiffsStoreReader for DbNotePoolDiffsStore {
     fn get(&self, hash: Hash) -> Result<Arc<PoolDiff>, StoreError> {
-        self.access.read(hash)
+        match self.access.read(hash) {
+            Err(StoreError::KeyNotFound(_)) => self.legacy.read(hash).map(|legacy| Arc::new(PoolDiff::from((*legacy).clone()))),
+            other => other,
+        }
     }
 }
 

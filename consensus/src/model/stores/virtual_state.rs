@@ -208,6 +208,8 @@ pub struct VirtualStores {
     /// item rather than a `VirtualState` field to leave that type's versioned
     /// serialization untouched; committed in the same batch, under the same lock.
     pub pool_diff: CachedDbItem<PoolDiff>,
+    /// The v1.1 row of virtual's own diff, read once when the new one is absent.
+    pub pool_diff_legacy: CachedDbItem<kaspa_consensus_core::notepool::LegacyPoolDiff>,
 }
 
 impl VirtualStores {
@@ -221,14 +223,18 @@ impl VirtualStores {
             // sizes make the hit rate matter (P8.3 calibration territory).
             pool_state: DbNotePoolStore::new(db.clone(), CachePolicy::Count(100_000)),
             pool_smt: DbNotePoolSmtStore::new(db.clone(), CachePolicy::Count(100_000)),
-            pool_diff: CachedDbItem::new(db, DatabaseStorePrefixes::VirtualNotePoolDiffV2.into()),
+            pool_diff: CachedDbItem::new(db.clone(), DatabaseStorePrefixes::VirtualNotePoolDiffV2.into()),
+            pool_diff_legacy: CachedDbItem::new(db, DatabaseStorePrefixes::VirtualNotePoolDiff.into()),
         }
     }
 
     /// Virtual's own mergeset pool diff; an uninitialized store (fresh DB, genesis)
     /// reads as the empty diff.
     pub fn virtual_pool_diff(&self) -> PoolDiff {
-        self.pool_diff.read().optional().unwrap().unwrap_or_default()
+        if let Some(diff) = self.pool_diff.read().optional().unwrap() {
+            return diff;
+        }
+        self.pool_diff_legacy.read().optional().unwrap().map(PoolDiff::from).unwrap_or_default()
     }
 }
 

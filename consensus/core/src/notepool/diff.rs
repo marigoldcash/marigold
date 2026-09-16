@@ -7,9 +7,7 @@
 //! POOL-SPEC.md P5.1), so where `UtxoDiff` must compare entries' DAA scores to tell "same
 //! logical UTXO" from "recreated at a different score", the pool needs only the serial.
 
-use super::PoolEntry;
-#[cfg(test)]
-use super::NewNote;
+use super::{NewNote, PoolEntry};
 use crate::Hash;
 use crate::errors::notepool::PoolAlgebraError;
 use kaspa_utils::mem_size::MemSizeEstimator;
@@ -52,6 +50,30 @@ impl<T: ImmutablePoolDiff> ImmutablePoolDiff for &T {
 pub struct PoolDiff {
     pub add: PoolCollection,
     pub remove: PoolCollection,
+}
+
+/// A diff as the v1.1 stores wrote it — `NewNote` values, no lock. Read from
+/// the pre-P5.9 prefixes when a block's diff is not under the new one, so a
+/// node upgraded mid-chain can still walk and unwind its old blocks.
+#[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LegacyPoolDiff {
+    pub add: HashMap<Hash, NewNote>,
+    pub remove: HashMap<Hash, NewNote>,
+}
+
+impl MemSizeEstimator for LegacyPoolDiff {
+    fn estimate_mem_bytes(&self) -> usize {
+        size_of::<Self>() + (self.add.len() + self.remove.len()) * (size_of::<Hash>() + size_of::<NewNote>())
+    }
+}
+
+impl From<LegacyPoolDiff> for PoolDiff {
+    fn from(legacy: LegacyPoolDiff) -> Self {
+        Self {
+            add: legacy.add.into_iter().map(|(sn, note)| (sn, PoolEntry::unlocked(note))).collect(),
+            remove: legacy.remove.into_iter().map(|(sn, note)| (sn, PoolEntry::unlocked(note))).collect(),
+        }
+    }
 }
 
 impl MemSizeEstimator for PoolDiff {
