@@ -337,6 +337,28 @@ pub async fn redeem_with(
     // through a throwaway `RedeemOp` just to read it back off.
     const REDEEM_OP_TYPE: u8 = 2;
 
+    // The feerate first, because it sets the line below which change is not
+    // worth an output. The node's estimate is a priority signal reporting 1
+    // petal per gram, while the mempool refuses anything under its relay
+    // minimum however patient the sender.
+    let feerate = match wallet.rpc_api().get_fee_estimate().await {
+        Ok(estimate) => estimate.normal_buckets.first().map(|b| b.feerate).unwrap_or(1.0),
+        Err(_) => 1.0,
+    }
+    .max(POOL_FEE_RATE);
+    // Change below this goes to the destination rather than into an output
+    // of its own: KIP-9 prices an output by 1/value, a 0.01 change output
+    // weighs a million grams, and a redeem planned with one had its whole
+    // value eaten by the fee estimate and failed (2026-09-16). Twice the
+    // keep line, so that after the fee the smallest change output is still
+    // comfortably under the mass limit. A payment then arrives a fraction
+    // over what was asked, never under — the notes-only rule, for everyone.
+    let keep_change = 2 * change_keep_line(params.storage_mass_parameter, feerate);
+    let change_worth_keeping = match &destination {
+        Some((_, petals)) => redeemed_value_petals.saturating_sub(*petals) >= keep_change,
+        None => true,
+    };
+
     // Build with placeholder (zero) signatures first — a `SignedGroup`'s wire size is
     // fixed regardless of signature content, so mass computed against the placeholder
     // payload is identical to the final one, and doesn't need recomputing after signing.
@@ -348,11 +370,11 @@ pub async fn redeem_with(
     // costs more than a one-output one.
     let placeholder_outputs = match (&destination, &change_script) {
         (None, Some(change_script)) => vec![TransactionOutput::new(redeemed_value_petals, change_script.clone())],
-        (Some((address, petals)), Some(change_script)) => vec![
+        (Some((address, petals)), Some(change_script)) if change_worth_keeping => vec![
             TransactionOutput::new(*petals, pay_to_address_script(address)),
             TransactionOutput::new(redeemed_value_petals.saturating_sub(*petals), change_script.clone()),
         ],
-        (Some((address, _)), None) => vec![TransactionOutput::new(redeemed_value_petals, pay_to_address_script(address))],
+        (Some((address, _)), _) => vec![TransactionOutput::new(redeemed_value_petals, pay_to_address_script(address))],
         (None, None) => unreachable!("rejected above"),
     };
     let placeholder_tx =
@@ -369,14 +391,6 @@ pub async fn redeem_with(
     let non_contextual = mass_calculator.calc_non_contextual_masses(&placeholder_tx);
     let mass = contextual.max(non_contextual.compute_mass).max(non_contextual.transient_mass);
 
-    // And the same feerate floor: the node's estimate is a priority signal
-    // reporting 1 petal per gram, while the mempool refuses anything under its
-    // 100-per-gram relay minimum however patient the sender.
-    let feerate = match wallet.rpc_api().get_fee_estimate().await {
-        Ok(estimate) => estimate.normal_buckets.first().map(|b| b.feerate).unwrap_or(1.0),
-        Err(_) => 1.0,
-    }
-    .max(POOL_FEE_RATE);
     let fee_petals = (mass as f64 * feerate).ceil() as u64;
 
     if redeemed_value_petals <= fee_petals {
@@ -393,14 +407,16 @@ pub async fn redeem_with(
                     "redeemed value after fee ({output_value} petals) does not cover the requested payment ({petals} petals)"
                 )));
             }
-            let change = output_value - petals;
-            let mut outputs = vec![TransactionOutput::new(*petals, pay_to_address_script(address))];
-            // Dust-sized change is left to the fee rather than created as an
-            // unspendable output.
-            if change >= DENOMINATION_PETALS[0] {
-                outputs.push(TransactionOutput::new(change, change_script));
+            if change_worth_keeping {
+                vec![
+                    TransactionOutput::new(*petals, pay_to_address_script(address)),
+                    TransactionOutput::new(output_value - petals, change_script),
+                ]
+            } else {
+                // Same shape as the placeholder: one output, the small
+                // remainder riding along to the destination.
+                vec![TransactionOutput::new(output_value, pay_to_address_script(address))]
             }
-            outputs
         }
         (Some((address, petals)), None) => {
             if *petals > output_value {

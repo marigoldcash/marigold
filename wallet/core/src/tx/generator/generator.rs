@@ -962,11 +962,23 @@ impl Generator {
                 let output_harmonic_with_change =
                     calc.calc_storage_mass_output_harmonic_single(change_value) + self.inner.final_transaction_outputs_harmonic;
                 let storage_mass_with_change = self.calc_storage_mass(data, output_harmonic_with_change);
+                let storage_mass_without_change = self.calc_storage_mass(data, self.inner.final_transaction_outputs_harmonic);
 
-                // TODO - review and potentially simplify:
-                // this profiles the storage mass with change and without change
-                // and decides which one to use based on the fees
-                if storage_mass_with_change == 0 || (storage_mass_with_change < compute_mass_with_change) {
+                // Change that is not dust by the size rule can still be too
+                // heavy to keep: KIP-9 prices a small output by 1/value, and a
+                // mint that gathered just over its amount from small coins
+                // left a few hundredths of change weighing more than a whole
+                // transaction may. That failed with "storage mass exceeds
+                // maximum" (founder, 2026-09-16, 'note mint 100' on a ledger
+                // of five million coins). Such change goes to the fee instead
+                // — it is under a tenth of a coin by construction, and on the
+                // own lane the fee comes back anyway.
+                if storage_mass_with_change > MAXIMUM_STANDARD_TRANSACTION_MASS
+                    && storage_mass_without_change <= MAXIMUM_STANDARD_TRANSACTION_MASS
+                {
+                    absorb_change_to_fees = true;
+                    storage_mass_without_change
+                } else if storage_mass_with_change == 0 || (storage_mass_with_change < compute_mass_with_change) {
                     0
                 } else {
                     let storage_mass_no_change = self.calc_storage_mass(data, self.inner.final_transaction_outputs_harmonic);
@@ -983,7 +995,22 @@ impl Generator {
                         );
                         let difference = fees_with_change.saturating_sub(fees_no_change);
 
-                        if difference > change_value {
+                        // The fee comes out of the change, so the change that
+                        // would actually exist is what the decision has to be
+                        // made on. Judging the full change against a fee priced
+                        // on it kept a 0.10 change worth 0.09 in storage-mass
+                        // fee, and the 0.01 that was left weighed ten times the
+                        // limit (founder, 2026-09-16: 'mint 1' from a 1.10 coin).
+                        let net_change = change_value.saturating_sub(fees_with_change);
+                        let storage_mass_net = if net_change == 0 {
+                            u64::MAX
+                        } else {
+                            self.calc_storage_mass(
+                                data,
+                                calc.calc_storage_mass_output_harmonic_single(net_change) + self.inner.final_transaction_outputs_harmonic,
+                            )
+                        };
+                        if difference > net_change || storage_mass_net > MAXIMUM_STANDARD_TRANSACTION_MASS {
                             absorb_change_to_fees = true;
                             storage_mass_no_change
                         } else {

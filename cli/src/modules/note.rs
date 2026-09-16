@@ -199,7 +199,7 @@ impl Note {
         })
     }
 
-    async fn mint(&self, ctx: &Arc<KaspaCli>, mut argv: Vec<String>) -> Result<()> {
+    pub(crate) async fn mint(&self, ctx: &Arc<KaspaCli>, mut argv: Vec<String>) -> Result<()> {
         let ticker = ctx.ticker();
         let account = ctx.ledger_account().await?;
 
