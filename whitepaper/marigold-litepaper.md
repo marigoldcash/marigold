@@ -101,6 +101,20 @@ The common thread: a Marigold note is a key, and a key can be printed, texted, f
 
 ---
 
+## Your Phone Is a Remote Control, Not a Wallet
+
+Everything you can do at your own keyboard, you can do from your phone, in a Telegram chat: check your balance, pay someone, take in a note, raise a payment request, read your history, see whether your miner is running. What changes is not what you can do. It is where the money is — and the money is not on the phone.
+
+Your wallet runs at home, on whatever stays switched on: a laptop in a drawer, a small computer beside the router. It keeps itself in step with the chain, it holds your notes, and it answers your messages. The phone in your pocket holds no keys and stores no notes. It talks to nothing but Telegram. Lose it, and you have lost a remote control.
+
+The bot is yours, not ours. You make it in Telegram in about two minutes, hand your wallet the token, and pair the two with a code. From then on your wallet answers that one Telegram account and ignores every other. There is no Marigold server in the middle, no account with us, no fleet of machines we run for your phone to depend on. Your wallet calls out to Telegram; nothing calls in, and there is nothing to open on your router.
+
+Spending is guarded the way a bank card is: a PIN before anything that moves money, a lockout after three wrong tries that only the machine at home can clear, and a daily limit you set yourself. That Telegram account can now move money, so it needs two-factor authentication — the bot tells you so the first time you speak to it.
+
+The limits, plainly. When the machine at home is off, the phone can do nothing at all: no balance, no paying, no receiving. A payment code sent through a chat is bearer value while it is in flight, exactly like the printed QR codes above — whoever reads it first can claim it. And a proper phone app, one that holds keys itself, is a job for later and probably for someone else. This is the version that asks you to trust nobody.
+
+---
+
 ## What an Observer Can and Cannot See
 
 Marigold is not a privacy coin, and this litepaper will not pretend it is. Here is exactly what someone watching the system can figure out:
