@@ -112,6 +112,10 @@ enum Node {
 /// under `serve`, a dim line on the terminal inside the wallet.
 pub type Say = Arc<dyn Fn(String) + Send + Sync>;
 
+/// A miner running inside the terminal wallet, read for the bot; the
+/// terminal owns starting and stopping it.
+pub type LocalMiner = Arc<dyn Fn() -> Option<kaspa_rpc_core::RpcMinerStatus> + Send + Sync>;
+
 /// The open wallet and everything the bot may do with it.
 pub struct WalletService {
     wallet: Arc<Wallet>,
@@ -124,6 +128,7 @@ pub struct WalletService {
     spent: Mutex<(u64, u64)>,
     started: std::time::Instant,
     say: Say,
+    local_miner: Option<LocalMiner>,
 }
 
 fn utc_day() -> u64 {
@@ -131,7 +136,7 @@ fn utc_day() -> u64 {
 }
 
 impl WalletService {
-    pub fn new(wallet: Arc<Wallet>, secret: Secret, network_id: NetworkId, folder: &str, name: &str, miner: Option<Arc<MinerHost>>, say: Say) -> Arc<Self> {
+    pub fn new(wallet: Arc<Wallet>, secret: Secret, network_id: NetworkId, folder: &str, name: &str, miner: Option<Arc<MinerHost>>, say: Say, local_miner: Option<LocalMiner>) -> Arc<Self> {
         let rpc = wallet.rpc_api();
         Arc::new(Self {
             wallet,
@@ -143,7 +148,40 @@ impl WalletService {
             spent: Mutex::new((utc_day(), 0)),
             started: std::time::Instant::now(),
             say,
+            local_miner,
         })
+    }
+
+    /// Which miner, if any: one this service runs, one inside the terminal
+    /// wallet, or the background miner on this machine, whose node we are on.
+    async fn miner_status(&self) -> Option<(kaspa_rpc_core::RpcMinerStatus, &'static str)> {
+        if let Some(host) = &self.miner {
+            return Some((host.status(), "here"));
+        }
+        if let Some(local) = &self.local_miner {
+            if let Some(status) = local() {
+                return Some((status, "in the terminal"));
+            }
+        }
+        match self.rpc.get_miner_status().await {
+            Ok(status) if status.available => Some((status, "in the background program")),
+            _ => None,
+        }
+    }
+
+    fn miner_line(status: &kaspa_rpc_core::RpcMinerStatus, where_: &str) -> String {
+        if status.mining {
+            format!(
+                "Miner ({where_}): {} on {} threads ({}%), {} blocks found, {} accepted",
+                crate::miner::format_hashrate(status.hashrate),
+                status.threads,
+                status.percent,
+                status.blocks_found,
+                status.blocks_accepted
+            )
+        } else {
+            format!("Miner ({where_}): idle")
+        }
     }
 
     pub fn say(&self, line: String) {
@@ -288,22 +326,44 @@ impl WalletService {
             Err(_) => lines.push("Network: not reachable".to_string()),
         }
         lines.push(format!("Wallet: {} for {}", if self.wallet.is_connected() { "connected" } else { "not connected" }, crate::cli::humanised_minutes(self.started.elapsed().as_secs() / 60)));
-        match &self.miner {
-            Some(host) => {
-                let s = host.status();
-                if s.mining {
-                    lines.push(format!("Miner: {} on {} threads ({}%), {} blocks found, {} accepted", crate::miner::format_hashrate(s.hashrate), s.threads, s.percent, s.blocks_found, s.blocks_accepted));
-                } else {
-                    lines.push("Miner: idle (/mine start)".to_string());
+        match self.miner_status().await {
+            Some((status, where_)) => {
+                lines.push(Self::miner_line(&status, where_));
+                if status.mining && !status.address.is_empty() {
+                    lines.push(format!("Rewards go to: {}", status.address));
                 }
             }
-            None => lines.push("Miner: none (start the service with --mine <percent>)".to_string()),
+            None => lines.push("Miner: none".to_string()),
         }
         lines.join("\n")
     }
 
     pub async fn mine(&self, what: Option<&str>) -> String {
-        let Some(host) = &self.miner else { return "This service was started without --mine; restart it with --mine <percent> to mine.".to_string() };
+        let Some(host) = &self.miner else {
+            // Not ours to run: the background miner takes start and stop
+            // over RPC; one inside the terminal is the terminal's.
+            let remote = matches!(self.rpc.get_miner_status().await, Ok(s) if s.available);
+            if remote {
+                return match what {
+                    Some("start") => match self.rpc.control_miner(true, None).await {
+                        Ok(s) => format!("Mining in the background program: {} threads ({}%).", s.threads, s.percent),
+                        Err(e) => format!("Could not start: {e}"),
+                    },
+                    Some("stop") => match self.rpc.control_miner(false, None).await {
+                        Ok(_) => "The background miner is idle now.".to_string(),
+                        Err(e) => format!("Could not stop: {e}"),
+                    },
+                    _ => match self.miner_status().await {
+                        Some((s, w)) => Self::miner_line(&s, w),
+                        None => "Miner: none".to_string(),
+                    },
+                };
+            }
+            return match self.miner_status().await {
+                Some((s, w)) => format!("{}\nStart and stop it from the terminal.", Self::miner_line(&s, w)),
+                None => "No miner runs with this wallet. In the terminal, 'mine start'; or 'marigold-cli mine-to' as a service.".to_string(),
+            };
+        };
         match what {
             Some("start") => match host.start(host.miner().map(|m| m.percent()).unwrap_or(50)) {
                 Ok(s) => format!("Mining: {} threads ({}% of the machine).", s.threads, s.percent),
@@ -430,6 +490,7 @@ pub async fn serve(args: Vec<String>) -> Result<()> {
         &options.wallet,
         miner_host.clone().filter(|h| h.address_bound()),
         Arc::new(|line: String| log::info!("{line}")),
+        None,
     );
 
     match telegram {

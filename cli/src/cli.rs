@@ -424,7 +424,25 @@ impl KaspaCli {
         let Ok(network_id) = self.wallet.network_id() else { return };
         let this = self.clone();
         let say: crate::serve::Say = Arc::new(move |line: String| tprintln!(this, "{}", style(line).dim()));
-        let service = crate::serve::WalletService::new(self.wallet.clone(), secret, network_id, &folder, &descriptor.filename, None, say);
+        // A miner started in this terminal, for the bot's /status and /mine.
+        let this = self.clone();
+        let local_miner: crate::serve::LocalMiner = Arc::new(move || {
+            let miner = this.cpu_miner.lock().unwrap().clone()?;
+            Some(kaspa_rpc_core::RpcMinerStatus {
+                available: true,
+                mining: miner.is_running(),
+                percent: miner.percent(),
+                threads: miner.thread_count() as u32,
+                cores: crate::miner::cores() as u32,
+                hashrate: miner.hashrate(),
+                blocks_found: miner.blocks_found(),
+                blocks_accepted: miner.blocks_accepted(),
+                blocks_rejected: miner.blocks_rejected(),
+                address: String::new(),
+                uptime_seconds: miner.uptime().as_secs(),
+            })
+        });
+        let service = crate::serve::WalletService::new(self.wallet.clone(), secret, network_id, &folder, &descriptor.filename, None, say, Some(local_miner));
         let handle = tokio::spawn(crate::telegram::run_bot(service, path, cfg));
         self.telegram_bot.lock().unwrap().replace(handle);
         tprintln!(self, "{}", style("Answering your Telegram bot while this wallet is open.").dim());
