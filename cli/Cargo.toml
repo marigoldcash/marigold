@@ -66,6 +66,9 @@ kaspa-grpc-client.workspace = true
 kaspa-wrpc-client.workspace = true
 # The Telegram Bot API, which takes every method as a GET.
 workflow-http.workspace = true
+# For uploading a QR picture to Telegram (multipart POST). The same reqwest
+# workflow-http already builds, so nothing new is compiled.
+reqwest = { version = "0.12.8", default-features = false, features = ["rustls-tls-webpki-roots", "multipart"] }
 sha2.workspace = true
 nw-sys.workspace = true
 num_cpus.workspace = true

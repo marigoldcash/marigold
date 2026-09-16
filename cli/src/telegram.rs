@@ -119,6 +119,24 @@ async fn delete(token: &str, chat_id: i64, message_id: i64) {
     }
 }
 
+/// The code as a QR picture, under the message that carries it as text.
+/// Telegram takes the file as a multipart upload; a failure is logged and
+/// the text, already sent, stands on its own.
+async fn send_qr(token: &str, chat_id: i64, code: &str, caption: &str) {
+    let Some(png) = crate::qrpng::qr_png(code) else { return };
+    let part = match reqwest::multipart::Part::bytes(png).file_name("code.png").mime_str("image/png") {
+        Ok(part) => part,
+        Err(_) => return,
+    };
+    let form = reqwest::multipart::Form::new().text("chat_id", chat_id.to_string()).text("caption", caption.to_string()).part("photo", part);
+    let url = format!("https://api.telegram.org/bot{token}/sendPhoto");
+    match reqwest::Client::new().post(url).multipart(form).send().await {
+        Ok(resp) if resp.status().is_success() => {}
+        Ok(resp) => log::warn!("telegram: sendPhoto answered {}", resp.status()),
+        Err(e) => log::warn!("telegram: sendPhoto: {e}"),
+    }
+}
+
 async fn send(token: &str, chat_id: i64, html: &str) {
     let params = [("chat_id", chat_id.to_string()), ("text", html.to_string()), ("parse_mode", "HTML".to_string())];
     if let Err(e) = call(token, "sendMessage", &params).await {
@@ -254,6 +272,7 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
                                     ),
                                 )
                                 .await;
+                                send_qr(&token, chat_id, &paid.code, "The same code, to scan").await;
                             }
                             Err(e) => send(&token, chat_id, &format!("Could not pay: {}", html_escape(&e))).await,
                         },
@@ -322,6 +341,7 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
                                 None => "for whatever the payer chooses".to_string(),
                             };
                             send(&token, chat_id, &format!("A request {what}. Give them this code; they type <b>pay</b> and the code. I will say when it is paid.\n\n<code>{}</code>", html_escape(&code))).await;
+                            send_qr(&token, chat_id, &code, "The same request, to scan").await;
                             let (service, token, sent_code) = (service.clone(), token.clone(), code);
                             tokio::spawn(async move {
                                 match service.await_request(&sent_code, Duration::from_secs(3600)).await {

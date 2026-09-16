@@ -18,6 +18,7 @@ mod imports;
 mod matchers;
 #[cfg(feature = "embedded-node")]
 pub mod miner;
+pub mod qrpng;
 pub mod modules;
 mod notifier;
 pub mod result;
