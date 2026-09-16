@@ -45,9 +45,10 @@ ledger and the wallet turns them into notes by itself; `balance` shows the ledge
 does. If it ever says there is too much to tidy on its own, `sweep <amount>` does part of it at
 a time.
 
-YOUR OWN NODE. The wallet can run a Marigold node on this machine, so nobody else sees which
-notes you ask about. `connect` offers it; the first sync takes a while and the wallet says so.
-Until then it can use a public node if you say yes — it never does that unasked.
+THE NETWORK. `connect` syncs a copy of the network on this machine, so nobody else sees which
+notes you ask about. The first sync takes a while and the wallet says so; until it has caught up
+nothing can be seen or paid, so it asks once whether to use a public computer meanwhile — and
+never does that unasked. `connect status` shows progress; `disconnect` stops it.
 
 EVERYTHING ELSE. `help` lists the everyday commands. `advanced on` shows the technical side —
 every command, addresses, and the reason behind an error — and `advanced off` hides it again.

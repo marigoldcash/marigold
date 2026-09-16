@@ -9,7 +9,7 @@ env = dict(os.environ, HOME=home, TERM="xterm-256color")
 c = pexpect.spawn("./target/release/marigold-cli", env=env, encoding="utf-8", timeout=180, dimensions=(44, 120))
 log = open(f"{sp}/wallet_a.log", "w"); c.logfile_read = log
 def step(exp, reply): c.expect_exact(exp); c.send(reply + "\r")
-for e, r in [("$", "advanced on"), ("$", "wallet create alpha"), ("different wallet name", ""), ("Default account title", ""),
+for e, r in [("›", "advanced on"), ("›", "wallet create alpha"), ("different wallet name", ""), ("Default account title", ""),
              ("phishing hint", ""), ("encryption password", "hunter2hunter2"), ("Re-enter", "hunter2hunter2"),
              ("mnemonic passphrase (optional)", ""), ("or press <enter> to generate one", "")]:
     step(e, r)
@@ -26,16 +26,16 @@ ceremonies = c.before.count("recovery words")
 c.send("\r")
 c.expect(r"(marigoldtest:[a-z0-9]{50,})")
 address = c.match.group(1)
-c.expect_exact("›"); c.send("connect\r"); step("[Y/n]", "n")
-c.expect_exact("Public node connected")
+c.expect_exact("›"); c.send("connect public\r")
+c.expect_exact("Public computer connected")
 for p in payloads:
     c.expect_exact("›"); c.send(f"receive {p}\r")
     c.expect_exact("Enter wallet password"); c.send("hunter2hunter2\r")
-    c.expect_exact("$", timeout=180)
+    c.expect_exact("›", timeout=180)
 time.sleep(45)  # let the import rotations confirm before the backup is judged against the chain
-c.send("note verify\r"); c.expect_exact("$", timeout=180)
+c.send("note verify\r"); c.expect_exact("›", timeout=180)
 c.send(f"note vault backup {sp}/backup\r"); c.expect_exact("copied vault files", timeout=60)
-c.expect_exact("›"); c.send("balance\r"); c.expect_exact("$", timeout=60)
+c.expect_exact("›"); c.send("balance\r"); c.expect_exact("›", timeout=60)
 c.send("exit\r"); c.expect(pexpect.EOF, timeout=120)
 json.dump({"words": words, "address": address, "ceremonies_seen": ceremonies}, open(f"{sp}/wallet_a.json", "w"))
 print(json.dumps({"address": address, "words": words.split()[:3] + ["..."], "notes_imported": len(payloads)}))

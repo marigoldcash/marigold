@@ -1,7 +1,7 @@
 use crate::imports::*;
 
 #[derive(Default, Handler)]
-#[help("Mine with spare CPU while your own node is running")]
+#[help("Mine with spare CPU, once the network is synced on this machine")]
 pub struct Mine;
 
 impl Mine {

@@ -67,9 +67,8 @@ def command(c, line, timeout=240):
 
 
 def connect(c):
-    c.send("connect\r")
-    step(c, "[Y/n]", "n")
-    c.expect_exact("Public node connected")
+    c.send("connect public\r")
+    c.expect_exact("Public computer connected")
     c.expect_exact("›")
 
 
@@ -77,7 +76,7 @@ def create_notes_only(c, name, words=None):
     # The ceremony (the words this driver hands from one wallet to the next)
     # only runs with advanced on.
     run(c, "advanced on")
-    for e, r in [("$", f"wallet create {name}"), ("different wallet name", ""), ("Keep a ledger account too?", "n"),
+    for e, r in [("›", f"wallet create {name}"), ("different wallet name", ""), ("Keep a ledger account too?", "n"),
                  ("phishing hint", ""), ("encryption password", PW), ("Re-enter", PW)]:
         step(c, e, r)
     step(c, "or press <enter> to generate one", words or "")
@@ -111,7 +110,7 @@ verdict["balance_has_no_ledger_row"] = "ledger" not in b0
 
 # --- 2. the payer ------------------------------------------------------------
 payer = spawn(payer_home, "payer")
-which = payer.expect_exact(["Enter wallet password", "$"])
+which = payer.expect_exact(["Enter wallet password", "›"])
 if which == 1:
     # A remembered wallet may still ask on its own a moment after the prompt.
     if payer.expect_exact(["Enter wallet password", pexpect.TIMEOUT], timeout=4) == 1:
@@ -122,17 +121,16 @@ payer.send(PW + "\r")
 # node, answered as the P8.0 driver did). Take whichever comes, until the prompt.
 connected = False
 while True:
-    i = payer.expect_exact(["Connect now? [Y/n]", "[Y/n]: ", "Public node connected", "$"], timeout=240)
+    i = payer.expect_exact(["Connect now? [Y/n]", "Public computer connected", "›"], timeout=240)
     if i == 0:
-        payer.send("y\r")
-    elif i == 1:
+        # No: a yes would start syncing the network on this machine. The
+        # driver connects to a public computer explicitly instead.
         payer.send("n\r")
-    elif i == 2:
+    elif i == 1:
         connected = True
-        payer.expect(r"\[[0-9a-f]{8}\]", timeout=120)  # the prompt carries the account id once it is active
     else:
         break
-if not connected and "Public node connected" not in transcript(payer):
+if not connected and "Public computer connected" not in transcript(payer):
     connect(payer)
 payer_address = re.search(r"(marigoldtest:[a-z0-9]{50,})", run(payer, "address")).group(1)
 run(payer, "balance", timeout=120)
@@ -200,7 +198,7 @@ step(again, "Enter wallet password", PW)
 again.expect(r"recovered (\d+) live note\(s\); (\d+) stale; (\d+) corrupted", timeout=300)
 live, stale, corrupted = map(int, again.match.groups())
 verdict["restore"] = {"live": live, "stale": stale, "corrupted": corrupted}
-again.expect_exact("$", timeout=300)
+again.expect_exact("›", timeout=300)
 verdict["again_list_shows_no_account"] = "No accounts yet" in run(again, "list")
 verdict["again_never_printed_a_ledger_address"] = "marigoldtest:" not in transcript(again)
 again.send("exit\r"); again.expect(pexpect.EOF, timeout=120)

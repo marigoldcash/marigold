@@ -1,4 +1,6 @@
 use crate::imports::*;
+#[cfg(feature = "embedded-node")]
+use kaspa_wallet_core::rpc::Rpc;
 
 #[derive(Default, Handler)]
 #[help("Connect to a Marigold network")]
@@ -18,11 +20,40 @@ impl Connect {
         // path: connect to a public node, start your own, hand over when it is
         // ready. Only the question is skipped.
         let mut argv = argv;
+
+        // 'connect' is the network, all of it (founder, 2026-09-16): the
+        // copy of it this wallet keeps on this machine, its progress, and
+        // — only when asked — a public computer to use meanwhile. There is
+        // no 'node' to think about.
+        #[cfg(feature = "embedded-node")]
+        match argv.first().map(|s| s.as_str()) {
+            Some("status") => {
+                crate::modules::node::Node::default().status(&ctx).await;
+                return Ok(());
+            }
+            Some("details") => {
+                crate::modules::node::Node::default().details(&ctx).await;
+                return Ok(());
+            }
+            Some("logs") => {
+                let on = !matches!(argv.get(1).map(|s| s.as_str()), Some("off"));
+                crate::embedded::set_logs_wanted(on);
+                tprintln!(ctx, "Sync logs are {}.", if on { "on — 'connect logs off' to silence them" } else { "off" });
+                return Ok(());
+            }
+            // Already syncing (or in sync): 'connect' alone is a status report.
+            None if ctx.embedded_node_running() => {
+                crate::modules::node::Node::default().status(&ctx).await;
+                return Ok(());
+            }
+            _ => {}
+        }
+
         let want_local = matches!(argv.first().map(|s| s.as_str()), Some("local") | Some("mine") | Some("own"));
         if want_local {
             argv.remove(0);
             if !cfg!(feature = "embedded-node") {
-                tprintln!(ctx, "This build has no node in it. 'connect <host>:port' reaches one elsewhere.");
+                tprintln!(ctx, "This build cannot sync the network itself. 'connect <host>:port' reaches a computer that does.");
                 return Ok(());
             }
         }
@@ -30,53 +61,87 @@ impl Connect {
         if let Some(wrpc_client) = ctx.wallet().try_wrpc_client().as_ref() {
             let network_id = ctx.wallet().network_id()?;
 
-            // A cleared setting is stored as an empty string; treat it as absent,
-            // or `connect` would try to dial "" instead of a public node.
+            // A cleared setting is stored as an empty string; treat it as absent.
+            // A remembered "public", or a remembered address on this machine,
+            // is not a target either: bare 'connect' means the network here.
             let typed_a_target = argv.first().is_some();
-            let arg_or_server_address = argv
-                .first()
-                .cloned()
-                .or_else(|| ctx.wallet().settings().get::<String>(WalletSettings::Server).filter(|s| !s.trim().is_empty()));
+            let arg_or_server_address = argv.first().cloned().or_else(|| {
+                ctx.wallet()
+                    .settings()
+                    .get::<String>(WalletSettings::Server)
+                    .filter(|s| !s.trim().is_empty() && s != "public" && !is_local_target(s))
+            });
+
+            // Bare 'connect' with the network compiled in: start syncing here.
+            #[cfg(feature = "embedded-node")]
+            if arg_or_server_address.is_none() {
+                let public = kaspa_wrpc_client::resolver::public_nodes(network_id)
+                    .into_iter()
+                    .next()
+                    .and_then(|node| wrpc_client.parse_url_with_network_type(node, network_id.into()).ok());
+                match start_network_sync(&ctx, public.is_some()).await? {
+                    SyncStart::Settled => return Ok(()),
+                    SyncStart::PublicMeanwhile(rpc) => {
+                        let target = public.expect("offered only when there is one");
+                        let dial = ConnectOptions { block_async_connect: true, strategy: ConnectStrategy::Fallback, url: Some(target), ..Default::default() };
+                        if let Err(err) = wrpc_client.connect(Some(dial)).await {
+                            tprintln!(ctx, "{}", style("Could not reach the public computer.").yellow());
+                            if ctx.advanced() {
+                                tprintln!(ctx, "{}", style(format!("({err})")).dim());
+                            }
+                            tprintln!(ctx, "Using your own copy while it catches up — 'connect status' shows progress.");
+                            ctx.adopt_embedded_node(rpc).await?;
+                            return Ok(());
+                        }
+                        ctx.start_node_handover_task(rpc);
+                        for _ in 0..40 {
+                            if ctx.wallet().is_connected() {
+                                break;
+                            }
+                            workflow_core::task::sleep(std::time::Duration::from_millis(250)).await;
+                        }
+                        tprintln!(ctx, "Public computer connected. Your own sync takes over once it has caught up.");
+                        ctx.print_next_step().await;
+                        if ctx.wallet().is_open() {
+                            ctx.request_open_housekeeping();
+                        }
+                        return Ok(());
+                    }
+                }
+            }
+
             let (mut is_public, url) = match arg_or_server_address.as_deref() {
-                // No public nodes exist for Marigold yet, so say that rather
+                // No public computers exist for Marigold yet, so say that rather
                 // than fail against an empty list — and certainly rather than
                 // reach for Kaspa's public node network, which this fork used
                 // to inherit wholesale. Marigold's testnet-10 answers to the
                 // same network-id string as Kaspa's, so being handed one of
                 // their nodes would attach the wallet to a different chain.
-                // A node we run, offered directly. Not a resolver: Marigold
-                // has none deployed and at this scale needs none — the list is
-                // shuffled, which load-balances well enough across a handful.
                 Some("public") | None
                     if !kaspa_wrpc_client::resolver::public_nodes(network_id).is_empty() =>
                 {
                     let node = kaspa_wrpc_client::resolver::public_nodes(network_id).remove(0);
-                    // Name the network here. Until launch every build is a
-                    // testnet build, and someone who has read about Marigold
-                    // elsewhere should not have to wonder whether the coins
-                    // they are about to hold are the real ones.
                     let which = if network_id.is_mainnet() { "" } else { " test" };
-                    tprintln!(ctx, "Connecting to a public Marigold{which} node.");
+                    tprintln!(ctx, "Connecting to a public Marigold{which} computer.");
                     (true, wrpc_client.parse_url_with_network_type(node, network_id.into()).map_err(|e| e.to_string())?)
                 }
                 Some("public") | None if !Resolver::default().is_configured() => {
                     tprintln!(ctx, "");
-                    tprintln!(ctx, "Marigold has no public nodes yet — there is nowhere to connect you automatically.");
+                    tprintln!(ctx, "Marigold has no public computers yet — there is nowhere to connect you automatically.");
                     tprintln!(ctx, "");
-                    tprintln!(ctx, "Connect to a node by address:");
-                    tprintln!(ctx, "  connect 127.0.0.1:27210      a node running on this machine");
-                    tprintln!(ctx, "  connect <host>:27210         someone else's node");
+                    tprintln!(ctx, "Connect to one by address:");
+                    tprintln!(ctx, "  connect <host>:27210         someone else's copy of the network");
                     tprintln!(ctx, "");
                     tprintln!(ctx, "{}", style("'server <address>' remembers one, so 'connect' alone works next time.").dim());
                     tprintln!(ctx, "");
                     return Ok(());
                 }
                 Some("public") => {
-                    tprintln!(ctx, "Connecting to a public node");
+                    tprintln!(ctx, "Connecting to a public computer");
                     (true, Resolver::default().get_url(WrpcEncoding::Borsh, network_id).await.map_err(|e| e.to_string())?)
                 }
                 None => {
-                    tprintln!(ctx, "No server set, connecting to a public node");
+                    tprintln!(ctx, "Connecting to a public computer");
                     (true, Resolver::default().get_url(WrpcEncoding::Borsh, network_id).await.map_err(|e| e.to_string())?)
                 }
                 Some(url) => {
@@ -93,72 +158,25 @@ impl Connect {
             };
             let mut outcome = wrpc_client.connect(Some(dial(url))).await;
 
-            // Your own node, not running. The old answer — "check the
-            // address" — was about an address nobody typed: the wallet
-            // remembers the node it last used, and a node inside this
-            // program is not running until this program starts it. So start
-            // it, say it is no use until it has caught up, and ask whether to
-            // use a public node meanwhile. Ask, because whoever runs a public
-            // node sees which notes this wallet asks about, and that is not a
-            // choice to make on someone's behalf (founder, 2026-09-15).
+            // An address on this machine that is not answering: the network
+            // is not being synced here yet, so start it — same flow as bare
+            // 'connect'.
             #[cfg(feature = "embedded-node")]
             let mut own_node_started = false;
             #[cfg(feature = "embedded-node")]
             if outcome.is_err() && is_local_target(&url_label) && !ctx.embedded_node_running() {
-                tprintln!(ctx, "");
-                tprintln!(ctx, "Your own node is not running. Starting it.");
-                match ctx.spawn_embedded_node().await {
-                    Err(err) => {
-                        tprintln!(ctx, "{}", style(format!("Your node could not start: {err}")).yellow());
-                        tprintln!(ctx, "'connect public' uses a public node instead.");
-                        tprintln!(ctx, "");
-                        return Ok(());
-                    }
-                    Ok(None) => {}
-                    Ok(Some(rpc)) => {
-                        if KaspaCli::node_is_synced(&rpc).await {
-                            ctx.adopt_embedded_node(rpc).await?;
-                            tprintln!(ctx, "{}", style("Your node is caught up. Using it — nobody else sees your notes.").green());
-                            tprintln!(ctx, "");
-                            ctx.print_next_step().await;
-                            if ctx.wallet().is_open() {
-                                ctx.request_open_housekeeping();
-                            }
-                            return Ok(());
-                        }
-                        ctx.announce_sync_started();
-                        tprintln!(ctx, "Until it has caught up, your node cannot tell you what is on the ledger.");
-                        tprintln!(ctx, "{}", style("A public node can, but whoever runs it sees which notes your wallet asks about.").dim());
-                        let answer =
-                            ctx.term().ask(false, "Use a public node while your node is loading? [y/N]: ").await?.trim().to_lowercase();
-                        tprintln!(ctx, "");
-                        let public = kaspa_wrpc_client::resolver::public_nodes(network_id)
-                            .into_iter()
-                            .next()
-                            .and_then(|node| wrpc_client.parse_url_with_network_type(node, network_id.into()).ok());
-                        match (answer.starts_with('y'), public) {
-                            (true, Some(target)) => {
-                                tprintln!(ctx, "Connecting to a public node until your own is ready.");
-                                outcome = wrpc_client.connect(Some(dial(target))).await;
-                                is_public = true;
-                                own_node_started = true;
-                                ctx.start_node_handover_task(rpc);
-                            }
-                            (true, None) => {
-                                tprintln!(ctx, "There is no public node to use. Using your own while it catches up.");
-                                ctx.adopt_embedded_node(rpc).await?;
-                                ctx.print_next_step().await;
-                                return Ok(());
-                            }
-                            (false, _) => {
-                                ctx.adopt_embedded_node(rpc).await?;
-                                tprintln!(ctx, "Using your own node. What it shows of the ledger is incomplete until it has");
-                                tprintln!(ctx, "caught up — 'node status' shows progress.");
-                                tprintln!(ctx, "");
-                                ctx.print_next_step().await;
-                                return Ok(());
-                            }
-                        }
+                let public = kaspa_wrpc_client::resolver::public_nodes(network_id)
+                    .into_iter()
+                    .next()
+                    .and_then(|node| wrpc_client.parse_url_with_network_type(node, network_id.into()).ok());
+                match start_network_sync(&ctx, public.is_some()).await? {
+                    SyncStart::Settled => return Ok(()),
+                    SyncStart::PublicMeanwhile(rpc) => {
+                        let target = public.expect("offered only when there is one");
+                        outcome = wrpc_client.connect(Some(dial(target))).await;
+                        is_public = true;
+                        own_node_started = true;
+                        ctx.start_node_handover_task(rpc);
                     }
                 }
             }
@@ -173,7 +191,7 @@ impl Connect {
                 if let Some(node) = public.into_iter().next() {
                     tprintln!(ctx, "");
                     tprintln!(ctx, "{}", style(format!("{url_label} is not answering.")).yellow());
-                    tprintln!(ctx, "Using a public node for now, and starting your own behind it.");
+                    tprintln!(ctx, "Using a public computer for now, and starting your own sync behind it.");
                     tprintln!(ctx, "");
                     if let Ok(target) = wrpc_client.parse_url_with_network_type(node, network_id.into()) {
                         outcome = wrpc_client.connect(Some(dial(target))).await;
@@ -188,17 +206,17 @@ impl Connect {
             if let Err(err) = outcome {
                 tprintln!(ctx, "");
                 if is_public {
-                    tprintln!(ctx, "{}", style("Could not reach the public node.").yellow());
+                    tprintln!(ctx, "{}", style("Could not reach the public computer.").yellow());
                     tprintln!(ctx, "It may be down, or this machine may be offline. Nothing is wrong with your");
                     tprintln!(ctx, "wallet — your notes are on this disk and are not going anywhere.");
                     tprintln!(ctx, "");
                     tprintln!(ctx, "  'connect'       try again");
                     if cfg!(feature = "embedded-node") && !want_local {
-                        tprintln!(ctx, "  'connect local' run your own node instead, which needs nobody else");
+                        tprintln!(ctx, "  'connect local' sync the network here instead, which needs nobody else");
                     }
                 } else {
                     tprintln!(ctx, "{}", style(format!("Could not reach {}.", url_label)).yellow());
-                    tprintln!(ctx, "Check the address, or 'connect' to use a public node instead.");
+                    tprintln!(ctx, "Check the address, or 'connect public' to use a public computer instead.");
                 }
                 tprintln!(ctx, "");
                 // The technical reason, for whoever wants it, last and dimmed.
@@ -212,7 +230,7 @@ impl Connect {
                 if want_local {
                     // They asked for their own node. Not reaching somebody
                     // else's is no reason not to start it.
-                    tprintln!(ctx, "Starting your own node anyway.");
+                    tprintln!(ctx, "Starting the sync here anyway.");
                     ctx.start_local_node_now().await?;
                 }
                 return Ok(());
@@ -235,17 +253,19 @@ impl Connect {
             // Offered after the connection lands, not before: until it does,
             // "run your own instead" is a question about a thing that might
             // not have worked.
+            // 'connect public' was a choice; it is not followed by the question
+            // about syncing here — 'connect' alone does that.
             #[cfg(feature = "embedded-node")]
             if own_node_started {
-                tprintln!(ctx, "Public node connected. Your own takes over once it has caught up.");
+                tprintln!(ctx, "Public computer connected. Your own sync takes over once it has caught up.");
             } else if want_local || fell_back {
                 ctx.start_local_node_now().await?;
             } else if is_public {
-                ctx.offer_local_node().await?;
+                tprintln!(ctx, "Public computer connected.");
             }
             #[cfg(not(feature = "embedded-node"))]
             if is_public {
-                tprintln!(ctx, "Public node connected.");
+                tprintln!(ctx, "Public computer connected.");
             }
             ctx.print_next_step().await;
 
@@ -284,15 +304,78 @@ impl Connect {
                 }
             }
         } else {
-            terrorln!(ctx, "Unable to connect with non-wRPC client");
+            tprintln!(ctx, "This wallet cannot connect from here.");
         }
         Ok(())
     }
 }
 
-/// A node on this machine: the one this program can start.
-#[cfg(feature = "embedded-node")]
-fn is_local_target(url: &str) -> bool {
+/// An address on this machine: the network sync this program runs itself.
+pub(crate) fn is_local_target(url: &str) -> bool {
     let url = url.to_ascii_lowercase();
     ["localhost", "127.0.0.1", "[::1]", "0.0.0.0"].iter().any(|host| url.contains(host))
+}
+
+#[cfg(feature = "embedded-node")]
+enum SyncStart {
+    /// Everything is settled here: in sync already, or staying on our own
+    /// copy while it catches up, or nothing could start.
+    Settled,
+    /// The person wants a public computer meanwhile; the caller dials it and
+    /// hands over to this sync once it has caught up.
+    PublicMeanwhile(Rpc),
+}
+
+/// Start syncing the network on this machine and say what that means.
+///
+/// The words are the founder's (2026-09-16): no node, just the network and
+/// the sync of it. A sync that has not caught up can neither show the
+/// ledger nor move notes, so the one question asked is whether to use a
+/// public computer meanwhile — asked, never assumed, because whoever runs
+/// it sees which notes this wallet asks about.
+#[cfg(feature = "embedded-node")]
+async fn start_network_sync(ctx: &Arc<KaspaCli>, public_available: bool) -> Result<SyncStart> {
+    tprintln!(ctx, "");
+    tprintln!(ctx, "Starting sync with the network...");
+    let rpc = match ctx.spawn_embedded_node().await {
+        Err(err) => {
+            tprintln!(ctx, "{}", style(format!("Sync could not start: {err}")).yellow());
+            tprintln!(ctx, "'connect public' uses a public computer instead.");
+            tprintln!(ctx, "");
+            return Ok(SyncStart::Settled);
+        }
+        Ok(None) => return Ok(SyncStart::Settled),
+        Ok(Some(rpc)) => rpc,
+    };
+    if KaspaCli::node_is_synced(&rpc).await {
+        ctx.adopt_embedded_node(rpc).await?;
+        tprintln!(ctx, "{}", style("In sync with the network. Nobody else sees your notes.").green());
+        tprintln!(ctx, "");
+        ctx.print_next_step().await;
+        if ctx.wallet().is_open() {
+            ctx.request_open_housekeeping();
+        }
+        return Ok(SyncStart::Settled);
+    }
+    ctx.announce_sync_started();
+    tprintln!(ctx, "Until sync has caught up, we can't tell what is on the ledger — and notes can't be");
+    tprintln!(ctx, "paid or received either.");
+    tprintln!(ctx, "{}", style("We could connect to a public computer that has all the data already, but whoever").dim());
+    tprintln!(ctx, "{}", style("runs it sees which notes your wallet asks about.").dim());
+    let answer = ctx.term().ask(false, "Use a public computer until sync has caught up? [y/N]: ").await?.trim().to_lowercase();
+    tprintln!(ctx, "");
+    if answer.starts_with('y') {
+        if public_available {
+            tprintln!(ctx, "Connecting to a public computer until your own sync has caught up.");
+            return Ok(SyncStart::PublicMeanwhile(rpc));
+        }
+        tprintln!(ctx, "There is no public computer to use. Staying on your own copy while it catches up.");
+    } else {
+        tprintln!(ctx, "Staying on your own. Nothing can be seen or paid until sync has caught up —");
+        tprintln!(ctx, "'connect status' shows progress.");
+    }
+    ctx.adopt_embedded_node(rpc).await?;
+    tprintln!(ctx, "");
+    ctx.print_next_step().await;
+    Ok(SyncStart::Settled)
 }

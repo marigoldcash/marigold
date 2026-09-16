@@ -1,41 +1,17 @@
 use crate::imports::*;
 
 #[derive(Default, Handler)]
-#[help("Run a node inside this wallet, or see which node you are using")]
+#[help("The old name: 'connect' starts the network sync, 'connect status' shows it, 'disconnect' stops it")]
 pub struct Node;
 
 impl Node {
-    async fn main(self: Arc<Self>, ctx: &Arc<dyn Context>, argv: Vec<String>, _cmd: &str) -> Result<()> {
+    async fn main(self: Arc<Self>, ctx: &Arc<dyn Context>, _argv: Vec<String>, _cmd: &str) -> Result<()> {
         let ctx = ctx.clone().downcast_arc::<KaspaCli>()?;
-        match argv.first().map(|s| s.as_str()) {
-            // Handover, not a straight bind: if the wallet is already talking
-            // to a node that can answer, there is no reason to swap it for one
-            // that cannot yet. You still end up on your own node.
-            Some("start") => ctx.start_node_with_handover().await,
-            Some("stop") => ctx.stop_embedded_node().await,
-            Some("logs") => {
-                // The node's own logging is clamped to warnings so it does not
-                // scroll a wallet's terminal once a second. That also made a
-                // node that would not sync completely undiagnosable, so it can
-                // be turned back on.
-                let on = !matches!(argv.get(1).map(|s| s.as_str()), Some("off"));
-                crate::embedded::set_logs_wanted(on);
-                tprintln!(ctx, "Node logs are {}.", if on { "on — 'node logs off' to silence them" } else { "off" });
-                Ok(())
-            }
-            Some("status") | None => {
-                self.status(&ctx).await;
-                Ok(())
-            }
-            Some("details") => {
-                self.details(&ctx).await;
-                Ok(())
-            }
-            Some(other) => {
-                tprintln!(ctx, "usage: 'node start' | 'node stop' | 'node status' | 'node details' | 'node logs [off]'  (got '{other}')");
-                Ok(())
-            }
-        }
+        // There is no node to think about any more (founder, 2026-09-16):
+        // 'connect' is the network. The old verb only says where things went.
+        tprintln!(ctx, "'node' is now part of 'connect': 'connect' starts syncing the network here, 'connect status'");
+        tprintln!(ctx, "shows progress, 'connect logs' shows what it is doing, and 'disconnect' stops it.\r\n");
+        Ok(())
     }
 
     /// How far our own node has got, as a step out of three and a percentage.
@@ -93,15 +69,15 @@ impl Node {
     /// is behind 'node details', because block counts and DAA scores change
     /// nobody's next move and reading them is a skill this wallet should not
     /// require.
-    async fn status(&self, ctx: &Arc<KaspaCli>) {
+    pub(crate) async fn status(&self, ctx: &Arc<KaspaCli>) {
         let mine = ctx.embedded_node_in_use();
         let pending = ctx.embedded_node_pending();
         let connected = ctx.wallet().is_connected();
 
         tprintln!(ctx, "");
         if mine {
-            tprintln!(ctx, "Using: {}", style("your own wallet node, all in sync with the network.").bold());
-            tprintln!(ctx, "Your wallet notes are not announced to a public node.");
+            tprintln!(ctx, "Using: {}", style("your own copy of the network, all in sync.").bold());
+            tprintln!(ctx, "Your wallet notes are not announced to anyone.");
             tprintln!(ctx, "");
             return;
         }
@@ -111,13 +87,13 @@ impl Node {
             // refused us, in which case there is no ledger connection at all
             // until our own node is ready.
             if connected {
-                tprintln!(ctx, "Using: {} Syncing local node, {}.", style("public node.").bold(), Self::sync_step(ctx));
-                tprintln!(ctx, "Your wallet notes are still being announced through a public node until the");
-                tprintln!(ctx, "sync is complete.");
+                tprintln!(ctx, "Using: {} Your own sync: {}.", style("a public computer.").bold(), Self::sync_step(ctx));
+                tprintln!(ctx, "Your wallet notes are announced through a public computer until the sync");
+                tprintln!(ctx, "is complete.");
             } else {
-                tprintln!(ctx, "Using: {} Syncing local node, {}.", style("no node yet.").bold(), Self::sync_step(ctx));
-                tprintln!(ctx, "Your notes are safe on this disk, but the ledger cannot be read until your");
-                tprintln!(ctx, "node has caught up. Nothing is being announced to anyone in the meantime.");
+                tprintln!(ctx, "Using: {} Your own sync: {}.", style("nothing yet.").bold(), Self::sync_step(ctx));
+                tprintln!(ctx, "Your notes are safe on this disk, but nothing can be seen or paid until the");
+                tprintln!(ctx, "sync has caught up. Nothing is being announced to anyone in the meantime.");
             }
             // The one thing worth interrupting for. A stalled sync looks
             // identical to a working one — the numbers simply stop — and
@@ -126,19 +102,19 @@ impl Node {
             if let Some(stalled) = Self::stalled_for(ctx) {
                 tprintln!(ctx, "");
                 tprintln!(ctx, "{}", style(format!("It has not moved for {stalled}. That is longer than expected.")).yellow());
-                tprintln!(ctx, "{}", style("Leaving it running usually recovers; 'node logs' shows what it is doing.").dim());
+                tprintln!(ctx, "{}", style("Leaving it running usually recovers; 'connect logs' shows what it is doing.").dim());
             }
             tprintln!(ctx, "");
             return;
         }
         if connected {
-            tprintln!(ctx, "Using: {}", style("a public node.").bold());
+            tprintln!(ctx, "Using: {}", style("a public computer.").bold());
             tprintln!(ctx, "Whoever runs it can see which notes your wallet asks about.");
-            tprintln!(ctx, "Type 'node start' to run your own instead.");
+            tprintln!(ctx, "Type 'connect' to sync the network here instead.");
             tprintln!(ctx, "");
             return;
         }
-        tprintln!(ctx, "Not connected to any node.");
+        tprintln!(ctx, "Not connected to the network.");
         tprintln!(ctx, "");
         tprintln!(ctx, "Type 'connect' to get started.");
         tprintln!(ctx, "");
@@ -146,24 +122,24 @@ impl Node {
 
     /// The node's own figures. Kept out of 'node status' on purpose — see
     /// there — but a node that will not sync cannot be diagnosed without them.
-    async fn details(&self, ctx: &Arc<KaspaCli>) {
+    pub(crate) async fn details(&self, ctx: &Arc<KaspaCli>) {
         tprintln!(ctx, "");
         let connected = ctx.wallet().is_connected();
         if !connected && !ctx.embedded_node_running() {
-            tprintln!(ctx, "Not connected to any node, and no node of your own is running.");
+            tprintln!(ctx, "Not connected to the network, and no sync of your own is running.");
             tprintln!(ctx, "");
             return;
         }
         if connected {
             let synced = ctx.wallet().utxo_processor().is_synced();
-            tprintln!(ctx, "Node reports: {}", if synced { "caught up" } else { "not caught up" });
+            tprintln!(ctx, "Reports:      {}", if synced { "caught up" } else { "not caught up" });
         } else {
             // The interesting case: our own node is running and is the only
             // thing there is to report on.
-            tprintln!(ctx, "Wallet:       not connected to any node yet");
+            tprintln!(ctx, "Wallet:       not connected to anything yet");
         }
         if ctx.embedded_node_running() {
-            tprintln!(ctx, "Your node:    {}", Self::sync_step(ctx));
+            tprintln!(ctx, "Your sync:    {}", Self::sync_step(ctx));
             tprintln!(ctx, "Adopted:      {}", if ctx.embedded_node_in_use() { "yes" } else { "not yet" });
             // The raw figures behind the step-of-three. 'node status' does not
             // carry them because they answer nothing anyone asks; here they are
@@ -192,7 +168,7 @@ impl Node {
             tprintln!(
                 ctx,
                 "{}",
-                style(format!("Hidden:       {suppressed} node warnings — 'node logs' shows them as they arrive")).dim()
+                style(format!("Hidden:       {suppressed} sync warnings — 'connect logs' shows them as they arrive")).dim()
             );
         }
         if !connected {
@@ -213,7 +189,7 @@ impl Node {
                     .dim()
                 );
             }
-            Err(err) => tprintln!(ctx, "{}", style(format!("(could not read the node's figures: {err})")).dim()),
+            Err(err) => tprintln!(ctx, "{}", style(format!("(could not read the figures: {err})")).dim()),
         }
         tprintln!(ctx, "");
     }

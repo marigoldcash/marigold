@@ -232,7 +232,7 @@ impl Wallet {
                         .as_ref()
                         .and_then(|m| m.server.clone())
                         .or_else(|| ctx.wallet().settings().get::<String>(WalletSettings::Server))
-                        .filter(|server| server != "public");
+                        .filter(|server| server != "public" && !crate::modules::connect::is_local_target(server));
                     tprintln!(ctx, "");
                     let answer = ctx.term().ask(false, "Connect now? [Y/n]: ").await?.trim().to_lowercase();
                     if answer.starts_with('n') {

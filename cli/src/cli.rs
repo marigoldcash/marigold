@@ -455,7 +455,7 @@ impl KaspaCli {
             return Ok(());
         };
         self.adopt_embedded_node(rpc).await?;
-        tprintln!(self, "Your node is running. It will catch up with the network in the background.");
+        tprintln!(self, "The network sync is running. It will catch up in the background.");
         Ok(())
     }
 
@@ -501,7 +501,7 @@ impl KaspaCli {
     #[cfg(feature = "embedded-node")]
     pub async fn spawn_embedded_node(self: &Arc<Self>) -> Result<Option<Rpc>> {
         if self.embedded_node.lock().unwrap().is_some() {
-            tprintln!(self, "Your node is already running.");
+            tprintln!(self, "The sync is already running here.");
             return Ok(None);
         }
         let network_id = self.wallet.network_id()?;
@@ -613,19 +613,19 @@ impl KaspaCli {
             Ok(Some(rpc)) => rpc,
             Ok(None) => return Ok(()),
             Err(err) => {
-                tprintln!(self, "{}", style(format!("Your node could not start: {err}")).yellow());
+                tprintln!(self, "{}", style(format!("Sync could not start: {err}")).yellow());
                 // Same reconnect trap as the success path below: a caller that
                 // has just connected reads is_connected() as false, and
                 // reconnecting here asked the "run your own node?" question a
                 // second time and dropped the socket that was already open.
                 if !ensure_connection || self.wallet.is_connected() {
-                    tprintln!(self, "The wallet is using a public node instead.");
-                    tprintln!(self, "{}", style("Whoever runs it sees which notes your wallet asks about. 'node start'").dim());
-                    tprintln!(self, "{}", style("tries yours again once the problem above is dealt with.").dim());
+                    tprintln!(self, "The wallet is using a public computer instead.");
+                    tprintln!(self, "{}", style("Whoever runs it sees which notes your wallet asks about. 'connect' tries").dim());
+                    tprintln!(self, "{}", style("the sync here again once the problem above is dealt with.").dim());
                 } else {
-                    tprintln!(self, "Using a public node instead, so the wallet works meanwhile.");
-                    tprintln!(self, "{}", style("Whoever runs it sees which notes your wallet asks about. 'node start'").dim());
-                    tprintln!(self, "{}", style("tries yours again once the problem above is dealt with.").dim());
+                    tprintln!(self, "Using a public computer instead, so the wallet works meanwhile.");
+                    tprintln!(self, "{}", style("Whoever runs it sees which notes your wallet asks about. 'connect' tries").dim());
+                    tprintln!(self, "{}", style("the sync here again once the problem above is dealt with.").dim());
                     self.exec_within("connect public").await?;
                 }
                 tprintln!(self, "");
@@ -637,7 +637,7 @@ impl KaspaCli {
         // needs no public node at all.
         if Self::node_is_synced(&rpc).await {
             self.adopt_embedded_node(rpc).await?;
-            tprintln!(self, "{}", style("Your node is caught up. Using it — nobody else sees your notes.").green());
+            tprintln!(self, "{}", style("In sync with the network. Nobody else sees your notes.").green());
             tprintln!(self, "");
             tprintln!(self, "You can mine with spare CPU — 'mine start'.");
             tprintln!(self, "");
@@ -648,7 +648,7 @@ impl KaspaCli {
             if let Err(err) = self.exec_within("connect public").await {
                 // No public node either: bind to our own anyway. An incomplete
                 // view beats none, and 'node status' explains what it is.
-                tprintln!(self, "Could not reach a public node ({err}) — using your own while it catches up.");
+                tprintln!(self, "Could not reach a public computer ({err}) — using your own copy while it catches up.");
                 self.adopt_embedded_node(rpc.clone()).await?;
             }
         }
@@ -667,10 +667,10 @@ impl KaspaCli {
     #[cfg(feature = "embedded-node")]
     pub fn announce_sync_started(self: &Arc<Self>) {
         tprintln!(self, "");
-        tprintln!(self, "{}", style("Local node sync started!").green());
+        tprintln!(self, "{}", style("Network sync started!").green());
         tprintln!(self, "A first sync takes anywhere from half an hour to a few hours. Leaving the");
         tprintln!(self, "wallet before it finishes discards it — after that, restarts are free.");
-        tprintln!(self, "Type 'node status' for progress info.");
+        tprintln!(self, "Type 'connect status' for progress info.");
         tprintln!(self, "");
     }
 
@@ -691,31 +691,6 @@ impl KaspaCli {
             tprintln!(self, "Type 'wallet create' to create a wallet or 'help' for list of commands.");
         }
         tprintln!(self, "");
-    }
-
-    /// Ask, once per public connection, whether they would rather not be on a
-    /// public node at all.
-    ///
-    /// Asked here because this is the moment it is true: they have just
-    /// connected to a node run by someone else, and that node can see which
-    /// notes their wallet asks after. A "no" is not recorded — the question
-    /// costs one keystroke and the answer may be different on a laptop that is
-    /// staying put than on one about to be closed.
-    #[cfg(feature = "embedded-node")]
-    pub async fn offer_local_node(self: &Arc<Self>) -> Result<()> {
-        if self.embedded_node_running() {
-            return Ok(());
-        }
-        tprintln!(self, "Do you want to run a local node so that your wallet notes stay private?");
-        tprintln!(self, "{}", style("(marigold.cash/faq explains what this choice costs)").dim());
-        let answer = self.term().ask(false, "[Y/n]: ").await?.trim().to_lowercase();
-        if answer.starts_with('n') {
-            tprintln!(self, "");
-            tprintln!(self, "Public node connected.");
-            return Ok(());
-        }
-        // We connected a moment ago; do not let it connect again.
-        self.start_node_with_handover_inner(false).await
     }
 
     /// Start the node without touching the wallet's connection.
@@ -753,7 +728,7 @@ impl KaspaCli {
                 match this.adopt_embedded_node(rpc.clone()).await {
                     Ok(()) => {
                         tprintln!(this, "");
-                        tprintln!(this, "{}", style("Your node has caught up. The wallet is now using it —").green());
+                        tprintln!(this, "{}", style("Your sync has caught up. The wallet is now on its own copy of the network —").green());
                         tprintln!(this, "{}", style("nobody else sees your address or which notes you hold.").green());
                         tprintln!(this, "");
                         // The moment this becomes true is the moment to say
@@ -765,8 +740,8 @@ impl KaspaCli {
                         this.request_open_housekeeping();
                     }
                     Err(err) => {
-                        tprintln!(this, "Your node is ready, but the wallet could not switch to it: {err}");
-                        tprintln!(this, "'node start' moves it across by hand.");
+                        tprintln!(this, "Your sync is ready, but the wallet could not switch to it: {err}");
+                        tprintln!(this, "'connect' moves it across by hand.");
                     }
                 }
                 break;
@@ -793,11 +768,11 @@ impl KaspaCli {
         if !self.embedded_node_in_use() {
             tprintln!(self, "");
             if self.embedded_node_pending() {
-                tprintln!(self, "Your node is still catching up. Mining starts once it is ready —");
-                tprintln!(self, "'node status' shows how far along it is.");
+                tprintln!(self, "The sync is still catching up. Mining starts once it is ready —");
+                tprintln!(self, "'connect status' shows how far along it is.");
             } else {
-                tprintln!(self, "Mining needs your own node. Type 'node start' to run one.");
-                tprintln!(self, "{}", style("Asking a public node for work would tell its operator which address").dim());
+                tprintln!(self, "Mining needs the network synced on this machine. Type 'connect' to start that.");
+                tprintln!(self, "{}", style("Asking a public computer for work would tell its operator which address").dim());
                 tprintln!(self, "{}", style("your coins are paid to, which is the one thing worth not sharing.").dim());
             }
             tprintln!(self, "");
@@ -989,7 +964,7 @@ impl KaspaCli {
                 if self.embedded_node_in_use() {
                     tprintln!(self, "'mine start' begins, using whatever CPU nothing else wants.");
                 } else {
-                    tprintln!(self, "Mining needs your own node — 'node start'.");
+                    tprintln!(self, "Mining needs the network synced on this machine — 'connect'.");
                 }
             }
         }
@@ -1005,15 +980,15 @@ impl KaspaCli {
             Some(node) => {
                 if !self.wallet.utxo_processor().is_synced() {
                     tprintln!(self, "");
-                    tprintln!(self, "{}", style("Note: this node has not finished its first sync, and that progress").yellow());
+                    tprintln!(self, "{}", style("Note: the sync has not finished its first run, and that progress").yellow());
                     tprintln!(self, "{}", style("is discarded — the next start begins again from scratch.").yellow());
                     tprintln!(self, "");
                 }
-                tprintln!(self, "Stopping your node...");
+                tprintln!(self, "Stopping the network sync...");
                 node.stop().await?;
                 tprintln!(self, "Stopped.");
             }
-            None => tprintln!(self, "No node of yours is running."),
+            None => tprintln!(self, "No sync of your own is running."),
         }
         Ok(())
     }
@@ -2005,8 +1980,8 @@ impl KaspaCli {
                                     // No URL means the node is inside this process — there is no
                                     // address to print, and "at N/A" reads like a fault.
                                     match url {
-                                        Some(url) => tprintln!(this, "Connected to Marigold node version {server_version} at {url}"),
-                                        None => tprintln!(this, "Connected to your own Marigold node, version {server_version}"),
+                                        Some(url) => tprintln!(this, "Connected to a public computer, Marigold version {server_version}, at {url}"),
+                                        None => tprintln!(this, "Using your own copy of the network, Marigold version {server_version}"),
                                     }
 
                                     let is_open = this.wallet.is_open();
@@ -2751,6 +2726,7 @@ impl Cli for KaspaCli {
                 ("settings", _) => Some(vec!["set"]),
                 ("track", _) => Some(vec!["balance", "pending", "tx", "utxo", "daa"]),
                 ("network", _) => Some(vec!["mainnet", "testnet-10"]),
+                ("connect", _) => Some(vec!["status", "details", "logs", "public"]),
                 ("node", _) | ("miner", _) => Some(vec!["start", "stop", "restart", "status"]),
                 ("utxos", _) => Some(vec!["all"]),
                 ("auto", _) => Some(vec!["on", "off", "sweep", "verbose"]),
