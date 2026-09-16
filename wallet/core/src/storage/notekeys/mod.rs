@@ -70,6 +70,22 @@ pub enum NoteStatus {
     /// Distinct from [`Self::HandedOver`], which means given away for good, and
     /// from [`Self::Active`], which means free to spend here.
     Mirrored,
+    /// Paid to someone under a lock (POOL-SPEC.md P5.9, FORK-PLAN P8.0g): the
+    /// note is theirs to take until the lock lapses, and this row's key is the
+    /// refund key that takes it back after. Not spendable here meanwhile, not
+    /// counted in the balance, listed as offered with the date it comes back.
+    Offered,
+}
+
+/// A standing receiving key (FORK-PLAN P8.0g): shared once with the people who
+/// pay you, like a phone number, and never seen on-chain — every payment to it
+/// lands on a one-time key derived from it. Derived from the vault key by index,
+/// so the recovery words recover every one of them.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShareKeyInfo {
+    pub index: u32,
+    pub label: String,
+    pub pk: [u8; 32],
 }
 
 /// One row of the note key database (POOL-SPEC.md P5.6's `KeyDbEntry`, flattened to

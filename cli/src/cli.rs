@@ -1628,6 +1628,35 @@ impl KaspaCli {
                 return;
             }
         }
+        // Offered notes (FORK-PLAN P8.0g): once a lock has lapsed, what the
+        // receiver never took comes back under its refund key; what they took
+        // in time is marked paid. Needs the secret the automation holds.
+        let secret_for_offers = self.auto_secret.lock().unwrap().clone();
+        if let Some(secret) = secret_for_offers {
+            match kaspa_wallet_core::account::notepool::reclaim_lapsed(&self.wallet, secret).await {
+                Ok(report) => {
+                    for (_, d) in &report.taken_back {
+                        self.record("returned", kaspa_consensus_core::notepool::DENOMINATION_PETALS[*d as usize], 0, "offer lapsed, taken back", "");
+                    }
+                    for (_, d) in &report.taken_by_receiver {
+                        self.record("paid", kaspa_consensus_core::notepool::DENOMINATION_PETALS[*d as usize], 0, "locked code, taken in time", "");
+                    }
+                    if !report.taken_back.is_empty() {
+                        let back: u64 = report.taken_back.iter().map(|(_, d)| kaspa_consensus_core::notepool::DENOMINATION_PETALS[*d as usize]).sum();
+                        tprintln!(self, "{}", crate::ui::dim(format!("An offer lapsed untaken: {} {ticker} came back to you.", kaspa_wallet_core::utils::sompi_to_kaspa_string(back))));
+                    }
+                    if !report.taken_by_receiver.is_empty() {
+                        let paid: u64 = report.taken_by_receiver.iter().map(|(_, d)| kaspa_consensus_core::notepool::DENOMINATION_PETALS[*d as usize]).sum();
+                        tprintln!(self, "{}", crate::ui::dim(format!("A locked payment of {} {ticker} was taken in time.", kaspa_wallet_core::utils::sompi_to_kaspa_string(paid))));
+                    }
+                }
+                Err(err) => {
+                    if loud {
+                        tprintln!(self, "{}", crate::ui::dim(format!("(offers not checked: {err})")));
+                    }
+                }
+            }
+        }
         // "Armed" means something is actually configured to run — holding the
         // secret is not the same thing, and conflating them made a wallet with
         // only auto-sweep on look like auto-mint was armed too.

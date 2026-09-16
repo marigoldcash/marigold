@@ -11,7 +11,7 @@ use crate::telegram::TelegramConfig;
 use kaspa_consensus_core::network::NetworkId;
 use kaspa_consensus_core::notepool::DENOMINATION_PETALS;
 use kaspa_core::signals::{Shutdown, Signals};
-use kaspa_wallet_core::account::notepool::{self, BearerNote, Handover, HandoverSelection, BEARER_NOTE_PREFIX, HANDOVER_PREFIX};
+use kaspa_wallet_core::account::notepool::{self, BearerNote, Handover, HandoverSelection, LockedHandover, BEARER_NOTE_PREFIX, HANDOVER_PREFIX, LOCKED_HANDOVER_PREFIX, SHARE_KEY_PREFIX};
 use kaspa_wallet_core::prelude::*;
 use kaspa_wallet_core::rpc::DynRpcApi;
 use kaspa_wallet_core::storage::NoteStatus;
@@ -263,8 +263,38 @@ impl WalletService {
         Ok(Paid { code, value_petals: result.value_petals, fee_petals: result.transfer.fee_petals, notes: result.handover.notes.len().saturating_sub(1) })
     }
 
+    /// 'pay' to a share key under a lock (P8.0g): the receiver's to take until
+    /// `seconds` from now, ours again after.
+    pub async fn pay_locked(&self, petals: u64, key: &str, seconds: u64) -> std::result::Result<Paid, String> {
+        let share_pk = notepool::share_key_from_text(key).map_err(|e| e.to_string())?;
+        let bps = kaspa_consensus_core::config::params::Params::from(self.network_id).bps();
+        let now = self.rpc.get_server_info().await.map_err(|e| e.to_string())?.virtual_daa_score;
+        let result = notepool::hand_over_locked(&self.wallet, self.secret.clone(), petals, share_pk, now + seconds * bps).await.map_err(|e| e.to_string())?;
+        let code = result.handover.to_text();
+        self.record("offered", result.value_petals, result.stamp_petals + result.transfer.fee_petals, "locked code (telegram)", &result.transfer.transaction_id.to_string());
+        Ok(Paid { code, value_petals: result.value_petals, fee_petals: result.transfer.fee_petals, notes: result.handover.notes.len().saturating_sub(1) })
+    }
+
+    /// A share key to hand out (P8.0g).
+    pub async fn share_key(&self, label: &str) -> std::result::Result<String, String> {
+        let store = self.wallet.store().as_note_key_store().map_err(|e| e.to_string())?;
+        let info = store.add_share_key(&self.secret, label).await.map_err(|e| e.to_string())?;
+        Ok(notepool::share_key_to_text(&info.pk))
+    }
+
+    pub fn is_share_key(text: &str) -> bool {
+        text.starts_with(SHARE_KEY_PREFIX)
+    }
+
     pub async fn receive(&self, code: &str) -> std::result::Result<String, String> {
-        if code.starts_with(HANDOVER_PREFIX) {
+        if code.starts_with(LOCKED_HANDOVER_PREFIX) {
+            let handover = LockedHandover::from_text(code).map_err(|e| e.to_string())?;
+            let result = notepool::receive_locked(&self.wallet, self.secret.clone(), handover).await.map_err(|e| e.to_string())?;
+            let stamp = result.notes.iter().any(|(_, d)| *d == kaspa_consensus_core::notepool::DenominationTag::D0_01);
+            let value = if stamp { result.value_petals - DENOMINATION_PETALS[0] } else { result.value_petals };
+            self.record("received", value, 0, "locked code (telegram)", &result.rotation.transaction_id.to_string());
+            Ok(format!("Received {} {} in {} note(s), taken in time and made yours alone.", sompi_to_kaspa_string(value), self.ticker(), result.notes.len() - usize::from(stamp)))
+        } else if code.starts_with(HANDOVER_PREFIX) {
             let handover = Handover::from_text(code).map_err(|e| e.to_string())?;
             let result = notepool::receive_handover(&self.wallet, self.secret.clone(), handover).await.map_err(|e| e.to_string())?;
             let stamp = result.notes.iter().any(|(_, d)| *d == kaspa_consensus_core::notepool::DenominationTag::D0_01);
@@ -518,6 +548,14 @@ pub async fn serve(args: Vec<String>) -> Result<()> {
         if last_report.elapsed() >= Duration::from_secs(300) {
             last_report = std::time::Instant::now();
             log::info!("{}", service.status_text().await.replace('\n', "; "));
+            // Offers whose lock lapsed come back (P8.0g).
+            match notepool::reclaim_lapsed(&wallet, options.password.clone()).await {
+                Ok(report) if !report.taken_back.is_empty() || !report.taken_by_receiver.is_empty() => {
+                    log::info!("offers: {} note(s) taken back after their lock lapsed, {} taken by the receiver in time", report.taken_back.len(), report.taken_by_receiver.len());
+                }
+                Ok(_) => {}
+                Err(e) => log::warn!("offers not checked: {e}"),
+            }
         }
         tokio::time::sleep(Duration::from_secs(5)).await;
     }

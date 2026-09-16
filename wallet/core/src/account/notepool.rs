@@ -27,7 +27,7 @@ use kaspa_consensus_core::config::params::Params;
 use kaspa_consensus_core::constants::TX_VERSION_TOCCATA;
 use kaspa_consensus_core::mass::MassCalculator;
 use kaspa_consensus_core::notepool::{
-    DENOMINATION_PETALS, DenominationTag, FreshnessAnchor, MintOp, NewNote, PoolOp, RedeemOp, SignedGroup, TransferOp,
+    DENOMINATION_PETALS, DenominationTag, FreshnessAnchor, MintOp, NewNote, NoteLock, PoolOp, ProducedLock, RedeemOp, SignedGroup, TransferLockedOp, TransferOp,
     hashing::{serial_hash, signing_hash, transparent_outputs_hash},
 };
 use kaspa_consensus_core::subnets::SUBNETWORK_ID_NOTE_POOL;
@@ -977,6 +977,23 @@ async fn submit_transfer(
     freshness: FreshnessAnchor,
     fee_petals: u64,
 ) -> Result<TransferResult> {
+    submit_transfer_with_locks(wallet, wallet_secret, consumed_entries, external, own_fresh, own_provenance, freshness, fee_petals, &[]).await
+}
+
+/// [`submit_transfer`] with locks on some of the external notes (POOL-SPEC.md
+/// P5.9): a `TransferLocked` op, signed over the locks too.
+#[allow(clippy::too_many_arguments)]
+async fn submit_transfer_with_locks(
+    wallet: &Arc<Wallet>,
+    wallet_secret: &Secret,
+    consumed_entries: &[NoteKeyEntry],
+    external: &[NewNote],
+    own_fresh: &[FreshNote],
+    own_provenance: NoteProvenance,
+    freshness: FreshnessAnchor,
+    fee_petals: u64,
+    locks: &[ProducedLock],
+) -> Result<TransferResult> {
     let mut produced: Vec<NewNote> = external.to_vec();
     produced.extend(own_fresh.iter().map(|f| NewNote { d: f.d, pk: f.pk }));
 
@@ -986,17 +1003,21 @@ async fn submit_transfer(
         groups_by_sk.entry(entry.sk).or_default().push(entry.sn);
     }
 
-    const TRANSFER_OP_TYPE: u8 = 1;
+    let op_type: u8 = if locks.is_empty() { 1 } else { 3 };
     let mut signed_groups = Vec::with_capacity(groups_by_sk.len());
     for (sk_bytes, group_serials) in groups_by_sk {
-        let hash = signing_hash(TRANSFER_OP_TYPE, &group_serials, &produced, outputs_hash, freshness.anchor_daa_score);
+        let hash = kaspa_consensus_core::notepool::signing_hash_with_locks(op_type, &group_serials, &produced, locks, outputs_hash, freshness.anchor_daa_score);
         let keypair =
             Keypair::from_seckey_slice(SECP256K1, &sk_bytes).map_err(|e| Error::Custom(format!("invalid note secret key: {e}")))?;
         let signature: [u8; 64] = *keypair.sign_schnorr(Message::from_digest(hash.into())).as_ref();
         signed_groups.push(SignedGroup { serials: group_serials, signature });
     }
 
-    let payload = PoolOp::Transfer(TransferOp { consumed: signed_groups, produced: produced.clone(), freshness }).encode_payload();
+    let payload = if locks.is_empty() {
+        PoolOp::Transfer(TransferOp { consumed: signed_groups, produced: produced.clone(), freshness }).encode_payload()
+    } else {
+        PoolOp::TransferLocked(TransferLockedOp { consumed: signed_groups, produced: produced.clone(), locks: locks.to_vec(), freshness }).encode_payload()
+    };
     let tx = Transaction::new(TX_VERSION_TOCCATA, vec![], vec![], 0, SUBNETWORK_ID_NOTE_POOL, 0, payload);
 
     let network_id = wallet.network_id()?;
@@ -2910,5 +2931,365 @@ mod mirror_export_tests {
             total += notes.len();
         }
         assert_eq!(total, 90);
+    }
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// Escrowed handover (FORK-PLAN P8.0g, POOL-SPEC.md P5.9): pay to someone's share
+// key under a lock. The notes go to a one-time key only the receiver can derive;
+// the payer keeps a refund key that works once the lock lapses.
+
+/// Text prefix of a share key — the standing receiving key a person hands out.
+pub const SHARE_KEY_PREFIX: &str = "marigoldkey:";
+/// Text prefix of a locked handover code.
+pub const LOCKED_HANDOVER_PREFIX: &str = "marigoldpay2:";
+
+pub fn share_key_to_text(pk: &[u8; 32]) -> String {
+    format!("{SHARE_KEY_PREFIX}{}", pk.as_slice().to_hex())
+}
+
+pub fn share_key_from_text(text: &str) -> Result<[u8; 32]> {
+    let hex = text.trim().strip_prefix(SHARE_KEY_PREFIX).ok_or_else(|| Error::Custom(format!("a share key starts with '{SHARE_KEY_PREFIX}'")))?;
+    let bytes = Vec::<u8>::from_hex(hex).map_err(|e| Error::Custom(format!("invalid share key hex: {e}")))?;
+    bytes.try_into().map_err(|_| Error::Custom("a share key is 32 bytes".to_string()))
+}
+
+/// The tweak both sides compute from the shared point: `H("marigold-onetime-v1" || x)`.
+fn onetime_tweak(shared_x: &[u8; 32]) -> Result<secp256k1::Scalar> {
+    use sha2::Digest;
+    let mut hasher = sha2::Sha256::new();
+    hasher.update(b"marigold-onetime-v1");
+    hasher.update(shared_x);
+    let t: [u8; 32] = hasher.finalize().into();
+    secp256k1::Scalar::from_be_bytes(t).map_err(|_| Error::Custom("one-time tweak out of range (astronomically unlikely); retry".to_string()))
+}
+
+/// The payer's side: from the receiver's share key (x-only, taken as its even-y
+/// point) and a throwaway secret, the one-time note key and the throwaway's
+/// public half to send along. `pk' = S + H(e·S)·G`.
+pub fn onetime_key_for_share(share_pk: &[u8; 32], ephemeral_sk: &[u8; 32]) -> Result<([u8; 32], [u8; 33])> {
+    let e = SecretKey::from_slice(ephemeral_sk).map_err(|err| Error::Custom(format!("ephemeral key: {err}")))?;
+    let s_point = secp256k1::PublicKey::from_x_only_public_key(
+        secp256k1::XOnlyPublicKey::from_slice(share_pk).map_err(|err| Error::Custom(format!("share key: {err}")))?,
+        secp256k1::Parity::Even,
+    );
+    let shared = s_point.mul_tweak(SECP256K1, &secp256k1::Scalar::from(e)).map_err(|err| Error::Custom(format!("ecdh: {err}")))?;
+    let t = onetime_tweak(&shared.x_only_public_key().0.serialize())?;
+    let onetime = s_point.add_exp_tweak(SECP256K1, &t).map_err(|err| Error::Custom(format!("one-time key: {err}")))?;
+    let e_pub = secp256k1::PublicKey::from_secret_key(SECP256K1, &e).serialize();
+    Ok((onetime.x_only_public_key().0.serialize(), e_pub))
+}
+
+/// The receiver's side: from a share key's secret and the payer's throwaway
+/// public half, the one-time secret that signs for `pk'`. `s' = s_even + H(s·E)`,
+/// where `s_even` is `s` negated if its point has odd y — the payer used the
+/// even-y lift of the x-only share key.
+pub fn onetime_secret_for_share(share_sk: &[u8; 32], ephemeral_pk: &[u8; 33]) -> Result<[u8; 32]> {
+    let mut s = SecretKey::from_slice(share_sk).map_err(|err| Error::Custom(format!("share secret: {err}")))?;
+    let (_, parity) = secp256k1::PublicKey::from_secret_key(SECP256K1, &s).x_only_public_key();
+    if parity == secp256k1::Parity::Odd {
+        s = s.negate();
+    }
+    let e_pub = secp256k1::PublicKey::from_slice(ephemeral_pk).map_err(|err| Error::Custom(format!("ephemeral public key: {err}")))?;
+    let shared = e_pub.mul_tweak(SECP256K1, &secp256k1::Scalar::from(s)).map_err(|err| Error::Custom(format!("ecdh: {err}")))?;
+    let t = onetime_tweak(&shared.x_only_public_key().0.serialize())?;
+    let onetime = s.add_tweak(&t).map_err(|err| Error::Custom(format!("one-time secret: {err}")))?;
+    Ok(onetime.secret_bytes())
+}
+
+/// A locked handover code: the payer's throwaway public half, the lock's end,
+/// and the notes. No secret inside — only the receiver's share secret opens it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LockedHandover {
+    pub ephemeral_pk: [u8; 33],
+    pub until_daa: u64,
+    pub notes: Vec<(Hash, DenominationTag)>,
+}
+
+impl LockedHandover {
+    pub fn value_petals(&self) -> u64 {
+        self.notes.iter().map(|(_, d)| DENOMINATION_PETALS[*d as usize]).sum()
+    }
+
+    pub fn encode(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(41 + 33 * self.notes.len());
+        bytes.extend_from_slice(&self.ephemeral_pk);
+        bytes.extend_from_slice(&self.until_daa.to_le_bytes());
+        for (sn, d) in &self.notes {
+            bytes.extend_from_slice(&sn.as_bytes());
+            bytes.push(*d as u8);
+        }
+        bytes
+    }
+
+    pub fn decode(bytes: &[u8]) -> Result<Self> {
+        if bytes.len() < 41 + 33 || (bytes.len() - 41) % 33 != 0 {
+            return Err(Error::Custom(format!("a locked handover is 41 bytes plus 33 per note, got {}", bytes.len())));
+        }
+        let ephemeral_pk: [u8; 33] = bytes[..33].try_into().unwrap();
+        let until_daa = u64::from_le_bytes(bytes[33..41].try_into().unwrap());
+        let mut notes = Vec::with_capacity((bytes.len() - 41) / 33);
+        for chunk in bytes[41..].chunks(33) {
+            let sn = Hash::from_slice(&chunk[..32]);
+            let d = DenominationTag::try_from(chunk[32]).map_err(|_| Error::Custom(format!("unknown denomination tag {}", chunk[32])))?;
+            notes.push((sn, d));
+        }
+        Ok(Self { ephemeral_pk, until_daa, notes })
+    }
+
+    pub fn to_text(&self) -> String {
+        format!("{LOCKED_HANDOVER_PREFIX}{}", self.encode().to_hex())
+    }
+
+    pub fn from_text(text: &str) -> Result<Self> {
+        let hex = text
+            .trim()
+            .strip_prefix(LOCKED_HANDOVER_PREFIX)
+            .ok_or_else(|| Error::Custom(format!("a locked handover starts with '{LOCKED_HANDOVER_PREFIX}'")))?;
+        let bytes = Vec::<u8>::from_hex(hex).map_err(|e| Error::Custom(format!("invalid handover hex: {e}")))?;
+        Self::decode(&bytes)
+    }
+}
+
+pub struct LockedHandoverResult {
+    pub handover: LockedHandover,
+    pub transfer: TransferResult,
+    pub value_petals: u64,
+    pub stamp_petals: u64,
+}
+
+/// Pay `petals` to `share_pk`, locked until `until_daa`: the notes (plus a 0.01
+/// stamp for the receiver's rotation) go to a one-time key derived from the
+/// share key, each locked with a fresh refund key of ours behind it. The refund
+/// key is stored `Offered`; housekeeping takes the notes back once the lock has
+/// lapsed unclaimed.
+pub async fn hand_over_locked(wallet: &Arc<Wallet>, wallet_secret: Secret, petals: u64, share_pk: [u8; 32], until_daa: u64) -> Result<LockedHandoverResult> {
+    let note_key_store = wallet.store().as_note_key_store()?;
+    let active: Vec<Arc<NoteKeyInfo>> = note_key_store
+        .iter()
+        .await?
+        .try_filter(|info| futures::future::ready(info.status == NoteStatus::Active))
+        .try_collect()
+        .await?;
+    let held_total: u64 = active.iter().map(|info| DENOMINATION_PETALS[info.d as usize]).sum();
+    let mut denoms = decompose_amount(petals)
+        .ok_or_else(|| Error::Custom(format!("{petals} petals is not representable (must be a nonzero multiple of 0.01 MAGLD)")))?;
+    let stamp = FEE_QUANTUM_PETALS;
+    denoms.push(DenominationTag::D0_01);
+
+    let ephemeral = generate_fresh_notes(&[DenominationTag::D0_01]).remove(0);
+    let (onetime_pk, ephemeral_pk) = onetime_key_for_share(&share_pk, &ephemeral.sk)?;
+    let refund = generate_fresh_notes(&[DenominationTag::D0_01]).remove(0);
+    let external: Vec<NewNote> = denoms.iter().map(|d| NewNote { d: *d, pk: onetime_pk }).collect();
+    let locks: Vec<ProducedLock> =
+        (0..external.len()).map(|i| ProducedLock { index: i as u32, lock: NoteLock { refund_pk: refund.pk, until_daa } }).collect();
+
+    let network_id = wallet.network_id()?;
+    let mass_calculator = MassCalculator::new_with_consensus_params(&Params::from(network_id));
+    let server_info = wallet.rpc_api().get_server_info().await?;
+    if until_daa <= server_info.virtual_daa_score {
+        return Err(Error::Custom("the lock would already have lapsed".to_string()));
+    }
+    let freshness = FreshnessAnchor { anchor_daa_score: server_info.virtual_daa_score };
+    let feerate = transfer_feerate(wallet).await;
+    let mut fee_quanta: u64 = 1;
+    for _ in 0..8 {
+        let fee_petals = fee_quanta * FEE_QUANTUM_PETALS;
+        let target = petals + stamp + fee_petals;
+        let selection = select_cover(&active, target).ok_or_else(|| {
+            Error::Custom(format!(
+                "not enough in notes: {} held, {} needed ({} plus a 0.01 stamp for the receiver plus {} fee)",
+                crate::utils::sompi_to_kaspa_string(held_total),
+                crate::utils::sompi_to_kaspa_string(target),
+                crate::utils::sompi_to_kaspa_string(petals),
+                crate::utils::sompi_to_kaspa_string(fee_petals)
+            ))
+        })?;
+        let selected_total: u64 = selection
+            .iter()
+            .map(|sn| DENOMINATION_PETALS[active.iter().find(|info| info.sn == *sn).expect("from the active set").d as usize])
+            .sum();
+        let change_denoms = decompose_amount_allow_zero(selected_total - target).expect("change is denomination-quantized");
+        let placeholder_groups: Vec<Vec<Hash>> = (0..selection.len()).map(|i| vec![Hash::from_u64_word(i as u64)]).collect();
+        let mut placeholder_produced = external.clone();
+        placeholder_produced.extend(change_denoms.iter().map(|d| NewNote { d: *d, pk: [0u8; 32] }));
+        // The locks add bytes; the mass estimate is over the plain shape, and one
+        // quantum covers thousands of grams, so the margin is ample.
+        let mass = estimate_transfer_mass(&mass_calculator, &placeholder_groups, &placeholder_produced, freshness)?;
+        let required = required_fee_quanta(mass + 200 * locks.len() as u64, feerate);
+        if required > fee_quanta {
+            fee_quanta = required;
+            continue;
+        }
+        let mut consumed_entries = Vec::with_capacity(selection.len());
+        for sn in &selection {
+            let entry = note_key_store
+                .load_key(&wallet_secret, sn)
+                .await?
+                .ok_or_else(|| Error::Custom(format!("serial {sn} has no stored key")))?;
+            consumed_entries.push(entry);
+        }
+        let own_fresh = generate_fresh_notes(&change_denoms);
+        let transfer = submit_transfer_with_locks(
+            wallet,
+            &wallet_secret,
+            &consumed_entries,
+            &external,
+            &own_fresh,
+            NoteProvenance::Cold,
+            freshness,
+            fee_quanta * FEE_QUANTUM_PETALS,
+            &locks,
+        )
+        .await?;
+        if transfer.external_serials.len() != denoms.len() {
+            return Err(Error::Custom("locked handover: the transfer did not produce the notes it was asked for".to_string()));
+        }
+        // The refund key, one row per offered note, so what comes back is
+        // accounted for note by note.
+        for (sn, d) in transfer.external_serials.iter().zip(denoms.iter()) {
+            note_key_store.store_offered(&wallet_secret, NoteKeyEntry::new(*sn, refund.sk, *d, NoteProvenance::Cold), until_daa).await?;
+        }
+        wallet.store().commit(&wallet_secret).await?;
+        let notes = transfer.external_serials.iter().copied().zip(denoms.iter().copied()).collect();
+        return Ok(LockedHandoverResult { handover: LockedHandover { ephemeral_pk, until_daa, notes }, transfer, value_petals: petals, stamp_petals: stamp });
+    }
+    Err(Error::Custom("transfer fee sizing did not converge".to_string()))
+}
+
+/// Take a locked handover: find the share key it was paid to, derive the
+/// one-time secret, check the notes are there and still ours to take, and
+/// rotate them into this vault. The stamp pays the rotation.
+pub async fn receive_locked(wallet: &Arc<Wallet>, wallet_secret: Secret, handover: LockedHandover) -> Result<ReceiveResult> {
+    let note_key_store = wallet.store().as_note_key_store()?;
+    let serials: Vec<Hash> = handover.notes.iter().map(|(sn, _)| *sn).collect();
+    let on_chain = wallet.rpc_api().get_notes_by_serial(serials.clone()).await?;
+    let first = on_chain
+        .iter()
+        .find(|entry| entry.sn == serials[0])
+        .ok_or_else(|| Error::Custom(format!("note {} is not in the pool yet — if it was just paid, try again in a moment", serials[0])))?;
+    // Which of our share keys was this paid to? Try each until the derived
+    // one-time key matches what the chain holds.
+    let mut onetime_sk: Option<[u8; 32]> = None;
+    for share in note_key_store.share_keys().await? {
+        let sk = note_key_store.share_secret(&wallet_secret, share.index).await?;
+        let candidate = onetime_secret_for_share(&sk, &handover.ephemeral_pk)?;
+        let secret_key = SecretKey::from_slice(&candidate).map_err(|e| Error::Custom(format!("derived key: {e}")))?;
+        let pk = Keypair::from_secret_key(SECP256K1, &secret_key).x_only_public_key().0.serialize();
+        if pk == first.pk {
+            onetime_sk = Some(candidate);
+            break;
+        }
+    }
+    let onetime_sk = onetime_sk.ok_or_else(|| Error::Custom("this code was not paid to any share key of this wallet".to_string()))?;
+    let server_info = wallet.rpc_api().get_server_info().await?;
+    for (sn, d) in &handover.notes {
+        let entry = on_chain
+            .iter()
+            .find(|entry| entry.sn == *sn)
+            .ok_or_else(|| Error::Custom(format!("note {sn} is not in the pool — already taken, or lapsed and taken back")))?;
+        if entry.pk != first.pk {
+            return Err(Error::Custom(format!("note {sn} is no longer under the code's key — it has already been taken")));
+        }
+        if entry.denomination != *d as u8 {
+            return Err(Error::Custom(format!("note {sn}: the code says one size, the chain another")));
+        }
+        if let Some(lock) = &entry.lock {
+            if server_info.virtual_daa_score >= lock.until_daa {
+                return Err(Error::Custom("this payment's lock has lapsed — it is the payer's again; ask them to pay afresh".to_string()));
+            }
+        }
+    }
+    for (sn, d) in &handover.notes {
+        note_key_store.import_bearer_key(&wallet_secret, *sn, onetime_sk, *d).await?;
+    }
+    wallet.store().commit(&wallet_secret).await?;
+    let stamp = handover.notes.iter().position(|(_, d)| *d == DenominationTag::D0_01);
+    let mut to_rotate: Vec<Hash> = serials.clone();
+    if let Some(index) = stamp {
+        if to_rotate.len() > 1 {
+            to_rotate.remove(index);
+        }
+    }
+    let rotation = rotate_notes(wallet, wallet_secret, to_rotate).await?;
+    Ok(ReceiveResult { value_petals: handover.value_petals(), notes: handover.notes, rotation })
+}
+
+/// What a lapsed offer came to: the notes taken back, and the ones the receiver
+/// had taken in time (now marked as paid).
+#[derive(Default)]
+pub struct ReclaimReport {
+    pub taken_back: Vec<(Hash, DenominationTag)>,
+    pub taken_by_receiver: Vec<(Hash, DenominationTag)>,
+    pub still_offered: usize,
+}
+
+/// Housekeeping for offered notes (P8.0g): once a lock has lapsed, a note still
+/// in the pool comes back under its refund key; one no longer there was taken
+/// by the receiver in time and is marked paid for good.
+pub async fn reclaim_lapsed(wallet: &Arc<Wallet>, wallet_secret: Secret) -> Result<ReclaimReport> {
+    let note_key_store = wallet.store().as_note_key_store()?;
+    let offered = note_key_store.offered_notes().await?;
+    let mut report = ReclaimReport::default();
+    if offered.is_empty() {
+        return Ok(report);
+    }
+    let now = wallet.rpc_api().get_server_info().await?.virtual_daa_score;
+    let lapsed: Vec<Arc<NoteKeyInfo>> = offered.iter().filter(|(_, until)| *until <= now).map(|(info, _)| info.clone()).collect();
+    report.still_offered = offered.len() - lapsed.len();
+    if lapsed.is_empty() {
+        return Ok(report);
+    }
+    let on_chain = wallet.rpc_api().get_notes_by_serial(lapsed.iter().map(|i| i.sn).collect()).await?;
+    let mut to_reclaim = Vec::new();
+    for info in &lapsed {
+        if on_chain.iter().any(|e| e.sn == info.sn) {
+            to_reclaim.push(info.sn);
+        } else {
+            note_key_store.mark_status(&info.sn, NoteStatus::HandedOver).await?;
+            report.taken_by_receiver.push((info.sn, info.d));
+        }
+    }
+    if !to_reclaim.is_empty() {
+        let rotation = rotate_notes(wallet, wallet_secret, to_reclaim.clone()).await?;
+        for sn in rotation.consumed_serials {
+            if let Some(info) = lapsed.iter().find(|i| i.sn == sn) {
+                report.taken_back.push((sn, info.d));
+            }
+        }
+    }
+    Ok(report)
+}
+
+#[cfg(test)]
+mod escrow_tests {
+    use super::*;
+
+    #[test]
+    fn the_receiver_derives_the_key_the_payer_paid_to() {
+        for seed in 1u8..=6 {
+            let share_sk = [seed; 32];
+            let share_pk = Keypair::from_seckey_slice(SECP256K1, &share_sk).unwrap().x_only_public_key().0.serialize();
+            let ephemeral_sk = [0x40 + seed; 32];
+            let (onetime_pk, e_pub) = onetime_key_for_share(&share_pk, &ephemeral_sk).unwrap();
+            let onetime_sk = onetime_secret_for_share(&share_sk, &e_pub).unwrap();
+            let derived_pk = Keypair::from_seckey_slice(SECP256K1, &onetime_sk).unwrap().x_only_public_key().0.serialize();
+            assert_eq!(derived_pk, onetime_pk, "seed {seed}: the receiver's derived key must be the note's key");
+            // Another share key does not open it.
+            let other = onetime_secret_for_share(&[seed + 100; 32], &e_pub).unwrap();
+            let other_pk = Keypair::from_seckey_slice(SECP256K1, &other).unwrap().x_only_public_key().0.serialize();
+            assert_ne!(other_pk, onetime_pk);
+        }
+    }
+
+    #[test]
+    fn locked_handover_text_round_trips() {
+        let h = LockedHandover { ephemeral_pk: [2u8; 33], until_daa: 123_456, notes: vec![(Hash::from_bytes([9; 32]), DenominationTag::D10), (Hash::from_bytes([8; 32]), DenominationTag::D0_01)] };
+        let text = h.to_text();
+        assert!(text.starts_with(LOCKED_HANDOVER_PREFIX));
+        assert_eq!(LockedHandover::from_text(&text).unwrap(), h);
+        assert!(LockedHandover::from_text("marigoldpay:00").is_err());
+        let pk = [7u8; 32];
+        assert_eq!(share_key_from_text(&share_key_to_text(&pk)).unwrap(), pk);
     }
 }

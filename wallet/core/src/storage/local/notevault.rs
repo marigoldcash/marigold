@@ -34,7 +34,8 @@
 use crate::encryption::{decrypt_xchacha20poly1305_raw_key, encrypt_xchacha20poly1305_raw_key};
 use crate::imports::*;
 use crate::storage::interface::StorageStream;
-use crate::storage::notekeys::{NoteKeyEntry, NoteKeyInfo, NoteProvenance, NoteStatus, NotesChangedApplyResult};
+use crate::storage::notekeys::{NoteKeyEntry, NoteKeyInfo, NoteProvenance, NoteStatus, NotesChangedApplyResult, ShareKeyInfo};
+use secp256k1::{Keypair, SECP256K1, SecretKey};
 use futures::stream;
 use kaspa_bip32::{Language, Mnemonic};
 use kaspa_consensus_core::Hash;
@@ -88,6 +89,8 @@ fn unwrap_vault_key(wrapped: &[u8], wallet_secret: &Secret) -> Result<([u8; 32],
     Ok((k, upgraded))
 }
 const MANIFEST_FILE: &str = "manifest.tsv";
+/// Share keys (P8.0g): index, label, public half — nothing secret.
+const SHARES_FILE: &str = "shares.tsv";
 
 /// Every status that owns a directory on disk. A rebuild walks this list, so a
 /// status missing from it is a note the recovery path would silently drop.
@@ -101,6 +104,7 @@ fn status_subdir(status: NoteStatus) -> &'static str {
         NoteStatus::Superseded => "superseded",
         NoteStatus::Mirrored => "mirrored",
         NoteStatus::Unknown => "unknown",
+        NoteStatus::Offered => "offered",
     }
 }
 
@@ -115,6 +119,7 @@ fn status_from_str(s: &str) -> Option<NoteStatus> {
         "superseded" => Some(NoteStatus::Superseded),
         "mirrored" => Some(NoteStatus::Mirrored),
         "unknown" => Some(NoteStatus::Unknown),
+        "offered" => Some(NoteStatus::Offered),
         _ => None,
     }
 }
@@ -230,11 +235,13 @@ struct ManifestRow {
     /// node that has three separate times declared itself caught up and still
     /// not had the serial is saying something.
     missing_strikes: u32,
+    /// For an offered note: the DAA score its lock lapses at; 0 otherwise.
+    lock_until: u64,
 }
 
 fn manifest_line(row: &ManifestRow) -> String {
     format!(
-        "{}\t{}\t{}\t{}\t{}\t{}\t{}",
+        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
         row.info.sn.to_hex(),
         denomination_petals(row.info.d),
         row.info.pk.as_slice().to_hex(),
@@ -242,6 +249,7 @@ fn manifest_line(row: &ManifestRow) -> String {
         status_to_str(row.info.status),
         row.last_rotated_at,
         row.missing_strikes,
+        row.lock_until,
     )
 }
 
@@ -259,7 +267,9 @@ fn parse_manifest_line(line: &str) -> Option<ManifestRow> {
     // Added after the fact, so a manifest written by an older wallet has six
     // fields and no strikes. Absent means none, which is the right default.
     let missing_strikes: u32 = fields.next().and_then(|f| f.parse().ok()).unwrap_or(0);
-    Some(ManifestRow { info: NoteKeyInfo { sn, pk, d, provenance, status }, last_rotated_at, missing_strikes })
+    // Eighth field since P8.0g; absent means no lock.
+    let lock_until: u64 = fields.next().and_then(|f| f.parse().ok()).unwrap_or(0);
+    Some(ManifestRow { info: NoteKeyInfo { sn, pk, d, provenance, status }, last_rotated_at, missing_strikes, lock_until })
 }
 
 pub struct NoteVault {
@@ -578,7 +588,7 @@ impl NoteVault {
                 let Ok(file) = VaultNoteFile::try_from_slice(plaintext.as_ref()) else { continue };
                 let pk = NoteKeyEntry::new(file.sn, file.sk, file.d, file.provenance).derive_pk()?;
                 let info = NoteKeyInfo { sn: file.sn, pk, d: file.d, provenance: file.provenance, status };
-                rows.insert(file.sn, ManifestRow { info, last_rotated_at: file.last_rotated_at, missing_strikes: 0 });
+                rows.insert(file.sn, ManifestRow { info, last_rotated_at: file.last_rotated_at, missing_strikes: 0, lock_until: 0 });
             }
         }
         let count = rows.len();
@@ -643,13 +653,108 @@ impl NoteVault {
         self.write_note_file(&file, NoteStatus::Active, &k).await?;
         let info = NoteKeyInfo { sn: entry.sn, pk, d: entry.d, provenance: entry.provenance, status: NoteStatus::Active };
         // A freshly stored note starts with a clean slate.
-        self.index.write().await.insert(entry.sn, ManifestRow { info, last_rotated_at, missing_strikes: 0 });
+        self.index.write().await.insert(entry.sn, ManifestRow { info, last_rotated_at, missing_strikes: 0, lock_until: 0 });
         self.persist_manifest().await?;
         Ok(())
     }
 
     /// Overwrite a note file's bytes in place (zero pass, then random pass,
     /// fsync after each) before it is unlinked. See `remove_note_file`.
+    /// A refund key for a note paid away under a lock (P8.0g): stored like any
+    /// entry, but `Offered` with the score its lock lapses at, so nothing here
+    /// spends it and housekeeping knows when to take it back.
+    pub async fn store_offered(&self, wallet_secret: &Secret, entry: NoteKeyEntry, lock_until: u64) -> Result<()> {
+        self.ensure_loaded().await?;
+        let k = self.unlock(wallet_secret).await?;
+        let pk = entry.derive_pk()?;
+        let last_rotated_at = now_unix();
+        let file = VaultNoteFile { sn: entry.sn, sk: entry.sk, d: entry.d, provenance: entry.provenance, last_rotated_at };
+        self.write_note_file(&file, NoteStatus::Offered, &k).await?;
+        let info = NoteKeyInfo { sn: entry.sn, pk, d: entry.d, provenance: entry.provenance, status: NoteStatus::Offered };
+        self.index.write().await.insert(entry.sn, ManifestRow { info, last_rotated_at, missing_strikes: 0, lock_until });
+        self.persist_manifest().await?;
+        Ok(())
+    }
+
+    /// Every offered note with the score its lock lapses at.
+    pub async fn offered_notes(&self) -> Result<Vec<(Arc<NoteKeyInfo>, u64)>> {
+        self.ensure_loaded().await?;
+        let index = self.index.read().await;
+        Ok(index.values().filter(|row| row.info.status == NoteStatus::Offered).map(|row| (Arc::new(row.info.clone()), row.lock_until)).collect())
+    }
+
+    // --- Share keys (P8.0g) ---------------------------------------------------
+    //
+    // A standing receiving key is derived from the vault key and an index, so
+    // the recovery words recover every one of them and no key material is
+    // written: `shares.tsv` holds only index, label and the public half.
+
+    fn share_secret_from_vault_key(k: &[u8; 32], index: u32) -> [u8; 32] {
+        use sha2::Digest;
+        // Rehash until the scalar is a valid secret key — in practice, once.
+        let mut counter: u32 = 0;
+        loop {
+            let mut hasher = sha2::Sha256::new();
+            hasher.update(b"marigold-share-key-v1");
+            hasher.update(k);
+            hasher.update(index.to_le_bytes());
+            hasher.update(counter.to_le_bytes());
+            let candidate: [u8; 32] = hasher.finalize().into();
+            if SecretKey::from_slice(&candidate).is_ok() {
+                return candidate;
+            }
+            counter += 1;
+        }
+    }
+
+    fn shares_path(&self) -> std::path::PathBuf {
+        self.folder.join(SHARES_FILE)
+    }
+
+    async fn read_shares(&self) -> Result<Vec<ShareKeyInfo>> {
+        let text = match fs::read_to_string(&self.shares_path()).await {
+            Ok(text) => text,
+            Err(_) => return Ok(Vec::new()),
+        };
+        let mut out = Vec::new();
+        for line in text.lines() {
+            let mut fields = line.split('\t');
+            let (Some(index), Some(label), Some(pk_hex)) = (fields.next(), fields.next(), fields.next()) else { continue };
+            let Ok(index) = index.parse::<u32>() else { continue };
+            let Ok(pk_bytes) = Vec::<u8>::from_hex(pk_hex) else { continue };
+            let Ok(pk) = <[u8; 32]>::try_from(pk_bytes) else { continue };
+            out.push(ShareKeyInfo { index, label: label.to_string(), pk });
+        }
+        Ok(out)
+    }
+
+    pub async fn share_keys(&self) -> Result<Vec<ShareKeyInfo>> {
+        self.read_shares().await
+    }
+
+    /// The secret half of share key `index`.
+    pub async fn share_secret(&self, wallet_secret: &Secret, index: u32) -> Result<[u8; 32]> {
+        let k = self.unlock(wallet_secret).await?;
+        Ok(Self::share_secret_from_vault_key(&k, index))
+    }
+
+    /// A new share key with the next free index, labelled.
+    pub async fn add_share_key(&self, wallet_secret: &Secret, label: &str) -> Result<ShareKeyInfo> {
+        let k = self.unlock(wallet_secret).await?;
+        let existing = self.read_shares().await?;
+        let index = existing.iter().map(|s| s.index + 1).max().unwrap_or(0);
+        let sk = Self::share_secret_from_vault_key(&k, index);
+        let secret_key = SecretKey::from_slice(&sk).map_err(|e| Error::Custom(format!("share key: {e}")))?;
+        let pk = Keypair::from_secret_key(SECP256K1, &secret_key).x_only_public_key().0.serialize();
+        let info = ShareKeyInfo { index, label: label.replace(['\t', '\n', '\r'], " "), pk };
+        let mut text = String::new();
+        for s in existing.iter().chain(std::iter::once(&info)) {
+            text.push_str(&format!("{}\t{}\t{}\n", s.index, s.label, s.pk.as_slice().to_hex()));
+        }
+        fs::write(&self.shares_path(), text.as_bytes()).await?;
+        Ok(info)
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     fn shred_file_sync(path: &std::path::Path) -> std::io::Result<()> {
         use rand::RngCore;
@@ -1054,8 +1159,8 @@ mod tests {
         vault.store(&secret, entry).await?;
 
         let notification = kaspa_rpc_core::message::NotesChangedNotification {
-            added: Arc::new(vec![RpcNoteEntry { sn: sn_new, denomination: DenominationTag::D1 as u8, pk }]),
-            removed: Arc::new(vec![RpcNoteEntry { sn: sn_old, denomination: DenominationTag::D1 as u8, pk }]),
+            added: Arc::new(vec![RpcNoteEntry { sn: sn_new, denomination: DenominationTag::D1 as u8, pk, lock: None }]),
+            removed: Arc::new(vec![RpcNoteEntry { sn: sn_old, denomination: DenominationTag::D1 as u8, pk, lock: None }]),
         };
 
         let result = vault.apply_notes_changed(None, &notification).await?;

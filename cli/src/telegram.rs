@@ -157,9 +157,14 @@ enum Pending {
     Nothing,
     /// Digits for an amount, on the keypad message `message_id`.
     Amount { purpose: Purpose, buf: String, message_id: i64 },
-    /// PIN digits, on the keypad message `message_id`, to pay `petals`.
-    Pin { petals: u64, buf: String, message_id: i64 },
+    /// PIN digits, on the keypad message `message_id`, to pay `petals` — to a
+    /// share key under a lock when `key` is set, as a bearer code otherwise.
+    Pin { petals: u64, buf: String, message_id: i64, key: Option<String> },
 }
+
+/// A locked payment from the phone lasts this long: three days, the same
+/// default the terminal uses.
+const LOCK_SECONDS: u64 = 3 * 86_400;
 
 #[derive(Clone, Copy, PartialEq)]
 enum Purpose {
@@ -176,6 +181,7 @@ Tap a button below, or type:\n\
 /history — the last payments\n\
 /status — the network, the miner\n\
 /mine start|stop|status — the miner, if this wallet mines\n\
+/key [name] — a key of yours for someone to pay to; /pay &lt;amount&gt; &lt;key&gt; pays to one, locked three days\n\
 /cancel — forget what was being asked";
 
 /// The buttons under the message field: the everyday verbs, and the camera.
@@ -185,6 +191,7 @@ fn main_keyboard() -> String {
             [{"text": "Balance"}, {"text": "Pay"}],
             [{"text": "Receive"}, {"text": "Request"}],
             [{"text": "History"}, {"text": "Status"}],
+            [{"text": "My key"}],
             [{"text": "📷 Scan a code", "web_app": {"url": SCAN_URL}}]
         ],
         "resize_keyboard": true,
@@ -260,6 +267,10 @@ fn pin_line(petals: u64, buf: &str, ticker: &str) -> String {
     format!("Pay {} {ticker} as a code.\nPIN: <b>{}</b>", sompi_to_kaspa_string(petals), if buf.is_empty() { "_".to_string() } else { "•".repeat(buf.len()) })
 }
 
+fn pin_line_locked(petals: u64, buf: &str, ticker: &str) -> String {
+    format!("Pay {} {ticker} to their key, locked three days.\nPIN: <b>{}</b>", sompi_to_kaspa_string(petals), if buf.is_empty() { "_".to_string() } else { "•".repeat(buf.len()) })
+}
+
 /// Long-poll the bot and act for the paired user. Runs until the service
 /// stops; a Telegram hiccup is logged and retried, never fatal.
 pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: TelegramConfig) {
@@ -330,7 +341,7 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
                                             edit(&token, chat_id, message_id, &html_escape(&why), None).await;
                                         }
                                         Ok(()) => {
-                                            pending = Pending::Pin { petals, buf: String::new(), message_id };
+                                            pending = Pending::Pin { petals, buf: String::new(), message_id, key: None };
                                             edit(&token, chat_id, message_id, &pin_line(petals, "", ticker), Some(&keypad(false))).await;
                                         }
                                     },
@@ -374,8 +385,9 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
                             _ => {}
                         }
                     }
-                    Pending::Pin { petals, buf, message_id: mid } if *mid == message_id => {
+                    Pending::Pin { petals, buf, message_id: mid, key: share } if *mid == message_id => {
                         let petals = *petals;
+                        let share_key = share.clone();
                         match key.as_str() {
                             "Cancel" => {
                                 pending = Pending::Nothing;
@@ -397,7 +409,29 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
                                 }
                                 pin_failures = 0;
                                 edit(&token, chat_id, message_id, "Paying…", None).await;
-                                match service.pay(petals).await {
+                                let outcome = match &share_key {
+                                    Some(key) => service.pay_locked(petals, key, LOCK_SECONDS).await,
+                                    None => service.pay(petals).await,
+                                };
+                                match outcome {
+                                    Ok(paid) if share_key.is_some() => {
+                                        service.note_spent(petals);
+                                        service.say(format!("telegram: offered {} {ticker} to a key, locked three days", sompi_to_kaspa_string(paid.value_petals)));
+                                        edit(
+                                            &token,
+                                            chat_id,
+                                            message_id,
+                                            &format!(
+                                                "{} {ticker} offered to their key for three days, plus a 0.01 stamp (fee {}). Give them this code; they type <b>receive</b> and the code, or scan the picture. Only their key can take it; if they have not by then, it comes back to you.\n\n<code>{}</code>",
+                                                sompi_to_kaspa_string(paid.value_petals),
+                                                sompi_to_kaspa_string(paid.fee_petals),
+                                                html_escape(&paid.code)
+                                            ),
+                                            None,
+                                        )
+                                        .await;
+                                        send_qr(&token, chat_id, &paid.code, "The same code, to scan").await;
+                                    }
                                     Ok(paid) => {
                                         service.note_spent(petals);
                                         service.say(format!("telegram: paid {} {ticker} as a code", sompi_to_kaspa_string(paid.value_petals)));
@@ -423,14 +457,14 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
                             }
                             "⌫" => {
                                 buf.pop();
-                                let line = pin_line(petals, buf, ticker);
+                                let line = if share_key.is_some() { pin_line_locked(petals, buf, ticker) } else { pin_line(petals, buf, ticker) };
                                 edit(&token, chat_id, message_id, &line, Some(&keypad(false))).await;
                             }
                             k if k.len() == 1 && k.chars().all(|c| c.is_ascii_digit()) => {
                                 if buf.len() < 12 {
                                     buf.push_str(k);
                                 }
-                                let line = pin_line(petals, buf, ticker);
+                                let line = if share_key.is_some() { pin_line_locked(petals, buf, ticker) } else { pin_line(petals, buf, ticker) };
                                 edit(&token, chat_id, message_id, &line, Some(&keypad(false))).await;
                             }
                             _ => {}
@@ -487,7 +521,7 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
 
             // Codes pasted or scanned are received, every one of them; a
             // request code pays it.
-            let codes: Vec<&str> = text.split_whitespace().filter(|w| w.starts_with("marigoldpay:") || w.starts_with("marigoldnote:")).collect();
+            let codes: Vec<&str> = text.split_whitespace().filter(|w| w.starts_with("marigoldpay:") || w.starts_with("marigoldpay2:") || w.starts_with("marigoldnote:")).collect();
             if !text.starts_with('/') && !codes.is_empty() {
                 for code in codes {
                     let reply = match service.receive(code).await {
@@ -520,6 +554,7 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
                 "/status" | "status" => "status",
                 "/mine" | "mine" => "mine",
                 "/cancel" | "cancel" => "cancel",
+                "/key" | "my key" | "key" => "key",
                 "/start" | "/help" | "help" => "help",
                 _ if lowered.starts_with("📷") => "scan",
                 _ => "unknown",
@@ -535,12 +570,15 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
                     send(&token, chat_id, &format!("<pre>{}</pre>", html_escape(&service.history_text(n)))).await
                 }
                 "pay" => match rest.first().and_then(|s| crate::utils::try_parse_required_nonzero_kaspa_as_sompi_u64(Some(s)).ok()) {
-                    // '/pay 5' typed: straight to the PIN keypad.
+                    // '/pay 5' typed: straight to the PIN keypad; '/pay 5 marigoldkey:…'
+                    // pays to that key under a lock.
                     Some(petals) => match service.spend_allowed(petals, cfg.daily_limit_petals) {
                         Err(why) => send(&token, chat_id, &html_escape(&why)).await,
                         Ok(()) => {
-                            if let Some(mid) = send_with_keyboard(&token, chat_id, &pin_line(petals, "", ticker), &keypad(false)).await {
-                                pending = Pending::Pin { petals, buf: String::new(), message_id: mid };
+                            let key = rest.get(1).filter(|k| WalletService::is_share_key(k)).map(|k| k.to_string());
+                            let line = if key.is_some() { pin_line_locked(petals, "", ticker) } else { pin_line(petals, "", ticker) };
+                            if let Some(mid) = send_with_keyboard(&token, chat_id, &line, &keypad(false)).await {
+                                pending = Pending::Pin { petals, buf: String::new(), message_id: mid, key };
                             }
                         }
                     },
@@ -594,6 +632,13 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
                     }
                 },
                 "mine" => send(&token, chat_id, &html_escape(&service.mine(rest.first().copied()).await)).await,
+                "key" => match service.share_key(&rest.join(" ")).await {
+                    Ok(key) => {
+                        send(&token, chat_id, &format!("A key of yours. Give it to whoever should pay you; they use <b>pay &lt;amount&gt;</b> and this key, and the money is theirs to send and yours to take.\n\n<code>{}</code>", html_escape(&key))).await;
+                        send_qr(&token, chat_id, &key, "The same key, to scan").await;
+                    }
+                    Err(e) => send(&token, chat_id, &format!("Could not make a key: {}", html_escape(&e))).await,
+                },
                 "scan" => send(&token, chat_id, "The scan button opens the camera; a code it reads comes straight back here.").await,
                 "cancel" => {
                     pending = Pending::Nothing;

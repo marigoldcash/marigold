@@ -946,6 +946,28 @@ impl NoteKeyStore for LocalStoreInner {
         Ok(())
     }
 
+    async fn store_offered(&self, wallet_secret: &Secret, entry: NoteKeyEntry, lock_until: u64) -> Result<()> {
+        self.ensure_note_vault(wallet_secret).await?;
+        self.notevault.store_offered(wallet_secret, entry, lock_until).await
+    }
+
+    async fn offered_notes(&self) -> Result<Vec<(Arc<NoteKeyInfo>, u64)>> {
+        self.notevault.offered_notes().await
+    }
+
+    async fn share_keys(&self) -> Result<Vec<crate::storage::notekeys::ShareKeyInfo>> {
+        self.notevault.share_keys().await
+    }
+
+    async fn share_secret(&self, wallet_secret: &Secret, index: u32) -> Result<[u8; 32]> {
+        self.notevault.share_secret(wallet_secret, index).await
+    }
+
+    async fn add_share_key(&self, wallet_secret: &Secret, label: &str) -> Result<crate::storage::notekeys::ShareKeyInfo> {
+        self.ensure_note_vault(wallet_secret).await?;
+        self.notevault.add_share_key(wallet_secret, label).await
+    }
+
     async fn import_bearer_key(&self, wallet_secret: &Secret, sn: Hash, sk: [u8; 32], d: DenominationTag) -> Result<()> {
         self.ensure_note_vault(wallet_secret).await?;
         self.notevault.import_bearer_key(wallet_secret, sn, sk, d).await?;
@@ -1194,7 +1216,7 @@ mod note_key_store_tests {
         NoteKeyStore::mark_status(&store, &sn, NoteStatus::Unknown).await?;
         let notification = kaspa_rpc_core::message::NotesChangedNotification {
             added: Arc::new(vec![]),
-            removed: Arc::new(vec![RpcNoteEntry { sn, denomination: DenominationTag::D1 as u8, pk }]),
+            removed: Arc::new(vec![RpcNoteEntry { sn, denomination: DenominationTag::D1 as u8, pk, lock: None }]),
         };
         NoteKeyStore::apply_notes_changed(&store, None, &notification).await?;
         NoteKeyStore::remove(&store, &wallet_secret, &sn).await?;
@@ -1234,8 +1256,8 @@ mod note_key_store_tests {
         NoteKeyStore::store(&store, &wallet_secret, entry).await?;
 
         let notification = kaspa_rpc_core::message::NotesChangedNotification {
-            added: Arc::new(vec![RpcNoteEntry { sn: sn_new, denomination: DenominationTag::D1 as u8, pk }]),
-            removed: Arc::new(vec![RpcNoteEntry { sn: sn_old, denomination: DenominationTag::D1 as u8, pk }]),
+            added: Arc::new(vec![RpcNoteEntry { sn: sn_new, denomination: DenominationTag::D1 as u8, pk, lock: None }]),
+            removed: Arc::new(vec![RpcNoteEntry { sn: sn_old, denomination: DenominationTag::D1 as u8, pk, lock: None }]),
         };
 
         // Without a secret: the removed half (plaintext-only) always applies; the

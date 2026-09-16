@@ -25,6 +25,8 @@ impl Balance {
         let mut total = 0u64;
         let mut mirrored = 0u64;
         let mut mirrored_count = 0usize;
+        let mut offered = 0u64;
+        let mut offered_count = 0usize;
         while let Some(info) = stream.try_next().await? {
             match info.status {
                 NoteStatus::Active => {
@@ -38,6 +40,12 @@ impl Balance {
                 NoteStatus::Mirrored => {
                     mirrored += DENOMINATION_PETALS[info.d as usize];
                     mirrored_count += 1;
+                }
+                // Paid to someone under a lock: theirs to take for now, back
+                // here if they never do. Shown, not counted.
+                NoteStatus::Offered => {
+                    offered += DENOMINATION_PETALS[info.d as usize];
+                    offered_count += 1;
                 }
                 _ => {}
             }
@@ -111,6 +119,16 @@ impl Balance {
                 money(mirrored),
                 unit.clone(),
                 ui::paint(ui::Ink::Moss, format!("{mirrored_count} note{}", if mirrored_count == 1 { "" } else { "s" })),
+            ]);
+        }
+
+        if offered > 0 {
+            rows.push(vec![String::new(); 4]);
+            rows.push(vec![
+                ui::paint(ui::Ink::Cream, "offered, not yet taken"),
+                money(offered),
+                unit.clone(),
+                ui::paint(ui::Ink::Moss, format!("{offered_count} note{}", if offered_count == 1 { "" } else { "s" })),
             ]);
         }
 

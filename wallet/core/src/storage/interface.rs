@@ -94,6 +94,15 @@ pub trait NoteKeyStore: Send + Sync {
     /// keys, and rotation-derived rows that inherit an existing key's provenance).
     async fn store(&self, wallet_secret: &Secret, entry: NoteKeyEntry) -> Result<()>;
     async fn remove(&self, wallet_secret: &Secret, sn: &Hash) -> Result<()>;
+    /// A refund key for a note paid away under a lock (P8.0g), kept `Offered`
+    /// with the DAA score its lock lapses at.
+    async fn store_offered(&self, wallet_secret: &Secret, entry: NoteKeyEntry, lock_until: u64) -> Result<()>;
+    /// Every offered note and the score its lock lapses at.
+    async fn offered_notes(&self) -> Result<Vec<(Arc<NoteKeyInfo>, u64)>>;
+    /// The standing receiving keys (P8.0g), public halves and labels.
+    async fn share_keys(&self) -> Result<Vec<crate::storage::notekeys::ShareKeyInfo>>;
+    async fn share_secret(&self, wallet_secret: &Secret, index: u32) -> Result<[u8; 32]>;
+    async fn add_share_key(&self, wallet_secret: &Secret, label: &str) -> Result<crate::storage::notekeys::ShareKeyInfo>;
     /// Import a key that crossed a wallet boundary (bearer handover, cross-device
     /// export, backup restore) — always recorded `Hot` regardless of the imported
     /// key's prior state (POOL-SPEC.md P5.6's same-key-in-two-wallets hazard).
