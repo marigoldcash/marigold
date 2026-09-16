@@ -104,6 +104,9 @@ enum Command {
         /// Missing file: per-IP only, and a warning at start.
         #[arg(long)]
         telegram_bot_token_file: Option<std::path::PathBuf>,
+        /// The Mini App the bot's /start answer opens.
+        #[arg(long, default_value = "https://marigold.cash/app/")]
+        mini_app_url: String,
     },
 }
 
@@ -205,13 +208,102 @@ struct FaucetState {
 /// data (`initData`) with HMAC-SHA256 keyed by HMAC-SHA256("WebAppData", token),
 /// so a valid signature is proof the user id came from Telegram, not from the
 /// page.
-fn claimant(state: &FaucetState, headers: &HeaderMap, ip: IpAddr) -> String {
+struct Claimant {
+    /// The rate-limit key: "tg:<user id>" or "ip:<addr>".
+    key: String,
+    /// Set when Telegram vouched for the user — the bot can then message them.
+    telegram_user: Option<i64>,
+}
+
+fn claimant(state: &FaucetState, headers: &HeaderMap, ip: IpAddr) -> Claimant {
     if let (Some(token), Some(init)) = (state.telegram_bot_token.as_deref(), headers.get("x-telegram-init-data").and_then(|v| v.to_str().ok())) {
         if let Some(user_id) = telegram_user_id(init, token) {
-            return format!("tg:{user_id}");
+            return Claimant { key: format!("tg:{user_id}"), telegram_user: Some(user_id) };
         }
     }
-    format!("ip:{ip}")
+    Claimant { key: format!("ip:{ip}"), telegram_user: None }
+}
+
+// --- The bot -----------------------------------------------------------------
+//
+// Two things and no more: send a claimant their codes into their own chat, so
+// they have them somewhere a wallet can read them from, and answer /start with
+// the button that opens the Mini App. The Bot API takes every method as a GET
+// with query parameters, which is what the workspace's HTTP client does.
+
+fn url_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() * 3);
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+}
+
+async fn telegram_call(token: &str, method: &str, params: &[(&str, String)]) -> anyhow::Result<serde_json::Value> {
+    let query = params.iter().map(|(k, v)| format!("{k}={}", url_encode(v))).collect::<Vec<_>>().join("&");
+    let url = format!("https://api.telegram.org/bot{token}/{method}?{query}");
+    let value: serde_json::Value = workflow_http::get_json(url).await.map_err(|e| anyhow::anyhow!("{method}: {e}"))?;
+    if value.get("ok").and_then(|v| v.as_bool()) != Some(true) {
+        anyhow::bail!("{method}: {}", value.get("description").and_then(|d| d.as_str()).unwrap_or("not ok"));
+    }
+    Ok(value)
+}
+
+/// The claimed codes, into the claimant's own chat with the bot: one message,
+/// each code tap-to-copy. Sent after the claim is answered; a failure is
+/// logged, never shown — the page already has the notes.
+async fn telegram_send_codes(token: String, user_id: i64, notes: Vec<(String, String)>) {
+    let mut text = String::from("Your notes. Each line is a bearer note: whoever holds it owns it, so take them into your wallet with <code>receive &lt;code&gt;</code>, the big one first.\n");
+    for (denomination, payload) in &notes {
+        text.push_str(&format!("\n<b>{} MAGLD</b>\n<code>{}</code>\n", html_escape(denomination), html_escape(payload)));
+    }
+    let params = [("chat_id", user_id.to_string()), ("text", text), ("parse_mode", "HTML".to_string())];
+    if let Err(e) = telegram_call(&token, "sendMessage", &params).await {
+        log::warn!("could not send codes to Telegram user {user_id}: {e}");
+    }
+}
+
+/// Answer /start (and anything else typed at the bot) with the button that
+/// opens the Mini App. Long polling; this is the only process on the token.
+async fn telegram_updates_loop(token: String, mini_app_url: String) {
+    let mut offset: i64 = 0;
+    loop {
+        let params = [("offset", offset.to_string()), ("timeout", "25".to_string()), ("allowed_updates", "[\"message\"]".to_string())];
+        let updates = match telegram_call(&token, "getUpdates", &params).await {
+            Ok(v) => v,
+            Err(e) => {
+                log::warn!("Telegram getUpdates: {e}");
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                continue;
+            }
+        };
+        let Some(list) = updates.get("result").and_then(|r| r.as_array()) else { continue };
+        for update in list {
+            if let Some(id) = update.get("update_id").and_then(|v| v.as_i64()) {
+                offset = offset.max(id + 1);
+            }
+            let Some(message) = update.get("message") else { continue };
+            let Some(chat_id) = message.get("chat").and_then(|c| c.get("id")).and_then(|v| v.as_i64()) else { continue };
+            let text = message.get("text").and_then(|t| t.as_str()).unwrap_or("");
+            let reply = if text.starts_with("/start") {
+                "Marigold testnet faucet. Tap the button for three bearer notes — 10, 1 and 0.1 MAGLD. They are sent here as well, so your wallet can take them with <code>receive &lt;code&gt;</code>."
+            } else {
+                "Tap the button to take a note. Your wallet takes it with <code>receive &lt;code&gt;</code>."
+            };
+            let markup = serde_json::json!({ "inline_keyboard": [[{ "text": "Take a note", "web_app": { "url": mini_app_url } }]] }).to_string();
+            let params = [("chat_id", chat_id.to_string()), ("text", reply.to_string()), ("parse_mode", "HTML".to_string()), ("reply_markup", markup)];
+            if let Err(e) = telegram_call(&token, "sendMessage", &params).await {
+                log::warn!("Telegram reply to {chat_id}: {e}");
+            }
+        }
+    }
 }
 
 fn percent_decode(s: &str) -> String {
@@ -386,7 +478,8 @@ async fn claim(
     headers: HeaderMap,
 ) -> impl IntoResponse {
     let ip = client_ip(&headers, peer.ip());
-    let who = claimant(&state, &headers, ip);
+    let claimant = claimant(&state, &headers, ip);
+    let who = claimant.key.clone();
 
     // Global daily cap.
     {
@@ -463,6 +556,10 @@ async fn claim(
         *served += 1;
     }
     log::info!("claim served to {who} ({} notes)", notes.len());
+    if let (Some(user_id), Some(token)) = (claimant.telegram_user, state.telegram_bot_token.clone()) {
+        let codes = notes.iter().map(|n| (n.denomination_magld.clone(), n.payload.clone())).collect();
+        tokio::spawn(telegram_send_codes(token, user_id, codes));
+    }
 
     Json(ClaimResponse {
         notes,
@@ -516,6 +613,7 @@ async fn cmd_serve(
     daily_cap: u64,
     cors_origins: Vec<String>,
     telegram_bot_token_file: Option<std::path::PathBuf>,
+    mini_app_url: String,
 ) -> anyhow::Result<()> {
     let wallet_secret = wallet_secret_from_env();
     let telegram_bot_token = match telegram_bot_token_file {
@@ -563,6 +661,10 @@ async fn cmd_serve(
         telegram_bot_token,
     });
 
+    if let Some(token) = state.telegram_bot_token.clone() {
+        tokio::spawn(telegram_updates_loop(token, mini_app_url));
+        log::info!("Telegram bot answering /start with the Mini App button");
+    }
     let buffer_state = state.clone();
     tokio::spawn(async move {
         loop {
@@ -592,8 +694,8 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Init => cmd_init(&cli.network, &cli.wrpc_url).await,
-        Command::Serve { listen, buffer_bundles, per_ip_cooldown_secs, daily_cap, cors_origins, telegram_bot_token_file } => {
-            cmd_serve(&cli.network, &cli.wrpc_url, listen, buffer_bundles, per_ip_cooldown_secs, daily_cap, cors_origins, telegram_bot_token_file).await
+        Command::Serve { listen, buffer_bundles, per_ip_cooldown_secs, daily_cap, cors_origins, telegram_bot_token_file, mini_app_url } => {
+            cmd_serve(&cli.network, &cli.wrpc_url, listen, buffer_bundles, per_ip_cooldown_secs, daily_cap, cors_origins, telegram_bot_token_file, mini_app_url).await
         }
     }
 }

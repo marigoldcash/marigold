@@ -33,6 +33,8 @@ qrcode = { workspace = true, features = ["svg"] }
 hmac.workspace = true
 sha2.workspace = true
 hex.workspace = true
+# Talks to the Telegram Bot API (GET, which it accepts for every method).
+workflow-http.workspace = true
 # Not workspace dependencies — the faucet is the only axum HTTP server in the
 # tree (the node's RPC stacks are tonic/workflow-rpc), and the only crate that
 # wants anyhow (the rest use per-crate thiserror enums).
