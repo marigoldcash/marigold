@@ -170,6 +170,9 @@ impl Wallet {
                 let args = WalletOpenArgs::default_with_legacy_accounts();
                 ctx.wallet().open(&wallet_secret, name.clone(), args, &guard).await?;
                 ctx.wallet().activate_accounts(None, &guard).await?;
+                // The phone, if one is paired: answered from here, with the
+                // password just typed, until 'close'.
+                ctx.start_telegram_bot(wallet_secret.clone()).await;
 
                 // Automation defaults ON: the ledger is plumbing, and a
                 // person should not have to learn about it. Both arm with the

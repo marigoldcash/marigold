@@ -97,6 +97,11 @@ pub struct KaspaCli {
     /// what it last said it was doing.
     remote_miner: Arc<AtomicBool>,
     remote_mining: Arc<AtomicBool>,
+    /// The Telegram bot answered from inside this program while a paired
+    /// wallet is open (FORK-PLAN P8.0h), so nothing has to be closed to use
+    /// the phone. Aborted on close and on exit.
+    #[cfg(feature = "embedded-node")]
+    telegram_bot: Mutex<Option<tokio::task::JoinHandle<()>>>,
     /// True while the UTXO set is being read in, which on a wallet that has
     /// been mined into is minutes of work with nothing to show for it.
     loading: Arc<AtomicBool>,
@@ -281,6 +286,8 @@ impl KaspaCli {
             cpu_miner: Mutex::new(None),
             remote_miner: Arc::new(AtomicBool::new(false)),
             remote_mining: Arc::new(AtomicBool::new(false)),
+            #[cfg(feature = "embedded-node")]
+            telegram_bot: Mutex::new(None),
             loading: Arc::new(AtomicBool::new(false)),
             auto_payment_secret: Mutex::new(None),
             auto_threshold_petals: Arc::new(AtomicU64::new(0)),
@@ -399,6 +406,42 @@ impl KaspaCli {
             }
         }
     }
+
+    /// Answer the wallet's paired Telegram bot from here, with the password
+    /// just typed at 'open', for as long as the wallet stays open. Nothing
+    /// persisted, nothing listening; the same loop 'serve' runs.
+    #[cfg(feature = "embedded-node")]
+    pub async fn start_telegram_bot(self: &Arc<Self>, secret: Secret) {
+        self.stop_telegram_bot();
+        let Some(descriptor) = self.wallet.store().descriptor() else { return };
+        let folder: String = self
+            .wallet
+            .settings()
+            .get(WalletSettings::Folder)
+            .unwrap_or_else(|| kaspa_wallet_core::storage::local::default_storage_folder().to_string());
+        let path = crate::telegram::TelegramConfig::path(&folder, &descriptor.filename);
+        let Some(cfg) = crate::telegram::TelegramConfig::load(&path) else { return };
+        let Ok(network_id) = self.wallet.network_id() else { return };
+        let this = self.clone();
+        let say: crate::serve::Say = Arc::new(move |line: String| tprintln!(this, "{}", style(line).dim()));
+        let service = crate::serve::WalletService::new(self.wallet.clone(), secret, network_id, &folder, &descriptor.filename, None, say);
+        let handle = tokio::spawn(crate::telegram::run_bot(service, path, cfg));
+        self.telegram_bot.lock().unwrap().replace(handle);
+        tprintln!(self, "{}", style("Answering your Telegram bot while this wallet is open.").dim());
+    }
+
+    #[cfg(feature = "embedded-node")]
+    pub fn stop_telegram_bot(&self) {
+        if let Some(handle) = self.telegram_bot.lock().unwrap().take() {
+            handle.abort();
+        }
+    }
+
+    #[cfg(not(feature = "embedded-node"))]
+    pub async fn start_telegram_bot(self: &Arc<Self>, _secret: Secret) {}
+
+    #[cfg(not(feature = "embedded-node"))]
+    pub fn stop_telegram_bot(&self) {}
 
     /// This wallet's payments journal, when a wallet is open.
     pub fn journal(&self) -> Option<kaspa_wallet_core::storage::local::journal::Journal> {
@@ -2235,6 +2278,7 @@ impl KaspaCli {
                                     // A code accepted for one wallet is not a
                                     // code accepted for the next.
                                     this.reset_otp_session();
+                                    this.stop_telegram_bot();
                                     this.term().refresh_prompt();
                                 },
                                 Events::PrvKeyDataCreate { .. } => { },
@@ -2780,6 +2824,7 @@ impl KaspaCli {
     pub async fn shutdown(&self) -> Result<()> {
         if !self.shutdown.load(Ordering::SeqCst) {
             self.shutdown.store(true, Ordering::SeqCst);
+            self.stop_telegram_bot();
 
             let miner = self.daemons().try_cpu_miner();
             let kaspad = self.daemons().try_kaspad();

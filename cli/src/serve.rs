@@ -14,8 +14,8 @@ use kaspa_core::signals::{Shutdown, Signals};
 use kaspa_wallet_core::account::notepool::{self, BearerNote, Handover, HandoverSelection, BEARER_NOTE_PREFIX, HANDOVER_PREFIX};
 use kaspa_wallet_core::prelude::*;
 use kaspa_wallet_core::rpc::DynRpcApi;
-use kaspa_wallet_core::storage::local::journal::{Journal, JournalEntry};
 use kaspa_wallet_core::storage::NoteStatus;
+use kaspa_wallet_core::storage::local::journal::{Journal, JournalEntry};
 use kaspa_wallet_core::utils::sompi_to_kaspa_string;
 use kaspa_wallet_core::wallet::Wallet;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -108,6 +108,10 @@ enum Node {
     Grpc(Arc<kaspa_grpc_client::GrpcClient>),
 }
 
+/// Where the service tells whoever is watching what the bot did: the log
+/// under `serve`, a dim line on the terminal inside the wallet.
+pub type Say = Arc<dyn Fn(String) + Send + Sync>;
+
 /// The open wallet and everything the bot may do with it.
 pub struct WalletService {
     wallet: Arc<Wallet>,
@@ -119,6 +123,7 @@ pub struct WalletService {
     /// (UTC day, petals paid out that day) — the daily limit's memory.
     spent: Mutex<(u64, u64)>,
     started: std::time::Instant,
+    say: Say,
 }
 
 fn utc_day() -> u64 {
@@ -126,6 +131,25 @@ fn utc_day() -> u64 {
 }
 
 impl WalletService {
+    pub fn new(wallet: Arc<Wallet>, secret: Secret, network_id: NetworkId, folder: &str, name: &str, miner: Option<Arc<MinerHost>>, say: Say) -> Arc<Self> {
+        let rpc = wallet.rpc_api();
+        Arc::new(Self {
+            wallet,
+            secret,
+            network_id,
+            journal: Journal::new(folder, name),
+            miner,
+            rpc,
+            spent: Mutex::new((utc_day(), 0)),
+            started: std::time::Instant::now(),
+            say,
+        })
+    }
+
+    pub fn say(&self, line: String) {
+        (self.say)(line);
+    }
+
     pub fn ticker(&self) -> &'static str {
         kaspa_wallet_core::utils::kaspa_suffix(&self.network_id.network_type())
     }
@@ -398,16 +422,15 @@ pub async fn serve(args: Vec<String>) -> Result<()> {
         }
     }
 
-    let service = Arc::new(WalletService {
-        wallet: wallet.clone(),
-        secret: options.password.clone(),
+    let service = WalletService::new(
+        wallet.clone(),
+        options.password.clone(),
         network_id,
-        journal: Journal::new(&folder, &options.wallet),
-        miner: miner_host.clone().filter(|h| h.address_bound()),
-        rpc: rpc.clone(),
-        spent: Mutex::new((utc_day(), 0)),
-        started: std::time::Instant::now(),
-    });
+        &folder,
+        &options.wallet,
+        miner_host.clone().filter(|h| h.address_bound()),
+        Arc::new(|line: String| log::info!("{line}")),
+    );
 
     match telegram {
         Some(cfg) => {

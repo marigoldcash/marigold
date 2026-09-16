@@ -110,6 +110,15 @@ async fn call(token: &str, method: &str, params: &[(&str, String)]) -> Result<se
     Ok(value)
 }
 
+/// A PIN must not stay on the screen. Bots may delete a person's own message
+/// in a private chat; if that fails the log says so and nothing else changes.
+async fn delete(token: &str, chat_id: i64, message_id: i64) {
+    let params = [("chat_id", chat_id.to_string()), ("message_id", message_id.to_string())];
+    if let Err(e) = call(token, "deleteMessage", &params).await {
+        log::warn!("telegram: could not delete the PIN message: {e}");
+    }
+}
+
 async fn send(token: &str, chat_id: i64, html: &str) {
     let params = [("chat_id", chat_id.to_string()), ("text", html.to_string()), ("parse_mode", "HTML".to_string())];
     if let Err(e) = call(token, "sendMessage", &params).await {
@@ -175,6 +184,7 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
             let Some(from) = message.get("from").and_then(|f| f.get("id")).and_then(|v| v.as_i64()) else { continue };
             let Some(chat_id) = message.get("chat").and_then(|c| c.get("id")).and_then(|v| v.as_i64()) else { continue };
             let text = message.get("text").and_then(|t| t.as_str()).unwrap_or("").trim().to_string();
+            let message_id = message.get("message_id").and_then(|v| v.as_i64()).unwrap_or(0);
 
             // Pairing: the one moment an unpaired user is listened to.
             if cfg.user_id.is_none() {
@@ -185,7 +195,7 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
                     if let Err(e) = cfg.save(&cfg_path) {
                         log::error!("telegram: could not save the pairing: {e}");
                     }
-                    log::info!("telegram: paired with user {from}");
+                    service.say(format!("telegram: paired with user {from}"));
                     send(&token, chat_id, &format!("Paired. This chat now moves money in your wallet: keep 2FA on your Telegram account.\n\n{HELP}")).await;
                 } else {
                     send(&token, chat_id, "Not paired. In your wallet, 'mobile telegram' shows a code; send it here as /start &lt;code&gt;.").await;
@@ -211,6 +221,7 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
                     send(&token, chat_id, "Cancelled.").await;
                     continue;
                 } else if !cfg.pin_matches(&text) {
+                    delete(&token, chat_id, message_id).await;
                     pin_failures += 1;
                     if pin_failures >= 3 {
                         locked = true;
@@ -221,12 +232,14 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
                     }
                     continue;
                 } else {
+                    delete(&token, chat_id, message_id).await;
                     pin_failures = 0;
                     match service.spend_allowed(petals, cfg.daily_limit_petals) {
                         Err(why) => send(&token, chat_id, &html_escape(&why)).await,
                         Ok(()) => match service.pay(petals).await {
                             Ok(paid) => {
                                 service.note_spent(petals);
+                                service.say(format!("telegram: paid {} {} as a code", sompi_to_kaspa_string(paid.value_petals), service.ticker()));
                                 send(
                                     &token,
                                     chat_id,
@@ -255,7 +268,10 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
             if !text.starts_with('/') && !codes.is_empty() {
                 for code in codes {
                     let reply = match service.receive(code).await {
-                        Ok(line) => line,
+                        Ok(line) => {
+                            service.say(format!("telegram: {line}"));
+                            line
+                        }
                         Err(e) => format!("Could not receive one code: {e}"),
                     };
                     send(&token, chat_id, &html_escape(&reply)).await;
@@ -287,7 +303,10 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
                 "/receive" => match rest.first() {
                     Some(code) => {
                         let reply = match service.receive(code).await {
-                            Ok(line) => line,
+                            Ok(line) => {
+                                service.say(format!("telegram: {line}"));
+                                line
+                            }
                             Err(e) => format!("Could not receive: {e}"),
                         };
                         send(&token, chat_id, &html_escape(&reply)).await
