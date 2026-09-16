@@ -1064,6 +1064,12 @@ build_wrpc_wasm_bindgen_interface!(
         /// Retrieves the virtual chain corresponding to a specified block hash.
         /// Returned information: Virtual chain information. (Version 2)
         /// May be used to get fully populated transactions
-        GetVirtualChainFromBlockV2
+        GetVirtualChainFromBlockV2,
+        /// Marigold: which of the given note serials are live in the pool.
+        /// Returned information: the notes that exist.
+        GetNotesBySerial,
+        /// Marigold: live note count per denomination.
+        /// Returned information: counts, smallest denomination first.
+        GetPoolStats
     ]
 );

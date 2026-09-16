@@ -1389,6 +1389,90 @@ try_from! ( args: GetVirtualChainFromBlockV2Response, IGetVirtualChainFromBlockV
 
     Ok(IGetVirtualChainFromBlockV2Response { obj: value })
 });
+
+// ---------------------------------------------------------------------------
+// Marigold: the note pool (FORK-PLAN P6.9). A phone that holds mirrored note
+// keys asks whether each serial is still live; a wallet asks the pool's size.
+
+declare! {
+    IGetNotesBySerialRequest,
+    r#"
+    /**
+     * Serials (hex) to look up in the note pool. Serials not currently in the
+     * pool are simply absent from the response.
+     *
+     * @category Node RPC
+     */
+    export interface IGetNotesBySerialRequest {
+        serials : HexString[];
+    }
+    "#,
+}
+
+try_from! ( args: IGetNotesBySerialRequest, GetNotesBySerialRequest, {
+    Ok(from_value(args.into())?)
+});
+
+declare! {
+    IGetNotesBySerialResponse,
+    r#"
+    /**
+     * @category Node RPC
+     */
+    export interface IRpcNoteEntry {
+        sn : HexString;
+        denomination : number;
+        /** 32 bytes, as numbers */
+        pk : number[];
+    }
+
+    /**
+     * The notes that exist, in the order they were asked for, minus the ones
+     * that do not.
+     *
+     * @category Node RPC
+     */
+    export interface IGetNotesBySerialResponse {
+        notes : IRpcNoteEntry[];
+    }
+    "#,
+}
+
+try_from! ( args: GetNotesBySerialResponse, IGetNotesBySerialResponse, {
+    Ok(to_value(&args)?.into())
+});
+
+declare! {
+    IGetPoolStatsRequest,
+    r#"
+    /**
+     * @category Node RPC
+     */
+    export interface IGetPoolStatsRequest { }
+    "#,
+}
+
+try_from! ( args: IGetPoolStatsRequest, GetPoolStatsRequest, {
+    Ok(from_value(args.into())?)
+});
+
+declare! {
+    IGetPoolStatsResponse,
+    r#"
+    /**
+     * Live note count per denomination, smallest first.
+     *
+     * @category Node RPC
+     */
+    export interface IGetPoolStatsResponse {
+        counts : number[];
+    }
+    "#,
+}
+
+try_from! ( args: GetPoolStatsResponse, IGetPoolStatsResponse, {
+    Ok(to_value(&args)?.into())
+});
 // ---
 
 declare! {
