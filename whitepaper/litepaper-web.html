@@ -2,74 +2,214 @@
 <!--
   GENERATED TEXT — do not edit the words in this file, in either repository.
 
-  The words come from whitepaper/marigold-litepaper.md in the marigold-node
-  repo. Edit them there, run whitepaper/sync-litepaper.py, rebuild the PDF,
-  and copy the result here. The design — classes, plates, chips, kickers —
-  IS this file's own and is never touched by the sync; only prose is.
+  English prose comes from whitepaper/marigold-litepaper.md; every other
+  language from whitepaper/translations/marigold-litepaper.<lang>.md; the
+  headline, buttons, kickers and footer from whitepaper/translations/chrome.json.
+  Edit them there, run whitepaper/sync-litepaper.py, rebuild the PDF, and copy
+  the result here.
+
+  The design — classes, plates, chips, kickers — IS this file's own and is never
+  touched by the sync; only prose is. The English section below is the one a
+  designer edits; the translated sections between the `translations:` markers
+  are written by the sync from it, so anything hand-typed there is lost on the
+  next run.
 -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Marigold Litepaper — digital cash with a fully auditable chain</title>
-<meta name="description" content="Marigold is digital cash: bearer notes on a fully auditable chain. The litepaper, readable on any device.">
+<title>Marigold Litepaper — digital cash for everyday use</title>
+<meta name="description" content="Marigold is digital cash: bearer notes you hold, hand over and understand. The litepaper, readable on any device, in eight languages.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script>
+  /* Theme and language are settled before the first paint, so the page never
+     flashes the wrong one. Both are plain attributes on <html>; the CSS does
+     the rest, which is why switching language works with JavaScript off after
+     the first choice and the document still reads in English without it. */
+  (function () {
+    var LANGS = ["en", "es", "de", "fr", "it", "pt", "ru", "zh"];
+    var root = document.documentElement;
+    var get = function (k) { try { return localStorage.getItem(k); } catch (e) { return null; } };
+
+    var theme = get("marigold-theme");
+    if (theme === "dark" || theme === "light") root.setAttribute("data-theme", theme);
+
+    var lang = null;
+    try { lang = new URLSearchParams(location.search).get("lang"); } catch (e) {}
+    if (LANGS.indexOf(lang) < 0) lang = get("marigold-lang");
+    if (LANGS.indexOf(lang) < 0) {
+      var want = navigator.languages || [navigator.language || "en"];
+      for (var i = 0; i < want.length && LANGS.indexOf(lang) < 0; i++) {
+        var base = String(want[i]).split("-")[0].toLowerCase();
+        if (LANGS.indexOf(base) >= 0) lang = base;
+      }
+    }
+    if (LANGS.indexOf(lang) < 0) lang = "en";
+    root.setAttribute("data-doclang", lang);
+    root.setAttribute("lang", lang === "zh" ? "zh-Hans" : lang);
+  })();
+</script>
 <style>
+  /* Day. The complete palette lives here; night below redefines only the
+     tokens, so nothing is ever left holding one theme's colour on the
+     other theme's ground. */
   :root{
-    --ink:#141f19; --note:#18291f; --note-edge:#0f1813; --gold:#e4a33d;
-    --amber:#c9761f; --petal:#f3cf82; --cream:#efe7d3; --moss:#9aa894;
+    --gold:#e4a33d; --amber:#c9761f; --petal:#f3cf82;
+    --page-bg:#efe7d3; --page-fg:#141f19;
+    --band-bg:#18291f; --band-fg:#efe7d3; --band-dim:#9aa894;
+    --plate-bg:#18291f; --plate-fg:#efe7d3;
+    --kicker:#c9761f; --edge:#0f1813;
+    --hair:rgba(20,31,25,.14);
+    --code-bg:rgba(228,163,61,.16);
+    --micro:rgba(201,118,31,.55);
   }
+  /* Night, for a reader who has not chosen: the deep green the rest of
+     marigold.cash is printed on. An explicit day choice still wins. */
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --page-bg:#0f1813; --page-fg:#e7dfcb;
+      --band-bg:#141f19; --band-fg:#efe7d3; --band-dim:#9aa894;
+      --plate-bg:#1d3226; --plate-fg:#efe7d3;
+      --kicker:#e4a33d;
+      --hair:rgba(239,231,211,.16);
+      --code-bg:rgba(228,163,61,.2);
+      --micro:rgba(228,163,61,.4);
+    }
+  }
+  /* Night, chosen. Same tokens, so the toggle wins in both directions. */
+  :root[data-theme="dark"]{
+    --page-bg:#0f1813; --page-fg:#e7dfcb;
+    --band-bg:#141f19; --band-fg:#efe7d3; --band-dim:#9aa894;
+    --plate-bg:#1d3226; --plate-fg:#efe7d3;
+    --kicker:#e4a33d;
+    --hair:rgba(239,231,211,.16);
+    --code-bg:rgba(228,163,61,.2);
+    --micro:rgba(228,163,61,.4);
+  }
+
   *{margin:0;padding:0;box-sizing:border-box}
   html{scroll-behavior:smooth}
-  body{background:var(--cream);color:var(--ink);font-family:"Fraunces",serif;font-weight:300;
+  body{background:var(--page-bg);color:var(--page-fg);font-family:"Fraunces",Georgia,serif;font-weight:300;
        font-size:1.0625rem;line-height:1.75;-webkit-font-smoothing:antialiased}
+  @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important}}
   .kicker{font-family:"IBM Plex Mono",monospace;font-size:.68rem;letter-spacing:.32em;text-transform:uppercase}
+  .sr{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
 
-  header{background:var(--note);color:var(--cream);border-bottom:3px solid var(--gold);
-         padding:2.6rem 1.25rem 2.2rem;text-align:center}
+  /* One language is shown at a time. Doing it in CSS rather than JavaScript
+     keeps the switch instant and free of a flash of the wrong language. */
+  [data-lang]{display:none}
+  :root:not([data-doclang]) [data-lang="en"],
+  :root[data-doclang="en"] [data-lang="en"],
+  :root[data-doclang="es"] [data-lang="es"],
+  :root[data-doclang="de"] [data-lang="de"],
+  :root[data-doclang="fr"] [data-lang="fr"],
+  :root[data-doclang="it"] [data-lang="it"],
+  :root[data-doclang="pt"] [data-lang="pt"],
+  :root[data-doclang="ru"] [data-lang="ru"],
+  :root[data-doclang="zh"] [data-lang="zh"]{display:block}
+
+  /* Chinese and Russian fall through Fraunces (Latin only) to a system face;
+     naming one keeps the fall predictable instead of whatever is installed. */
+  [lang="zh-Hans"]{font-family:"Fraunces","Noto Serif CJK SC","Source Han Serif SC","Songti SC","Microsoft YaHei",serif;line-height:1.9}
+  [lang="ru"]{font-family:"Fraunces",Georgia,"Times New Roman",serif}
+
+  /* The top row: day/night on one side, language on the other. It stays put
+     while you read, and stays thumb-sized on a phone. */
+  .topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:.5rem;
+          background:var(--band-bg);border-bottom:1px solid rgba(228,163,61,.28);
+          padding:.35rem .6rem;min-height:2.9rem}
+  .topbar .grow{flex:1}
+  .tgl{display:inline-flex;align-items:center;justify-content:center;width:2.4rem;height:2.4rem;
+       background:none;border:1px solid rgba(228,163,61,.35);border-radius:6px;color:var(--petal);cursor:pointer}
+  .tgl svg{width:1.1rem;height:1.1rem;display:block;fill:none;stroke:currentColor;stroke-width:1.6;
+           stroke-linecap:round;stroke-linejoin:round}
+  .tgl .moon{display:none}
+  :root[data-theme="dark"] .tgl .moon{display:block}
+  :root[data-theme="dark"] .tgl .sun{display:none}
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme="light"]) .tgl .moon{display:block}
+    :root:not([data-theme="light"]) .tgl .sun{display:none}
+  }
+  .langpick{display:inline-flex;align-items:center;gap:.4rem;border:1px solid rgba(228,163,61,.35);
+            border-radius:6px;padding:0 .2rem 0 .55rem;height:2.4rem;color:var(--petal)}
+  .langpick svg{width:1rem;height:1rem;flex:none;fill:none;stroke:currentColor;stroke-width:1.5}
+  /* 16px is not a taste decision: anything smaller makes iOS Safari zoom the
+     whole page when the picker opens. */
+  .langpick select{appearance:none;-webkit-appearance:none;background:none;border:0;color:var(--petal);
+                   font-family:"IBM Plex Mono",monospace;font-size:16px;line-height:1;padding:.4rem 1.5rem .4rem .1rem;
+                   cursor:pointer;background-image:linear-gradient(45deg,transparent 50%,currentColor 50%),linear-gradient(135deg,currentColor 50%,transparent 50%);
+                   background-position:calc(100% - 12px) 52%,calc(100% - 7px) 52%;background-size:5px 5px,5px 5px;background-repeat:no-repeat}
+  .langpick select option{background:#18291f;color:#efe7d3}
+  .tgl:focus-visible,.langpick:focus-within,.btn:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+
+  header{background:var(--band-bg);color:var(--band-fg);border-bottom:3px solid var(--gold);
+         padding:2.2rem 1.25rem 2.2rem;text-align:center}
   header .rosette{width:84px;height:84px;display:block;margin:0 auto 1.1rem}
   header .kicker{color:var(--gold);margin-bottom:.8rem}
-  header h1{font-weight:500;font-size:clamp(1.9rem,6vw,2.7rem);line-height:1.15;letter-spacing:.01em}
-  header p.tag{color:var(--moss);margin-top:.7rem;font-size:1rem;font-style:italic}
+  header h1{font-weight:500;font-size:clamp(1.9rem,6vw,2.7rem);line-height:1.15;letter-spacing:.01em;text-wrap:balance}
+  header p.tag{color:var(--band-dim);margin-top:.7rem;font-size:1rem;font-style:italic}
   .actions{margin-top:1.5rem;display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap}
   .btn{display:inline-block;font-family:"IBM Plex Mono",monospace;font-size:.78rem;letter-spacing:.12em;
        text-transform:uppercase;text-decoration:none;padding:.7rem 1.25rem;border-radius:6px}
-  .btn.gold{background:var(--gold);color:var(--note-edge);border:1px solid var(--amber)}
+  .btn.gold{background:var(--gold);color:var(--edge);border:1px solid var(--amber)}
   .btn.line{color:var(--petal);border:1px solid rgba(228,163,61,.5)}
   .btn:hover{filter:brightness(1.06)}
 
   main{max-width:42rem;margin:0 auto;padding:2.5rem 1.25rem 4rem}
-  h2{font-weight:500;font-size:clamp(1.35rem,4.5vw,1.7rem);line-height:1.25;margin:2.8rem 0 .4rem}
-  h2 .kicker{display:block;color:var(--amber);margin-bottom:.55rem}
-  h3{font-weight:500;font-size:1.12rem;margin:1.9rem 0 .35rem}
+  h2{font-weight:500;font-size:clamp(1.35rem,4.5vw,1.7rem);line-height:1.25;margin:2.8rem 0 .4rem;text-wrap:balance}
+  h2 .kicker{display:block;color:var(--kicker);margin-bottom:.55rem}
+  h3{font-weight:500;font-size:1.12rem;margin:1.9rem 0 .35rem;text-wrap:balance}
   p{margin:.85rem 0}
   strong{font-weight:600}
   em{font-style:italic}
   ol,ul{margin:.85rem 0 .85rem 1.35rem}
   li{margin:.45rem 0}
   hr{border:0;height:1px;background:linear-gradient(90deg,transparent,var(--gold),transparent);margin:2.6rem auto;width:70%}
-  .rule{background:var(--note);color:var(--cream);border-radius:10px;border:1px solid var(--note-edge);
+  .rule{background:var(--plate-bg);color:var(--plate-fg);border-radius:10px;border:1px solid var(--edge);
         padding:1.1rem 1.2rem;margin:1.4rem 0;text-align:center}
   .rule .kicker{color:var(--gold);margin-bottom:.5rem}
   .rule p{margin:0;font-size:1.05rem}
-  code{font-family:"IBM Plex Mono",monospace;font-size:.85em;background:rgba(228,163,61,.16);
+  code{font-family:"IBM Plex Mono",monospace;font-size:.85em;background:var(--code-bg);
        border-radius:4px;padding:.08em .35em}
   .facts{list-style:none;margin:1.2rem 0;padding:0}
-  .facts li{border-top:1px solid rgba(20,31,25,.14);padding:.7rem 0;margin:0}
-  .facts li:last-child{border-bottom:1px solid rgba(20,31,25,.14)}
+  .facts li{border-top:1px solid var(--hair);padding:.7rem 0;margin:0}
+  .facts li:last-child{border-bottom:1px solid var(--hair)}
   .facts b{font-weight:600}
   .cansee{border-left:3px solid var(--gold);padding:.15rem 0 .15rem 1rem;margin:1rem 0}
-  .cannotsee{border-left:3px solid var(--note);padding:.15rem 0 .15rem 1rem;margin:1rem 0}
-  footer{background:var(--note);color:var(--moss);text-align:center;font-size:.9rem;
+  .cannotsee{border-left:3px solid var(--kicker);padding:.15rem 0 .15rem 1rem;margin:1rem 0}
+  footer{background:var(--band-bg);color:var(--band-dim);text-align:center;font-size:.9rem;
          padding:2.2rem 1.25rem;line-height:1.9}
   footer a{color:var(--petal);text-decoration:none}
   .micro{font-family:"IBM Plex Mono",monospace;font-size:.55rem;letter-spacing:.3em;text-transform:uppercase;
-         color:rgba(201,118,31,.55);white-space:nowrap;overflow:hidden;text-align:center;padding:.5rem 0}
+         color:var(--micro);white-space:nowrap;overflow:hidden;text-align:center;padding:.5rem 0}
 </style>
 </head>
 <body>
+
+<nav class="topbar">
+  <button class="tgl" id="themeBtn" type="button" aria-pressed="false">
+    <svg class="sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.4v2.2M12 19.4v2.2M4.2 12H2M22 12h-2.2M6.5 6.5 4.9 4.9M19.1 19.1l-1.6-1.6M17.5 6.5l1.6-1.6M4.9 19.1l1.6-1.6"/></svg>
+    <svg class="moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.2A8.2 8.2 0 0 1 9.8 4 8.4 8.4 0 1 0 20 14.2Z"/></svg>
+    <span class="sr" id="themeLabel">Switch between day and night</span>
+  </button>
+  <div class="grow"></div>
+  <label class="langpick">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg>
+    <span class="sr" id="langLabel">Language</span>
+    <select id="langSel" aria-labelledby="langLabel">
+      <option value="en">English</option>
+      <option value="es">Español</option>
+      <option value="de">Deutsch</option>
+      <option value="fr">Français</option>
+      <option value="it">Italiano</option>
+      <option value="pt">Português</option>
+      <option value="ru">Русский</option>
+      <option value="zh">中文</option>
+    </select>
+  </label>
+</nav>
 
 <header>
   <svg class="rosette" viewBox="-60 -60 120 120" role="img" aria-label="Marigold flower">
@@ -122,17 +262,79 @@
         <circle r="3" fill="#5a300c"/>
       </svg>
   <div class="kicker">marigold &middot; litepaper</div>
-  <h1>Digital cash with a fully auditable chain</h1>
-  <p class="tag">The paper you can actually read on your phone.</p>
-  <div class="actions">
-    <a class="btn gold" href="marigold-litepaper.pdf" download>Download PDF</a>
-    <a class="btn line" href="https://marigold.cash/">marigold.cash</a>
+  <div class="head-text" data-lang="en" lang="en">
+    <h1>Digital cash for everyday use</h1>
+    <p class="tag">The paper you can actually read on your phone.</p>
+    <div class="actions">
+      <a class="btn gold" href="marigold-litepaper.pdf" download>Download PDF</a>
+      <a class="btn line" href="https://marigold.cash/">marigold.cash</a>
+    </div>
   </div>
+<!-- translations:head -->
+<div class="head-text" data-lang="es" lang="es">
+    <h1>Dinero digital para el día a día</h1>
+    <p class="tag">El documento que de verdad puedes leer en el teléfono.</p>
+    <div class="actions">
+      <a class="btn gold" href="marigold-litepaper.pdf" download>Descargar PDF (en inglés)</a>
+      <a class="btn line" href="https://marigold.cash/">marigold.cash</a>
+    </div>
+  </div>
+<div class="head-text" data-lang="de" lang="de">
+    <h1>Digitales Bargeld für den Alltag</h1>
+    <p class="tag">Das Papier, das du wirklich auf dem Handy lesen kannst.</p>
+    <div class="actions">
+      <a class="btn gold" href="marigold-litepaper.pdf" download>PDF herunterladen (englisch)</a>
+      <a class="btn line" href="https://marigold.cash/">marigold.cash</a>
+    </div>
+  </div>
+<div class="head-text" data-lang="fr" lang="fr">
+    <h1>De l'argent liquide numérique, au quotidien</h1>
+    <p class="tag">Le document que vous pouvez vraiment lire sur votre téléphone.</p>
+    <div class="actions">
+      <a class="btn gold" href="marigold-litepaper.pdf" download>Télécharger le PDF (en anglais)</a>
+      <a class="btn line" href="https://marigold.cash/">marigold.cash</a>
+    </div>
+  </div>
+<div class="head-text" data-lang="it" lang="it">
+    <h1>Contante digitale per tutti i giorni</h1>
+    <p class="tag">Il documento che puoi davvero leggere sul telefono.</p>
+    <div class="actions">
+      <a class="btn gold" href="marigold-litepaper.pdf" download>Scarica il PDF (in inglese)</a>
+      <a class="btn line" href="https://marigold.cash/">marigold.cash</a>
+    </div>
+  </div>
+<div class="head-text" data-lang="pt" lang="pt">
+    <h1>Dinheiro digital para o dia a dia</h1>
+    <p class="tag">O documento que dá para ler de verdade no celular.</p>
+    <div class="actions">
+      <a class="btn gold" href="marigold-litepaper.pdf" download>Baixar o PDF (em inglês)</a>
+      <a class="btn line" href="https://marigold.cash/">marigold.cash</a>
+    </div>
+  </div>
+<div class="head-text" data-lang="ru" lang="ru">
+    <h1>Цифровые наличные на каждый день</h1>
+    <p class="tag">Документ, который действительно читается с телефона.</p>
+    <div class="actions">
+      <a class="btn gold" href="marigold-litepaper.pdf" download>Скачать PDF (на английском)</a>
+      <a class="btn line" href="https://marigold.cash/">marigold.cash</a>
+    </div>
+  </div>
+<div class="head-text" data-lang="zh" lang="zh-Hans">
+    <h1>日常可用的数字现金</h1>
+    <p class="tag">一份真的能在手机上读完的文件。</p>
+    <div class="actions">
+      <a class="btn gold" href="marigold-litepaper.pdf" download>下载 PDF（英文）</a>
+      <a class="btn line" href="https://marigold.cash/">marigold.cash</a>
+    </div>
+  </div>
+<!-- /translations:head -->
 </header>
 
 <div class="micro" aria-hidden="true">marigold · litepaper · marigold · litepaper · marigold · litepaper · marigold · litepaper · marigold · litepaper</div>
 
 <main>
+
+<article data-lang="en">
 
 <h2 id="problem"><span class="kicker">the problem</span>Digital Money Forgot What Cash Got Right</h2>
 <p>Take a dollar bill out of your wallet. Notice three things:</p>
@@ -210,6 +412,15 @@
 
 <hr>
 
+<h2 id="phone"><span class="kicker">on your phone</span>Your Phone Is a Remote Control, Not a Wallet</h2>
+<p>Everything you can do at your own keyboard, you can do from your phone, in a Telegram chat: check your balance, pay someone, take in a note, raise a payment request, read your history, see whether your miner is running. What changes is not what you can do. It is where the money is — and the money is not on the phone.</p>
+<p>Your wallet runs at home, on whatever stays switched on: a laptop in a drawer, a small computer beside the router. It keeps itself in step with the chain, it holds your notes, and it answers your messages. The phone in your pocket holds no keys and stores no notes. It talks to nothing but Telegram. Lose it, and you have lost a remote control.</p>
+<p>The bot is yours, not ours. You make it in Telegram in about two minutes, hand your wallet the token, and pair the two with a code. From then on your wallet answers that one Telegram account and ignores every other. There is no Marigold server in the middle, no account with us, no fleet of machines we run for your phone to depend on. Your wallet calls out to Telegram; nothing calls in, and there is nothing to open on your router.</p>
+<p>Spending is guarded the way a bank card is: a PIN before anything that moves money, a lockout after three wrong tries that only the machine at home can clear, and a daily limit you set yourself. That Telegram account can now move money, so it needs two-factor authentication — the bot tells you so the first time you speak to it.</p>
+<p>The limits, plainly. When the machine at home is off, the phone can do nothing at all: no balance, no paying, no receiving. A payment code sent through a chat is bearer value while it is in flight, exactly like the printed QR codes above — whoever reads it first can claim it. And a proper phone app, one that holds keys itself, is a job for later and probably for someone else. This is the version that asks you to trust nobody.</p>
+
+<hr>
+
 <h2 id="observer"><span class="kicker">honest boundaries</span>What an Observer Can and Cannot See</h2>
 <p>Marigold is not a privacy coin, and this litepaper will not pretend it is. Here is exactly what someone watching the system can figure out:</p>
 <div class="cansee"><p><strong>They can see:</strong> Every note, every value, every operation, the total supply, and the complete current state of the system. All of it is in plain view. Nothing is encrypted, ever.</p></div>
@@ -267,13 +478,1120 @@
   <a class="btn gold" href="marigold-litepaper.pdf" download>Download the PDF</a>
 </div>
 
+</article>
+<!-- translations:main -->
+<article data-lang="es" lang="es">
+
+<h2 id="problem-es"><span class="kicker">el problema</span>El dinero digital olvidó lo que el efectivo hacía bien</h2>
+<p>Saca un billete de la cartera. Fíjate en tres cosas:</p>
+<ol>
+  <li><strong>Quien lo tiene, es su dueño.</strong> No hay cuenta, ni inicio de sesión, ni intermediario. La posesión es la propiedad.</li>
+  <li><strong>No guarda memoria.</strong> El billete no recuerda quién lo gastó la última vez. No existe ningún registro que te vincule con el café que compraste esta mañana.</li>
+  <li><strong>Cualquiera puede comprobar que es auténtico.</strong> Lo miras al trasluz, tocas el papel. No hace falta ser experto.</li>
+</ol>
+<p>Ningún dinero digital de uso corriente reúne las tres propiedades a la vez.</p>
+<p>Bitcoin te da la primera y la tercera: tener tus llaves significa ser dueño de tus monedas, y cualquiera puede verificar que el sistema es honesto. Pero falla estrepitosamente en la segunda. Cada bitcoin que se ha minado arrastra su historial completo, de forma permanente y pública. Cada dirección desde la que has enviado algo o en la que has recibido algo queda cosida a las demás en un grafo que cualquiera puede analizar. Tus monedas recuerdan todo lo que hiciste con ellas.</p>
+<p>Las monedas de privacidad como Monero y Zcash intentan arreglarlo cifrando el historial. Y lo consiguen: esconden cosas. Pero la misma criptografía que las esconde crea dos problemas nuevos. El primero: casi nadie puede verificar por sí mismo que el sistema es honesto. Estás confiando en expertos que no conoces, en que las matemáticas no esconden ningún fallo ni ninguna puerta trasera. El segundo: los reguladores echan un vistazo a esa criptografía compleja y clasifican la moneda en consecuencia — la exclusión de las casas de cambio, las restricciones y el trato hostil no llegan por lo que la moneda hace, sino por cómo lo hace.</p>
+<p>El resultado es un panorama en el que eliges entre transparencia sin privacidad o privacidad sin confianza. El efectivo ofrecía las dos cosas, sin esfuerzo. El dinero digital, de algún modo, lo olvidó.</p>
+
+<hr>
+
+<h2 id="insight-es"><span class="kicker">la idea</span>No ocultes el rastro — no dejes ninguno</h2>
+<p>Imagina que estás en un puesto del mercado. Le das un billete de cinco dólares al vendedor. El vendedor lo mete en la caja. Más tarde, ese mismo día, el vendedor se gasta ese mismo billete en la panadería. La panadería se lo da de cambio al siguiente cliente.</p>
+<p>Ahora pregunta: ¿quién puede rastrear ese billete hasta ti? Nadie. No porque el recorrido del billete estuviera cifrado u oculto — el billete estuvo a plena vista en cada paso del camino — sino porque el billete nunca registró quién se lo entregó a quién. La conexión entre tú y el vendedor no se escribió en ninguna parte. Existió solo en el momento de la entrega y después desapareció.</p>
+<p>Esta es la diferencia entre ocultar información y no recogerla nunca. Las monedas de privacidad ocultan. Marigold no recoge.</p>
+
+<hr>
+
+<h2 id="how-es"><span class="kicker">cómo funciona</span>Billetes en lugar de cuentas</h2>
+<p>La mayoría de las criptomonedas funcionan como cuentas bancarias. Tienes una dirección (parecida a un número de cuenta) y las transacciones mueven valor entre direcciones. Las direcciones son públicas y cada movimiento entre ellas queda registrado para siempre. Es el sueño de un contable y la pesadilla de la privacidad.</p>
+<p>Marigold funciona como el efectivo. No hay cuentas. En su lugar, el sistema mantiene un conjunto de <strong>billetes</strong> — piensa en ellos como billetes de banco digitales.</p>
+<p>Cada billete es un registro público sencillo:</p>
+<ul>
+  <li>Un <strong>número de serie</strong> (como el número de serie de un billete de papel)</li>
+  <li>Un <strong>valor</strong> (0,01, 0,1, 1, 10, 100, 1.000, 10.000 o 100.000 MAGLD)</li>
+  <li>Una <strong>cerradura</strong> (una llave pública: quien tenga la llave que encaja puede gastarlo)</li>
+</ul>
+<p>Eso es todo. Sin nombre de dueño, sin dirección, sin identidad. El billete no sabe quién lo tiene. Solo sabe que existe una llave, y que quien pueda abrir la cerradura puede gastarlo.</p>
+
+<h3>Hacer un pago</h3>
+<p>Pagar a alguien es como entregar un billete, con un paso más:</p>
+<ol>
+  <li><strong>Le das al destinatario la llave</strong> del billete (por código QR, por mensaje de texto o incluso de viva voz — igual que compartirías una foto).</li>
+  <li><strong>El destinatario cambia la cerradura de inmediato</strong> — registra una transacción que sustituye tu llave por una llave nueva que solo él conoce. Se confirma en menos de un segundo.</li>
+</ol>
+<p>Una vez confirmado ese cambio, el billete es suyo de forma irrevocable. Tú ya no tienes una llave que funcione. La liquidación está hecha.</p>
+<p>Como alternativa, si el destinatario puede enviarte por adelantado su llave nueva (por ejemplo, con una solicitud de pago), puedes cambiar la cerradura directamente a su llave. Tu llave no viaja a ninguna parte. Los dos métodos producen el mismo resultado: el billete pasa de una llave a otra.</p>
+
+<h3>Dividir y unir</h3>
+<p>Los billetes vienen en valores fijos, igual que el dinero de papel. Si necesitas pagar 30 MAGLD y tienes un billete de 100 MAGLD, lo <strong>divides</strong> en diez billetes de 10 MAGLD. Entregas tres. Te quedas siete. Dar cambio, igual que con el efectivo.</p>
+<p>En sentido contrario, diez billetes de 10 MAGLD pueden <strong>unirse</strong> en uno solo de 100 MAGLD. Los valores se mueven en factores de diez, así que cualquier cantidad se paga con un puñado pequeño de billetes.</p>
+
+<h3>Qué registra el sistema</h3>
+<p>Cada operación — crear, cambiar cerraduras, dividir, unir, canjear — es pública y está a plena vista. Lo que nadie puede ver es <strong>quién</strong> la hizo, porque el sistema no tiene ningún concepto de «quién». No hay campo de remitente. Ni campo de destinatario. Ni agenda de direcciones. Ni cuenta.</p>
+<p>El sistema registra que un billete cambió de manos. No registra de qué manos.</p>
+
+<hr>
+
+<h2 id="realworld-es"><span class="kicker">en la práctica</span>Usar Marigold en el mundo real</h2>
+<p>Como un billete Marigold no es más que una llave, usarlo en el mundo real es tan sencillo como usar efectivo. Así es como se hace:</p>
+
+<h3>Imprímelo, gástalo</h3>
+<p>Cada billete de tu aplicación de monedero se puede mostrar como un <strong>código QR</strong>. Puedes imprimir ese código QR en un papel, doblarlo y meterlo en tu cartera de cuero, justo al lado de las tarjetas de crédito y el carné de conducir. Ese papel <em>es</em> el dinero. Se lo entregas a alguien, lo escanea, cambia la cerradura y el billete es suyo. Tú ya no tienes una llave que funcione. El papel que ahora lleva en el bolsillo no vale nada: el valor se ha movido.</p>
+<p>Esto no es una metáfora. El código QR impreso contiene la llave de verdad. Perderlo es como perder un billete de cien dólares: quien lo encuentre puede gastarlo. Guardarlo a salvo es la misma responsabilidad que guardar efectivo a salvo. No hay teléfono de atención para recuperarlo, ni botón de «denunciar robo», ni banco que revierta la transacción. Eso es lo que significa ser un instrumento al portador, y en eso consiste todo.</p>
+
+<h3>Regálalo</h3>
+<p>Una tarjeta de cumpleaños con un código QR impreso dentro no se distingue de una tarjeta de cumpleaños con un billete de cincuenta dólares dentro. Quien la recibe lo escanea, cambia la cerradura de inmediato y el billete es suyo de forma irrevocable. No hay cuenta que abrir ni plazo de espera. Abre el sobre y ya tiene el dinero en la mano.</p>
+
+<h3>Déjalo en herencia</h3>
+<p>Un sobre cerrado en una caja de seguridad, con los códigos QR impresos de varios billetes, funciona exactamente igual que un sobre lleno de efectivo. Quien lo abre tiene las llaves. Quien tiene las llaves tiene los billetes. No hace falta albacea, ni juicio testamentario, ni permiso de ningún tercero para que el valor cambie de manos — aunque, igual que con el efectivo, los arreglos <em>legales</em> en torno a una herencia son un asunto aparte que el sistema no aborda ni puede abordar. El sistema garantiza solo que tener la llave es tener el billete.</p>
+
+<h3>Paga en un puesto del mercado</h3>
+<p>Estás comprando tomates. El vendedor muestra un código QR: su solicitud de pago. Lo escaneas con tu aplicación de monedero, eliges el billete con el que quieres pagar y tu teléfono cambia la cerradura directamente a la llave del vendedor. Menos de un segundo después, el billete es suyo. Te guardas los tomates. El vendedor nunca vio tu nombre, ni tu dirección, ni tu cuenta. Tú tampoco viste los suyos. La transacción queda liquidada, es definitiva y se puede olvidar, igual que el efectivo.</p>
+
+<h3>Guárdalo en frío</h3>
+<p>¿Te preocupan los hackers? Imprime tus billetes como códigos QR, mételos en una caja ignífuga y borra la aplicación. Los billetes existen en la blockchain. Las llaves existen en papel. Ningún aparato conectado a internet las guarda. Cuando quieras gastar, escanea el código QR para devolverlo a una aplicación de monedero, cambia la cerradura de inmediato (por si alguien copió el papel mientras estaba guardado) y opera con normalidad.</p>
+
+<h3>Cámbialo de monedero</h3>
+<p>Como los billetes son llaves independientes y no están atados a ninguna frase semilla ni a ninguna cuenta, puedes llevar un billete de una aplicación de monedero a otra cuando quieras. Exporta la llave de una aplicación e impórtala en otra. No hace falta ninguna transacción en la cadena, no se paga ninguna comisión, no hay interacción alguna con la red. Tu billete funciona igual en cualquier monedero compatible con Marigold: elige la aplicación que te guste, cámbiala cuando quieras, tu dinero va contigo.</p>
+<p>El hilo común: un billete Marigold es una llave, y una llave se puede imprimir, mandar por mensaje, doblar dentro de un sobre, pegar en la nevera o aprender de memoria. Al sistema le da igual cómo viaja la llave entre las personas, porque el sistema no sabe que las personas existen. Solo conoce llaves y billetes — y por eso cada forma de mover un billete de papel tiene aquí un equivalente digital directo.</p>
+
+<hr>
+
+<h2 id="phone-es"><span class="kicker">en tu teléfono</span>Tu teléfono es un control remoto, no un monedero</h2>
+<p>Todo lo que puedes hacer desde tu propio teclado lo puedes hacer desde el teléfono, en un chat de Telegram: consultar tu saldo, pagar a alguien, recibir un billete, emitir una solicitud de pago, leer tu historial, ver si tu minero está funcionando. Lo que cambia no es lo que puedes hacer. Es dónde está el dinero — y el dinero no está en el teléfono.</p>
+<p>Tu monedero funciona en casa, en lo que sea que quede encendido: una computadora portátil en un cajón, una máquina pequeña junto al router. Se mantiene al día con la cadena, guarda tus billetes y responde a tus mensajes. El teléfono que llevas en el bolsillo no guarda llaves ni almacena billetes. No habla con nada más que con Telegram. Si lo pierdes, has perdido un control remoto.</p>
+<p>El bot es tuyo, no nuestro. Lo creas en Telegram en unos dos minutos, le entregas el token a tu monedero y emparejas los dos con un código. A partir de ahí tu monedero responde a esa única cuenta de Telegram e ignora todas las demás. No hay ningún servidor de Marigold en medio, ninguna cuenta con nosotros, ninguna flota de máquinas nuestras de la que tu teléfono dependa. Tu monedero llama hacia fuera, a Telegram; nada llama hacia dentro, y no hay nada que abrir en tu router.</p>
+<p>El gasto está protegido como el de una tarjeta bancaria: un PIN antes de cualquier cosa que mueva dinero, un bloqueo tras tres intentos fallidos que solo la máquina de casa puede levantar, y un límite diario que fijas tú. Esa cuenta de Telegram ya puede mover dinero, así que necesita autenticación de dos factores: el bot te lo dice la primera vez que hablas con él.</p>
+<p>Los límites, dichos claramente. Cuando la máquina de casa está apagada, el teléfono no puede hacer absolutamente nada: ni saldo, ni pagos, ni cobros. Un código de pago enviado por un chat es valor al portador mientras está en tránsito, exactamente igual que los códigos QR impresos de antes: quien lo lea primero se lo queda. Y una aplicación de teléfono en condiciones, una que guarde las llaves ella misma, es tarea para más adelante y probablemente para otra gente. Esta es la versión que no te pide confiar en nadie.</p>
+
+<hr>
+
+<h2 id="observer-es"><span class="kicker">límites honestos</span>Lo que un observador puede y no puede ver</h2>
+<p>Marigold no es una moneda de privacidad, y este litepaper no va a fingir que lo sea. Esto es exactamente lo que puede averiguar alguien que observe el sistema:</p>
+<div class="cansee"><p><strong>Puede ver:</strong> cada billete, cada valor, cada operación, el suministro total y el estado actual completo del sistema. Todo está a plena vista. Nada está cifrado, nunca.</p></div>
+<div class="cansee"><p><strong>Puede ver:</strong> la cadena de operaciones — qué billete se cambió por qué billete nuevo, cuándo hubo divisiones y uniones, los patrones de tiempos. Un analista decidido que estudie los registros públicos puede identificar patrones de comportamiento: pagos rápidos y seguidos, secuencias de dividir y gastar, o el ritmo diario de aceptar y unir de un comercio.</p></div>
+<div class="cansee"><p><strong>Puede ver:</strong> quién creó y canjeó billetes, si consigue vincular una dirección corriente de la blockchain con una identidad del mundo real. Los puntos donde Marigold se conecta con el mundo tradicional de la blockchain son completamente visibles.</p></div>
+<div class="cannotsee"><p><strong>No puede ver:</strong> ninguna identidad asociada a un pago dentro del sistema. No hay nada que ver, porque ese dato nunca se registró.</p></div>
+<p>Un billete se confunde con todos los demás billetes del mismo valor: un billete de 100 MAGLD se parece a cualquier otro billete de 100 MAGLD y no dice nada más allá de ese grupo. El software de monedero puede difuminar los patrones de comportamiento (variando un poco los tiempos, agrupando operaciones, alternando qué tamaños de billete se usan para las comisiones), pero eso son buenos hábitos, no magia. Marigold no afirma nada más fuerte que eso.</p>
+
+<hr>
+
+<h2 id="honest-es"><span class="kicker">la aritmética</span>Por qué es dinero honesto</h2>
+<p>Cada pocos segundos, cada participante verifica una sola regla:</p>
+<div class="rule">
+  <div class="kicker">la regla de conservación</div>
+  <p><strong>Todos los billetes que existen + todas las monedas del lado tradicional = total de monedas minadas hasta hoy.</strong></p>
+</div>
+<p>Si esto no se cumple, algo va mal y la red lo ve de inmediato. El suministro es comprobable en todo momento — no porque confíes en un auditor, no porque confíes en un sistema de pruebas complicado, sino con la clase de aritmética que cualquiera sabe hacer.</p>
+<p>Dentro del sistema nunca se crea ni se destruye valor. Pagar una comisión retira un billete del conjunto, pero su valor se acredita al minero y puede volver a crearse como billete nuevo en cualquier momento. La regla de conservación es absoluta y universal.</p>
+
+<hr>
+
+<h2 id="chain-es"><span class="kicker">la cadena</span>Lo bastante rápida para sentirse como efectivo</h2>
+<p>La regla de liquidación es sencilla: un billete es tuyo cuando tu cambio de cerradura queda confirmado en la red. Eso significa que <strong>el tiempo de confirmación es el tiempo de entrega.</strong> En Bitcoin, estarías diez minutos de pie en el puesto del mercado. En Ethereum, unos doce segundos. En Marigold, menos de un segundo.</p>
+<p>Marigold funciona sobre una blockchain de prueba de trabajo que produce unos 10 bloques por segundo, lo que da confirmaciones por debajo del segundo. La tecnología de base la construyó el proyecto Kaspa: una blockchain rápida, fiable y bien probada. Marigold añade encima el sistema de billetes y su economía, y deja intacta la capa base porque hace su trabajo excepcionalmente bien.</p>
+<p><strong>Un apunte sobre la energía.</strong> La historia energética de Marigold no es que consuma poco — una cadena de prueba de trabajo atrae tanta minería como valgan sus recompensas, y una Marigold exitosa no será una excepción. La historia es que nada de esa energía compra espera. Una blockchain clásica solo puede aceptar un bloque por ronda; los bloques minados en paralelo se tiran a la basura, así que la red solo se mantiene segura manteniéndose lenta. La cadena sobre la que corre Marigold conserva todos los bloques — los que se encuentran en el mismo instante se entretejen juntos en el libro de cuentas, y todos cuentan — y así el mismo presupuesto de seguridad entrega diez bloques por segundo y liquidación por debajo del segundo en lugar de una cola de diez minutos. Por pago, esa diferencia de eficiencia es enorme. En total, es la misma aritmética honesta que todo lo demás aquí: energía gastada en proporción al valor que se protege.</p>
+
+<hr>
+
+<h2 id="economics-es"><span class="kicker">economía</span>La economía de un vistazo</h2>
+<ul class="facts">
+  <li><b>Suministro:</b> 210.000.000 MAGLD, tope fijo. Sin preminado, sin fondo de desarrollo, sin asignación de ningún tipo.</li>
+  <li><b>Lanzamiento:</b> lanzamiento justo desde el primer día. Software disponible para todo el mundo por adelantado. Todos empiezan en igualdad de condiciones.</li>
+  <li><b>Emisión:</b> suave y gradual — la recompensa de minería se reduce a la mitad cada tres años, sin caídas bruscas. Cerca del 21% se mina en el primer año, y alrededor del 90% para el décimo.</li>
+  <li><b>Unidad base:</b> 1 MAGLD = 100.000.000 pétalos.</li>
+  <li><b>Coste de pagar:</b> 0,01 MAGLD — una centésima de moneda — por cualquier pago cotidiano, envíes lo que envíes. La comisión es un único billete pequeño que se entrega junto con el pago, así que mover un café y mover un auto cuestan lo mismo. Solo las operaciones inusualmente grandes, que agrupan docenas de billetes a la vez, suben a dos o tres centésimas.</li>
+  <li><b>Comisiones:</b> todas las comisiones van a los mineros. No se quema nada, no se desvía nada. Una economía de efectivo — donde cada pago es una transacción en la cadena — produce unos ingresos por comisiones constantes que las cadenas de reserva de valor no pueden igualar.</li>
+</ul>
+
+<hr>
+
+<h2 id="security-es"><span class="kicker">seguridad al lanzar</span>Ruedas de apoyo que se acaban quitando</h2>
+<p>Una cadena de prueba de trabajo recién nacida tiene poca potencia de minería, y la poca potencia de minería invita a los ataques. Marigold se lanza con una salvaguarda temporal y enteramente pública llamada <strong>anclas de finalidad</strong>: cinco garantes identificados públicamente co-firman cada cierto tiempo (hacen falta al menos 3 de 5) un bloque reciente y lo vuelven permanente e irreversible. Nadie puede deshacer un bloque anclado.</p>
+<p>Los garantes no pueden censurar transacciones, ni crear monedas, ni mover los fondos de nadie, ni producir bloques. Su único poder es impedir que se deshagan transacciones ya completadas. Si se quedan en silencio, la cadena sigue funcionando con normalidad como una red de prueba de trabajo corriente: algo menos protegida, pero plenamente operativa.</p>
+<p>La salvaguarda está diseñada para retirarse. Cuando la potencia de minería de la red crezca lo bastante como para que atacarla salga prohibitivamente caro, las anclas pasarán de obligatorias a consultivas y de ahí a caducadas del todo. Antes de que eso ocurra, la elección de los garantes sucesores está pensada para pasar a la gobernanza de quienes tienen billetes — de modo que incluso lo que quede de las ruedas de apoyo pase de los fundadores a la comunidad antes de que se retiren por completo.</p>
+
+<hr>
+
+<h2 id="isandisnot-es"><span class="kicker">en una frase</span>Lo que Marigold es — y lo que no</h2>
+<p><strong>Marigold es</strong> efectivo digital. Los billetes son instrumentos al portador. Tener la llave es ser el dueño. Entregar la llave es liquidar el pago. La cadena lo dice todo sobre el valor y calla sobre las personas — exactamente igual que un billete de papel.</p>
+<p><strong>Marigold no es</strong> una moneda de privacidad. Nada está cifrado. Nada está oculto. La distinción no es un eufemismo: las monedas de privacidad ocultan criptográficamente los datos que registran, y Marigold no registra ningún dato que ocultar. Lo que comparte con el efectivo es concreto y está honestamente delimitado: el sistema lo dice todo sobre el <em>valor</em> por diseño, y calla sobre las <em>personas</em> por diseño.</p>
+<p><strong>Marigold es</strong> cinco operaciones, una regla de conservación, un estado a plena vista, firmas digitales corrientes, un suministro fijo que todo el mundo comprueba en todo momento, sobre una red lo bastante rápida como para que entregar un billete Marigold se sienta como entregar un billete de papel.</p>
+<p>Todo lo que hace puede comprobarlo la gente para la que está hecho.</p>
+
+<div class="actions" style="margin-top:2.5rem">
+  <a class="btn gold" href="marigold-litepaper.pdf" download>Descargar el PDF (en inglés)</a>
+</div>
+
+</article>
+<article data-lang="de" lang="de">
+
+<h2 id="problem-de"><span class="kicker">das problem</span>Digitales Geld hat vergessen, was Bargeld richtig macht</h2>
+<p>Nimm einen Geldschein aus deiner Brieftasche. Drei Dinge fallen auf:</p>
+<ol>
+  <li><strong>Wer ihn hat, dem gehört er.</strong> Kein Konto, kein Login, kein Vermittler. Besitz ist Eigentum.</li>
+  <li><strong>Er hat kein Gedächtnis.</strong> Der Schein weiß nicht, wer ihn zuletzt ausgegeben hat. Nichts verbindet dich mit dem Kaffee von heute Morgen.</li>
+  <li><strong>Jeder kann prüfen, ob er echt ist.</strong> Gegen das Licht halten, das Papier fühlen. Dafür braucht es kein Fachwissen.</li>
+</ol>
+<p>Kein verbreitetes digitales Geld bringt diese drei Eigenschaften zugleich zustande.</p>
+<p>Bitcoin liefert die erste und die dritte: Wer die Schlüssel hat, dem gehören die Coins, und jeder kann nachprüfen, dass das System ehrlich ist. Bei der zweiten versagt Bitcoin gründlich. Jeder je geschürfte Bitcoin trägt seine vollständige Geschichte dauerhaft und öffentlich mit sich. Jede Adresse, von der du je gesendet oder auf der du je empfangen hast, hängt in einem Graphen, den jeder auswerten kann. Deine Coins erinnern sich an alles, was du je mit ihnen gemacht hast.</p>
+<p>Privacy-Coins wie Monero und Zcash versuchen das zu lösen, indem sie die Geschichte verschlüsseln. Das Verstecken gelingt ihnen — aber genau die Kryptografie, die versteckt, schafft zwei neue Probleme. Erstens kann kaum jemand selbst nachprüfen, dass das System ehrlich ist. Du vertraust Fachleuten, die du nie getroffen hast, dass in der Mathematik kein Fehler steckt und keine Hintertür. Zweitens werfen Aufsichtsbehörden einen Blick auf die komplizierte Kryptografie und stufen die Währung entsprechend ein — Delistings, Auflagen und eine feindselige Behandlung folgen nicht daraus, was die Währung tut, sondern daraus, wie sie es tut.</p>
+<p>Am Ende hast du die Wahl zwischen Transparenz ohne Privatsphäre und Privatsphäre ohne Vertrauen. Bargeld bot beides, ganz mühelos. Digitales Geld hat irgendwie vergessen, wie das geht.</p>
+
+<hr>
+
+<h2 id="insight-de"><span class="kicker">die einsicht</span>Die Spur nicht verwischen — gar keine hinterlassen</h2>
+<p>Stell dir vor, du stehst an einem Marktstand. Du gibst dem Händler einen Fünf-Euro-Schein. Der Händler legt ihn in die Kasse. Später am Tag gibt er genau diesen Schein beim Bäcker aus. Der Bäcker gibt ihn als Wechselgeld an den nächsten Kunden weiter.</p>
+<p>Jetzt die Frage: Wer kann diesen Schein zu dir zurückverfolgen? Niemand. Nicht, weil sein Weg verschlüsselt oder versteckt gewesen wäre — der Schein lag bei jedem Schritt offen sichtbar da —, sondern weil der Schein selbst nie festgehalten hat, wer ihn wem gereicht hat. Die Verbindung zwischen dir und dem Händler wurde nie aufgeschrieben. Sie bestand nur im Moment der Übergabe und war dann weg.</p>
+<p>Das ist der Unterschied zwischen Daten verstecken und Daten gar nicht erst sammeln. Privacy-Coins verstecken. Marigold sammelt nicht.</p>
+
+<hr>
+
+<h2 id="how-de"><span class="kicker">so funktioniert es</span>Scheine statt Konten</h2>
+<p>Die meisten Kryptowährungen funktionieren wie Bankkonten. Du hast eine Adresse (so etwas wie eine Kontonummer), und Transaktionen schieben Werte zwischen Adressen hin und her. Die Adressen sind öffentlich, und jede Bewegung zwischen ihnen wird für immer festgehalten. Ein Traum für Buchhalter und ein Albtraum für die Privatsphäre.</p>
+<p>Marigold funktioniert wie Bargeld. Es gibt keine Konten. Stattdessen verwaltet das System einen Bestand an <strong>Scheinen</strong> — denk an sie wie an digitale Geldscheine.</p>
+<p>Jeder Schein ist ein schlichter öffentlicher Eintrag:</p>
+<ul>
+  <li>Eine <strong>Seriennummer</strong> (wie die Seriennummer auf einem Geldschein)</li>
+  <li>Ein <strong>Wert</strong> (0,01, 0,1, 1, 10, 100, 1.000, 10.000 oder 100.000 MAGLD)</li>
+  <li>Ein <strong>Schloss</strong> (ein öffentlicher Schlüssel — wer den passenden Schlüssel hat, kann den Schein ausgeben)</li>
+</ul>
+<p>Das ist alles. Kein Name eines Eigentümers, keine Adresse, keine Identität. Der Schein weiß nicht, wer ihn hat. Er weiß nur, dass es einen Schlüssel gibt, und dass ihn ausgeben kann, wer das Schloss öffnet.</p>
+
+<h3>Bezahlen</h3>
+<p>Jemanden zu bezahlen ist wie einen Schein zu übergeben, nur mit einem Schritt mehr:</p>
+<ol>
+  <li><strong>Du gibst dem Empfänger den Schlüssel</strong> zum Schein (per QR-Code, per Nachricht oder sogar mündlich — so, wie du ein Foto weitergeben würdest).</li>
+  <li><strong>Der Empfänger tauscht sofort das Schloss aus</strong> — er schreibt eine Transaktion, die deinen Schlüssel durch einen ganz neuen ersetzt, den nur er kennt. Das ist in unter einer Sekunde bestätigt.</li>
+</ol>
+<p>Sobald der Tausch bestätigt ist, gehört der Schein unwiderruflich ihm. Dein Schlüssel passt nicht mehr. Die Zahlung ist abgeschlossen.</p>
+<p>Umgekehrt geht es auch: Wenn der Empfänger dir seinen neuen Schlüssel vorab schicken kann, etwa mit einer Zahlungsaufforderung, tauschst du das Schloss gleich gegen seinen Schlüssel aus. Dein Schlüssel verlässt dein Gerät dann nie. Beide Wege führen zum selben Ergebnis: Der Schein wandert von einem Schlüssel zum nächsten.</p>
+
+<h3>Teilen und Zusammenlegen</h3>
+<p>Scheine gibt es in festen Werten, genau wie beim Bargeld. Wenn du 30 MAGLD zahlen willst und einen 100-MAGLD-Schein hast, <strong>teilst</strong> du ihn in zehn 10-MAGLD-Scheine. Drei davon gibst du weiter. Sieben behältst du. Wechselgeld — wie beim Bargeld.</p>
+<p>Andersherum lassen sich zehn 10-MAGLD-Scheine zu einem 100-MAGLD-Schein <strong>zusammenlegen</strong>. Die Werte gehen in Zehnerschritten, deshalb ist jeder Betrag mit einer kleinen Handvoll Scheine zahlbar.</p>
+
+<h3>Was das System aufzeichnet</h3>
+<p>Jede Operation — erzeugen, Schloss austauschen, teilen, zusammenlegen, einlösen — ist öffentlich und offen sichtbar. Was niemand sieht, ist, <strong>wer</strong> es war, denn das System kennt kein „Wer“. Es gibt kein Absenderfeld. Kein Empfängerfeld. Kein Adressbuch. Kein Konto.</p>
+<p>Das System hält fest, dass ein Schein den Besitzer gewechselt hat. Wer die Besitzer sind, hält es nicht fest.</p>
+
+<hr>
+
+<h2 id="realworld-de"><span class="kicker">in der praxis</span>Marigold im Alltag</h2>
+<p>Weil ein Marigold-Schein nichts weiter ist als ein Schlüssel, ist der Umgang damit im Alltag so einfach wie der mit Bargeld. So geht es:</p>
+
+<h3>Ausdrucken und ausgeben</h3>
+<p>Jeder Schein in deiner Wallet-App lässt sich als <strong>QR-Code</strong> anzeigen. Du kannst diesen QR-Code auf ein Blatt Papier drucken, es zusammenfalten und in deine Brieftasche stecken — direkt neben die Kreditkarten und den Führerschein. Dieses Stück Papier <em>ist</em> das Geld. Gib es jemandem, er scannt es, tauscht das Schloss aus, und der Schein gehört ihm. Dein Schlüssel passt nicht mehr. Das Papier in seiner Tasche ist jetzt wertlos — der Wert ist weitergewandert.</p>
+<p>Das ist kein Bild. Im gedruckten QR-Code steckt der echte Schlüssel. Ihn zu verlieren ist, als würdest du einen Hundert-Euro-Schein verlieren: Wer ihn findet, kann ihn ausgeben. Ihn sicher zu verwahren ist dieselbe Verantwortung wie bei Bargeld. Es gibt keine Hotline, keinen Knopf „als gestohlen melden“, keine Bank, die die Zahlung zurückholt. Genau das heißt Inhaberpapier, und darum geht es hier.</p>
+
+<h3>Verschenken</h3>
+<p>Eine Geburtstagskarte mit einem gedruckten QR-Code darin ist nicht zu unterscheiden von einer Geburtstagskarte mit einem Fünfzig-Euro-Schein darin. Der Beschenkte scannt ihn, tauscht sofort das Schloss aus, und der Schein gehört unwiderruflich ihm. Kein Konto einrichten, keine Wartezeit. Er macht den Umschlag auf und hat das Geld in der Hand.</p>
+
+<h3>Vererben</h3>
+<p>Ein versiegelter Umschlag im Bankschließfach, mit gedruckten QR-Codes für mehrere Scheine, wirkt genau wie ein Umschlag voll Bargeld. Wer ihn öffnet, hat die Schlüssel. Wer die Schlüssel hat, hat die Scheine. Es braucht keinen Testamentsvollstrecker, kein Nachlassgericht, keine Erlaubnis von dritter Seite, damit der Wert übergeht — wobei, wie bei Bargeld, die <em>rechtliche</em> Seite des Erbens eine eigene Sache ist, die das System nicht regelt und nicht regeln kann. Das System garantiert nur eines: Wer den Schlüssel hat, hat den Schein.</p>
+
+<h3>Am Marktstand bezahlen</h3>
+<p>Du kaufst Tomaten. Der Händler zeigt einen QR-Code — seine Zahlungsaufforderung. Du scannst ihn mit deiner Wallet-App, wählst den Schein aus, mit dem du zahlen willst, und dein Handy tauscht das Schloss direkt gegen den Schlüssel des Händlers aus. Keine Sekunde später gehört der Schein ihm. Du steckst die Tomaten ein. Der Händler hat deinen Namen nie gesehen, deine Adresse nicht und dein Konto auch nicht. Du hast von ihm genauso wenig gesehen. Die Zahlung ist erledigt, endgültig und vergessen — wie beim Bargeld.</p>
+
+<h3>Kalt lagern</h3>
+<p>Angst vor Hackern? Druck deine Scheine als QR-Codes aus, leg sie in eine feuerfeste Kassette und lösch die App. Die Scheine liegen in der Blockchain. Die Schlüssel liegen auf Papier. Kein Gerät mit Internetanschluss hat sie. Wenn du zahlen willst, scannst du den QR-Code zurück in eine Wallet-App, tauschst sofort das Schloss aus (falls jemand das Papier während der Lagerung abfotografiert hat) und zahlst ganz normal.</p>
+
+<h3>Zwischen Wallets umziehen</h3>
+<p>Weil Scheine eigenständige Schlüssel sind und an keine Seed-Phrase und kein Konto gebunden, kannst du einen Schein jederzeit von einer Wallet-App in eine andere holen. Schlüssel in der einen App exportieren, in der anderen importieren. Keine Transaktion auf der Chain, keine Gebühr, überhaupt kein Kontakt mit dem Netzwerk. Dein Schein funktioniert in jeder Wallet gleich, die Marigold unterstützt — nimm die App, die dir gefällt, wechsle, wann du willst, dein Geld kommt mit.</p>
+<p>Der rote Faden: Ein Marigold-Schein ist ein Schlüssel, und ein Schlüssel lässt sich drucken, verschicken, in einen Umschlag falten, an den Kühlschrank heften oder auswendig lernen. Dem System ist egal, wie der Schlüssel von Mensch zu Mensch kommt, denn das System weiß nicht, dass es Menschen gibt. Es kennt nur Schlüssel und Scheine — und deshalb hat jeder Weg, auf dem man eine Banknote weitergeben kann, hier eine direkte digitale Entsprechung.</p>
+
+<hr>
+
+<h2 id="phone-de"><span class="kicker">auf dem handy</span>Dein Handy ist eine Fernbedienung, keine Geldbörse</h2>
+<p>Alles, was du an deiner eigenen Tastatur tun kannst, geht auch vom Handy aus, in einem Telegram-Chat: Guthaben abfragen, jemanden bezahlen, einen Schein annehmen, eine Zahlungsaufforderung stellen, deinen Verlauf lesen, nachsehen, ob dein Miner läuft. Was sich ändert, ist nicht, was du tun kannst. Es ist, wo das Geld liegt — und das Geld liegt nicht auf dem Handy.</p>
+<p>Deine Wallet läuft zu Hause, auf dem, was ohnehin an bleibt: ein Laptop in der Schublade, ein kleiner Rechner neben dem Router. Sie hält sich mit der Chain auf Stand, sie verwahrt deine Scheine, und sie beantwortet deine Nachrichten. Das Handy in deiner Tasche hat keine Schlüssel und speichert keine Scheine. Es redet mit nichts außer Telegram. Verlierst du es, hast du eine Fernbedienung verloren.</p>
+<p>Der Bot gehört dir, nicht uns. Du legst ihn in Telegram in etwa zwei Minuten an, gibst deiner Wallet das Token und verbindest beide mit einem Code. Von da an antwortet deine Wallet genau diesem einen Telegram-Konto und ignoriert jedes andere. Kein Marigold-Server dazwischen, kein Konto bei uns, keine Maschinenflotte von uns, auf die dein Handy angewiesen wäre. Deine Wallet ruft bei Telegram an; bei ihr ruft niemand an, und an deinem Router musst du nichts öffnen.</p>
+<p>Das Ausgeben ist abgesichert wie bei einer Bankkarte: eine PIN vor allem, was Geld bewegt, eine Sperre nach drei Fehlversuchen, die nur der Rechner zu Hause aufheben kann, und ein Tageslimit, das du selbst festlegst. Dieses Telegram-Konto kann jetzt Geld bewegen, also braucht es Zwei-Faktor-Authentifizierung — der Bot sagt dir das beim ersten Mal, wenn du mit ihm sprichst.</p>
+<p>Die Grenzen, ganz offen. Wenn der Rechner zu Hause aus ist, kann das Handy gar nichts: kein Guthaben, kein Bezahlen, kein Annehmen. Ein Zahlungscode, der durch einen Chat geht, ist unterwegs ein Inhaberpapier, genau wie die gedruckten QR-Codes weiter oben — wer ihn zuerst liest, kann ihn einlösen. Und eine richtige Handy-App, die selbst Schlüssel verwahrt, ist eine Aufgabe für später und wahrscheinlich für jemand anderen. Das hier ist die Version, die von dir verlangt, niemandem zu vertrauen.</p>
+
+<hr>
+
+<h2 id="observer-de"><span class="kicker">ehrliche grenzen</span>Was ein Beobachter sehen kann — und was nicht</h2>
+<p>Marigold ist kein Privacy-Coin, und dieses Litepaper tut auch nicht so. Hier steht genau, was jemand herausfinden kann, der das System beobachtet:</p>
+<div class="cansee"><p><strong>Sichtbar ist:</strong> Jeder Schein, jeder Wert, jede Operation, die Gesamtmenge und der vollständige aktuelle Zustand des Systems. Alles liegt offen da. Nichts ist verschlüsselt, zu keinem Zeitpunkt.</p></div>
+<div class="cansee"><p><strong>Sichtbar ist:</strong> Die Kette der Operationen — welcher Schein zu welchem neuen Schein wurde, wann geteilt und zusammengelegt wurde, zeitliche Muster. Wer die öffentlichen Aufzeichnungen hartnäckig genug durchgeht, erkennt Verhaltensmuster: schnelle Zahlungen hintereinander, erst teilen und dann ausgeben, oder den täglichen Rhythmus eines Händlers aus Annehmen und Zusammenlegen.</p></div>
+<div class="cansee"><p><strong>Sichtbar ist:</strong> Wer Scheine erzeugt und eingelöst hat — vorausgesetzt, es gelingt, eine gewöhnliche Blockchain-Adresse einer echten Person zuzuordnen. Die Stellen, an denen Marigold an die herkömmliche Blockchain-Welt andockt, liegen vollständig offen.</p></div>
+<div class="cannotsee"><p><strong>Nicht sichtbar ist:</strong> Irgendeine Identität hinter einer Zahlung innerhalb des Systems. Da ist nichts zu sehen, weil die Daten nie aufgezeichnet wurden.</p></div>
+<p>Ein Schein geht in allen anderen Scheinen desselben Werts auf — ein 100-MAGLD-Schein sieht aus wie jeder andere 100-MAGLD-Schein, und weiter als bis zu dieser Gruppe reicht die Anonymität nicht. Wallet-Software kann Verhaltensmuster verwischen: Zeitpunkte leicht streuen, Operationen bündeln, unterschiedliche Scheingrößen für Gebühren nehmen. Aber das sind gute Gewohnheiten, keine Zauberei. Mehr behauptet Marigold nicht.</p>
+
+<hr>
+
+<h2 id="honest-de"><span class="kicker">die rechnung</span>Warum es ehrliches Geld ist</h2>
+<p>Alle paar Sekunden prüft jeder Teilnehmer eine einzige Regel:</p>
+<div class="rule">
+  <div class="kicker">die erhaltungsregel</div>
+  <p><strong>Alle vorhandenen Scheine + alle Coins auf der herkömmlichen Seite = alle je geschürften Coins.</strong></p>
+</div>
+<p>Stimmt das nicht, ist etwas faul, und das Netzwerk sieht es sofort. Die Geldmenge ist in jedem Augenblick nachprüfbar — nicht, weil man einem Prüfer glaubt, nicht, weil man einem komplizierten Beweissystem glaubt, sondern mit der Sorte Rechnen, die jeder beherrscht.</p>
+<p>Innerhalb des Systems entsteht nie Wert und geht nie Wert verloren. Eine Gebühr zu zahlen nimmt einen Schein aus dem Bestand, aber sein Wert wird dem Miner gutgeschrieben und kann jederzeit wieder als neuer Schein erzeugt werden. Die Erhaltungsregel gilt absolut und ausnahmslos.</p>
+
+<hr>
+
+<h2 id="chain-de"><span class="kicker">die chain</span>Schnell genug, um sich wie Bargeld anzufühlen</h2>
+<p>Die Regel für den Abschluss ist einfach: Ein Schein gehört dir, sobald dein Schlosstausch im Netzwerk bestätigt ist. Das heißt: <strong>Bestätigungszeit ist Übergabezeit.</strong> Bei Bitcoin ständest du zehn Minuten am Marktstand. Bei Ethereum etwa zwölf Sekunden. Bei Marigold unter einer Sekunde.</p>
+<p>Marigold läuft auf einer Proof-of-Work-Blockchain, die ungefähr 10 Blöcke pro Sekunde erzeugt und damit in unter einer Sekunde bestätigt. Die Technik darunter stammt vom Kaspa-Projekt — eine schnelle, zuverlässige, gut erprobte Blockchain. Marigold setzt das Scheinsystem und seine Ökonomie obendrauf und lässt die Basisschicht unangetastet, weil sie ihre Arbeit außergewöhnlich gut macht.</p>
+<p><strong>Ein Wort zum Energieverbrauch.</strong> Marigold verbraucht nicht wenig Energie, und das behauptet hier auch niemand — eine Proof-of-Work-Chain zieht so viel Mining an, wie ihre Belohnungen wert sind, und ein erfolgreiches Marigold wird da keine Ausnahme sein. Der Punkt ist ein anderer: Nichts davon wird fürs Warten ausgegeben. Eine klassische Blockchain kann pro Runde nur einen Block annehmen; parallel geschürfte Blöcke landen im Müll, und das Netzwerk bleibt nur sicher, indem es langsam bleibt. Die Chain, auf der Marigold läuft, behält jeden Block — Blöcke, die im selben Moment gefunden werden, werden gemeinsam ins Hauptbuch eingewoben und zählen alle —, und deshalb liefert derselbe Sicherheitsaufwand zehn Blöcke pro Sekunde und einen Abschluss in unter einer Sekunde statt einer Warteschlange von zehn Minuten. Pro Zahlung ist das ein gewaltiger Unterschied in der Effizienz. Insgesamt ist es dieselbe ehrliche Rechnung wie alles andere hier: Energie im Verhältnis zu dem Wert, den sie schützt.</p>
+
+<hr>
+
+<h2 id="economics-de"><span class="kicker">ökonomie</span>Die Ökonomie auf einen Blick</h2>
+<ul class="facts">
+  <li><b>Menge:</b> 210.000.000 MAGLD, harte Obergrenze. Nichts vorab geschürft, kein Entwicklerfonds, keine Zuteilung irgendeiner Art.</li>
+  <li><b>Start:</b> Fairer Start ab Tag eins. Die Software steht vorab allen zur Verfügung. Alle fangen unter gleichen Bedingungen an.</li>
+  <li><b>Ausgabe:</b> Gleichmäßig und allmählich — die Mining-Belohnung halbiert sich alle drei Jahre, ohne plötzliche Einbrüche. Etwa 21 % werden im ersten Jahr geschürft, rund 90 % bis zum zehnten.</li>
+  <li><b>Kleinste Einheit:</b> 1 MAGLD = 100.000.000 Blütenblätter.</li>
+  <li><b>Was eine Zahlung kostet:</b> 0,01 MAGLD — ein Hundertstel Coin — für jede alltägliche Zahlung, egal wie viel du schickst. Die Gebühr ist ein einzelner kleiner Schein, den du mit der Zahlung übergibst, deshalb kostet ein Kaffee dasselbe wie ein Auto. Nur ungewöhnlich große Operationen, die Dutzende Scheine auf einmal bündeln, steigen auf zwei oder drei Hundertstel.</li>
+  <li><b>Gebühren:</b> Alle Gebühren gehen an die Miner. Nichts wird verbrannt, nichts umgeleitet. Eine Bargeldwirtschaft — in der jede Zahlung eine Transaktion auf der Chain ist — bringt stetige Gebühreneinnahmen, mit denen Chains als reiner Wertspeicher nicht mithalten können.</li>
+</ul>
+
+<hr>
+
+<h2 id="security-de"><span class="kicker">sicherheit zum start</span>Stützräder, die wieder abkommen</h2>
+<p>Eine neue Proof-of-Work-Chain hat wenig Rechenleistung hinter sich, und wenig Rechenleistung lädt zu Angriffen ein. Marigold startet mit einer befristeten, vollständig offengelegten Absicherung namens <strong>Finalitätsanker</strong>: Fünf öffentlich benannte Treuhänder unterschreiben in regelmäßigen Abständen gemeinsam einen jungen Block — mindestens 3 von 5 müssen mitmachen — und machen ihn damit endgültig und unumkehrbar. Einen verankerten Block kann niemand mehr rückgängig machen.</p>
+<p>Die Treuhänder können keine Transaktionen zensieren, keine Coins erzeugen, niemandes Geld bewegen und keine Blöcke produzieren. Ihre einzige Macht ist, das Rückgängigmachen abgeschlossener Transaktionen zu verhindern. Wenn sie verstummen, läuft die Chain ganz normal als gewöhnliches Proof-of-Work-Netzwerk weiter — etwas weniger geschützt, aber voll funktionsfähig.</p>
+<p>Die Absicherung ist darauf angelegt, wieder zu verschwinden. Sobald die Rechenleistung im Netzwerk stark genug ist, dass Angriffe unbezahlbar werden, werden die Anker von verbindlich zu empfehlend und treten am Ende ganz außer Kraft. Vorher soll die Auswahl der nachfolgenden Treuhänder an die Mitbestimmung der Scheininhaber übergehen — selbst der Rest der Stützräder wechselt also von den Gründern zur Gemeinschaft, bevor sie ganz abgenommen werden.</p>
+
+<hr>
+
+<h2 id="isandisnot-de"><span class="kicker">in einem satz</span>Was Marigold ist — und was nicht</h2>
+<p><strong>Marigold ist</strong> digitales Bargeld. Scheine sind Inhaberpapiere. Wer den Schlüssel hat, dem gehört der Schein. Wer den Schlüssel weitergibt, hat bezahlt. Die Chain führt lückenlos Buch über Werte und schweigt über Menschen — genau wie ein Geldschein.</p>
+<p><strong>Marigold ist kein</strong> Privacy-Coin. Nichts ist verschlüsselt. Nichts ist versteckt. Der Unterschied ist keine Beschönigung: Privacy-Coins verbergen aufgezeichnete Daten mit Kryptografie, und Marigold zeichnet keine Daten auf, die man verbergen müsste. Was es mit Bargeld teilt, ist genau benannt und ehrlich begrenzt — das System führt von Grund auf lückenlos Buch über <em>Werte</em> und schweigt von Grund auf über <em>Menschen</em>.</p>
+<p><strong>Marigold ist</strong> fünf Operationen, eine Erhaltungsregel, ein offen sichtbarer Zustand, gewöhnliche digitale Signaturen, eine feste Geldmenge, die jeder jederzeit nachrechnet, auf einem Netzwerk, das schnell genug ist, damit sich das Weitergeben eines Scheins anfühlt wie das Weitergeben einer Banknote.</p>
+<p>Alles, was es tut, können die Leute nachprüfen, für die es gemacht ist.</p>
+
+<div class="actions" style="margin-top:2.5rem">
+  <a class="btn gold" href="marigold-litepaper.pdf" download>Das PDF herunterladen (englisch)</a>
+</div>
+
+</article>
+<article data-lang="fr" lang="fr">
+
+<h2 id="problem-fr"><span class="kicker">le problème</span>La monnaie numérique a oublié ce que l’argent liquide faisait bien</h2>
+<p>Sortez un billet de votre portefeuille. Remarquez trois choses :</p>
+<ol>
+  <li><strong>Celui qui le détient le possède.</strong> Pas de compte, pas d’identifiant, pas d’intermédiaire. La possession vaut propriété.</li>
+  <li><strong>Il n’a aucune mémoire.</strong> Le billet ne se souvient pas de qui l’a dépensé en dernier. Aucune trace ne vous relie au café que vous avez acheté ce matin.</li>
+  <li><strong>N’importe qui peut vérifier qu’il est authentique.</strong> On le regarde à la lumière, on tâte le papier. Aucune expertise particulière.</li>
+</ol>
+<p>Aucune monnaie numérique grand public ne réunit ces trois propriétés à la fois.</p>
+<p>Bitcoin vous offre la première et la troisième : détenir vos clés, c’est posséder vos pièces, et n’importe qui peut vérifier que le système est honnête. Mais il échoue lourdement sur la deuxième. Chaque bitcoin jamais miné traîne son historique complet, en permanence et en public. Chaque adresse depuis laquelle vous avez envoyé ou reçu se retrouve cousue à toutes les autres dans un graphe que n’importe qui peut analyser. Vos pièces se souviennent de tout ce que vous avez fait avec elles.</p>
+<p>Les cryptomonnaies anonymes comme Monero et Zcash tentent d’y remédier en chiffrant l’historique. Elles réussissent à cacher — mais la cryptographie même qui permet de cacher crée deux problèmes nouveaux. D’abord, presque personne n’est en mesure de vérifier par soi-même que le système est honnête. Vous faites confiance à des experts que vous n’avez jamais rencontrés pour vous assurer que les mathématiques ne contiennent ni faille ni porte dérobée. Ensuite, les régulateurs jettent un coup d’œil à cette cryptographie complexe et classent la monnaie en conséquence : retraits de cotation, restrictions et traitement hostile découlent non pas de ce que fait la monnaie, mais de la façon dont elle le fait.</p>
+<p>Résultat : un paysage où il faut choisir entre la transparence sans vie privée et la vie privée sans confiance. L’argent liquide offrait les deux, sans effort. La monnaie numérique a fini par oublier comment.</p>
+
+<hr>
+
+<h2 id="insight-fr"><span class="kicker">l'idée</span>Ne pas cacher la trace — ne pas en laisser</h2>
+<p>Imaginez-vous devant un étal de marché. Vous tendez un billet de cinq dollars au marchand. Le marchand le met dans sa caisse. Plus tard dans la journée, il dépense ce même billet à la boulangerie. La boulangerie le rend en monnaie au client suivant.</p>
+<p>Posez-vous la question : qui peut remonter de ce billet jusqu’à vous ? Personne. Non pas parce que le trajet du billet était chiffré ou dissimulé — le billet est resté visible de tous à chaque étape — mais parce que le billet lui-même n’a jamais enregistré qui le remettait à qui. Le lien entre vous et le marchand n’a jamais été écrit nulle part. Il a existé le temps de la remise, puis il a disparu.</p>
+<p>Voilà toute la différence entre cacher une information et ne jamais la recueillir. Les cryptomonnaies anonymes cachent. Marigold ne recueille rien.</p>
+
+<hr>
+
+<h2 id="how-fr"><span class="kicker">comment ça marche</span>Des billets, pas des comptes</h2>
+<p>La plupart des cryptomonnaies fonctionnent comme des comptes bancaires. Vous avez une adresse (l’équivalent d’un numéro de compte) et les transactions déplacent de la valeur d’une adresse à l’autre. Les adresses sont publiques et chaque mouvement entre elles est enregistré pour toujours. Un rêve de comptable, un cauchemar pour la vie privée.</p>
+<p>Marigold fonctionne comme l’argent liquide. Il n’y a pas de comptes. Le système tient à la place un ensemble de <strong>billets</strong> — voyez-les comme des billets de banque numériques.</p>
+<p>Chaque billet est un enregistrement public tout simple :</p>
+<ul>
+  <li>Un <strong>numéro de série</strong> (comme celui imprimé sur un billet de banque)</li>
+  <li>Une <strong>valeur</strong> (0,01, 0,1, 1, 10, 100, 1 000, 10 000 ou 100 000 MAGLD)</li>
+  <li>Une <strong>serrure</strong> (une clé publique — qui détient la clé correspondante peut le dépenser)</li>
+</ul>
+<p>C’est tout. Pas de nom de propriétaire, pas d’adresse, pas d’identité. Le billet ne sait pas qui le détient. Il sait seulement qu’une clé existe et que celui qui parvient à l’ouvrir peut le dépenser.</p>
+
+<h3>Payer quelqu’un</h3>
+<p>Payer quelqu’un, c’est comme tendre un billet, avec une étape en plus :</p>
+<ol>
+  <li><strong>Vous donnez au destinataire la clé</strong> du billet (par QR code, par SMS, ou même à l’oral — comme vous partageriez une photo).</li>
+  <li><strong>Le destinataire change aussitôt la serrure</strong> — il inscrit une transaction qui remplace votre clé par une clé toute neuve que lui seul connaît. C’est confirmé en moins d’une seconde.</li>
+</ol>
+<p>Une fois ce changement confirmé, le billet lui appartient irrévocablement. Vous ne détenez plus de clé qui fonctionne. Le règlement est terminé.</p>
+<p>Autre possibilité : si le destinataire peut vous transmettre sa nouvelle clé à l’avance (par une demande de paiement, par exemple), vous changez la serrure directement pour la sienne. Votre clé ne circule nulle part. Les deux méthodes donnent le même résultat : le billet passe d’une clé à une autre.</p>
+
+<h3>Diviser et fusionner</h3>
+<p>Les billets existent en valeurs fixes, exactement comme les espèces. Si vous devez payer 30 MAGLD et que vous détenez un billet de 100 MAGLD, vous le <strong>divisez</strong> en dix billets de 10 MAGLD. Vous en tendez trois. Vous en gardez sept. Faire la monnaie — comme avec l’argent liquide.</p>
+<p>Dans l’autre sens, dix billets de 10 MAGLD peuvent être <strong>fusionnés</strong> en un seul billet de 100 MAGLD. Les valeurs vont de dix en dix, si bien que n’importe quel montant se paie avec une petite poignée de billets.</p>
+
+<h3>Ce que le système enregistre</h3>
+<p>Toute opération — créer un billet, changer une serrure, diviser, fusionner, encaisser — est publique et visible de tous. Ce que personne ne peut voir, c’est <strong>qui</strong> l’a faite, parce que le système n’a aucune notion de « qui ». Pas de champ expéditeur. Pas de champ destinataire. Pas de carnet d’adresses. Pas de compte.</p>
+<p>Le système enregistre qu’un billet a changé de mains. Il n’enregistre pas de quelles mains.</p>
+
+<hr>
+
+<h2 id="realworld-fr"><span class="kicker">en pratique</span>Marigold dans la vie de tous les jours</h2>
+<p>Parce qu’un billet Marigold n’est rien d’autre qu’une clé, s’en servir dans la vie réelle est aussi simple que de se servir d’argent liquide. Voici comment :</p>
+
+<h3>Imprimez-le, dépensez-le</h3>
+<p>Chaque billet de votre application de portefeuille peut s’afficher sous forme de <strong>QR code</strong>. Vous pouvez imprimer ce QR code sur une feuille de papier, la plier et la glisser dans votre portefeuille en cuir — juste à côté de vos cartes bancaires et de votre permis de conduire. Ce bout de papier <em>est</em> l’argent. Tendez-le à quelqu’un : il le scanne, change la serrure, et le billet est à lui. Vous ne détenez plus de clé qui fonctionne. Le papier qu’il a en poche ne vaut plus rien — la valeur est passée ailleurs.</p>
+<p>Ce n’est pas une métaphore. Le QR code imprimé contient la clé elle-même. Le perdre, c’est comme perdre un billet de cent dollars : celui qui le trouve peut le dépenser. Le garder en sécurité est exactement la même responsabilité que garder de l’argent liquide en sécurité. Il n’y a pas de numéro d’assistance, pas de bouton « signaler un vol », pas de banque pour annuler la transaction. C’est cela, être au porteur, et c’est tout l’intérêt.</p>
+
+<h3>Offrez-le</h3>
+<p>Une carte d’anniversaire avec un QR code imprimé à l’intérieur ne se distingue en rien d’une carte d’anniversaire contenant un billet de cinquante dollars. Le destinataire le scanne, change aussitôt la serrure, et le billet est irrévocablement à lui. Aucun compte à ouvrir, aucun délai d’attente. Il ouvre l’enveloppe, il a l’argent en main.</p>
+
+<h3>Laissez un héritage</h3>
+<p>Une enveloppe scellée dans un coffre, contenant les QR codes imprimés de plusieurs billets, fonctionne exactement comme une enveloppe de billets de banque. Qui l’ouvre détient les clés. Qui détient les clés détient les billets. Aucun exécuteur testamentaire, aucun tribunal des successions, aucune autorisation d’un tiers n’est nécessaire pour que la valeur change de main — même si, comme avec l’argent liquide, les dispositions <em>juridiques</em> de la succession sont une tout autre affaire, que le système ne règle pas et ne peut pas régler. Le système garantit une seule chose : détenir la clé, c’est détenir le billet.</p>
+
+<h3>Payez sur un marché</h3>
+<p>Vous achetez des tomates. Le marchand affiche un QR code : sa demande de paiement. Vous le scannez avec votre application de portefeuille, vous choisissez le billet avec lequel vous voulez payer, et votre téléphone change la serrure directement pour la clé du marchand. Moins d’une seconde plus tard, le billet est à lui. Vous empochez vos tomates. Le marchand n’a jamais vu votre nom, votre adresse ni votre compte. Vous n’avez jamais vu les siens. La transaction est réglée, définitive et oubliable — comme avec de l’argent liquide.</p>
+
+<h3>Rangez-le hors ligne</h3>
+<p>Les pirates vous inquiètent ? Imprimez vos billets sous forme de QR codes, rangez-les dans une boîte ignifugée et supprimez l’application. Les billets existent sur la blockchain. Les clés existent sur papier. Aucun appareil connecté à Internet ne les détient. Le jour où vous voulez dépenser, rescannez le QR code dans une application de portefeuille, changez aussitôt la serrure (au cas où quelqu’un aurait copié le papier pendant qu’il dormait là) et payez normalement.</p>
+
+<h3>Changez de portefeuille</h3>
+<p>Comme les billets sont des clés indépendantes, qui ne dépendent d’aucune phrase de récupération ni d’aucun compte, vous pouvez déplacer un billet d’une application de portefeuille à une autre quand bon vous semble. Exportez la clé d’une application, importez-la dans une autre. Aucune transaction sur la chaîne, aucun frais, aucune interaction avec le réseau. Votre billet fonctionne de la même façon dans tous les portefeuilles compatibles avec Marigold — choisissez l’application qui vous plaît, changez quand vous voulez, votre argent vous suit.</p>
+<p>Le fil conducteur : un billet Marigold est une clé, et une clé peut s’imprimer, s’envoyer par SMS, se plier dans une enveloppe, s’aimanter sur un frigo ou s’apprendre par cœur. Le système se moque de la façon dont la clé passe d’une personne à l’autre, parce qu’il ignore que les personnes existent. Il ne connaît que des clés et des billets — et c’est pourquoi chaque manière de faire circuler un billet de banque a ici un équivalent numérique direct.</p>
+
+<hr>
+
+<h2 id="phone-fr"><span class="kicker">sur votre téléphone</span>Votre téléphone est une télécommande, pas un portefeuille</h2>
+<p>Tout ce que vous faites à votre clavier, vous pouvez le faire depuis votre téléphone, dans une conversation Telegram : consulter votre solde, payer quelqu’un, recevoir un billet, émettre une demande de paiement, relire votre historique, vérifier que votre mineur tourne. Ce qui change, ce n’est pas ce que vous pouvez faire. C’est l’endroit où se trouve l’argent — et l’argent n’est pas sur le téléphone.</p>
+<p>Votre portefeuille tourne chez vous, sur ce qui reste allumé : un ordinateur portable au fond d’un tiroir, une petite machine posée à côté du routeur. Il se tient à jour avec la chaîne, il garde vos billets et il répond à vos messages. Le téléphone dans votre poche ne contient aucune clé et ne stocke aucun billet. Il ne parle à rien d’autre qu’à Telegram. Perdez-le : vous avez perdu une télécommande.</p>
+<p>Le bot est le vôtre, pas le nôtre. Vous le créez dans Telegram en deux minutes environ, vous confiez le jeton à votre portefeuille, et vous appariez les deux avec un code. À partir de là, votre portefeuille répond à ce seul compte Telegram et ignore tous les autres. Aucun serveur Marigold au milieu, aucun compte chez nous, aucun parc de machines que nous ferions tourner et dont votre téléphone dépendrait. Votre portefeuille appelle Telegram ; rien ne l’appelle, et il n’y a aucun port à ouvrir sur votre routeur.</p>
+<p>Les dépenses sont protégées comme celles d’une carte bancaire : un code avant toute opération qui déplace de l’argent, un blocage après trois erreurs que seule la machine restée chez vous peut lever, et un plafond quotidien que vous fixez vous-même. Ce compte Telegram peut désormais déplacer de l’argent : il lui faut donc une authentification à deux facteurs — le bot vous le dit dès votre premier échange avec lui.</p>
+<p>Les limites, sans détour. Quand la machine restée chez vous est éteinte, le téléphone ne peut plus rien faire : pas de solde, pas de paiement, pas de réception. Un code de paiement envoyé dans une conversation est une valeur au porteur tant qu’il circule, exactement comme les QR codes imprimés plus haut — le premier qui le lit peut se l’approprier. Quant à une vraie application mobile, qui détiendrait elle-même les clés, c’est un chantier pour plus tard, et sans doute pour quelqu’un d’autre. Ceci est la version qui ne vous demande de faire confiance à personne.</p>
+
+<hr>
+
+<h2 id="observer-fr"><span class="kicker">limites assumées</span>Ce qu’un observateur peut voir, et ce qu’il ne peut pas voir</h2>
+<p>Marigold n’est pas une cryptomonnaie anonyme, et ce document ne prétendra pas le contraire. Voici exactement ce que peut déduire quelqu’un qui observe le système :</p>
+<div class="cansee"><p><strong>Il peut voir :</strong> chaque billet, chaque valeur, chaque opération, l’offre totale et l’état courant complet du système. Tout est visible de tous. Rien n’est jamais chiffré.</p></div>
+<div class="cansee"><p><strong>Il peut voir :</strong> l’enchaînement des opérations — quel billet a donné quel nouveau billet, à quel moment les divisions et les fusions ont eu lieu, les rythmes dans le temps. Un analyste déterminé qui étudie les registres publics peut repérer des habitudes : des paiements rapprochés, des séquences « je divise puis je dépense », ou le rythme quotidien d’un commerçant qui reçoit des billets et les fusionne.</p></div>
+<div class="cansee"><p><strong>Il peut voir :</strong> qui a créé et qui a encaissé des billets, s’il parvient à relier une adresse blockchain ordinaire à une identité réelle. Les points où Marigold rejoint le monde blockchain traditionnel sont entièrement visibles.</p></div>
+<div class="cannotsee"><p><strong>Il ne peut pas voir :</strong> la moindre identité attachée à un paiement à l’intérieur du système. Il n’y a rien à voir, parce que la donnée n’a jamais été enregistrée.</p></div>
+<p>Un billet se fond dans la masse de tous les billets de même valeur — un billet de 100 MAGLD ressemble à tous les autres billets de 100 MAGLD, et rien de plus. Les logiciels de portefeuille peuvent brouiller ces habitudes (varier légèrement le moment des opérations, les regrouper, alterner les coupures utilisées pour les frais), mais ce sont de bonnes pratiques, pas de la magie. Marigold ne promet rien de plus.</p>
+
+<hr>
+
+<h2 id="honest-fr"><span class="kicker">l'arithmétique</span>Pourquoi c’est une monnaie honnête</h2>
+<p>Toutes les quelques secondes, chaque participant vérifie une règle unique :</p>
+<div class="rule">
+  <div class="kicker">la règle de conservation</div>
+  <p><strong>Tous les billets existants + toutes les pièces du côté traditionnel = total des pièces jamais minées.</strong></p>
+</div>
+<p>Si l’égalité ne tient pas, quelque chose ne va pas, et le réseau le voit immédiatement. L’offre est vérifiable à chaque instant — sans faire confiance à un auditeur, sans faire confiance à un système de preuves compliqué, mais avec le genre d’arithmétique que tout le monde sait faire.</p>
+<p>Aucune valeur n’est jamais créée ni détruite à l’intérieur du système. Payer des frais retire un billet de l’ensemble, mais sa valeur est créditée au mineur et peut être recréée en un nouveau billet à tout moment. La règle de conservation est absolue et universelle.</p>
+
+<hr>
+
+<h2 id="chain-fr"><span class="kicker">la chaîne</span>Assez rapide pour ressembler à de l’argent liquide</h2>
+<p>La règle de règlement est simple : un billet est à vous quand votre changement de serrure est confirmé par le réseau. Autrement dit, <strong>le temps de confirmation est le temps de la remise en main propre.</strong> Sur Bitcoin, vous resteriez planté devant l’étal pendant dix minutes. Sur Ethereum, une douzaine de secondes. Sur Marigold, moins d’une seconde.</p>
+<p>Marigold tourne sur une blockchain à preuve de travail qui produit environ 10 blocs par seconde, d’où une confirmation en moins d’une seconde. La technologie sous-jacente a été construite par le projet Kaspa — une blockchain rapide, fiable et éprouvée. Marigold ajoute par-dessus le système de billets et son économie, en laissant la couche de base intacte, parce qu’elle fait son travail remarquablement bien.</p>
+<p><strong>Un mot sur l’énergie.</strong> Ce que Marigold a à dire sur l’énergie, ce n’est pas qu’il en consomme peu — une chaîne à preuve de travail attire autant de minage que ses récompenses le justifient, et un Marigold à succès ne fera pas exception. C’est qu’aucun de ces watts ne sert à vous faire attendre. Une blockchain classique ne peut accepter qu’un bloc par tour ; les blocs minés en parallèle sont jetés, si bien que le réseau ne reste sûr qu’en restant lent. La chaîne sur laquelle tourne Marigold garde tous les blocs — ceux qui sont trouvés au même instant sont tissés ensemble dans le registre, et comptent tous — et c’est ainsi que le même budget de sécurité donne dix blocs par seconde et un règlement en moins d’une seconde, au lieu d’une file d’attente de dix minutes. Rapportée au paiement, la différence d’efficacité est énorme. Au total, c’est la même arithmétique honnête que partout ailleurs ici : de l’énergie dépensée à proportion de la valeur protégée.</p>
+
+<hr>
+
+<h2 id="economics-fr"><span class="kicker">économie</span>L’économie en un coup d’œil</h2>
+<ul class="facts">
+  <li><b>Offre :</b> 210 000 000 MAGLD, plafond absolu. Aucun pré-minage, aucun fonds pour les développeurs, aucune attribution d’aucune sorte.</li>
+  <li><b>Lancement :</b> lancement équitable dès le premier jour. Logiciel disponible pour tous à l’avance. Tout le monde part à égalité.</li>
+  <li><b>Émission :</b> douce et progressive — la récompense de minage est divisée par deux tous les trois ans, sans chute brutale. Environ 21 % est miné la première année, ~90 % au bout de dix ans.</li>
+  <li><b>Unité de base :</b> 1 MAGLD = 100 000 000 pétales.</li>
+  <li><b>Coût d’un paiement :</b> 0,01 MAGLD — un centième de pièce — pour tout paiement courant, quel que soit le montant envoyé. Les frais sont un unique petit billet remis avec le paiement : déplacer un café ou une voiture coûte donc la même chose. Seules les opérations inhabituellement lourdes, qui regroupent des dizaines de billets d’un coup, montent à deux ou trois centièmes.</li>
+  <li><b>Frais :</b> tous les frais vont aux mineurs. Rien n’est brûlé, rien n’est détourné. Une économie d’argent liquide — où chaque paiement est une transaction sur la chaîne — produit un revenu de frais régulier que les chaînes de réserve de valeur ne peuvent pas égaler.</li>
+</ul>
+
+<hr>
+
+<h2 id="security-fr"><span class="kicker">sécurité au lancement</span>Des petites roues faites pour être enlevées</h2>
+<p>Une nouvelle chaîne à preuve de travail dispose de peu de puissance de minage, et une faible puissance de minage attire les attaques. Marigold démarre avec une protection temporaire et entièrement divulguée, appelée <strong>ancres de finalité</strong> : cinq garants publiquement identifiés co-signent périodiquement un bloc récent (il en faut au moins 3 sur 5), ce qui le rend permanent et irréversible. Personne ne peut défaire un bloc ancré.</p>
+<p>Les garants ne peuvent pas censurer de transactions, créer des pièces, déplacer les fonds de qui que ce soit, ni produire des blocs. Leur seul pouvoir est d’empêcher qu’une transaction déjà faite soit défaite. S’ils se taisent, la chaîne continue normalement, comme un réseau à preuve de travail ordinaire — un peu moins protégée, mais pleinement opérationnelle.</p>
+<p>Cette protection est conçue pour disparaître. Dès que la puissance de minage du réseau devient assez forte pour rendre une attaque hors de prix, les ancres passent d’obligatoires à consultatives, puis expirent tout à fait. Avant cela, le choix des garants suivants doit revenir à une gouvernance des détenteurs de billets — de sorte que même ce qui reste des petites roues passe des fondateurs à la communauté avant d’être retiré pour de bon.</p>
+
+<hr>
+
+<h2 id="isandisnot-fr"><span class="kicker">en une phrase</span>Ce que Marigold est — et ce qu’il n’est pas</h2>
+<p><strong>Marigold est</strong> de l’argent liquide numérique. Les billets sont des titres au porteur. Détenir la clé, c’est être propriétaire. Transmettre la clé, c’est régler. La chaîne dit tout de la valeur et rien des personnes — exactement comme un billet de banque.</p>
+<p><strong>Marigold n’est pas</strong> une cryptomonnaie anonyme. Rien n’est chiffré. Rien n’est caché. La distinction n’est pas un euphémisme : les cryptomonnaies anonymes dissimulent par la cryptographie des données enregistrées, tandis que Marigold n’enregistre aucune donnée à dissimuler. Ce qu’il partage avec l’argent liquide est précis et honnêtement délimité — le système dit tout de la <em>valeur</em>, par construction, et rien des <em>personnes</em>, par construction.</p>
+<p><strong>Marigold est</strong> cinq opérations, une règle de conservation, un état visible de tous, des signatures numériques ordinaires, une offre fixe que tout le monde vérifie à chaque instant, sur un réseau assez rapide pour que remettre un billet Marigold donne la même sensation que remettre un billet de banque.</p>
+<p>Tout ce qu’il fait peut être vérifié par ceux à qui il est destiné.</p>
+
+<div class="actions" style="margin-top:2.5rem">
+  <a class="btn gold" href="marigold-litepaper.pdf" download>Télécharger le PDF (en anglais)</a>
+</div>
+
+</article>
+<article data-lang="it" lang="it">
+
+<h2 id="problem-it"><span class="kicker">il problema</span>Il denaro digitale ha dimenticato quello che il contante faceva bene</h2>
+<p>Tira fuori dal portafoglio una banconota da un dollaro. Guarda tre cose:</p>
+<ol>
+  <li><strong>Chi la tiene in mano, la possiede.</strong> Non c’è nessun conto, nessun login, nessun intermediario. Il possesso è la proprietà.</li>
+  <li><strong>Non ha memoria.</strong> La banconota non ricorda chi l’ha spesa per ultimo. Non esiste nessuna traccia che ti colleghi al caffè che hai preso stamattina.</li>
+  <li><strong>Chiunque può controllare che sia vera.</strong> La metti in controluce, tocchi la carta. Non serve nessuna competenza particolare.</li>
+</ol>
+<p>Nessuna forma diffusa di denaro digitale riproduce tutte e tre queste proprietà insieme.</p>
+<p>Bitcoin ti dà la prima e la terza: avere le chiavi significa possedere le monete, e chiunque può verificare che il sistema sia onesto. Sulla seconda però fallisce, e di molto. Ogni Bitcoin mai minato si porta dietro tutta la sua storia, per sempre e in pubblico. Ogni indirizzo da cui hai mandato o su cui hai ricevuto finisce cucito dentro un grafo che chiunque può analizzare. Le tue monete ricordano tutto quello che ci hai fatto.</p>
+<p>Le privacy coin come Monero e Zcash provano a rimediare cifrando la storia. A nascondere le cose riescono — ma è proprio la crittografia che nasconde a creare due problemi nuovi. Primo: quasi nessuno può verificare di persona che il sistema sia onesto. Ti fidi di esperti che non hai mai incontrato quando ti dicono che nella matematica non c’è nessun difetto, nessuna porta nascosta. Secondo: i regolatori danno un’occhiata a quella crittografia complicata e classificano la moneta di conseguenza — delisting, restrizioni e trattamento ostile arrivano non per quello che la moneta fa, ma per come lo fa.</p>
+<p>Il risultato è un panorama in cui devi scegliere tra trasparenza senza privacy o privacy senza fiducia. Il contante offriva entrambe, senza sforzo. Il denaro digitale, chissà come, se n’è dimenticato.</p>
+
+<hr>
+
+<h2 id="insight-it"><span class="kicker">l'intuizione</span>Non nascondere le tracce — non lasciarne</h2>
+<p>Immagina di essere alla bancarella di un mercato. Dai al venditore una banconota da cinque dollari. Il venditore la mette in cassa. Più tardi, lo stesso giorno, la spende dal panettiere. Il panettiere la dà di resto al cliente successivo.</p>
+<p>Ora chiediti: chi può risalire da quella banconota a te? Nessuno. Non perché il suo viaggio fosse cifrato o nascosto — la banconota è stata in piena vista a ogni passaggio — ma perché la banconota stessa non ha mai registrato chi l’ha passata a chi. Il legame tra te e il venditore non è mai stato messo per iscritto. È esistito solo nell’istante del passaggio, e poi è sparito.</p>
+<p>Questa è la differenza tra nascondere un’informazione e non raccoglierla mai. Le privacy coin nascondono. Marigold non raccoglie.</p>
+
+<hr>
+
+<h2 id="how-it"><span class="kicker">come funziona</span>Banconote al posto dei conti</h2>
+<p>Quasi tutte le criptovalute funzionano come conti bancari. Hai un indirizzo (una specie di numero di conto) e le transazioni spostano valore tra indirizzi. Gli indirizzi sono pubblici e ogni movimento tra loro resta registrato per sempre. È il sogno di un contabile e un incubo per la privacy.</p>
+<p>Marigold funziona come il contante. Non ci sono conti. Il sistema tiene invece un insieme di <strong>banconote</strong> — proprio come quelle di carta, ma digitali.</p>
+<p>Ogni banconota è un semplice dato pubblico:</p>
+<ul>
+  <li>Un <strong>numero di serie</strong> (come il numero di serie su una banconota da un dollaro)</li>
+  <li>Un <strong>valore</strong> (0,01, 0,1, 1, 10, 100, 1.000, 10.000 o 100.000 MAGLD)</li>
+  <li>Una <strong>serratura</strong> (una chiave pubblica — chi ha la chiave corrispondente può spenderla)</li>
+</ul>
+<p>Tutto qui. Nessun nome del proprietario, nessun indirizzo, nessuna identità. La banconota non sa chi la tiene. Sa soltanto che esiste una chiave, e che chi riesce ad aprirla può spenderla.</p>
+
+<h3>Fare un pagamento</h3>
+<p>Pagare qualcuno è come passargli una banconota, con un passaggio in più:</p>
+<ol>
+  <li><strong>Dai al destinatario la chiave</strong> della banconota (con un codice QR, un messaggio o anche a voce — come faresti per condividere una foto).</li>
+  <li><strong>Il destinatario cambia subito la serratura</strong> — registra una transazione che sostituisce la tua chiave con una chiave nuova di zecca che conosce solo lui. La conferma arriva in meno di un secondo.</li>
+</ol>
+<p>Una volta confermato il cambio, la banconota è sua in modo irrevocabile. Tu non hai più una chiave che funziona. Il pagamento è chiuso.</p>
+<p>In alternativa, se il destinatario può mandarti in anticipo la sua nuova chiave (per esempio con una richiesta di pagamento), puoi cambiare la serratura mettendo direttamente la sua. La tua chiave non viaggia da nessuna parte. I due modi danno lo stesso risultato: la banconota passa da una chiave a un’altra.</p>
+
+<h3>Dividere e unire</h3>
+<p>Le banconote hanno tagli fissi, esattamente come i soldi di carta. Se devi pagare 30 MAGLD e hai una banconota da 100 MAGLD, la <strong>dividi</strong> in dieci banconote da 10 MAGLD. Ne passi tre. Ne tieni sette. Dare il resto — come con il contante.</p>
+<p>Nel senso opposto, dieci banconote da 10 MAGLD si possono <strong>unire</strong> in una sola da 100 MAGLD. I tagli vanno di dieci in dieci, così qualsiasi importo si paga con una manciata di banconote.</p>
+
+<h3>Che cosa registra il sistema</h3>
+<p>Ogni operazione — creare, cambiare la serratura, dividere, unire, riscattare — è pubblica e in piena vista. Quello che nessuno può vedere è <strong>chi</strong> l’ha fatta, perché il sistema non ha nessuna nozione di «chi». Non c’è un campo mittente. Non c’è un campo destinatario. Non c’è una rubrica. Non c’è un conto.</p>
+<p>Il sistema registra che una banconota ha cambiato mano. Non registra di chi fosse la mano.</p>
+
+<hr>
+
+<h2 id="realworld-it"><span class="kicker">in pratica</span>Usare Marigold nel mondo reale</h2>
+<p>Dato che una banconota Marigold non è altro che una chiave, usarla nel mondo reale è semplice quanto usare il contante. Ecco come:</p>
+
+<h3>Stampala, spendila</h3>
+<p>Ogni banconota nell’app del portafoglio può essere mostrata come <strong>codice QR</strong>. Quel codice QR puoi stamparlo su un foglio, piegarlo e metterlo nel portafoglio di pelle — accanto alle carte di credito e alla patente. Quel pezzo di carta <em>è</em> il denaro. Lo passi a qualcuno, quello lo scansiona, cambia la serratura e la banconota è sua. Tu non hai più una chiave che funziona. Il foglio che ha in tasca ormai non vale niente — il valore si è spostato.</p>
+<p>Non è una metafora. Il codice QR stampato contiene la chiave vera. Perderlo è come perdere una banconota da cento dollari: chi la trova può spenderla. Tenerlo al sicuro è la stessa responsabilità che hai con i contanti. Non c’è un numero verde per il recupero, non c’è il pulsante «segnala il furto», non c’è una banca che annulla la transazione. Questo vuol dire essere al portatore, ed è tutto il punto.</p>
+
+<h3>Regalala</h3>
+<p>Un biglietto di auguri con dentro un codice QR stampato è indistinguibile da un biglietto di auguri con dentro una banconota da cinquanta dollari. Chi lo riceve lo scansiona, cambia subito la serratura, e la banconota è sua in modo irrevocabile. Nessun conto da aprire, nessuna attesa. Apre la busta e ha i soldi in mano.</p>
+
+<h3>Lasciala in eredità</h3>
+<p>Una busta sigillata in una cassetta di sicurezza, con dentro i codici QR stampati di alcune banconote, funziona esattamente come una busta piena di contanti. Chi la apre ha le chiavi. Chi ha le chiavi ha le banconote. Non serve un esecutore testamentario, non serve un tribunale, non serve il permesso di nessun terzo perché il valore passi di mano — anche se, come per il contante di carta, gli aspetti <em>legali</em> dell’eredità sono un’altra faccenda, che il sistema non affronta e non può affrontare. Il sistema garantisce solo questo: avere la chiave è avere la banconota.</p>
+
+<h3>Paga alla bancarella</h3>
+<p>Stai comprando i pomodori. Il venditore mostra un codice QR: la sua richiesta di pagamento. Lo scansioni con l’app del portafoglio, scegli la banconota con cui vuoi pagare e il telefono cambia la serratura mettendo direttamente quella del venditore. Meno di un secondo dopo, la banconota è sua. Tu ti prendi i pomodori. Il venditore non ha visto il tuo nome, il tuo indirizzo o il tuo conto. Tu non hai visto i suoi. Il pagamento è chiuso, definitivo e dimenticabile — proprio come con il contante.</p>
+
+<h3>Mettila in cassaforte</h3>
+<p>Hai paura degli hacker? Stampa le tue banconote come codici QR, mettile in una cassetta ignifuga e cancella l’app. Le banconote esistono sulla blockchain. Le chiavi esistono sulla carta. Non le tiene nessun dispositivo collegato a internet. Quando vuoi spendere, riporti il codice QR dentro un’app del portafoglio con una scansione, cambi subito la serratura (nel caso qualcuno abbia copiato il foglio mentre era custodito) e paghi normalmente.</p>
+
+<h3>Spostala tra portafogli</h3>
+<p>Dato che le banconote sono chiavi indipendenti e non sono legate a nessuna frase di recupero né a nessun conto, puoi spostarne una da un’app all’altra quando vuoi. Esporti la chiave da un’app, la importi in un’altra. Nessuna transazione sulla catena, nessuna commissione, nessuna interazione con la rete. La tua banconota funziona allo stesso modo in ogni portafoglio che supporta Marigold — scegli l’app che ti piace, cambiala quando vuoi, i tuoi soldi ti seguono.</p>
+<p>Il filo comune: una banconota Marigold è una chiave, e una chiave si può stampare, mandare per messaggio, piegare dentro una busta, attaccare al frigorifero o imparare a memoria. Al sistema non interessa come la chiave viaggia tra le persone, perché il sistema non sa che le persone esistono. Conosce solo chiavi e banconote — ed è per questo che ogni modo in cui puoi far girare una banconota di carta ha qui un equivalente digitale diretto.</p>
+
+<hr>
+
+<h2 id="phone-it"><span class="kicker">sul telefono</span>Il telefono è un telecomando, non un portafoglio</h2>
+<p>Tutto quello che fai dalla tua tastiera lo puoi fare dal telefono, in una chat di Telegram: controllare il saldo, pagare qualcuno, incassare una banconota, emettere una richiesta di pagamento, leggere lo storico, vedere se il tuo miner sta girando. Quello che cambia non è ciò che puoi fare. È dove stanno i soldi — e i soldi non sono sul telefono.</p>
+<p>Il tuo portafoglio gira a casa, su qualunque cosa resti accesa: un portatile in un cassetto, un computerino accanto al router. Si tiene al passo con la catena, custodisce le tue banconote e risponde ai tuoi messaggi. Il telefono che hai in tasca non contiene chiavi e non conserva banconote. Non parla con nient’altro che Telegram. Se lo perdi, hai perso un telecomando.</p>
+<p>Il bot è tuo, non nostro. Lo crei in Telegram in un paio di minuti, dai il token al tuo portafoglio e li accoppi con un codice. Da quel momento il tuo portafoglio risponde a quell’unico account Telegram e ignora tutti gli altri. Non c’è nessun server Marigold in mezzo, nessun account con noi, nessuna flotta di macchine gestita da noi da cui il tuo telefono debba dipendere. È il tuo portafoglio a chiamare Telegram; niente chiama dall’esterno, e non c’è niente da aprire sul router.</p>
+<p>La spesa è protetta come con una carta bancaria: un PIN prima di qualsiasi cosa muova denaro, il blocco dopo tre tentativi sbagliati che solo la macchina di casa può togliere, e un limite giornaliero che imposti tu. Quell’account Telegram adesso può muovere denaro, quindi gli serve l’autenticazione a due fattori — il bot te lo dice la prima volta che ci parli.</p>
+<p>I limiti, detti chiaramente. Quando la macchina di casa è spenta, il telefono non può fare proprio niente: niente saldo, niente pagamenti, niente incassi. Un codice di pagamento mandato in chat è valore al portatore finché è in viaggio, esattamente come i codici QR stampati di cui sopra: chi lo legge per primo se lo prende. E un’app per telefono vera e propria, che tenga lei le chiavi, è un lavoro per dopo e probabilmente per qualcun altro. Questa è la versione che non ti chiede di fidarti di nessuno.</p>
+
+<hr>
+
+<h2 id="observer-it"><span class="kicker">limiti dichiarati</span>Che cosa vede e che cosa non vede un osservatore</h2>
+<p>Marigold non è una privacy coin, e questo litepaper non farà finta che lo sia. Ecco esattamente che cosa può ricavare chi osserva il sistema:</p>
+<div class="cansee"><p><strong>Possono vedere:</strong> ogni banconota, ogni valore, ogni operazione, l’offerta totale e lo stato attuale completo del sistema. Tutto è in piena vista. Non c’è mai niente di cifrato.</p></div>
+<div class="cansee"><p><strong>Possono vedere:</strong> la catena delle operazioni — quale banconota è diventata quale banconota nuova, quando sono avvenute divisioni e unioni, i ritmi temporali. Un analista ostinato che studia i registri pubblici può individuare schemi di comportamento: pagamenti rapidi uno dietro l’altro, sequenze dividi-e-spendi, o il ritmo quotidiano di un negoziante che incassa e unisce.</p></div>
+<div class="cansee"><p><strong>Possono vedere:</strong> chi ha creato e chi ha riscattato le banconote, se riescono a collegare un normale indirizzo blockchain a un’identità reale. I punti in cui Marigold si collega al mondo blockchain tradizionale sono del tutto visibili.</p></div>
+<div class="cannotsee"><p><strong>Non possono vedere:</strong> nessuna identità legata a un pagamento dentro il sistema. Non c’è niente da vedere, perché quel dato non è mai stato registrato.</p></div>
+<p>Una banconota si confonde con tutte le altre dello stesso valore: una da 100 MAGLD è uguale a ogni altra da 100 MAGLD, e oltre quel gruppo non dice nulla. Il software del portafoglio può sfumare gli schemi di comportamento (variando un po' i tempi, raggruppando le operazioni, alternando i tagli usati per le commissioni), ma sono buone abitudini, non magia. Marigold non promette di più.</p>
+
+<hr>
+
+<h2 id="honest-it"><span class="kicker">l'aritmetica</span>Perché è denaro onesto</h2>
+<p>Ogni pochi secondi, ogni partecipante verifica una sola regola:</p>
+<div class="rule">
+  <div class="kicker">la regola di conservazione</div>
+  <p><strong>Tutte le banconote esistenti + tutte le monete sul lato tradizionale = tutte le monete mai minate.</strong></p>
+</div>
+<p>Se il conto non torna, qualcosa non va e la rete se ne accorge subito. L’offerta è verificabile in ogni istante — non fidandosi di un revisore, non fidandosi di un sistema di prove complicato, ma con il tipo di aritmetica che sa fare chiunque.</p>
+<p>Dentro il sistema non si crea né si distrugge mai valore. Pagare una commissione toglie una banconota dall’insieme, ma il suo valore viene accreditato al miner e può tornare a essere una banconota nuova in qualsiasi momento. La regola di conservazione è assoluta e vale per tutti.</p>
+
+<hr>
+
+<h2 id="chain-it"><span class="kicker">la catena</span>Abbastanza veloce da sembrare contante</h2>
+<p>Il pagamento si chiude con una regola semplice: una banconota è tua quando il tuo cambio di serratura è confermato sulla rete. Vuol dire che <strong>il tempo di conferma è il tempo del passaggio di mano.</strong> Su Bitcoin resteresti fermo alla bancarella dieci minuti. Su Ethereum, circa dodici secondi. Su Marigold, meno di un secondo.</p>
+<p>Marigold gira su una blockchain proof-of-work che produce circa 10 blocchi al secondo, con conferme sotto il secondo. La tecnologia di base è stata costruita dal progetto Kaspa — una blockchain veloce, affidabile e collaudata. Marigold aggiunge su quelle fondamenta il sistema delle banconote e la sua economia, e lascia intatto lo strato di base, perché il suo lavoro lo fa benissimo.</p>
+<p><strong>Una parola sull’energia.</strong> La storia energetica di Marigold non è che consuma poco: una catena proof-of-work attira tanto mining quanto valgono le sue ricompense, e se Marigold avrà successo non farà eccezione. La storia è che niente di quell’energia serve a farti aspettare. Una blockchain classica può accettare un solo blocco per turno; i blocchi minati in parallelo vengono buttati via, così la rete resta sicura solo restando lenta. La catena su cui gira Marigold tiene ogni blocco — i blocchi trovati nello stesso istante vengono intrecciati insieme nel registro, e contano tutti — ed è così che lo stesso budget di sicurezza dà dieci blocchi al secondo e pagamenti chiusi in meno di un secondo, invece di una coda di dieci minuti. Per ogni singolo pagamento la differenza di efficienza è enorme. Nel complesso è la stessa aritmetica onesta di tutto il resto: energia spesa in proporzione al valore che protegge.</p>
+
+<hr>
+
+<h2 id="economics-it"><span class="kicker">economia</span>L’economia in breve</h2>
+<ul class="facts">
+  <li><b>Offerta:</b> 210.000.000 MAGLD, tetto invalicabile. Nessuna moneta coniata in anticipo, nessun fondo per gli sviluppatori, nessuna assegnazione di alcun tipo.</li>
+  <li><b>Lancio:</b> equo dal primo giorno. Software a disposizione di tutti in anticipo. Si parte tutti alla pari.</li>
+  <li><b>Emissione:</b> regolare e graduale — la ricompensa di mining si dimezza ogni tre anni, senza cali improvvisi. Circa il 21% viene minato nel primo anno, il ~90% entro il decimo.</li>
+  <li><b>Unità base:</b> 1 MAGLD = 100.000.000 petali.</li>
+  <li><b>Costo di un pagamento:</b> 0,01 MAGLD — un centesimo di moneta — per qualsiasi pagamento quotidiano, qualunque sia la cifra che mandi. La commissione è una sola piccola banconota che passa insieme al pagamento, quindi spostare un caffè e spostare un’auto costa uguale. Solo le operazioni insolitamente grandi, che mettono insieme decine di banconote in un colpo, salgono a due o tre centesimi.</li>
+  <li><b>Commissioni:</b> vanno tutte ai miner. Niente viene bruciato, niente viene dirottato. Un’economia di contante — dove ogni pagamento è una transazione sulla catena — produce un flusso costante di commissioni che le catene pensate come riserva di valore non possono eguagliare.</li>
+</ul>
+
+<hr>
+
+<h2 id="security-it"><span class="kicker">sicurezza al lancio</span>Rotelle che poi si tolgono</h2>
+<p>Una catena proof-of-work nuova ha poca potenza di mining, e poca potenza di mining invita gli attacchi. Marigold parte con una protezione temporanea e dichiarata per intero, chiamata <strong>ancore di irreversibilità</strong>: cinque garanti identificati pubblicamente firmano insieme, a intervalli regolari (ne bastano almeno 3 su 5), un blocco recente, e lo rendono permanente e irreversibile. Un blocco ancorato non lo può annullare nessuno.</p>
+<p>I garanti non possono censurare transazioni, creare monete, spostare i fondi di qualcuno o produrre blocchi. Il loro unico potere è impedire che si annullino transazioni già concluse. Se tacciono, la catena va avanti normalmente come una rete proof-of-work qualsiasi — un po' meno protetta, ma perfettamente funzionante.</p>
+<p>La protezione è fatta per andare in pensione. Quando la potenza di mining della rete sarà cresciuta abbastanza da rendere un attacco proibitivamente caro, le ancore passeranno da obbligatorie a consultive, e poi scadranno del tutto. Prima che accada, la scelta dei garanti successivi dovrebbe passare al voto di chi detiene le banconote — così anche quel che resta delle rotelle passa dai fondatori alla comunità, prima di essere tolto del tutto.</p>
+
+<hr>
+
+<h2 id="isandisnot-it"><span class="kicker">in una frase</span>Che cos’è Marigold — e che cosa non è</h2>
+<p><strong>Marigold è</strong> contante digitale. Le banconote sono strumenti al portatore. Avere la chiave è essere proprietario. Passare la chiave è chiudere il pagamento. La catena è completa sul valore e muta sulle persone — esattamente come una banconota da un dollaro.</p>
+<p><strong>Marigold non è</strong> una privacy coin. Niente è cifrato. Niente è nascosto. La distinzione non è un eufemismo: le privacy coin nascondono con la crittografia dati che comunque registrano, e Marigold non registra nessun dato da nascondere. Quello che ha in comune con il contante è preciso e onestamente delimitato — il sistema è completo sul <em>valore</em> per scelta, e muto sulle <em>persone</em> per scelta.</p>
+<p><strong>Marigold è</strong> cinque operazioni, una regola di conservazione, uno stato in piena vista, normali firme digitali, un’offerta fissa che tutti controllano in ogni momento, su una rete abbastanza veloce che passare una banconota è come passarne una di carta.</p>
+<p>Tutto quello che fa può essere controllato dalle persone per cui è fatto.</p>
+
+<div class="actions" style="margin-top:2.5rem">
+  <a class="btn gold" href="marigold-litepaper.pdf" download>Scarica il PDF (in inglese)</a>
+</div>
+
+</article>
+<article data-lang="pt" lang="pt">
+
+<h2 id="problem-pt"><span class="kicker">o problema</span>O dinheiro digital esqueceu o que o dinheiro vivo acertou</h2>
+<p>Tire uma cédula de dólar da carteira. Repare em três coisas:</p>
+<ol>
+  <li><strong>Quem está com ela é o dono.</strong> Não existe conta, não existe login, não existe intermediário. A posse é a propriedade.</li>
+  <li><strong>Ela não tem memória.</strong> A cédula não lembra quem a gastou por último. Não existe registro nenhum ligando você ao café que você comprou hoje de manhã.</li>
+  <li><strong>Qualquer um consegue conferir se é verdadeira.</strong> Levante contra a luz, sinta o papel. Não precisa de perícia nenhuma.</li>
+</ol>
+<p>Nenhuma forma de dinheiro digital em uso hoje reúne as três coisas ao mesmo tempo.</p>
+<p>Bitcoin entrega a primeira e a terceira: ter as chaves é ser dono das moedas, e qualquer pessoa pode verificar que o sistema é honesto. Mas falha feio na segunda. Cada Bitcoin já minerado carrega o histórico inteiro, para sempre e à vista de todos. Cada endereço de onde você já mandou ou onde já recebeu fica costurado num grafo que qualquer um pode analisar. Suas moedas lembram de tudo o que você já fez com elas.</p>
+<p>Moedas de privacidade como Monero e Zcash tentam resolver isso criptografando o histórico. Elas conseguem esconder — mas a própria criptografia que esconde cria dois problemas novos. Primeiro, quase ninguém consegue verificar por conta própria que o sistema é honesto. Você está confiando em especialistas que nunca viu para garantir que a matemática não tem falha nem porta dos fundos. Segundo, os reguladores dão uma olhada na criptografia complicada e classificam a moeda de acordo — remoção das corretoras, restrições e tratamento hostil vêm não do que a moeda faz, mas de como ela faz.</p>
+<p>O resultado é um cenário em que você escolhe entre transparência sem privacidade ou privacidade sem confiança. O dinheiro vivo oferecia as duas coisas, sem esforço nenhum. O dinheiro digital, de algum jeito, esqueceu como se faz.</p>
+
+<hr>
+
+<h2 id="insight-pt"><span class="kicker">a ideia</span>Não esconda o rastro — não deixe rastro</h2>
+<p>Imagine que você está numa barraca de feira. Você entrega uma cédula de cinco dólares ao vendedor. O vendedor põe a cédula no caixa. Mais tarde, no mesmo dia, ele gasta essa mesma cédula na padaria. A padaria dá a cédula de troco para o próximo cliente.</p>
+<p>Agora pergunte: quem consegue rastrear essa cédula até você? Ninguém. Não porque o trajeto da cédula tenha sido criptografado ou escondido — a cédula esteve à vista em cada etapa do caminho —, mas porque a própria cédula nunca registrou quem a entregou a quem. A ligação entre você e o vendedor nunca foi anotada. Existiu só no instante da entrega e depois acabou.</p>
+<p>Essa é a diferença entre esconder informação e nunca coletá-la. As moedas de privacidade escondem. Marigold não coleta.</p>
+
+<hr>
+
+<h2 id="how-pt"><span class="kicker">como funciona</span>Cédulas em vez de contas</h2>
+<p>A maioria das criptomoedas funciona como conta bancária. Você tem um endereço (parecido com um número de conta), e as transações movem valor entre endereços. Os endereços são públicos, e cada movimento entre eles fica registrado para sempre. É o sonho de qualquer contador e o pesadelo da privacidade.</p>
+<p>Marigold funciona como dinheiro vivo. Não existem contas. Em vez disso, o sistema mantém um conjunto de <strong>cédulas</strong> — pense nelas como o dinheiro de papel da sua carteira, só que digital.</p>
+<p>Cada cédula é um registro público simples:</p>
+<ul>
+  <li>Um <strong>número de série</strong> (como o número de série de uma cédula de dólar)</li>
+  <li>Um <strong>valor</strong> (0,01, 0,1, 1, 10, 100, 1.000, 10.000 ou 100.000 MAGLD)</li>
+  <li>Uma <strong>fechadura</strong> (uma chave pública — quem tiver a chave correspondente pode gastá-la)</li>
+</ul>
+<p>É só isso. Nenhum nome de dono, nenhum endereço, nenhuma identidade. A cédula não sabe quem está com ela. Sabe apenas que existe uma chave e que quem conseguir abrir a fechadura pode gastá-la.</p>
+
+<h3>Fazer um pagamento</h3>
+<p>Pagar alguém é como entregar uma cédula, com um passo a mais:</p>
+<ol>
+  <li><strong>Você entrega a chave da cédula a quem vai receber</strong> (por QR code, mensagem de texto ou até de viva-voz — do mesmo jeito que você compartilharia uma foto).</li>
+  <li><strong>Quem recebe troca a fechadura na hora</strong> — registra uma transação que substitui a sua chave por uma chave novinha que só essa pessoa conhece. Isso é confirmado em menos de um segundo.</li>
+</ol>
+<p>Confirmada a troca, a cédula é irrevogavelmente de quem recebeu. A sua chave não abre mais nada. A liquidação está feita.</p>
+<p>Se quem recebe conseguir mandar a chave nova para você antes (numa cobrança, por exemplo), dá para fazer diferente: você troca a fechadura direto para a chave dessa pessoa. A sua chave não viaja para lugar nenhum. Os dois caminhos dão no mesmo: a cédula passa de uma chave para outra.</p>
+
+<h3>Dividir e juntar</h3>
+<p>As cédulas vêm em valores fixos, igual ao dinheiro de papel. Se você precisa pagar 30 MAGLD e tem uma cédula de 100 MAGLD, você a <strong>divide</strong> em dez cédulas de 10 MAGLD. Entrega três. Fica com sete. Troco — igual ao dinheiro vivo.</p>
+<p>No sentido contrário, dez cédulas de 10 MAGLD podem ser <strong>juntadas</strong> em uma cédula de 100 MAGLD. Os valores andam de dez em dez, então qualquer quantia se paga com um punhado de cédulas.</p>
+
+<h3>O que o sistema registra</h3>
+<p>Toda operação — criar, trocar fechadura, dividir, juntar, resgatar — é pública e está à vista. O que ninguém consegue ver é <strong>quem</strong> fez, porque o sistema não tem a noção de "quem". Não existe campo de remetente. Nem campo de destinatário. Nem agenda de endereços. Nem conta.</p>
+<p>O sistema registra que uma cédula mudou de mãos. Não registra de quem eram as mãos.</p>
+
+<hr>
+
+<h2 id="realworld-pt"><span class="kicker">na prática</span>Marigold no mundo real</h2>
+<p>Como uma cédula Marigold não passa de uma chave, usá-la no mundo real é tão simples quanto usar dinheiro vivo. Veja como:</p>
+
+<h3>Imprima e gaste</h3>
+<p>Toda cédula do seu aplicativo de carteira pode ser exibida como um <strong>QR code</strong>. Você pode imprimir esse QR code num pedaço de papel, dobrar e guardar na carteira de couro — bem ao lado dos cartões de crédito e da carteira de motorista. Esse pedaço de papel <em>é</em> o dinheiro. Entregue a alguém: a pessoa escaneia, troca a fechadura, e a cédula é dela. A sua chave não funciona mais. O papel que ficou no bolso dela agora não vale nada — o valor já mudou de lugar.</p>
+<p>Isso não é metáfora. O QR code impresso guarda a chave de verdade. Perdê-lo é como perder uma cédula de cem dólares: quem achar pode gastar. Guardá-lo bem é a mesma responsabilidade de guardar dinheiro vivo. Não existe central de recuperação, não existe botão de "informar roubo", não existe banco para estornar a transação. É exatamente isso que quer dizer ser ao portador, e é justamente esse o ponto.</p>
+
+<h3>Dê de presente</h3>
+<p>Um cartão de aniversário com um QR code impresso dentro não se distingue de um cartão de aniversário com uma cédula de cinquenta dólares dentro. Quem recebe escaneia, troca a fechadura na hora, e a cédula é irrevogavelmente dessa pessoa. Nenhuma conta para abrir, nenhum prazo de espera. Abriu o envelope, está com o dinheiro.</p>
+
+<h3>Deixe de herança</h3>
+<p>Um envelope lacrado no cofre do banco, com os QR codes impressos de várias cédulas, funciona exatamente como um envelope de dinheiro vivo. Quem abre está com as chaves. Quem está com as chaves está com as cédulas. Não é preciso inventariante, nem inventário, nem autorização de terceiros para o valor passar adiante — embora, como acontece com o dinheiro vivo, os arranjos <em>jurídicos</em> da herança sejam um assunto à parte, que o sistema não resolve e não tem como resolver. O sistema garante apenas que estar com a chave é estar com a cédula.</p>
+
+<h3>Pague na feira</h3>
+<p>Você está comprando tomate. O vendedor mostra um QR code — a cobrança dele. Você escaneia com o aplicativo de carteira, escolhe a cédula com que quer pagar, e o seu celular troca a fechadura direto para a chave do vendedor. Menos de um segundo depois, a cédula é dele. Você guarda os tomates. O vendedor nunca viu o seu nome, o seu endereço nem a sua conta. Você nunca viu os dele. A transação está liquidada, é final e pode ser esquecida — igual ao dinheiro vivo.</p>
+
+<h3>Guarde a frio</h3>
+<p>Preocupado com hackers? Imprima as suas cédulas como QR codes, guarde numa caixa à prova de fogo e apague o aplicativo. As cédulas existem no blockchain. As chaves existem no papel. Nenhum aparelho conectado à internet está com elas. Quando quiser gastar, escaneie o QR code de volta para um aplicativo de carteira, troque a fechadura na hora (vai que alguém copiou o papel enquanto ele estava guardado) e transacione normalmente.</p>
+
+<h3>Troque de carteira</h3>
+<p>Como as cédulas são chaves independentes e não estão amarradas a nenhuma frase-semente ou conta, você pode levar uma cédula de um aplicativo de carteira para outro quando quiser. Exporte a chave de um app, importe no outro. Nenhuma transação no blockchain, nenhuma taxa paga, nenhuma interação com a rede. A sua cédula funciona igual em toda carteira que aceita Marigold — escolha o app de que você gosta, mude quando quiser, o seu dinheiro vai junto.</p>
+<p>O fio condutor: uma cédula Marigold é uma chave, e uma chave pode ser impressa, mandada por mensagem, dobrada dentro de um envelope, presa na porta da geladeira ou decorada de cabeça. O sistema não se importa com o caminho que a chave faz entre as pessoas, porque o sistema não sabe que pessoas existem. Ele conhece só chaves e cédulas — e é por isso que toda forma de passar uma cédula de papel adiante tem aqui um equivalente digital direto.</p>
+
+<hr>
+
+<h2 id="phone-pt"><span class="kicker">no seu celular</span>Seu celular é um controle remoto, não uma carteira</h2>
+<p>Tudo o que você faz no seu próprio teclado, você faz pelo celular, numa conversa do Telegram: ver o saldo, pagar alguém, receber uma cédula, emitir uma cobrança, consultar o histórico, ver se o seu minerador está rodando. O que muda não é o que você pode fazer. É onde o dinheiro está — e o dinheiro não está no celular.</p>
+<p>A sua carteira roda em casa, no que quer que fique ligado: um notebook numa gaveta, um computadorzinho ao lado do roteador. Ela se mantém em dia com o blockchain, guarda as suas cédulas e responde às suas mensagens. O celular no seu bolso não guarda chave nenhuma nem cédula nenhuma. Ele só conversa com o Telegram. Se você perder o celular, perdeu um controle remoto.</p>
+<p>O bot é seu, não nosso. Você o cria no Telegram em uns dois minutos, entrega o token à sua carteira e pareia os dois com um código. Daí em diante a sua carteira responde àquela única conta do Telegram e ignora todas as outras. Não existe servidor Marigold no meio, não existe conta conosco, não existe um monte de máquinas nossas de que o seu celular dependa. A sua carteira liga para o Telegram; ninguém liga para ela, e não há nada para abrir no seu roteador.</p>
+<p>Gastar é protegido do mesmo jeito que um cartão de banco: uma senha antes de qualquer coisa que mexa com dinheiro, um bloqueio depois de três tentativas erradas que só a máquina de casa consegue liberar, e um limite diário que você mesmo define. Aquela conta do Telegram agora move dinheiro, então precisa de verificação em duas etapas — o bot avisa isso na primeira vez que você fala com ele.</p>
+<p>Os limites, sem rodeios. Com a máquina de casa desligada, o celular não faz absolutamente nada: nem saldo, nem pagamento, nem recebimento. Um código de pagamento mandado por uma conversa é valor ao portador enquanto está em trânsito, exatamente como os QR codes impressos acima — quem ler primeiro fica com ele. E um aplicativo de celular de verdade, que guarde as chaves ele mesmo, é tarefa para depois e provavelmente para outra pessoa. Esta é a versão que não pede que você confie em ninguém.</p>
+
+<hr>
+
+<h2 id="observer-pt"><span class="kicker">limites honestos</span>O que um observador vê e o que não vê</h2>
+<p>Marigold não é uma moeda de privacidade, e este litepaper não vai fingir que é. Veja exatamente o que alguém observando o sistema consegue descobrir:</p>
+<div class="cansee"><p><strong>Dá para ver:</strong> cada cédula, cada valor, cada operação, a oferta total e o estado atual completo do sistema. Tudo isso está à vista. Nada é criptografado, nunca.</p></div>
+<div class="cansee"><p><strong>Dá para ver:</strong> a cadeia de operações — qual cédula virou qual cédula nova, quando houve divisões e junções, padrões de horário. Um analista determinado, estudando os registros públicos, consegue identificar padrões de comportamento: pagamentos rápidos em sequência, sequências de dividir e gastar, ou o ritmo diário de um comerciante que recebe e junta cédulas.</p></div>
+<div class="cansee"><p><strong>Dá para ver:</strong> quem criou e quem resgatou cédulas, caso consiga ligar um endereço comum de blockchain a uma identidade do mundo real. Os pontos em que Marigold se conecta ao mundo tradicional do blockchain são totalmente visíveis.</p></div>
+<div class="cannotsee"><p><strong>Não dá para ver:</strong> nenhuma identidade ligada a um pagamento dentro do sistema. Não há o que ver, porque o dado nunca foi registrado.</p></div>
+<p>Uma cédula se confunde com todas as outras cédulas do mesmo valor — uma cédula de 100 MAGLD é igual a qualquer outra cédula de 100 MAGLD, e nada além desse grupo. Os aplicativos de carteira podem embaralhar padrões de comportamento (variando um pouco os horários, agrupando operações, alternando os valores de cédula usados para pagar taxas), mas isso é bom hábito, não mágica. Marigold não promete nada além disso.</p>
+
+<hr>
+
+<h2 id="honest-pt"><span class="kicker">a aritmética</span>Por que é dinheiro honesto</h2>
+<p>A cada poucos segundos, todos os participantes verificam uma única regra:</p>
+<div class="rule">
+  <div class="kicker">a regra de conservação</div>
+  <p><strong>Todas as cédulas existentes + todas as moedas do lado tradicional = total de moedas já mineradas.</strong></p>
+</div>
+<p>Se isso não bater, alguma coisa está errada e a rede enxerga na hora. A oferta presta contas a todo momento — não por confiar num auditor, não por confiar num sistema de provas complicado, mas pela aritmética que qualquer um sabe fazer.</p>
+<p>Nenhum valor é criado ou destruído dentro do sistema. Pagar uma taxa tira uma cédula do conjunto, mas o valor dela é creditado ao minerador e pode ser recriado como cédula nova a qualquer momento. A regra de conservação é absoluta e vale para tudo.</p>
+
+<hr>
+
+<h2 id="chain-pt"><span class="kicker">a cadeia</span>Rápido o bastante para parecer dinheiro vivo</h2>
+<p>A regra de liquidação é simples: a cédula é sua quando a sua troca de fechadura é confirmada na rede. Ou seja, <strong>tempo de confirmação é tempo de entrega.</strong> No Bitcoin, você ficaria parado na barraca da feira por dez minutos. No Ethereum, uns doze segundos. No Marigold, menos de um segundo.</p>
+<p>Marigold roda em um blockchain de prova de trabalho que produz cerca de 10 blocos por segundo, o que dá confirmação em menos de um segundo. A tecnologia de base foi construída pelo projeto Kaspa — um blockchain rápido, confiável e bem testado. Marigold acrescenta o sistema de cédulas e a economia dele por cima dessa fundação, deixando a camada de base intacta porque ela faz o trabalho dela excepcionalmente bem.</p>
+<p><strong>Uma palavra sobre energia.</strong> A história energética do Marigold não é que ele gasta pouco — um blockchain de prova de trabalho atrai tanta mineração quanto valem as suas recompensas, e um Marigold bem-sucedido não será exceção. A história é que nada dessa energia é gasto para você esperar. Um blockchain clássico só aceita um bloco por rodada; os blocos minerados em paralelo são jogados fora, então a rede só se mantém segura mantendo-se lenta. O blockchain em que Marigold roda guarda todos os blocos — os encontrados no mesmo instante são tecidos juntos no registro, todos eles contando —, e é assim que o mesmo orçamento de segurança entrega dez blocos por segundo e liquidação em menos de um segundo, em vez de uma fila de dez minutos. Por pagamento, isso é uma diferença enorme de eficiência. No total, é a mesma aritmética honesta de todo o resto aqui: energia gasta na proporção do valor que está sendo protegido.</p>
+
+<hr>
+
+<h2 id="economics-pt"><span class="kicker">economia</span>A economia em resumo</h2>
+<ul class="facts">
+  <li><b>Oferta:</b> 210.000.000 MAGLD, teto fixo. Sem pré-mineração, sem fundo de desenvolvimento, sem alocação de espécie alguma.</li>
+  <li><b>Lançamento:</b> lançamento justo desde o primeiro dia. Software disponível para todo mundo com antecedência. Todos começam em pé de igualdade.</li>
+  <li><b>Emissão:</b> suave e gradual — a recompensa de mineração cai pela metade a cada três anos, sem quedas bruscas. Cerca de 21% é minerado no primeiro ano, e uns 90% até o décimo.</li>
+  <li><b>Unidade base:</b> 1 MAGLD = 100.000.000 de pétalas.</li>
+  <li><b>Custo para pagar:</b> 0,01 MAGLD — um centésimo de moeda — para qualquer pagamento do dia a dia, por maior que seja a quantia que você está mandando. A taxa é uma única cédula pequena entregue junto com o pagamento, então mover um café e mover um carro custa a mesma coisa. Só operações fora do comum, que empacotam dezenas de cédulas de uma vez, sobem para dois ou três centésimos.</li>
+  <li><b>Taxas:</b> todas as taxas vão para os mineradores. Nada é queimado, nada é desviado. Uma economia de dinheiro vivo — em que cada pagamento é uma transação no blockchain — gera uma receita constante de taxas que as redes de reserva de valor não conseguem igualar.</li>
+</ul>
+
+<hr>
+
+<h2 id="security-pt"><span class="kicker">segurança no lançamento</span>Rodinhas que saem depois</h2>
+<p>Um blockchain de prova de trabalho novo tem pouco poder de mineração, e pouco poder de mineração é convite para ataque. Marigold é lançado com uma proteção temporária e totalmente divulgada, chamada <strong>âncoras de finalidade</strong>: cinco curadores publicamente identificados assinam em conjunto, de tempos em tempos (com no mínimo 3 de 5), um bloco recente, tornando-o permanente e irreversível. Ninguém consegue desfazer um bloco ancorado.</p>
+<p>Os curadores não podem censurar transações, criar moedas, mover o dinheiro de ninguém nem produzir blocos. O único poder deles é impedir que transações concluídas sejam desfeitas. Se ficarem em silêncio, o blockchain segue normalmente como uma rede comum de prova de trabalho — um pouco menos protegida, mas plenamente operacional.</p>
+<p>A proteção foi feita para se aposentar. Quando o poder de mineração da rede crescer a ponto de tornar os ataques proibitivamente caros, as âncoras deixam de ser obrigatórias, passam a ser apenas consultivas e depois expiram de vez. Antes disso, a escolha dos curadores sucessores deve passar para a governança de quem tem cédulas — de modo que até o que resta das rodinhas sai das mãos dos fundadores para as da comunidade antes de ser retirado por completo.</p>
+
+<hr>
+
+<h2 id="isandisnot-pt"><span class="kicker">em uma frase</span>O que Marigold é — e o que não é</h2>
+<p><strong>Marigold é</strong> dinheiro vivo digital. As cédulas são títulos ao portador. Estar com a chave é ser dono. Passar a chave adiante é liquidar. O blockchain é completo sobre o valor e silencioso sobre as pessoas — exatamente como uma cédula de dólar.</p>
+<p><strong>Marigold não é</strong> uma moeda de privacidade. Nada é criptografado. Nada é escondido. A distinção não é eufemismo: as moedas de privacidade escondem, com criptografia, dados que registraram; Marigold não registra dado nenhum para esconder. O que ele tem em comum com o dinheiro vivo é específico e honestamente delimitado — o sistema é, deliberadamente, completo sobre o <em>valor</em> e, deliberadamente, silencioso sobre as <em>pessoas</em>.</p>
+<p><strong>Marigold é</strong> cinco operações, uma regra de conservação, estado à vista de todos, assinaturas digitais comuns, uma oferta fixa conferida por todo mundo a todo momento, numa rede rápida o bastante para que entregar uma cédula digital pareça entregar uma cédula de papel.</p>
+<p>Tudo o que ele faz pode ser conferido pelas pessoas para quem ele existe.</p>
+
+<div class="actions" style="margin-top:2.5rem">
+  <a class="btn gold" href="marigold-litepaper.pdf" download>Baixar o PDF (em inglês)</a>
+</div>
+
+</article>
+<article data-lang="ru" lang="ru">
+
+<h2 id="problem-ru"><span class="kicker">проблема</span>Цифровые деньги забыли то, что наличные делали правильно</h2>
+<p>Достаньте из кошелька долларовую банкноту. Обратите внимание на три вещи:</p>
+<ol>
+  <li><strong>Кто её держит, тот ею и владеет.</strong> Нет ни счёта, ни логина, ни посредника. Держать — значит владеть.</li>
+  <li><strong>У неё нет памяти.</strong> Банкнота не помнит, кто потратил её в прошлый раз. Нигде нет записи, которая связала бы вас с утренним кофе.</li>
+  <li><strong>Любой может проверить, что она настоящая.</strong> Посмотрите на просвет, потрогайте бумагу. Никаких особых знаний не нужно.</li>
+</ol>
+<p>Ни одни массовые цифровые деньги не воспроизводят все три свойства сразу.</p>
+<p>Bitcoin даёт первое и третье: пока ключи у вас, монеты ваши, и любой может убедиться, что система работает честно. А вот со вторым всё плохо. Каждая когда-либо добытая монета Bitcoin навсегда и у всех на виду несёт на себе всю свою историю. Все адреса, с которых вы отправляли деньги или на которые получали, сшиты в граф, доступный для анализа кому угодно. Ваши монеты помнят всё, что вы с ними делали.</p>
+<p>Приватные монеты вроде Monero и Zcash пытаются это исправить, зашифровав историю. Прятать у них получается — но та самая криптография, которая прячет, порождает две новые проблемы. Во-первых, почти никто не может лично убедиться, что система честна. Вы доверяете экспертам, которых никогда не видели: верите им на слово, что в математике нет ни ошибки, ни закладки. Во-вторых, регуляторы смотрят на сложную криптографию и классифицируют монету соответственно — делистинги, ограничения и враждебное отношение следуют не из того, что монета делает, а из того, как она это делает.</p>
+<p>В итоге выбирать приходится между прозрачностью без приватности и приватностью без доверия. Бумажные наличные давали и то и другое, безо всяких усилий. Цифровые деньги это каким-то образом забыли.</p>
+
+<hr>
+
+<h2 id="insight-ru"><span class="kicker">идея</span>След не прячут — его не оставляют</h2>
+<p>Представьте, что вы на рынке. Вы протягиваете продавцу пятидолларовую банкноту. Продавец кладёт её в кассу. В тот же день он расплачивается этой банкнотой в пекарне. Пекарня отдаёт её на сдачу следующему покупателю.</p>
+<p>Теперь спросите: кто сможет проследить путь этой банкноты до вас? Никто. И не потому, что её путь был зашифрован или спрятан — банкнота всё время была у всех на виду, — а потому, что сама она нигде не записала, кто кому её передал. Связь между вами и продавцом не была зафиксирована нигде. Она существовала только в момент передачи из рук в руки, а потом исчезла.</p>
+<p>В этом разница между «спрятать сведения» и «никогда их не собирать». Приватные монеты прячут. Marigold не собирает.</p>
+
+<hr>
+
+<h2 id="how-ru"><span class="kicker">как это устроено</span>Купюры вместо счетов</h2>
+<p>Большинство криптовалют устроены как банковские счета. У вас есть адрес (вроде номера счёта), и транзакции переносят деньги с адреса на адрес. Адреса публичны, и каждое движение между ними записывается навсегда. Мечта бухгалтера и кошмар для приватности.</p>
+<p>Marigold устроен как наличные. Счетов нет вообще. Вместо них система ведёт общий пул <strong>купюр</strong> — считайте их цифровыми банкнотами.</p>
+<p>Каждая купюра — это простая публичная запись:</p>
+<ul>
+  <li><strong>Серийный номер</strong> (такой же, как на долларовой банкноте)</li>
+  <li><strong>Номинал</strong> (0,01, 0,1, 1, 10, 100, 1000, 10 000 или 100 000 MAGLD)</li>
+  <li><strong>Замок</strong> (открытый ключ — потратить купюру может тот, у кого есть подходящий ключ)</li>
+</ul>
+<p>И всё. Ни имени владельца, ни адреса, ни личности. Купюра не знает, у кого она в руках. Она знает лишь, что существует ключ, и что потратить её может тот, кто сумеет открыть замок.</p>
+
+<h3>Как заплатить</h3>
+<p>Заплатить кому-то — почти то же самое, что передать банкноту из рук в руки, только с одним лишним шагом:</p>
+<ol>
+  <li><strong>Вы передаёте получателю ключ</strong> от купюры (через QR-код, сообщение или даже вслух — так же просто, как отправить фотографию).</li>
+  <li><strong>Получатель тут же меняет замок</strong> — он записывает транзакцию, которая заменяет ваш ключ совершенно новым, известным только ему. Подтверждение занимает меньше секунды.</li>
+</ol>
+<p>Как только смена замка подтверждена, купюра принадлежит получателю бесповоротно. Ваш ключ больше не работает. Расчёт завершён.</p>
+<p>Можно и наоборот: если получатель заранее пришлёт вам свой новый ключ (скажем, в запросе на оплату), вы смените замок сразу на его ключ. Тогда ваш ключ никуда не уходит. Результат в обоих случаях один: купюра переходит от одного ключа к другому.</p>
+
+<h3>Размен и объединение</h3>
+<p>Купюры бывают только фиксированных номиналов — как и бумажные деньги. Если нужно заплатить 30 MAGLD, а у вас купюра в 100 MAGLD, вы <strong>разменяете</strong> её на десять купюр по 10 MAGLD. Три отдадите, семь оставите себе. Сдача — ровно как с наличными.</p>
+<p>В обратную сторону: десять купюр по 10 MAGLD можно <strong>объединить</strong> в одну купюру в 100 MAGLD. Номиналы идут с шагом в десять раз, поэтому любую сумму можно набрать горсткой купюр.</p>
+
+<h3>Что записывает система</h3>
+<p>Каждая операция — создание, смена замка, размен, объединение, погашение — публична и у всех на виду. Чего не видит никто, так это <strong>кто</strong> её совершил: у системы просто нет понятия «кто». Нет поля отправителя. Нет поля получателя. Нет адресной книги. Нет счёта.</p>
+<p>Система записывает, что купюра сменила руки. Чьи это были руки, она не записывает.</p>
+
+<hr>
+
+<h2 id="realworld-ru"><span class="kicker">на практике</span>Marigold в обычной жизни</h2>
+<p>Купюра Marigold — это всего лишь ключ, поэтому в жизни ею пользуются так же просто, как бумажными деньгами. Вот как это выглядит.</p>
+
+<h3>Распечатайте и потратьте</h3>
+<p>Любую купюру в приложении-кошельке можно показать на экране как <strong>QR-код</strong>. Этот QR-код можно распечатать на бумаге, сложить и положить в кожаный бумажник — рядом с банковскими картами и водительскими правами. Этот листок бумаги <em>и есть</em> деньги. Отдайте его человеку — он отсканирует код, сменит замок, и купюра станет его. Ваш ключ больше не работает. Бумажка у него в кармане теперь ничего не стоит: деньги ушли дальше.</p>
+<p>Это не метафора. В напечатанном QR-коде лежит настоящий ключ. Потерять его — всё равно что потерять стодолларовую банкноту: кто нашёл, тот и потратил. Хранить его — та же ответственность, что и хранить наличные. Нет ни горячей линии для восстановления, ни кнопки «сообщить о краже», ни банка, который отменит перевод. Вот что значит «на предъявителя», и в этом весь смысл.</p>
+
+<h3>Подарите</h3>
+<p>Открытка ко дню рождения с распечатанным QR-кодом внутри ничем не отличается от открытки с вложенной банкнотой в пятьдесят долларов. Получатель сканирует код, сразу меняет замок — и купюра бесповоротно его. Не нужно заводить счёт, не нужно ничего ждать. Открыл конверт — деньги уже в руках.</p>
+
+<h3>Оставьте наследство</h3>
+<p>Запечатанный конверт в банковской ячейке, а в нём распечатанные QR-коды нескольких купюр, работает ровно так же, как конверт с наличными. Кто его вскроет, у того и ключи. У кого ключи, у того и купюры. Чтобы деньги перешли дальше, не нужны ни душеприказчик, ни суд, ни чьё-либо разрешение — хотя, как и с бумажными деньгами, <em>юридическая</em> сторона наследования остаётся отдельным вопросом, которого система не касается и коснуться не может. Система гарантирует только одно: у кого ключ, у того и купюра.</p>
+
+<h3>Заплатите на рынке</h3>
+<p>Вы покупаете помидоры. Продавец показывает QR-код — свой запрос на оплату. Вы сканируете его приложением-кошельком, выбираете купюру, которой хотите заплатить, и телефон меняет замок сразу на ключ продавца. Меньше чем через секунду купюра принадлежит ему. Вы забираете помидоры. Продавец не увидел ни вашего имени, ни адреса, ни счёта. Вы не увидели его. Платёж завершён, окончателен и забыт — совсем как наличными.</p>
+
+<h3>Храните офлайн</h3>
+<p>Боитесь взлома? Распечатайте купюры в виде QR-кодов, уберите в несгораемый ящик и удалите приложение. Сами купюры остаются в блокчейне. Ключи остаются на бумаге. Ни на одном устройстве с выходом в сеть их нет. Когда захотите потратить — отсканируйте QR-код обратно в кошелёк, сразу смените замок (вдруг кто-то переснял бумагу, пока она лежала) и платите как обычно.</p>
+
+<h3>Переносите между кошельками</h3>
+<p>Купюра — это самостоятельный ключ, не привязанный ни к сид-фразе, ни к счёту, поэтому её можно в любой момент перенести из одного кошелька в другой. Выгрузите ключ из одного приложения, загрузите в другое. Никакой транзакции в блокчейне, никакой комиссии, вообще никакого обращения к сети. Купюра одинаково работает в любом кошельке, который поддерживает Marigold: выбирайте приложение по вкусу, меняйте когда захотите — деньги идут с вами.</p>
+<p>Общее во всех этих случаях одно: купюра Marigold — это ключ, а ключ можно распечатать, отправить сообщением, вложить в конверт, прилепить на холодильник или выучить наизусть. Системе всё равно, как ключ путешествует от человека к человеку, — она вообще не знает, что люди существуют. Она знает только ключи и купюры. Поэтому у любого способа передать бумажную банкноту здесь есть прямой цифровой аналог.</p>
+
+<hr>
+
+<h2 id="phone-ru"><span class="kicker">в телефоне</span>Телефон — это пульт, а не кошелёк</h2>
+<p>Всё, что вы делаете за собственной клавиатурой, можно сделать и с телефона, в чате Telegram: посмотреть баланс, заплатить, принять купюру, выставить запрос на оплату, полистать историю, проверить, работает ли ваш майнер. Меняется не то, что вы можете сделать. Меняется то, где лежат деньги, — а на телефоне их нет.</p>
+<p>Кошелёк работает у вас дома, на том, что и так включено: ноутбук в ящике стола, маленький компьютер рядом с роутером. Он держится в ногу с блокчейном, хранит ваши купюры и отвечает на ваши сообщения. В телефоне, который лежит у вас в кармане, нет ни ключей, ни купюр. Он разговаривает только с Telegram. Потеряете его — потеряете пульт.</p>
+<p>Бот ваш, а не наш. Вы заводите его в Telegram минуты за две, отдаёте кошельку токен и связываете их коротким кодом. С этого момента кошелёк отвечает одному-единственному аккаунту Telegram и не слушает никакой другой. Никакого сервера Marigold посередине, никакой регистрации у нас, никакого парка машин, от которого зависел бы ваш телефон. Кошелёк сам обращается к Telegram; снаружи к нему не обращается никто, и на роутере ничего открывать не нужно.</p>
+<p>Траты защищены так же, как банковская карта: PIN перед любой операцией с деньгами, блокировка после трёх неверных попыток, снять которую может только домашняя машина, и дневной лимит, который вы задаёте сами. Этот аккаунт Telegram теперь может двигать деньги, значит, ему нужна двухфакторная аутентификация — бот скажет вам об этом при первом же разговоре.</p>
+<p>Теперь про ограничения, честно и прямо. Пока домашняя машина выключена, телефон не может вообще ничего: ни баланса, ни платежей, ни приёма денег. Платёжный код, отправленный в чат, пока он летит, остаётся ценностью на предъявителя — ровно как распечатанные QR-коды выше: кто прочитал первым, тот и забрал. А настоящее мобильное приложение, которое само хранит ключи, — задача на потом и, скорее всего, для кого-то другого. Эта версия не просит вас доверять никому.</p>
+
+<hr>
+
+<h2 id="observer-ru"><span class="kicker">честные границы</span>Что наблюдатель видит, а чего не видит</h2>
+<p>Marigold — не приватная монета, и этот документ не станет делать вид, что это не так. Вот что именно может выяснить тот, кто наблюдает за системой.</p>
+<div class="cansee"><p><strong>Видно:</strong> каждую купюру, каждый номинал, каждую операцию, сколько всего монет существует и всё текущее состояние системы. Всё это у всех на виду. Ничто и никогда не шифруется.</p></div>
+<div class="cansee"><p><strong>Видно:</strong> цепочку операций — какая купюра превратилась в какую новую, когда происходили размены и объединения, как операции распределены во времени. Упорный аналитик, изучая публичные записи, может выделить поведенческие закономерности: быструю череду платежей, связки «разменял и потратил» или ежедневный ритм торговца, который принимает купюры и объединяет их.</p></div>
+<div class="cansee"><p><strong>Видно:</strong> кто создавал и погашал купюры — если наблюдателю удастся связать обычный адрес в блокчейне с живым человеком. Места, где Marigold стыкуется с традиционным миром блокчейна, просматриваются полностью.</p></div>
+<div class="cannotsee"><p><strong>Не видно:</strong> никакой личности за платежом внутри системы. Видеть нечего: эти данные никогда не записывались.</p></div>
+<p>Купюра теряется среди всех остальных купюр того же номинала: купюра в 100 MAGLD выглядит как любая другая купюра в 100 MAGLD, и дальше этой группы круг не сузить. Кошелёк умеет размывать поведенческие следы — слегка разбрасывать операции во времени, собирать их в группы, брать для комиссии разные номиналы, — но это хорошие привычки, а не волшебство. Ничего большего Marigold не обещает.</p>
+
+<hr>
+
+<h2 id="honest-ru"><span class="kicker">арифметика</span>Почему это честные деньги</h2>
+<p>Каждые несколько секунд каждый участник проверяет одно-единственное правило:</p>
+<div class="rule">
+  <div class="kicker">правило сохранения</div>
+  <p><strong>Все существующие купюры + все монеты на традиционной стороне = все когда-либо добытые монеты.</strong></p>
+</div>
+<p>Если равенство не сходится, значит, что-то не так, и сеть видит это сразу же. Общее количество монет поддаётся проверке в любой момент — не через доверие аудитору, не через доверие сложной системе доказательств, а с помощью арифметики, которую по силам проделать кому угодно.</p>
+<p>Внутри системы ценность не появляется из ниоткуда и не исчезает. Уплата комиссии убирает купюру из пула, но её номинал зачисляется майнеру и в любой момент может снова стать новой купюрой. Правило сохранения действует безусловно и для всех.</p>
+
+<hr>
+
+<h2 id="chain-ru"><span class="kicker">цепочка</span>Быстрый настолько, что похож на наличные</h2>
+<p>Правило расчёта простое: купюра ваша, когда сеть подтвердила смену замка. А значит, <strong>время подтверждения — это время передачи денег из рук в руки.</strong> В Bitcoin вы стояли бы у прилавка десять минут. В Ethereum — около двенадцати секунд. В Marigold — меньше секунды.</p>
+<p>Marigold работает на блокчейне с proof-of-work, который выдаёт примерно 10 блоков в секунду, так что подтверждение приходит быстрее, чем за секунду. Технологию, лежащую в основе, построил проект Kaspa — быстрый, надёжный, хорошо проверенный блокчейн. Marigold добавляет поверх этого фундамента систему купюр и её экономику, а базовый слой оставляет как есть: он прекрасно делает свою работу.</p>
+<p><strong>Несколько слов об энергии.</strong> История Marigold с энергией не в том, что её тратится мало: блокчейн на proof-of-work притягивает ровно столько майнинга, сколько стоят его награды, и успешный Marigold исключением не станет. История в том, что ни киловатта из этого не уходит на ожидание. Классический блокчейн может принять только один блок за раунд; блоки, добытые параллельно, выбрасываются, и сеть остаётся защищённой лишь потому, что остаётся медленной. Блокчейн, на котором работает Marigold, сохраняет каждый блок — найденные в один и тот же миг вплетаются в общий реестр вместе, и считаются они все. Именно поэтому тот же бюджет безопасности даёт десять блоков в секунду и расчёт быстрее секунды вместо десятиминутной очереди. В пересчёте на один платёж разница в эффективности огромна. А в целом это та же честная арифметика, что и всё остальное здесь: энергия тратится соразмерно тому, что она защищает.</p>
+
+<hr>
+
+<h2 id="economics-ru"><span class="kicker">экономика</span>Экономика вкратце</h2>
+<ul class="facts">
+  <li><b>Всего монет:</b> 210 000 000 MAGLD, жёсткий предел. Никакого премайна, никакого фонда разработчиков, никаких распределений вообще.</li>
+  <li><b>Запуск:</b> честный запуск с первого дня. Программа доступна всем заранее. Все начинают в равных условиях.</li>
+  <li><b>Эмиссия:</b> плавная и постепенная — награда за майнинг уменьшается вдвое каждые три года, без резких обвалов. За первый год добывается около 21%, к десятому — около 90%.</li>
+  <li><b>Базовая единица:</b> 1 MAGLD = 100 000 000 лепестков.</li>
+  <li><b>Стоимость платежа:</b> 0,01 MAGLD — одна сотая монеты — за любой обычный платёж, сколько бы вы ни отправляли. Комиссия — это одна маленькая купюра, которая передаётся вместе с платежом, поэтому перевести стоимость кофе и стоимость автомобиля стоит одинаково. Только необычно крупные операции, в которых разом участвуют десятки купюр, поднимаются до двух-трёх сотых.</li>
+  <li><b>Комиссии:</b> все комиссии уходят майнерам. Ничего не сжигается, ничего не отводится в сторону. Экономика наличных, где каждый платёж — это транзакция в блокчейне, даёт ровный поток комиссий, какого не будет у блокчейнов, созданных хранить стоимость.</li>
+</ul>
+
+<hr>
+
+<h2 id="security-ru"><span class="kicker">защита на старте</span>Страховочные колёса, которые снимут</h2>
+<p>У нового блокчейна на proof-of-work мало вычислительной мощности, а малая мощность притягивает атаки. Marigold запускается с временной и полностью открытой страховкой — <strong>якорями финальности</strong>: пять публично названных доверенных лиц время от времени совместно подписывают (нужны минимум трое из пяти) один из недавних блоков, делая его постоянным и необратимым. Отменить заякоренный блок не может никто.</p>
+<p>Доверенные лица не могут ни цензурировать транзакции, ни создавать монеты, ни двигать чужие деньги, ни производить блоки. Вся их власть — не дать отменить уже состоявшиеся платежи. Если они замолчат, блокчейн продолжит работать как обычная сеть на proof-of-work — чуть менее защищённая, но полностью работоспособная.</p>
+<p>Эта страховка задумана так, чтобы однажды исчезнуть. Как только мощность сети вырастет настолько, что атака станет непозволительно дорогой, якоря перестанут быть обязательными, потом станут просто рекомендательными, а потом отключатся совсем. Ещё раньше выбор новых доверенных лиц должен перейти к голосованию держателей купюр — так что даже остаток страховочных колёс переходит от основателей к сообществу до того, как их снимут окончательно.</p>
+
+<hr>
+
+<h2 id="isandisnot-ru"><span class="kicker">коротко</span>Чем Marigold является — и чем нет</h2>
+<p><strong>Marigold — это</strong> цифровые наличные. Купюры — инструменты на предъявителя. У кого ключ, тот и владелец. Передан ключ — расчёт состоялся. Блокчейн говорит всё о деньгах и молчит о людях — ровно как долларовая банкнота.</p>
+<p><strong>Marigold — не</strong> приватная монета. Ничто не шифруется. Ничто не прячется. Это различие — не эвфемизм: приватные монеты криптографически скрывают записанные данные, а Marigold не записывает данных, которые надо было бы скрывать. То, что роднит его с наличными, названо точно и честно ограничено: система по замыслу говорит всё о <em>деньгах</em> и по замыслу молчит о <em>людях</em>.</p>
+<p><strong>Marigold — это</strong> пять операций, одно правило сохранения, состояние у всех на виду, обычные цифровые подписи, неизменное количество монет, которое каждый проверяет в любой момент, — и всё это в сети, настолько быстрой, что передать купюру — всё равно что передать банкноту из рук в руки.</p>
+<p>Всё, что он делает, могут проверить те, для кого он сделан.</p>
+
+<div class="actions" style="margin-top:2.5rem">
+  <a class="btn gold" href="marigold-litepaper.pdf" download>Скачать PDF (на английском)</a>
+</div>
+
+</article>
+<article data-lang="zh" lang="zh-Hans">
+
+<h2 id="problem-zh"><span class="kicker">问题</span>数字货币丢掉了现金的长处</h2>
+<p>从钱包里抽出一张钞票，注意三件事：</p>
+<ol>
+  <li><strong>谁拿着它，它就是谁的</strong>。没有账户，不用登录，没有中间人。持有就是所有权。</li>
+  <li><strong>它没有记忆</strong>。这张钞票不记得上一个花它的人是谁。没有任何记录把你和今早那杯咖啡连在一起。</li>
+  <li><strong>谁都能验它的真假</strong>。对着光照一照，摸一摸纸面。不需要任何专业知识。</li>
+</ol>
+<p>没有一种主流的数字货币能同时做到这三点。</p>
+<p>比特币给了你第一点和第三点：掌握钥匙就等于拥有币，而且任何人都能验证这套系统是否诚实。但它在第二点上输得很惨。每一枚挖出来的比特币都永久、公开地带着自己的全部历史。你付款用过的、收款用过的每一个地址，都被串进一张任何人都能拿去分析的图里。你的币记得你对它做过的一切。</p>
+<p>Monero、Zcash 这类隐私币想用加密历史的办法解决这个问题。东西确实藏住了——但负责藏东西的那套密码学又带来两个新麻烦。第一，几乎没有人能亲自验证这套系统是诚实的。你只能相信素未谋面的专家，相信那些数学里没有漏洞、没有后门。第二，监管者看一眼这些复杂的密码学，就照此给这种币定性——下架、限制、被当成对手对待，起因不是这种币做了什么，而是它用什么方式去做。</p>
+<p>于是局面变成二选一：要么透明但没有隐私，要么有隐私但无从信任。现金本来毫不费力地两样都有。数字货币不知怎么就把这件事忘了。</p>
+
+<hr>
+
+<h2 id="insight-zh"><span class="kicker">关键想法</span>不去藏痕迹——干脆不留痕迹</h2>
+<p>设想你站在一个菜市场摊位前。你递给摊主一张五块钱的钞票。摊主把它放进钱箱。当天晚些时候，摊主拿这张钞票在面包店花掉了。面包店又把它找给了下一位顾客。</p>
+<p>现在想一想：谁能顺着这张钞票查到你？没有人。不是因为它的旅程被加密或被藏了起来——它每一步都明明白白摆在眼前——而是因为钞票本身从不记录谁把它交给了谁。你和摊主之间的那层关系，从来没被写下来过。它只存在于交接的那一瞬间，然后就没了。</p>
+<p>这就是「把信息藏起来」和「压根不收集信息」的区别。隐私币选择藏。Marigold 选择不收集。</p>
+
+<hr>
+
+<h2 id="how-zh"><span class="kicker">工作原理</span>用纸币，不用账户</h2>
+<p>大多数加密货币的运作方式像银行账户。你有一个地址（相当于账号），交易在地址之间搬运价值。地址是公开的，地址之间的每一次流动都被永久记录。这是会计的梦想，隐私的噩梦。</p>
+<p>Marigold 的运作方式像现金。这里没有账户，系统维护的是一池<strong>纸币</strong>——把它们想成数字版的钞票。</p>
+<p>每一张纸币都是一条简单的公开记录：</p>
+<ul>
+  <li>一个<strong>编号</strong>（就像钞票上的冠字号）</li>
+  <li>一个<strong>面额</strong>（0.01、0.1、1、10、100、1,000、10,000 或 100,000 MAGLD）</li>
+  <li>一把<strong>锁</strong>（一个公钥——谁持有配对的钥匙，谁就能花掉它）</li>
+</ul>
+<p>就这些。没有持有人姓名，没有地址，没有身份。纸币并不知道它在谁手上。它只知道有一把钥匙存在，谁能开锁，谁就能花掉它。</p>
+
+<h3>付款</h3>
+<p>给别人付钱就像递出一张钞票，只多一个步骤：</p>
+<ol>
+  <li><strong>你把这张纸币的钥匙交给对方</strong>（用 QR 码、短信，甚至口头念出来——就像分享一张照片那样）。</li>
+  <li><strong>对方立刻换锁</strong>——他们记一笔交易，把你的钥匙换成一把只有他们知道的全新钥匙。这在一秒之内就会确认。</li>
+</ol>
+<p>换锁一经确认，这张纸币就不可撤销地属于他们了。你手上那把钥匙不再管用。结算完成。</p>
+<p>另一种做法是：如果对方能提前把新钥匙给你（比如通过一张收款请求），你可以直接把锁换成他们的钥匙。你的钥匙哪儿也不用去。两种做法结果一样：纸币从一把钥匙转到另一把钥匙。</p>
+
+<h3>拆分与合并</h3>
+<p>纸币只有固定的几种面额，和现钞一样。如果你要付 30 MAGLD，手上却是一张 100 MAGLD 的纸币，你就把它<strong>拆分</strong>成十张 10 MAGLD 的纸币，递出去三张，留下七张。找零——和现金一模一样。</p>
+<p>反过来，十张 10 MAGLD 的纸币可以<strong>合并</strong>成一张 100 MAGLD 的。面额按十倍递进，所以任何金额都能用几张纸币付清。</p>
+
+<h3>系统记录了什么</h3>
+<p>每一次操作——创建、换锁、拆分、合并、赎回——都是公开的，明明白白摆在那里。没人能看到的是<strong>谁</strong>做的，因为系统里根本没有「谁」这个概念。没有付款方字段，没有收款方字段，没有通讯录，没有账户。</p>
+<p>系统记下的是一张纸币易了手，而不是易到了谁手上。</p>
+
+<hr>
+
+<h2 id="realworld-zh"><span class="kicker">实际使用</span>在现实生活中使用 Marigold</h2>
+<p>一张 Marigold 纸币无非就是一把钥匙，所以在现实生活里用它，和用现金一样简单。具体是这样：</p>
+
+<h3>打印出来，直接花</h3>
+<p>钱包应用里的每一张纸币，都可以显示成一个 <strong>QR 码</strong>。你可以把这个 QR 码打印在纸上，折好，塞进皮夹——就夹在信用卡和驾照旁边。那张纸<em>就是</em>钱。把它递给别人，对方一扫、一换锁，纸币就归他们了。你手上的钥匙不再管用。他们口袋里的那张纸这时已经一文不值——价值已经挪走了。</p>
+<p>这不是打比方。打印出来的 QR 码里装的就是真正的钥匙。弄丢了，等于弄丢一张百元大钞：谁捡到谁就能花。保管它的责任，和保管现金完全一样。没有挂失热线，没有「举报被盗」的按钮，没有哪家银行能把交易撤回来。这就是不记名的含义，也正是全部要点所在。</p>
+
+<h3>当礼物送</h3>
+<p>一张里面夹着打印 QR 码的生日贺卡，和一张里面夹着五十元钞票的生日贺卡，没有区别。收到的人扫一下，立刻换锁，这张纸币就不可撤销地属于他了。不用开户，不用等待。信封一拆，钱就在手上。</p>
+
+<h3>留作遗产</h3>
+<p>保险箱里一只封好的信封，装着几张纸币的打印 QR 码，作用和一信封现金完全一样。谁拆开它，谁就拿到钥匙；谁拿着钥匙，谁就拿着纸币。价值的转移不需要遗嘱执行人，不需要遗产法庭，不需要任何第三方点头——不过，和现金一样，继承在<em>法律</em>上的安排是另一回事，系统不处理，也没法处理。系统只保证一件事：持有钥匙，就是持有纸币。</p>
+
+<h3>在菜市场摊位付款</h3>
+<p>你在买西红柿。摊主亮出一个 QR 码——那是他的收款请求。你用钱包应用扫一下，挑一张要付的纸币，手机就直接把锁换成摊主的钥匙。不到一秒，纸币归他了。你拎起西红柿走人。摊主从头到尾没看见你的名字、住址或账户，你也没看见他的。这笔交易结清了，是终局，转头就能忘掉——和现金一样。</p>
+
+<h3>离线冷存</h3>
+<p>担心黑客？把纸币打印成 QR 码，放进防火盒，然后把应用删掉。纸币存在于区块链上，钥匙存在于纸上，没有任何联网设备碰得到它们。想花的时候，把 QR 码扫回钱包应用，立刻换一次锁（万一存放期间有人复印过那张纸），然后照常交易。</p>
+
+<h3>在钱包之间搬家</h3>
+<p>纸币就是一把把独立的钥匙，不绑定任何助记词或账户，所以你随时可以把一张纸币从一个钱包应用搬到另一个。从这个应用导出钥匙，导入那个应用。不需要链上交易，不用付手续费，完全不必和网络打交道。在每一个支持 Marigold 的钱包里，你的纸币用起来都一样——喜欢哪个应用就用哪个，想换随时换，钱跟着你走。</p>
+<p>贯穿这些场景的是同一件事：一张 Marigold 纸币就是一把钥匙，而钥匙可以打印、可以发短信、可以折进信封、可以贴在冰箱上，也可以背下来记在脑子里。钥匙怎么在人与人之间流转，系统并不关心，因为系统根本不知道有「人」这回事。它只认识钥匙和纸币——正因如此，现钞能被传递的每一种方式，在这里都有一个直接对应的数字版本。</p>
+
+<hr>
+
+<h2 id="phone-zh"><span class="kicker">在你的手机上</span>手机是遥控器，不是钱包</h2>
+<p>在自己键盘前能做的每一件事，你都能在手机上、在一个 Telegram 对话里做完：查余额、给人付钱、收下一张纸币、发起收款请求、翻看历史记录、看看矿机还在不在跑。变的不是你能做什么，而是钱放在哪里——钱不在手机上。</p>
+<p>你的钱包跑在家里，随便哪台一直开着的机器都行：抽屉里的一台旧笔记本，路由器旁边的一台小主机。它自己跟上链的进度，保管你的纸币，回复你的消息。你口袋里的手机不存钥匙，也不存纸币，除了 Telegram 什么都不连。丢了，你丢的只是一个遥控器。</p>
+<p>机器人是你的，不是我们的。你在 Telegram 里花两分钟做一个，把令牌交给钱包，再用一个配对码把两边连上。从此你的钱包只理会那一个 Telegram 账号，其余一概不理。中间没有 Marigold 的服务器，你不用在我们这儿开户，也没有一批由我们运营、供你手机依赖的机器。是你的钱包主动去找 Telegram；没有任何东西反过来找它，路由器上也不需要开任何端口。</p>
+<p>花钱这件事的防护和银行卡一样：任何动钱的操作之前都要输 PIN 码；连错三次就锁死，只有家里那台机器能解开；还有一个由你自己定的每日限额。那个 Telegram 账号现在能动钱了，所以它需要开两步验证——你第一次跟机器人说话时，它就会提醒你。</p>
+<p>把局限说清楚。家里那台机器关着的时候，手机什么也做不了：查不了余额，付不了钱，也收不了钱。通过聊天发出去的付款码，在路上的那段时间就是不记名的价值，和前面说的打印 QR 码完全一样——谁先读到，谁就能拿走。至于真正的手机应用，也就是自己保管钥匙的那一种，是以后的事，多半也该由别人来做。眼下这一版的好处是：它不要求你信任任何人。</p>
+
+<hr>
+
+<h2 id="observer-zh"><span class="kicker">诚实的边界</span>旁观者能看到什么，不能看到什么</h2>
+<p>Marigold 不是隐私币，这份简明白皮书也不会假装它是。一个盯着这套系统看的人究竟能推断出什么，下面说清楚：</p>
+<div class="cansee"><p><strong>他们能看到</strong>：每一张纸币、每一个面额、每一次操作、总供应量，以及系统当前的完整状态。全都摆在明面上。任何东西都不加密，从来不。</p></div>
+<div class="cansee"><p><strong>他们能看到</strong>：操作的链条——哪张纸币换成了哪张新纸币，拆分和合并发生在什么时候，时间上的规律。一个下功夫研究公开记录的分析者，能识别出行为模式：连续的快速付款、先拆分再花掉的序列，或者一个商家每天收款并合并的节奏。</p></div>
+<div class="cansee"><p><strong>他们能看到</strong>：谁创建了纸币、谁赎回了纸币——前提是他们能把一个普通的区块链地址对上现实世界里的某个身份。Marigold 与传统区块链世界相接的那几个点，是完全可见的。</p></div>
+<div class="cannotsee"><p><strong>他们看不到</strong>：系统内部任何一笔付款背后的身份。没什么可看的，因为这些数据从来没被记录过。</p></div>
+<p>一张纸币混在所有同面额的纸币里——一张 100 MAGLD 的纸币，看上去和其他每一张 100 MAGLD 的纸币都一样，能说的也就到这个范围为止。钱包软件可以把行为模式弄模糊（让时间稍微随机、把操作打包在一起、变换手续费用哪种面额的纸币），但这是好习惯，不是魔法。Marigold 不作更大的承诺。</p>
+
+<hr>
+
+<h2 id="honest-zh"><span class="kicker">算术</span>它为什么是诚实的钱</h2>
+<p>每隔几秒，每一个参与者都会验证同一条规则：</p>
+<div class="rule">
+  <div class="kicker">守恒规则</div>
+  <p><strong>现存的所有纸币 + 传统侧的所有币 = 历来挖出的币总量。</strong></p>
+</div>
+<p>只要这条式子不成立，就是出了问题，而且网络立刻就能看见。供应量在任何时刻都对得上账——靠的不是信任某个审计机构，也不是信任某套复杂的证明系统，而是人人都会算的加减法。</p>
+<p>系统内部从不凭空产生价值，也从不销毁价值。付手续费会把一张纸币从池子里拿走，但它的价值记到了矿工名下，随时可以重新变成一张新纸币。这条守恒规则是绝对的，没有例外。</p>
+
+<hr>
+
+<h2 id="chain-zh"><span class="kicker">这条链</span>快到像现金一样</h2>
+<p>结算规则很简单：当你的换锁在网络上被确认，这张纸币就是你的了。也就是说，<strong>确认时间就是交接时间</strong>。换成比特币，你得在菜市场摊位前站上十分钟；换成 Ethereum，大约十二秒；在 Marigold 上，不到一秒。</p>
+<p>Marigold 跑在一条工作量证明区块链上，每秒产出约 10 个区块，确认时间因此在一秒以内。底层技术出自 Kaspa 项目——一条快速、可靠、经过充分检验的区块链。Marigold 在这个地基之上加了纸币系统和它的经济规则，底层原样保留，因为它的本职工作做得非常出色。</p>
+<p><strong>关于能耗，补一句</strong>。Marigold 在能耗上的说法不是「用得少」——一条工作量证明链，奖励值多少就会招来多少算力，Marigold 若是成功了也不会例外。它的说法是：这些电力没有一分花在等待上。传统区块链每一轮只能接受一个区块，同时挖出的其他区块统统作废，于是网络只能靠慢来保住安全。Marigold 所在的这条链把每个区块都留下——同一刻产出的区块会一起织进账本，每一个都算数——正因如此，同样的安全预算换来的是每秒十个区块、一秒以内的结算，而不是十分钟的排队。分摊到每一笔付款上，效率差距是巨大的。总的来说，这和这份文档里的其他部分是同一套诚实的算术：花掉的能量，与它所保护的价值成比例。</p>
+
+<hr>
+
+<h2 id="economics-zh"><span class="kicker">经济模型</span>经济模型一览</h2>
+<ul class="facts">
+  <li><b>供应量</b>：210,000,000 MAGLD，硬顶。没有预挖，没有开发者基金，没有任何形式的份额分配。</li>
+  <li><b>启动方式</b>：从第一天起就是公平启动。软件提前向所有人开放。每个人站在同一条起跑线上。</li>
+  <li><b>发行曲线</b>：平滑渐进——挖矿奖励每三年减半，不会突然掉一截。第一年挖出约 21%，到第十年约 90%。</li>
+  <li><b>基本单位</b>：1 MAGLD = 100,000,000 花瓣。</li>
+  <li><b>付款成本</b>：0.01 MAGLD——一枚币的百分之一——适用于任何日常付款，不管你转的是多少。手续费就是随付款一起递出去的一张小面额纸币，所以买一杯咖啡和买一辆车，搬动的代价一样。只有特别大的操作，一次打包几十张纸币，才会涨到百分之二或百分之三。</li>
+  <li><b>手续费去向</b>：全部归矿工。不销毁，不挪作他用。在一个现金型经济里，每一笔付款都是一笔链上交易，由此产生的稳定手续费收入，是价值储存型的链比不了的。</li>
+</ul>
+
+<hr>
+
+<h2 id="security-zh"><span class="kicker">启动期安全</span>会拆掉的辅助轮</h2>
+<p>一条新的工作量证明链算力低，而算力低会招来攻击。Marigold 启动时带了一项临时的、完全公开的保护措施，叫做<strong>终局锚点</strong>：五位公开身份的受托人定期共同签名（至少要五分之三），把某个近期区块钉死，使它永久且不可逆转。被锚定的区块，谁也推翻不了。</p>
+<p>受托人不能审查交易，不能凭空造币，不能动任何人的资金，也不能生产区块。他们唯一的权力，是阻止已完成的交易被推翻。如果他们集体沉默，这条链会作为一条普通的工作量证明网络照常运行——保护弱一些，但功能完好。</p>
+<p>这项保护措施从设计之初就是要退场的。等网络算力壮大到攻击的代价高得不划算，锚点就从「强制」降为「参考」，再到彻底失效。在那之前，后继受托人的推选权计划移交给纸币持有人治理——也就是说，辅助轮在被彻底拆掉之前，连它最后残留的那点作用，也已经从创始团队转到了社区手里。</p>
+
+<hr>
+
+<h2 id="isandisnot-zh"><span class="kicker">一句话</span>Marigold 是什么——不是什么</h2>
+<p><strong>Marigold 是</strong>数字现金。纸币是不记名票据。持有钥匙就是拥有，交出钥匙就是结算。这条链把价值记得一清二楚，对人只字不提——和一张钞票一模一样。</p>
+<p><strong>Marigold 不是</strong>隐私币。没有任何东西被加密，没有任何东西被隐藏。这个区分不是修辞上的遮掩：隐私币用密码学把记录下来的数据藏起来，而 Marigold 压根不记录可藏的数据。它与现金相似的地方是具体的，界限也老实——这套系统在设计上对<em>价值</em>一清二楚，对<em>人</em>只字不提。</p>
+<p><strong>Marigold 就是</strong>五种操作、一条守恒规则、摊在明面上的状态、普通的数字签名、一个由所有人时刻核对的固定供应量，跑在一个足够快的网络上——快到递出一张纸币，就像递出一张钞票。</p>
+<p>它做的每一件事，它服务的每一个人都能亲自核验。</p>
+
+<div class="actions" style="margin-top:2.5rem">
+  <a class="btn gold" href="marigold-litepaper.pdf" download>下载 PDF（英文）</a>
+</div>
+
+</article>
+<!-- /translations:main -->
+
 </main>
 
 <footer>
-  <a href="https://marigold.cash/">marigold.cash</a> &middot; note@marigold.cash<br>
-  No token sale. No presale. Nothing to buy yet.<br>
-  When there is something real, it will be here.
+  <div class="foot-text" data-lang="en" lang="en">
+    <a href="https://marigold.cash/">marigold.cash</a> &middot; note@marigold.cash<br>
+    No token sale. No presale. Nothing to buy yet.<br>
+    When there is something real, it will be here.
+  </div>
+<!-- translations:foot -->
+<div class="foot-text" data-lang="es" lang="es">
+    <a href="https://marigold.cash/">marigold.cash</a> &middot; note@marigold.cash<br>
+    Sin venta de tokens. Sin preventa. Todavía no hay nada que comprar.<br>
+    Cuando haya algo real, estará aquí.
+  </div>
+<div class="foot-text" data-lang="de" lang="de">
+    <a href="https://marigold.cash/">marigold.cash</a> &middot; note@marigold.cash<br>
+    Kein Token-Verkauf. Kein Vorverkauf. Es gibt noch nichts zu kaufen.<br>
+    Wenn es etwas Echtes gibt, steht es hier.
+  </div>
+<div class="foot-text" data-lang="fr" lang="fr">
+    <a href="https://marigold.cash/">marigold.cash</a> &middot; note@marigold.cash<br>
+    Pas de vente de jetons. Pas de prévente. Il n'y a encore rien à acheter.<br>
+    Quand il y aura quelque chose de réel, ce sera ici.
+  </div>
+<div class="foot-text" data-lang="it" lang="it">
+    <a href="https://marigold.cash/">marigold.cash</a> &middot; note@marigold.cash<br>
+    Nessuna vendita di token. Nessuna prevendita. Non c'è ancora nulla da comprare.<br>
+    Quando ci sarà qualcosa di reale, sarà qui.
+  </div>
+<div class="foot-text" data-lang="pt" lang="pt">
+    <a href="https://marigold.cash/">marigold.cash</a> &middot; note@marigold.cash<br>
+    Sem venda de tokens. Sem pré-venda. Ainda não há nada para comprar.<br>
+    Quando houver algo real, estará aqui.
+  </div>
+<div class="foot-text" data-lang="ru" lang="ru">
+    <a href="https://marigold.cash/">marigold.cash</a> &middot; note@marigold.cash<br>
+    Никаких продаж токенов. Никакого пресейла. Покупать пока нечего.<br>
+    Когда появится что-то настоящее, оно будет здесь.
+  </div>
+<div class="foot-text" data-lang="zh" lang="zh-Hans">
+    <a href="https://marigold.cash/">marigold.cash</a> &middot; note@marigold.cash<br>
+    没有代币销售。没有预售。现在没有任何东西可买。<br>
+    等到有真东西了，就会出现在这里。
+  </div>
+<!-- /translations:foot -->
 </footer>
+
+<script id="chrome-data" type="application/json">{"en": {"title": "Marigold Litepaper — digital cash for everyday use", "theme_label": "Switch between day and night", "lang_label": "Language"}, "es": {"title": "Litepaper de Marigold — dinero digital para el día a día", "theme_label": "Cambiar entre día y noche", "lang_label": "Idioma"}, "de": {"title": "Marigold Litepaper — digitales Bargeld für den Alltag", "theme_label": "Zwischen Tag und Nacht wechseln", "lang_label": "Sprache"}, "fr": {"title": "Litepaper Marigold — de l'argent liquide numérique pour tous les jours", "theme_label": "Basculer entre jour et nuit", "lang_label": "Langue"}, "it": {"title": "Litepaper di Marigold — contante digitale per tutti i giorni", "theme_label": "Passa da giorno a notte", "lang_label": "Lingua"}, "pt": {"title": "Litepaper da Marigold — dinheiro digital para o dia a dia", "theme_label": "Alternar entre dia e noite", "lang_label": "Idioma"}, "ru": {"title": "Лайтпейпер Marigold — цифровые наличные на каждый день", "theme_label": "Переключить день и ночь", "lang_label": "Язык"}, "zh": {"title": "Marigold 简明白皮书 — 日常可用的数字现金", "theme_label": "切换日间与夜间", "lang_label": "语言"}}</script>
+<script>
+  (function () {
+    var root = document.documentElement;
+    var chrome = {};
+    try { chrome = JSON.parse(document.getElementById("chrome-data").textContent); } catch (e) {}
+
+    var sel = document.getElementById("langSel");
+    var btn = document.getElementById("themeBtn");
+    var themeLabel = document.getElementById("themeLabel");
+    var langLabel = document.getElementById("langLabel");
+
+    var dark = function () {
+      var chosen = root.getAttribute("data-theme");
+      if (chosen) return chosen === "dark";
+      return window.matchMedia("(prefers-color-scheme: dark)").matches;
+    };
+
+    var applyLang = function (lang) {
+      root.setAttribute("data-doclang", lang);
+      root.setAttribute("lang", lang === "zh" ? "zh-Hans" : lang);
+      var c = chrome[lang];
+      if (c) {
+        document.title = c.title;
+        themeLabel.textContent = c.theme_label;
+        langLabel.textContent = c.lang_label;
+      }
+      if (sel.value !== lang) sel.value = lang;
+      try { localStorage.setItem("marigold-lang", lang); } catch (e) {}
+    };
+
+    var applyTheme = function () {
+      btn.setAttribute("aria-pressed", dark() ? "true" : "false");
+    };
+
+    applyLang(root.getAttribute("data-doclang") || "en");
+    applyTheme();
+
+    sel.addEventListener("change", function () { applyLang(sel.value); });
+
+    btn.addEventListener("click", function () {
+      var next = dark() ? "light" : "dark";
+      root.setAttribute("data-theme", next);
+      try { localStorage.setItem("marigold-theme", next); } catch (e) {}
+      applyTheme();
+    });
+  })();
+</script>
 
 </body>
 </html>
