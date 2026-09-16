@@ -348,3 +348,15 @@ is priced like plumbing; notes are money and cost a penny to move.
 **The own lane still holds.** The background miner's node is started with `accept_own_below_floor`, the same as the wallet's own node, so a wallet on it takes the own lane (P8.3b) for sweep and mint, using the miner's reported hash rate for the hour bound. The transactions are withheld from relay by that node and mined by that miner; the fee comes back as block reward to the miner's address — which is the same household, not necessarily the same wallet, and the status line says so.
 
 **What this is not.** Not a pool, not a stratum bridge, not remote control from another machine: the RPC is bound to loopback and there is no authentication on it, because there is nothing to authenticate on a socket only this machine can reach. A garage's or a pool's remote node with the own lane is the next thing (P8.3b's "next, if wanted") and would need a bearer secret on the wire first.
+
+## Escrowed handover: time-locked notes (2026-09-16)
+
+**Decision.** `pay` will be able to hand money over as a promise with a deadline: the notes are rotated on-chain into notes that only the receiver's key can take until a lock lapses, and only the payer's refund key can take after it. If the receiver never accepts, the payer's wallet takes them back once the lock has lapsed. Planned as FORK-PLAN P8.0g; a consensus change, so POOL-SPEC first.
+
+**Why.** A tester asked whether a payment could be "signed to be taken by the other person and not reversible by the holder for a day or a week". Today it cannot: a `marigoldpay:` code is bearer keys, and until it is redeemed both sides can spend. `request` avoids that but only when the receiver goes first. The founder's reading of the ask is the right one — it gives the person holding the notes the assurance that it is their money even if they cannot roll right now, and it gives the payer an automatic return if it is never taken. That is what people mean by "I paid you".
+
+**Why a lock on the note and not a smarter code.** Anything done in the code alone is done with keys the payer already knows, and is therefore reversible by the payer. Only the chain can refuse the payer's own key for a while, so the condition has to live on the note. It is the smallest possible condition: one alternative key, one height.
+
+**What stays the same.** Denominations, the pool's counts, the stamp, `receive`. A locked note is one entry in the pool like any other, and the notes it rotates into are plain. The revert is not automatic on-chain: the lapse makes the refund key valid, and the payer's wallet uses it in its next opening housekeeping, the way it already does its other tidying.
+
+**Rejected for now.** A standing receiving key per person, stealth-address style: irreversible at once and no consensus change, but it makes a linkable address out of something Marigold has so far kept private, and it makes every wallet scan for notes derived from its key.
