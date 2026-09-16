@@ -137,8 +137,11 @@ async fn send_qr(token: &str, chat_id: i64, code: &str, caption: &str) {
     }
 }
 
+/// Every plain reply carries the buttons: Telegram shows a reply keyboard
+/// only with a message that brings it, and a person who never typed /help
+/// would otherwise never see them.
 async fn send(token: &str, chat_id: i64, html: &str) {
-    let params = [("chat_id", chat_id.to_string()), ("text", html.to_string()), ("parse_mode", "HTML".to_string())];
+    let params = [("chat_id", chat_id.to_string()), ("text", html.to_string()), ("parse_mode", "HTML".to_string()), ("reply_markup", main_keyboard())];
     if let Err(e) = call(token, "sendMessage", &params).await {
         log::warn!("telegram: could not send to {chat_id}: {e}");
     }
