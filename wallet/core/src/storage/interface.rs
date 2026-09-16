@@ -137,6 +137,9 @@ pub trait NoteKeyStore: Send + Sync {
     /// (FORK-PLAN P8.0b) has no account key to check a password against, and
     /// the vault key is wrapped under the same password.
     async fn verify_secret(&self, wallet_secret: &Secret) -> Result<()>;
+    /// The vault's 24 recovery words, for whoever wants them on paper. The
+    /// key is the words' entropy, so they can be produced at any time.
+    async fn recovery_words(&self, wallet_secret: &Secret) -> Result<String>;
     async fn load_payment_request_key(&self, wallet_secret: &Secret, pk: &[u8; 32]) -> Result<Option<PaymentRequestKey>>;
     async fn remove_payment_request(&self, wallet_secret: &Secret, pk: &[u8; 32]) -> Result<()>;
 

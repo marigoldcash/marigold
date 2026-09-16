@@ -8,7 +8,7 @@ env = dict(os.environ, HOME=home, TERM="xterm-256color")
 c = pexpect.spawn("./target/release/marigold-cli", env=env, encoding="utf-8", timeout=240, dimensions=(44, 120))
 log = open(f"{sp}/wallet_b.log", "w"); c.logfile_read = log
 def step(exp, reply): c.expect_exact(exp); c.send(reply + "\r")
-for e, r in [("$", "wallet create beta"), ("different wallet name", ""), ("Default account title", ""),
+for e, r in [("$", "advanced on"), ("$", "wallet create beta"), ("different wallet name", ""), ("Default account title", ""),
              ("phishing hint", ""), ("encryption password", "hunter2hunter2"), ("Re-enter", "hunter2hunter2"),
              ("mnemonic passphrase (optional)", "")]:
     step(e, r)

@@ -64,9 +64,9 @@ Walks an interactive wizard, in this exact order:
 3. A phishing-hint explainer paragraph, then `Create phishing hint (optional, press <enter> to skip):` — press enter to skip.
 4. `Enter wallet encryption password:` (masked) and `Re-enter wallet encryption password:` (masked) — must match.
 5. `Enter bip39 mnemonic passphrase (optional):` (masked) — only asked when keeping a ledger; press enter to skip (a *second*, optional secret on top of the wallet password; skip it unless you specifically want one).
-6. `Enter your own 24-word vault recovery phrase, or press <enter> to generate one:` — the one ceremony. These 24 words are the wallet's root: the note vault key `K` comes from them, and so does the ledger account key when there is one (P8.0), so there is nothing else to write down. They are shown once, in a numbered panel, and the wizard waits for enter before going on.
+6. That is all. The wizard says that your password and a backup are what bring the wallet back, and the wallet is open. The vault's 24 recovery words exist (the vault key is their entropy) but are not put in front of everyone: `note vault words` prints them at any time for whoever wants paper, and with `advanced on` the wizard runs the ceremony as before — your own 24 words or generated ones, shown once in a numbered panel.
 
-The wizard then prints the wallet's storage path and — when keeping a ledger — the default deposit address (`marigoldsim:...`). The account's own 12-word phrase is deliberately not shown (it is derived from the 24 words; `export mnemonic` produces it if another program ever needs it). The wallet is opened and activated in the same session — no separate `wallet open` needed.
+The wizard then prints the wallet's storage path (and, with `advanced on`, the ledger address when keeping a ledger). The account's own 12-word phrase is deliberately not shown (it is derived from the vault key; `export mnemonic` produces it if another program ever needs it). The wallet is opened and activated in the same session — no separate `wallet open` needed.
 
 ## 4. Fund the wallet
 

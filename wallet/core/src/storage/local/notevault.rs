@@ -372,6 +372,13 @@ impl NoteVault {
         Ok(())
     }
 
+    /// The 24 words, from the key: `K` is their entropy, the words are only an
+    /// encoding, so they can be shown whenever someone wants paper.
+    pub async fn recovery_words(&self, wallet_secret: &Secret) -> Result<String> {
+        let k = self.unlock(wallet_secret).await?;
+        Ok(Mnemonic::from_entropy(k.to_vec(), Language::English)?.phrase_string())
+    }
+
     /// Check a password against `vault.key` without caching anything.
     /// `unlock` remembers the key once it has it, so after the first success
     /// it would vouch for any password at all; this reads the file each time.

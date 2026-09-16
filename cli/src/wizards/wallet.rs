@@ -219,46 +219,52 @@ pub(crate) async fn create(
 
     tprintln!(ctx, "");
 
-    // Note-vault ceremony — at wallet creation, where it belongs, not as a
-    // lazy auto-create that logs the 24 words mid-command (which is exactly
-    // how the founder's vault words ended up in scrollback, 2026-09-05).
-    tprintln!(ctx, "");
-    tprintln!(ctx, "---");
-    tpara!(
-        ctx,
-        "\
-        Your note vault holds the keys to your bearer notes — your money. It has \
-        a 24-word recovery phrase, and this is the one to write down. You can \
-        supply your own 24 words or have them generated now.\
-        ",
-    );
-    tprintln!(ctx, "");
-    let vault_words = loop {
-        let input = term
-            .ask(false, "Enter your own 24-word vault recovery phrase, or press <enter> to generate one: ")
-            .await?
-            .trim()
-            .to_string();
-        if input.is_empty() {
-            break None;
-        }
-        let words: Vec<&str> = input.split_whitespace().collect();
-        if words.len() != 24 {
-            tprintln!(ctx, "Expected 24 words, got {} — try again (or press <enter> to generate)", words.len());
-            continue;
-        }
-        match Mnemonic::new(words.join(" "), Language::default()) {
-            Ok(_) => break Some(words.join(" ")),
-            Err(err) => {
-                tprintln!(ctx, "Not a valid 24-word phrase ({err}) — try again (or press <enter> to generate)");
+    // The vault's 24 words are only an encoding of its key, which lives in
+    // the wallet under the password: password plus a backup brings everything
+    // back, ledger included. So the ceremony is not put in front of everyone
+    // (founder, 2026-09-15). With 'advanced on' it runs as before — your own
+    // words or generated ones, shown once — and 'note vault words' prints
+    // them at any time for whoever wants paper.
+    let ceremony = ctx.advanced();
+    let vault_words = if ceremony {
+        tprintln!(ctx, "");
+        tprintln!(ctx, "---");
+        tpara!(
+            ctx,
+            "\
+            Your note vault holds the keys to your bearer notes — your money. It has \
+            a 24-word recovery phrase, and this is the one to write down. You can \
+            supply your own 24 words or have them generated now.\
+            ",
+        );
+        tprintln!(ctx, "");
+        loop {
+            let input = term
+                .ask(false, "Enter your own 24-word vault recovery phrase, or press <enter> to generate one: ")
+                .await?
+                .trim()
+                .to_string();
+            if input.is_empty() {
+                break None;
+            }
+            let words: Vec<&str> = input.split_whitespace().collect();
+            if words.len() != 24 {
+                tprintln!(ctx, "Expected 24 words, got {} — try again (or press <enter> to generate)", words.len());
                 continue;
             }
+            match Mnemonic::new(words.join(" "), Language::default()) {
+                Ok(_) => break Some(words.join(" ")),
+                Err(err) => {
+                    tprintln!(ctx, "Not a valid 24-word phrase ({err}) — try again (or press <enter> to generate)");
+                    continue;
+                }
+            }
         }
+    } else {
+        None
     };
     // The vault phrase is settled BEFORE any key is made, because the account
-    // key is now derived from it: one phrase recovers both sides. Choosing it
-    // afterwards would mean generating an account key that the phrase could not
-    // reproduce.
+    // key is derived from it: one phrase recovers both sides.
     let vault_words = match vault_words {
         Some(words) => words,
         None => kaspa_wallet_core::storage::local::notevault::new_vault_words()?,
@@ -321,35 +327,42 @@ pub(crate) async fn create(
     }
 
     let store = wallet.store().as_note_key_store()?;
-    {
-        {
-            let words = vault_words.clone();
-            store.vault_restore_from_words(&words, &wallet_secret).await?;
-            tprintln!(ctx, "");
-            crate::ui::recovery_words(ctx, &words);
-            tprintln!(ctx, "");
-            if ledger {
-                tpara!(
-                    ctx,
-                    "\
-                    These words bring back your ledger balance on their own. Your NOTES need \
-                    the words AND a copy of the vault files ('note vault backup <dir>' makes \
-                    one) — nothing can derive a note, which is exactly what makes it cash. \
-                    The words will not be shown again.\
-                    ",
-                );
-            } else {
-                tpara!(
-                    ctx,
-                    "\
-                    Your notes need these words AND a copy of the vault files ('note vault \
-                    backup <dir>' makes one) — nothing can derive a note, which is exactly \
-                    what makes it cash. The words will not be shown again.\
-                    ",
-                );
-            }
-            term.ask(false, "Press <enter> once you have written them down: ").await?;
+    store.vault_restore_from_words(&vault_words, &wallet_secret).await?;
+    if ceremony {
+        tprintln!(ctx, "");
+        crate::ui::recovery_words(ctx, &vault_words);
+        tprintln!(ctx, "");
+        if ledger {
+            tpara!(
+                ctx,
+                "\
+                These words bring back your ledger balance on their own. Your NOTES need \
+                the words AND a copy of the vault files ('note vault backup <dir>' makes \
+                one) — nothing can derive a note, which is exactly what makes it cash. \
+                'note vault words' shows them again.\
+                ",
+            );
+        } else {
+            tpara!(
+                ctx,
+                "\
+                Your notes need these words AND a copy of the vault files ('note vault \
+                backup <dir>' makes one) — nothing can derive a note, which is exactly \
+                what makes it cash. 'note vault words' shows them again.\
+                ",
+            );
         }
+        term.ask(false, "Press <enter> once you have written them down: ").await?;
+    } else {
+        tprintln!(ctx, "");
+        tpara!(
+            ctx,
+            "\
+            Your password and a backup are what bring this wallet back: type 'backup' once \
+            you hold anything, and keep the file somewhere safe. Nothing else can recover \
+            it — there is no one to ask.\
+            ",
+        );
     }
 
     term.writeln("");

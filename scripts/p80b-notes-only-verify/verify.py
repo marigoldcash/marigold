@@ -74,6 +74,9 @@ def connect(c):
 
 
 def create_notes_only(c, name, words=None):
+    # The ceremony (the words this driver hands from one wallet to the next)
+    # only runs with advanced on.
+    run(c, "advanced on")
     for e, r in [("$", f"wallet create {name}"), ("different wallet name", ""), ("Keep a ledger account too?", "n"),
                  ("phishing hint", ""), ("encryption password", PW), ("Re-enter", PW)]:
         step(c, e, r)

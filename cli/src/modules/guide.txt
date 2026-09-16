@@ -1,6 +1,5 @@
-#[nowallet] You do not have a wallet open yet. Type `wallet create` to make one — it asks a few
-questions and shows you 24 words to write down — or `open` if you have made one before. Then
-come back to `guide`.
+#[nowallet] You do not have a wallet open yet. Type `wallet create` to make one — a name and a
+password — or `open` if you have made one before. Then come back to `guide`.
 
 WHAT YOU ARE HOLDING. Marigold money comes as notes of fixed sizes — 0.01, 0.1, 1, 10 and up —
 that you hold and hand over, like cash. A note has no owner on record anywhere: whoever holds its
@@ -33,13 +32,13 @@ you when they do not fit.
 CHECKING. `balance` is the whole answer: your notes, by size. The prompt shows the same figure.
 `history` lists what you have paid and received; `note list` lists every note you hold.
 
-KEEPING IT SAFE. Two things bring your money back: the 24 words the wizard showed you, and a
-copy of the vault files. Write the words on paper — they are never shown again — and make the
-copy with `note vault backup <folder>` after you receive anything new. `wallet backup <file>`
-puts everything into one file under a passphrase of your choosing; that file alone rebuilds the
-wallet anywhere with `wallet restore <file>`. Anyone holding the words and the files, or the
-backup file and its passphrase, can spend your money — treat them as cash. `otp on` makes the
-wallet ask for a code from your phone before it spends.
+KEEPING IT SAFE. Your password and a backup bring your money back — nothing else can, and there
+is no one to ask. `backup <file>` puts the whole wallet into one file under a passphrase of your
+choosing; make one once you hold anything, and again after anything big arrives. That file alone
+rebuilds the wallet anywhere with `wallet restore <file>`. Anyone holding the file and its
+passphrase can spend your money — treat it as cash. `otp on` makes the wallet ask for a code from
+your phone before it spends. Prefer paper? `note vault words` prints 24 recovery words that,
+together with a copy of the vault files, bring the wallet back without the password.
 
 #[ledger] IF YOU MINE. `mine start` mines with spare CPU on your own node. Rewards land on your
 ledger and the wallet turns them into notes by itself; `balance` shows the ledger line while it

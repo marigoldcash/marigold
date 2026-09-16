@@ -995,6 +995,7 @@ impl Note {
             "backup" => self.vault_backup(ctx, argv).await,
             "verify" => self.vault_verify(ctx, argv).await,
             "restore" => self.vault_restore(ctx, argv).await,
+            "words" => self.vault_words(ctx).await,
             "export" => self.vault_export(ctx, argv).await,
             "import" => self.vault_import(ctx, argv).await,
             v => {
@@ -1007,6 +1008,7 @@ impl Note {
     async fn vault_help(&self, ctx: &Arc<KaspaCli>) -> Result<()> {
         ctx.term().help(
             &[
+                ("vault words", "Show the vault's 24 recovery words, for paper (asks the password)"),
                 ("vault create", "Run the vault's 24-word creation ceremony now (auto-runs on first note otherwise)"),
                 ("vault backup <dir>", "Copy the vault's files to <dir> (pair with the 24 words for a full recovery)"),
                 ("vault verify", "Light-verify this wallet's active notes against the live pool (no secret needed)"),
@@ -1018,6 +1020,28 @@ impl Note {
             ],
             None,
         )?;
+        Ok(())
+    }
+
+    /// `note vault words` — the 24 words, for whoever wants them on paper.
+    /// The vault key is their entropy, so they exist whether or not the
+    /// wizard showed them.
+    async fn vault_words(&self, ctx: &Arc<KaspaCli>) -> Result<()> {
+        let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(None).await?;
+        let store = ctx.wallet().store().as_note_key_store()?;
+        let words = store.recovery_words(&wallet_secret).await?;
+        tprintln!(ctx, "");
+        crate::ui::recovery_words(ctx, &words);
+        tprintln!(ctx, "");
+        tpara!(
+            ctx,
+            "\
+            These words are another way back in: with them and a copy of the vault files \
+            ('note vault backup <dir>'), 'note vault restore' rebuilds the wallet without the \
+            password. Anyone holding them and the files can spend your money — paper, not a photo.\
+            ",
+        );
+        tprintln!(ctx, "");
         Ok(())
     }
 
