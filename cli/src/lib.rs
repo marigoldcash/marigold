@@ -47,7 +47,8 @@ pub const HELP: &str = "marigold-cli {version} — the Marigold wallet, and the 
   marigold-cli mine-to <address> [<percent>] [--network <id>]
                                      mine in the background — no wallet needed
   marigold-cli --version             print the version
-  marigold-cli --platform            report what this build is
+  marigold-cli --platform            what this build is and what it sees of this machine;
+                                     paste it into a bug report
 
 Mining without a wallet open:
 
