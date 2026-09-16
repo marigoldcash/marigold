@@ -345,7 +345,7 @@ pub fn spawn_session(
 /// (FORK-PLAN P8.3c): what `marigold-cli mine-to` runs, and what a wallet on
 /// the same machine finds when it connects.
 pub struct MinerHost {
-    address: Address,
+    address: std::sync::OnceLock<Address>,
     rpc: std::sync::OnceLock<Arc<DynRpcApi>>,
     miner: std::sync::Mutex<Option<Arc<Miner>>>,
     shutdown: Arc<AtomicBool>,
@@ -353,7 +353,23 @@ pub struct MinerHost {
 
 impl MinerHost {
     pub fn new(address: Address, shutdown: Arc<AtomicBool>) -> Arc<Self> {
-        Arc::new(Self { address, rpc: std::sync::OnceLock::new(), miner: std::sync::Mutex::new(None), shutdown })
+        let host = Self::new_unbound(shutdown);
+        host.bind_address(address);
+        host
+    }
+
+    /// A host whose payout address comes later — the wallet service learns
+    /// its own address only once the wallet is open.
+    pub fn new_unbound(shutdown: Arc<AtomicBool>) -> Arc<Self> {
+        Arc::new(Self { address: std::sync::OnceLock::new(), rpc: std::sync::OnceLock::new(), miner: std::sync::Mutex::new(None), shutdown })
+    }
+
+    pub fn bind_address(&self, address: Address) {
+        let _ = self.address.set(address);
+    }
+
+    pub fn address_bound(&self) -> bool {
+        self.address.get().is_some()
     }
 
     /// The node to mine against, once it exists. The host is created before
@@ -362,8 +378,8 @@ impl MinerHost {
         let _ = self.rpc.set(rpc);
     }
 
-    pub fn address(&self) -> &Address {
-        &self.address
+    pub fn address(&self) -> Option<&Address> {
+        self.address.get()
     }
 
     pub fn miner(&self) -> Option<Arc<Miner>> {
@@ -379,11 +395,14 @@ impl MinerHost {
         let Some(rpc) = self.rpc.get().cloned() else {
             return Err(RpcError::General("the node is not up yet".to_string()));
         };
+        let Some(address) = self.address.get().cloned() else {
+            return Err(RpcError::General("no address to pay the rewards to".to_string()));
+        };
         if let Some(old) = self.miner.lock().unwrap().take() {
             old.stop();
         }
         let (miner, solutions) = Miner::start(percent);
-        spawn_session(rpc, self.address.clone(), miner.clone(), solutions, self.shutdown.clone());
+        spawn_session(rpc, address, miner.clone(), solutions, self.shutdown.clone());
         self.miner.lock().unwrap().replace(miner);
         Ok(self.status())
     }
@@ -396,7 +415,7 @@ impl MinerHost {
     }
 
     pub fn status(&self) -> RpcMinerStatus {
-        let mut status = RpcMinerStatus { available: true, cores: cores() as u32, address: self.address.to_string(), ..Default::default() };
+        let mut status = RpcMinerStatus { available: true, cores: cores() as u32, address: self.address.get().map(|a| a.to_string()).unwrap_or_default(), ..Default::default() };
         if let Some(miner) = self.miner() {
             status.mining = true;
             status.percent = miner.percent();

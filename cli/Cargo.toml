@@ -64,6 +64,9 @@ kaspa-wallet-keys.workspace = true
 kaspa-wallet-pskt.workspace = true
 kaspa-grpc-client.workspace = true
 kaspa-wrpc-client.workspace = true
+# The Telegram Bot API, which takes every method as a GET.
+workflow-http.workspace = true
+sha2.workspace = true
 nw-sys.workspace = true
 num_cpus.workspace = true
 rand.workspace = true

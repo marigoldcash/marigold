@@ -23,6 +23,22 @@ cfg_if::cfg_if! {
                 println!("{}", kaspa_cli_lib::HELP.replace("{version}", env!("CARGO_PKG_VERSION")));
                 return;
             }
+            // The wallet as a service: open, syncing, answering its Telegram bot.
+            if args.first().map(|a| a.as_str()) == Some("serve") {
+                #[cfg(feature = "embedded-node")]
+                {
+                    if let Err(err) = kaspa_cli_lib::serve::serve(args[1..].to_vec()).await {
+                        eprintln!("{err}");
+                        std::process::exit(1);
+                    }
+                    return;
+                }
+                #[cfg(not(feature = "embedded-node"))]
+                {
+                    eprintln!("This build has no node in it. Use a release build.");
+                    std::process::exit(1);
+                }
+            }
             // The miner as a service: no terminal, no wallet, stays in the
             // foreground for systemd or Docker to look after.
             if args.first().map(|a| a.as_str()) == Some("mine-to") {

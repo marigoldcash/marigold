@@ -6,6 +6,10 @@ mod cli;
 pub mod embedded;
 #[cfg(feature = "embedded-node")]
 pub mod headless;
+#[cfg(feature = "embedded-node")]
+pub mod serve;
+#[cfg(feature = "embedded-node")]
+pub mod telegram;
 pub mod error;
 pub(crate) mod log_sink;
 pub mod extensions;
@@ -46,6 +50,9 @@ pub const HELP: &str = "marigold-cli {version} — the Marigold wallet, and the 
   marigold-cli                       open the wallet
   marigold-cli mine-to <address> [<percent>] [--network <id>]
                                      mine in the background — no wallet needed
+  marigold-cli serve <wallet> [--password-file <path>] [--mine <percent>]
+                                     keep a wallet open as a service, answering
+                                     your Telegram bot ('mobile telegram' pairs it)
   marigold-cli --version             print the version
   marigold-cli --platform            what this build is and what it sees of this machine;
                                      paste it into a bug report
