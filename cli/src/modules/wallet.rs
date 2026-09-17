@@ -145,6 +145,26 @@ impl Wallet {
                     }
                 };
 
+                // Two programs on one wallet is refused, and it is known from
+                // the lock on the file before any password — so say it now,
+                // not after asking for one (founder, 2026-09-17).
+                if let Some(name) = &name {
+                    use kaspa_wallet_core::storage::local::{Storage, wallet_file_name};
+                    let folder: String = ctx
+                        .wallet()
+                        .settings()
+                        .get(WalletSettings::Folder)
+                        .unwrap_or_else(|| kaspa_wallet_core::storage::local::default_storage_folder().to_string());
+                    if let Ok(storage) = Storage::try_new_with_folder(&folder, &wallet_file_name(name)) {
+                        if kaspa_wallet_core::storage::local::interface::wallet_is_open_elsewhere(storage.filename()) {
+                            tprintln!(ctx, "");
+                            tprintln!(ctx, "'{name}' is open in another Marigold program on this machine. Close it there first.");
+                            tprintln!(ctx, "");
+                            return Ok(());
+                        }
+                    }
+                }
+
                 // Plaintext metadata is readable before the password: apply the
                 // wallet's remembered network first, since account activation
                 // derives addresses for whatever network is current.

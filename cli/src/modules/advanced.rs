@@ -7,7 +7,7 @@ use crate::imports::*;
 /// 2026-09-15: the basics, without the techno-babble).
 pub async fn everyday(ctx: &Arc<KaspaCli>) -> Vec<&'static str> {
     let mut verbs = vec![
-        "balance", "pay", "receive", "request", "exchange", "move", "mobile", "backup", "history", "wallet", "open", "close", "connect",
+        "balance", "pay", "receive", "request", "exchange", "move", "mobile", "backup", "history", "wallet", "create", "open", "close", "connect",
         "disconnect", "guide", "help", "advanced", "exit",
     ];
     // ...or when the background miner on this machine is the wallet's to steer.

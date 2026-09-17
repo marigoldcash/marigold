@@ -9,6 +9,7 @@ pub mod balance;
 pub mod broadcast;
 pub mod close;
 pub mod connect;
+pub mod create;
 #[path = "create-unsigned-tx.rs"]
 pub mod create_unsigned_tx;
 pub mod details;
@@ -81,7 +82,7 @@ pub fn register_handlers(cli: &Arc<KaspaCli>) -> Result<()> {
         cli,
         cli.handlers(),
         [
-            about, account, address, advanced, auto, backup, balance, close, connect, details, disconnect, estimate, exchange, exit, export, guide, help, history, import, rpc, list,
+            about, account, address, advanced, auto, backup, balance, close, connect, create, details, disconnect, estimate, exchange, exit, export, guide, help, history, import, rpc, list,
             mint, mobile, mv, pay, receive, request,
             miner, message, monitor, mute, network, node, note, open, otp, ping, pskb, quit, reload, select, server, settings, sweep,
             track, transfer, utxos, wallet,
