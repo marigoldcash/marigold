@@ -22,7 +22,21 @@ impl Wallet {
         let op = argv.remove(0);
         match op.as_str() {
             "list" => {
-                let wallets = ctx.store().wallet_list().await?;
+                // A permission error names the folder it happened in. In a
+                // container that folder is a mount, and "Permission denied"
+                // on its own sent a tester looking at the wrong thing.
+                let wallets = match ctx.store().wallet_list().await {
+                    Ok(wallets) => wallets,
+                    Err(err) => {
+                        let folder: String = ctx
+                            .wallet()
+                            .settings()
+                            .get(WalletSettings::Folder)
+                            .unwrap_or_else(|| kaspa_wallet_core::storage::local::default_storage_folder().to_string());
+                        tprintln!(ctx, "Could not read the wallet folder {folder}: {err}");
+                        return Ok(());
+                    }
+                };
                 if wallets.is_empty() {
                     tprintln!(ctx, "No wallets found");
                 } else {
@@ -156,6 +170,16 @@ impl Wallet {
                         .get(WalletSettings::Folder)
                         .unwrap_or_else(|| kaspa_wallet_core::storage::local::default_storage_folder().to_string());
                     if let Ok(storage) = Storage::try_new_with_folder(&folder, &wallet_file_name(name)) {
+                        // The same goes for a wallet that is not there at all:
+                        // a tester typed a name that did not exist and was asked
+                        // for a password first, then told "No wallet named
+                        // 'destini.wallet' found" (2026-09-17). Say it before.
+                        if !storage.exists_sync().unwrap_or(true) {
+                            tprintln!(ctx, "");
+                            tprintln!(ctx, "No wallet named '{name}' in {folder}. 'wallet list' shows the ones that are there.");
+                            tprintln!(ctx, "");
+                            return Ok(());
+                        }
                         if kaspa_wallet_core::storage::local::interface::wallet_is_open_elsewhere(storage.filename()) {
                             tprintln!(ctx, "");
                             tprintln!(ctx, "'{name}' is open in another Marigold program on this machine. Close it there first.");
