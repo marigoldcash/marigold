@@ -536,14 +536,14 @@ impl ConsensusSessionOwned {
         from_sn: Option<Hash>,
         chunk_size: usize,
         skip_first: bool,
-    ) -> ConsensusResult<Vec<(Hash, kaspa_consensus_core::notepool::NewNote)>> {
+    ) -> ConsensusResult<Vec<(Hash, kaspa_consensus_core::notepool::PoolEntry)>> {
         self.clone()
             .spawn_blocking(move |c| c.get_pruning_point_pool_entries(expected_pruning_point, from_sn, chunk_size, skip_first))
             .await
     }
     pub async fn async_append_imported_pruning_point_pool_entries(
         &self,
-        chunk: Vec<(Hash, kaspa_consensus_core::notepool::NewNote)>,
+        chunk: Vec<(Hash, kaspa_consensus_core::notepool::PoolEntry)>,
     ) {
         self.clone().spawn_blocking(move |c| c.append_imported_pruning_point_pool_entries(&chunk)).await
     }
@@ -559,10 +559,10 @@ impl ConsensusSessionOwned {
     pub async fn async_is_pruning_pool_state_stable(&self) -> bool {
         self.clone().spawn_blocking(move |c| c.is_pruning_pool_state_stable()).await
     }
-    pub async fn async_get_pool_note(&self, sn: Hash) -> Option<kaspa_consensus_core::notepool::NewNote> {
+    pub async fn async_get_pool_note(&self, sn: Hash) -> Option<kaspa_consensus_core::notepool::PoolEntry> {
         self.clone().spawn_blocking(move |c| c.get_pool_note(sn)).await
     }
-    pub async fn async_get_pool_notes(&self, sns: Vec<Hash>) -> Vec<Option<kaspa_consensus_core::notepool::NewNote>> {
+    pub async fn async_get_pool_notes(&self, sns: Vec<Hash>) -> Vec<Option<kaspa_consensus_core::notepool::PoolEntry>> {
         self.clone().spawn_blocking(move |c| c.get_pool_notes(&sns)).await
     }
     pub async fn async_get_pool_stats(&self) -> kaspa_consensus_core::notepool::PoolStats {
