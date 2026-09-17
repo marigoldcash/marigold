@@ -41,32 +41,36 @@ pub(crate) async fn create(
         .unwrap_or_else(|| kaspa_wallet_core::storage::local::default_storage_folder().to_string());
     let mut custom_filename: Option<String> = None;
     loop {
-        let file = match &custom_filename {
-            Some(file) => kaspa_wallet_core::storage::local::wallet_file_name(file),
-            None => kaspa_wallet_core::storage::local::wallet_file_name(&make_filename(&name, &None)),
-        };
+        // The bare name is what the store answers `exists` for; the path is
+        // what the user sees. Since a wallet became a directory the path is
+        // `<name>.wallet/<name>.keys`, and asking the store about the *path*
+        // expanded it a second time and never found anything — so the wizard
+        // offered the default name over a wallet that was already there.
+        let bare = make_filename(&name, &custom_filename);
+        let file = kaspa_wallet_core::storage::local::wallet_file_name(&bare);
         tprintln!(ctx);
         // Say up front if that name is taken. The overwrite warning came later,
         // after the name was accepted, so the wizard first announced where the
         // wallet "will be stored" as though the path were free — and the path
         // in question held a wallet with money in it.
-        let taken = ctx.store().exists(Some(file.trim_end_matches(".wallet"))).await.unwrap_or(false);
-        tprintln!(ctx, "This wallet will be stored as: {}", style(format!("{folder}/{file}")).cyan());
+        let taken = ctx.store().exists(Some(&bare)).await.unwrap_or(false);
         if taken {
-            tprintln!(ctx, "{}", style("That name is taken. Type a different one — a wallet is never overwritten.").yellow());
+            tprintln!(ctx, "{}", style(format!("A wallet named '{bare}' already exists at {folder}/{file}")).yellow());
+            tprintln!(ctx, "A wallet is never overwritten. To replace it, 'wallet destroy {bare}' first.");
+        } else {
+            tprintln!(ctx, "This wallet will be stored as: {}", style(format!("{folder}/{file}")).cyan());
         }
         tprintln!(ctx, "(change the folder for all wallets with 'settings set folder <path>' before creating)");
-        let input = term.ask(false, "Press <enter> to accept, or type a different wallet name: ").await?.trim().to_string();
+        let prompt = if taken { "Type a name for the new wallet: " } else { "Press <enter> to accept, or type a different wallet name: " };
+        let input = term.ask(false, prompt).await?.trim().to_string();
         if input.is_empty() {
             if taken {
                 // Nothing here overwrites a wallet. The file it would replace
                 // can hold the only copy of somebody's notes, and there is no
                 // undo — so the wizard has no path to it at all, deliberately.
                 // Deleting a wallet is 'wallet destroy', which checks the
-                // balance first and makes you type the name.
-                tprintln!(ctx, "");
-                tprintln!(ctx, "{}", style("That name is taken, and a wallet is never overwritten.").red());
-                tprintln!(ctx, "Pick another name, or remove the old one first with 'wallet destroy <name>'.");
+                // balance first and makes you type the name. Going round the
+                // loop again restates that the name is taken and asks anew.
                 continue;
             }
             break;
