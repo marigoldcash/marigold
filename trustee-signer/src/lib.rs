@@ -33,7 +33,7 @@ use kaspa_core::{debug, info, warn};
 use kaspa_grpc_client::GrpcClient;
 type DynRpcApi = dyn kaspa_rpc_core::api::rpc::RpcApi;
 use kaspa_hashes::Hash;
-use kaspa_rpc_core::{api::rpc::RpcApi, notify::mode::NotificationMode};
+use kaspa_rpc_core::notify::mode::NotificationMode;
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::Arc;
