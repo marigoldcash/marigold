@@ -108,6 +108,10 @@ struct UserInput {
     /// Ctrl+C, and the application is asked to exit once the command that
     /// owned the prompt has unwound (see `Terminal::take_eof`).
     eof: Arc<AtomicBool>,
+    /// Only digits reach the buffer. For a numbered pick, where anything
+    /// else typed is a mistake — most often a password meant for the prompt
+    /// after it, which then sat on screen in "No such wallet: 'hunter2'".
+    digits: Arc<AtomicBool>,
     sender: Sender<String>,
     receiver: Receiver<String>,
 }
@@ -124,6 +128,7 @@ impl UserInput {
             terminate: Arc::new(AtomicBool::new(false)),
             aborted: Arc::new(AtomicBool::new(false)),
             eof: Arc::new(AtomicBool::new(false)),
+            digits: Arc::new(AtomicBool::new(false)),
             sender,
             receiver,
         }
@@ -240,6 +245,9 @@ impl UserInput {
                 self.close()?;
             }
             Key::Char(ch) => {
+                if self.digits.load(Ordering::SeqCst) && !ch.is_ascii_digit() {
+                    return Ok(());
+                }
                 self.buffer.lock().unwrap().push(ch);
                 // A password shows a star per keystroke rather than nothing:
                 // silence at a prompt reads as a broken keyboard to anyone who
@@ -643,6 +651,14 @@ impl Terminal {
     /// command loop checks it after every command and exits the application.
     pub fn take_eof(&self) -> bool {
         self.user_input.eof.swap(false, Ordering::SeqCst)
+    }
+
+    /// [`Terminal::ask`] that lets only digits through: a numbered pick.
+    pub async fn ask_digits(self: &Arc<Terminal>, prompt: &str) -> Result<String> {
+        self.user_input.digits.store(true, Ordering::SeqCst);
+        let answer = self.ask(false, prompt).await;
+        self.user_input.digits.store(false, Ordering::SeqCst);
+        answer
     }
 
     pub async fn ask(self: &Arc<Terminal>, secret: bool, prompt: &str) -> Result<String> {

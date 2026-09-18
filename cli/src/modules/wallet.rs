@@ -140,7 +140,7 @@ impl Wallet {
                             let default = last.unwrap_or_else(|| wallets[0].filename.clone());
                             let selection = ctx
                                 .term()
-                                .ask(false, &format!("Select wallet [1..{}] or <enter> for '{default}': ", wallets.len()))
+                                .ask_digits(&format!("Select wallet [1..{}] or <enter> for '{default}': ", wallets.len()))
                                 .await?
                                 .trim()
                                 .to_string();
