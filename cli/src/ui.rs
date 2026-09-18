@@ -49,6 +49,9 @@ pub enum Ink {
     Moss,
     /// The microtext band, which is texture and is not meant to be read.
     Micro,
+    /// The note's paper: the deep green of the website's specimen. A ground,
+    /// never an ink for text.
+    Ground,
 }
 
 impl Ink {
@@ -65,6 +68,7 @@ impl Ink {
             // note's microtext is meant to be seen and not read, and an
             // opacity cannot be expressed in a terminal, so it is mixed here.
             Ink::Micro => (0x5c, 0x66, 0x59),
+            Ink::Ground => (0x1e, 0x35, 0x27),
         }
     }
 }
@@ -142,6 +146,47 @@ pub fn paint<S: AsRef<str>>(ink: Ink, text: S) -> String {
         Depth::Plain => text.to_string(),
         Depth::True => format!("\x1b[38;2;{r};{g};{b}m{text}\x1b[39m"),
         Depth::Indexed => format!("\x1b[38;5;{}m{text}\x1b[39m", nearest_256(r, g, b)),
+    }
+}
+
+/// `paint`, but Cream too: on the note's own green the terminal's default
+/// foreground is not a safe guess (a light theme's is black), so everything on
+/// the note is painted in full.
+pub fn paint_exact<S: AsRef<str>>(ink: Ink, text: S) -> String {
+    let text = text.as_ref();
+    let (r, g, b) = ink.rgb();
+    match depth() {
+        Depth::Plain => text.to_string(),
+        Depth::True => format!("\x1b[38;2;{r};{g};{b}m{text}\x1b[39m"),
+        Depth::Indexed => format!("\x1b[38;5;{}m{text}\x1b[39m", nearest_256(r, g, b)),
+    }
+}
+
+/// Lay `text` on the note's green. Foreground paints inside it stay as they
+/// are; the ground is set once at the start of the line and dropped at the
+/// end, so a line that is nothing but paints and spaces comes out as a strip
+/// of paper.
+pub fn on_ground<S: AsRef<str>>(text: S) -> String {
+    let text = text.as_ref();
+    let (r, g, b) = Ink::Ground.rgb();
+    match depth() {
+        Depth::Plain => text.to_string(),
+        Depth::True => format!("\x1b[48;2;{r};{g};{b}m{text}\x1b[49m"),
+        Depth::Indexed => format!("\x1b[48;5;{}m{text}\x1b[49m", nearest_256(r, g, b)),
+    }
+}
+
+/// One cell carrying two tones, the upper half in `top` and the lower in
+/// `bottom`: an upper-half block with the foreground and background set. The
+/// note's bloom is drawn from these, so nine rows of text hold eighteen rows
+/// of picture. Meaningless without colour; callers check `depth()` first.
+pub fn two_tone(top: (u8, u8, u8), bottom: (u8, u8, u8)) -> String {
+    let (tr, tg, tb) = top;
+    let (br, bg, bb) = bottom;
+    match depth() {
+        Depth::Plain => "▀".to_string(),
+        Depth::True => format!("\x1b[38;2;{tr};{tg};{tb}m\x1b[48;2;{br};{bg};{bb}m▀\x1b[39m\x1b[49m"),
+        Depth::Indexed => format!("\x1b[38;5;{}m\x1b[48;5;{}m▀\x1b[39m\x1b[49m", nearest_256(tr, tg, tb), nearest_256(br, bg, bb)),
     }
 }
 

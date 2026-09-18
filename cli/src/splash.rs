@@ -25,10 +25,12 @@ type Run = (Ink, &'static str);
 /// not a note.
 const NOTE_WIDTH: usize = 80;
 
-/// Frame plus the two lines beneath it plus breathing room. Below this many
-/// rows the note would scroll its own top off the screen on the way in, and
-/// the specimen is shown instead.
-const NOTE_ROWS: usize = 30;
+/// Frame plus the line beneath it plus the prompt: twenty-one rows of note,
+/// a blank, the next-step line, and the prompt make twenty-four — which is
+/// what a terminal opens at on a Mac and on most Linux desktops. Below this
+/// many rows the note would scroll its own top off the screen on the way in,
+/// and the specimen is shown instead.
+const NOTE_ROWS: usize = 24;
 
 /// The inside of the frame.
 const INNER: usize = NOTE_WIDTH - 2;
@@ -40,87 +42,59 @@ const INNER: usize = NOTE_WIDTH - 2;
 const NOTE_TOP: &str = "╔══════════════════════════════════════════════════════════════════════════════╗";
 const NOTE_BOTTOM: &str = "╚══════════════════════════════════════════════════════════════════════════════╝";
 
-/// Bloom, wordmark and taglines — everything between the two microtext bands
-/// that does not change with the network or the version.
-const NOTE_BODY: [&[Run]; 20] = [
-    &[(Cream, "                                                                              ")],
-    &[(Cream, "                                    "), (Amber, ".o0o."), (Cream, "                                     ")],
-    &[(Cream, "                                 "), (Amber, ".o0"), (Gold, "OOOOO"), (Amber, "0o."), (Cream, "                                  ")],
-    &[
-        (Cream, "                                "),
-        (Amber, "o0"),
-        (Gold, "OO"),
-        (Petal, "@@@@@"),
-        (Gold, "OO"),
-        (Amber, "0o"),
-        (Cream, "                                 "),
-    ],
-    &[
-        (Cream, "                               "),
-        (Amber, "0"),
-        (Gold, "OO"),
-        (Petal, "@@"),
-        (Amber, "##"),
-        (Gold, "%"),
-        (Amber, "##"),
-        (Petal, "@@"),
-        (Gold, "OO"),
-        (Amber, "0"),
-        (Cream, "                                "),
-    ],
-    &[
-        (Cream, "                               "),
-        (Amber, "0"),
-        (Gold, "OO"),
-        (Petal, "@@"),
-        (Amber, "#"),
-        (Gold, "%%%"),
-        (Amber, "#"),
-        (Petal, "@@"),
-        (Gold, "OO"),
-        (Amber, "0"),
-        (Cream, "                                "),
-    ],
-    &[
-        (Cream, "                               "),
-        (Amber, "0"),
-        (Gold, "OO"),
-        (Petal, "@@"),
-        (Amber, "##"),
-        (Gold, "%"),
-        (Amber, "##"),
-        (Petal, "@@"),
-        (Gold, "OO"),
-        (Amber, "0"),
-        (Cream, "                                "),
-    ],
-    &[
-        (Cream, "                                "),
-        (Amber, "o0"),
-        (Gold, "OO"),
-        (Petal, "@@@@@"),
-        (Gold, "OO"),
-        (Amber, "0o"),
-        (Cream, "                                 "),
-    ],
-    &[(Cream, "                                 "), (Amber, "'o0"), (Gold, "OOOOO"), (Amber, "0o'"), (Cream, "                                  ")],
-    &[(Cream, "                                    "), (Amber, "'0o0'"), (Cream, "                                     ")],
-    &[(Cream, "                                                                              ")],
-    &[(Cream, "      "), (Petal, "█▄   ▄█   ▄███▄   ██████▄  ████   ▄█████   ▄███▄   ██      ██████▄"), (Cream, "      ")],
-    &[(Cream, "      "), (Petal, "███▄███  ██   ██  ██   ██   ██   ██       ██   ██  ██      ██   ██"), (Cream, "      ")],
-    &[(Cream, "      "), (Petal, "██▀█▀██  ███████  ██████▀   ██   ██  ███  ██   ██  ██      ██   ██"), (Cream, "      ")],
-    &[(Cream, "      "), (Petal, "██   ██  ██   ██  ██  ██    ██   ██   ██  ██   ██  ██      ██   ██"), (Cream, "      ")],
-    &[(Cream, "      "), (Petal, "██   ██  ██   ██  ██   ██  ████   ▀████▀   ▀███▀   ██████  ██████▀"), (Cream, "      ")],
-    &[(Cream, "                                                                              ")],
-    &[
-        (Cream, "             Digital cash in fixed notes of "),
-        (Petal, "1, 10, 100"),
-        (Cream, " and "),
-        (Petal, "1,000"),
-        (Cream, ".             "),
-    ],
-    &[(Cream, "                  "), (Moss, "Notes you hold, hand over, and understand."), (Cream, "                  ")],
-    &[(Cream, "                                                                              ")],
+/// The bloom, as tone: eighteen columns by eighteen half-rows, 0 the ground
+/// and 30 the palest petal, reduced from a shaded drawing of the website's
+/// marigold (founder, 2026-09-18). Drawn with two tones to a cell, so it takes
+/// nine rows of the note.
+const BLOOM: [[u8; 18]; 18] = [
+    [0, 0, 0, 0, 0, 0, 0, 0, 11, 12, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 3, 12, 8, 5, 20, 20, 5, 8, 12, 3, 0, 0, 0, 0],
+    [0, 0, 0, 0, 8, 20, 19, 12, 18, 19, 11, 19, 20, 9, 0, 0, 0, 0],
+    [0, 0, 0, 0, 7, 20, 17, 19, 18, 17, 20, 17, 20, 8, 0, 0, 0, 0],
+    [0, 0, 10, 15, 12, 19, 16, 20, 19, 18, 19, 16, 19, 12, 15, 12, 0, 0],
+    [0, 0, 17, 20, 17, 20, 18, 18, 22, 22, 15, 18, 20, 18, 20, 18, 1, 0],
+    [0, 0, 8, 18, 15, 18, 23, 30, 26, 26, 29, 23, 17, 15, 18, 8, 0, 0],
+    [0, 2, 8, 15, 20, 18, 23, 29, 22, 21, 26, 25, 20, 20, 15, 8, 2, 0],
+    [0, 12, 20, 18, 19, 22, 29, 23, 9, 8, 24, 30, 22, 19, 18, 20, 12, 0],
+    [0, 13, 20, 18, 18, 15, 26, 23, 8, 8, 20, 24, 19, 18, 18, 20, 14, 0],
+    [0, 4, 11, 16, 20, 20, 28, 27, 18, 18, 26, 29, 20, 20, 16, 11, 4, 0],
+    [0, 0, 4, 16, 16, 17, 25, 26, 28, 27, 27, 26, 18, 16, 17, 5, 0, 0],
+    [0, 0, 16, 20, 18, 20, 20, 22, 26, 23, 22, 18, 20, 17, 20, 17, 0, 0],
+    [0, 0, 15, 20, 15, 15, 16, 19, 20, 18, 20, 17, 16, 15, 20, 15, 1, 0],
+    [0, 0, 3, 7, 6, 14, 14, 20, 19, 18, 20, 16, 15, 8, 7, 3, 0, 0],
+    [0, 0, 0, 0, 8, 20, 19, 13, 17, 18, 13, 19, 20, 9, 0, 0, 0, 0],
+    [0, 0, 0, 0, 4, 16, 12, 8, 20, 20, 8, 11, 16, 5, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 2, 0, 1, 16, 17, 2, 0, 1, 0, 0, 0, 0, 0],
+];
+const BLOOM_WIDTH: usize = 18;
+
+/// The bloom for a terminal without colour, where two tones to a cell mean
+/// nothing: a line drawing at the same nine rows.
+const LINE_BLOOM: [&str; 9] = [
+    "         ,.-~*'\"'*~-.,  ",
+    "      ,-'  ( \\ | / )  '-, ",
+    "    ,'  ( \\  ,---.  / )  ',",
+    "   /  ( \\  ,'  _  ',  / )  \\",
+    "  |  ( |  (  ( @ )  )  | )  |",
+    "   \\  ( /  ',  ~  ,'  \\ )  /",
+    "    ',  ( /  '---'  \\ )  ,' ",
+    "      '-,  ( / | \\ )  ,-'  ",
+    "         '~-.,*.*,.-~'   ",
+];
+
+/// The wordmark at three rows. Five was a poster; this is a note (founder,
+/// 2026-09-18). The R closes its bowl underneath and steps its leg down and
+/// to the right, and sits one cell from the I rather than two.
+const WORDMARK: [&str; 3] = [
+    "█▄ ▄█   ▄▀▄   █▀▀▄  █  ▄▀▀▀▄  ▄▀▀▀▄  █      █▀▀▄ ",
+    "█ ▀ █  █▀▀▀█  █▀█▀  █  █  ▄▄  █   █  █      █   █",
+    "█   █  █   █  █  ▀▄ █  ▀▄▄▄▀  ▀▄▄▄▀  █▄▄▄▄  █▄▄▀ ",
+];
+
+/// The two lines under the wordmark.
+const TAGLINE: [&[Run]; 2] = [
+    &[(Cream, "Digital cash in fixed notes of "), (Petal, "1, 10, 100"), (Cream, " and "), (Petal, "1,000"), (Cream, ".")],
+    &[(Moss, "Notes you hold, hand over, and understand.")],
 ];
 
 /// The denominations printed in the note's corners, top pair then bottom.
@@ -146,7 +120,38 @@ const MARK: [&[Run]; 5] = [
 // ---------------------------------------------------------------------------
 
 fn render(row: &[Run]) -> String {
-    row.iter().map(|(ink, text)| ui::paint(*ink, text)).collect()
+    row.iter().map(|(ink, text)| ui::paint_exact(*ink, text)).collect()
+}
+
+/// A tone from the bloom table as a colour: the ground, then amber, gold and
+/// petal at ten, twenty and thirty, blended between.
+fn tone(level: u8) -> (u8, u8, u8) {
+    let stops = [Ground.rgb(), Amber.rgb(), Gold.rgb(), Petal.rgb()];
+    let level = level.min(30) as usize;
+    let (i, t) = (level / 10, (level % 10) as u16);
+    if i >= 3 {
+        return stops[3];
+    }
+    let (a, b) = (stops[i], stops[i + 1]);
+    let lerp = |x: u8, y: u8| (x as i32 + (y as i32 - x as i32) * t as i32 / 10) as u8;
+    (lerp(a.0, b.0), lerp(a.1, b.1), lerp(a.2, b.2))
+}
+
+/// The nine rows of the bloom, each `INNER` wide, in whatever the terminal
+/// can show: two tones to a cell where there is colour, the line drawing
+/// where there is none.
+fn bloom_rows() -> Vec<String> {
+    if ui::depth() == ui::Depth::Plain {
+        // Padded to one width first, or centring would shift the rows
+        // against each other by a column.
+        return LINE_BLOOM.iter().map(|line| centre(&ui::pad(line, 29), INNER)).collect();
+    }
+    (0..BLOOM.len() / 2)
+        .map(|r| {
+            let cells: String = (0..BLOOM_WIDTH).map(|c| ui::two_tone(tone(BLOOM[2 * r][c]), tone(BLOOM[2 * r + 1][c]))).collect();
+            centre(&cells, INNER)
+        })
+        .collect()
 }
 
 /// Centre `text` in `columns`, measuring what shows rather than what is
@@ -209,21 +214,38 @@ fn imprint(version: &str, network: &str) -> String {
 
 /// Wrap a body line in the frame.
 fn framed(line: &str) -> String {
-    format!("{}{}{}", ui::paint(Gold, "║"), line, ui::paint(Gold, "║"))
+    ui::on_ground(format!("{}{}{}", ui::paint(Gold, "║"), line, ui::paint(Gold, "║")))
+}
+
+/// Every printed line of the note, top frame to bottom, each exactly
+/// `NOTE_WIDTH` wide.
+fn note_lines(version: &str, network: &str) -> Vec<String> {
+    let blank = " ".repeat(INNER);
+    let mut lines = vec![ui::on_ground(ui::paint(Gold, NOTE_TOP))];
+    lines.push(framed(&band(CORNERS[0].0, CORNERS[0].1)));
+    lines.push(framed(&blank));
+    for row in bloom_rows() {
+        lines.push(framed(&row));
+    }
+    lines.push(framed(&blank));
+    for row in WORDMARK {
+        lines.push(framed(&centre(&ui::paint_exact(Petal, row), INNER)));
+    }
+    for row in TAGLINE {
+        lines.push(framed(&centre(&render(row), INNER)));
+    }
+    lines.push(framed(&imprint(version, network)));
+    lines.push(framed(&band(CORNERS[1].0, CORNERS[1].1)));
+    lines.push(ui::on_ground(ui::paint(Gold, NOTE_BOTTOM)));
+    lines
 }
 
 /// The full note. Callers should have checked it fits.
 pub fn banknote(ctx: &Arc<KaspaCli>, version: &str, network: &str, has_wallet: Option<bool>) {
     let term = ctx.term();
-    term.writeln(ui::paint(Gold, NOTE_TOP));
-    term.writeln(framed(&band(CORNERS[0].0, CORNERS[0].1)));
-    for row in NOTE_BODY.iter() {
-        term.writeln(framed(&render(row)));
+    for line in note_lines(version, network) {
+        term.writeln(line);
     }
-    term.writeln(framed(&imprint(version, network)));
-    term.writeln(framed(&render(&[(Cream, "                                                                              ")])));
-    term.writeln(framed(&band(CORNERS[1].0, CORNERS[1].1)));
-    term.writeln(ui::paint(Gold, NOTE_BOTTOM));
     term.writeln("");
 
     // Under the frame, only what to type. A specimen serial and the site
@@ -234,6 +256,14 @@ pub fn banknote(ctx: &Arc<KaspaCli>, version: &str, network: &str, has_wallet: O
 
 /// The compact mark, for anything the note will not fit.
 pub fn specimen(ctx: &Arc<KaspaCli>, version: &str, network: &str, has_wallet: Option<bool>) {
+    specimen_because(ctx, version, network, has_wallet, false)
+}
+
+/// The specimen, and — when the note was left out for want of room — one
+/// quiet line saying what would bring it back. The wallet does not resize
+/// the window itself: most terminals ignore the request and the rest move a
+/// window nobody asked to move (founder, 2026-09-18).
+fn specimen_because(ctx: &Arc<KaspaCli>, version: &str, network: &str, has_wallet: Option<bool>, too_small: bool) {
     let term = ctx.term();
     let facts = [
         ui::paint_bold(Petal, letterspaced("MARIGOLD").replace(' ', "  ")),
@@ -248,6 +278,13 @@ pub fn specimen(ctx: &Arc<KaspaCli>, version: &str, network: &str, has_wallet: O
         let mark = render(row);
         let fact = facts.get(i).cloned().unwrap_or_default();
         term.writeln(format!("   {}    {fact}", ui::pad(&mark, 9)));
+    }
+    if too_small {
+        term.writeln("");
+        term.writeln(format!(
+            "   {}",
+            ui::paint(Micro, format!("the full note needs {NOTE_WIDTH} by {NOTE_ROWS} · widen the window and type about"))
+        ));
     }
     term.writeln("");
 }
@@ -284,7 +321,7 @@ pub fn show(ctx: &Arc<KaspaCli>, version: &str, network: Option<&str>, has_walle
     let network = network.unwrap_or("unknown network");
 
     match (ui::measured(ctx.term().cols()), ui::measured(ctx.term().rows())) {
-        (Some(cols), Some(rows)) if cols < NOTE_WIDTH || rows < NOTE_ROWS => specimen(ctx, version, network, has_wallet),
+        (Some(cols), Some(rows)) if cols < NOTE_WIDTH || rows < NOTE_ROWS => specimen_because(ctx, version, network, has_wallet, true),
         // A terminal that will not say how big it is is not a small terminal.
         // It is a container, a pipe, or a test harness — `docker compose run`
         // hands the container a pty reporting zero by zero. Guessing "small"
@@ -303,12 +340,37 @@ mod tests {
     /// right-hand frame wanders and the whole thing stops reading as a note.
     #[test]
     fn every_row_of_the_note_is_the_same_width() {
-        for (i, row) in NOTE_BODY.iter().enumerate() {
-            let width: usize = row.iter().map(|(_, text)| ui::display_width(text)).sum();
-            assert_eq!(width, INNER, "body row {i} is {width} columns, not {INNER}");
+        let lines = note_lines("2.0.46", "testnet-10");
+        for (i, line) in lines.iter().enumerate() {
+            let width = ui::display_width(line);
+            assert_eq!(width, NOTE_WIDTH, "line {i} is {width} columns, not {NOTE_WIDTH}");
         }
         assert_eq!(ui::display_width(NOTE_TOP), NOTE_WIDTH);
         assert_eq!(ui::display_width(NOTE_BOTTOM), NOTE_WIDTH);
+    }
+
+    /// Twenty-one rows of note, so that note, blank, next step and prompt fit
+    /// a terminal that opens at twenty-four.
+    #[test]
+    fn the_note_fits_a_default_terminal() {
+        assert_eq!(note_lines("2.0.46", "testnet-10").len(), NOTE_ROWS - 3);
+    }
+
+    #[test]
+    fn the_bloom_and_wordmark_are_the_shape_they_claim() {
+        assert_eq!(BLOOM.len(), 18);
+        assert!(BLOOM.iter().all(|row| row.len() == BLOOM_WIDTH));
+        assert!(BLOOM.iter().flatten().all(|&t| t <= 30));
+        for line in LINE_BLOOM {
+            assert!(ui::display_width(line) <= INNER);
+        }
+        for row in WORDMARK {
+            assert_eq!(ui::display_width(row), 49, "{row}");
+        }
+        assert_eq!(tone(0), Ground.rgb());
+        assert_eq!(tone(10), Amber.rgb());
+        assert_eq!(tone(20), Gold.rgb());
+        assert_eq!(tone(30), Petal.rgb());
     }
 
     /// The bands carry runtime-sized numbers, so they are the rows most
@@ -383,7 +445,7 @@ mod fit_tests {
     #[test]
     fn a_terminal_without_room_gets_the_specimen() {
         assert_eq!(choice(Some(79), Some(40)), "specimen", "one column short");
-        assert_eq!(choice(Some(100), Some(29)), "specimen", "one row short");
+        assert_eq!(choice(Some(100), Some(NOTE_ROWS - 1)), "specimen", "one row short");
         assert_eq!(choice(Some(40), Some(10)), "specimen");
     }
 
