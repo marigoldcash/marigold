@@ -15,7 +15,7 @@
 # browser silently being one ahead of the binary it is supposed to match.
 set -euo pipefail
 
-HOST="${MARIGOLD_BUILD_HOST:-root@157.90.15.33}"
+HOST="${MARIGOLD_BUILD_HOST:-pve3}"
 KEY="${MARIGOLD_BUILD_KEY:-$HOME/.ssh/marigold_deploy}"
 REMOTE_DIR="${MARIGOLD_BUILD_DIR:-/opt/marigold-build/remote-build}"
 SSH="ssh -i $KEY -o BatchMode=yes"

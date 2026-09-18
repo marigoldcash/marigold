@@ -152,7 +152,7 @@ impl log::Log for TerminalLogger {
         // Warnings used to be exempt, on the reasoning that a warning is worth
         // seeing. It is not, here: a peer timing out and being dropped is
         // ordinary p2p churn, and "SendPingsFlow flow error: timeout expired
-        // after 120s, disconnecting from peer 49.12.37.83:26211" landed in the
+        // after 120s, disconnecting from peer 203.0.113.12:26211" landed in the
         // middle of a new user creating their first wallet — between the
         // phishing-hint prompt and the password prompt. It reads like the
         // program breaking. It is the program working.

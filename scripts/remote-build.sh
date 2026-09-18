@@ -17,7 +17,7 @@
 # git, never from whatever happens to be in someone's editor.
 set -euo pipefail
 
-HOST="${MARIGOLD_BUILD_HOST:-root@157.90.15.33}"
+HOST="${MARIGOLD_BUILD_HOST:-pve3}"
 KEY="${MARIGOLD_BUILD_KEY:-$HOME/.ssh/marigold_deploy}"
 REMOTE_DIR="${MARIGOLD_BUILD_DIR:-/opt/marigold-build/remote-build}"
 SSH="ssh -i $KEY -o BatchMode=yes"
