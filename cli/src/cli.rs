@@ -2997,9 +2997,14 @@ impl Cli for KaspaCli {
             // something having gone wrong when the user simply changed their
             // mind. Say nothing and hand the prompt back.
             let text = err.to_string();
-            if !matches!(text.as_str(), "Cli error cancelled" | "cancelled" | "Aborted") {
+            if !matches!(text.as_str(), "cancelled" | "Aborted") {
                 term.writeln(self.describe_error(&err.to_string()));
             }
+        }
+        // Ctrl+D at a prompt cancelled it; now that the command has unwound,
+        // it means what it means at the main line.
+        if term.take_eof() {
+            self.handlers.execute(&self, "exit").await.ok();
         }
         Ok(())
     }

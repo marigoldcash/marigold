@@ -104,6 +104,10 @@ struct UserInput {
     /// an empty string indistinguishable from a real empty answer
     /// (Marigold fix).
     aborted: Arc<AtomicBool>,
+    /// Ctrl+D arrived while a prompt was open: the prompt is cancelled like
+    /// Ctrl+C, and the application is asked to exit once the command that
+    /// owned the prompt has unwound (see `Terminal::take_eof`).
+    eof: Arc<AtomicBool>,
     sender: Sender<String>,
     receiver: Receiver<String>,
 }
@@ -119,6 +123,7 @@ impl UserInput {
             kbhit: Arc::new(AtomicBool::new(false)),
             terminate: Arc::new(AtomicBool::new(false)),
             aborted: Arc::new(AtomicBool::new(false)),
+            eof: Arc::new(AtomicBool::new(false)),
             sender,
             receiver,
         }
@@ -218,6 +223,18 @@ impl UserInput {
                 // prompt tore down the whole CLI (Marigold fix). The aborted
                 // flag turns capture()'s result into an error so callers can
                 // tell cancellation from an intentionally empty answer.
+                self.aborted.store(true, Ordering::SeqCst);
+                term.crlf();
+                self.close()?;
+            }
+            Key::Ctrl('d') => {
+                // EOF at a prompt: Ctrl+D exits from the main line, and it
+                // should mean the same thing here rather than nothing — the
+                // founder had to press Ctrl+C first and then Ctrl+D, every
+                // time (2026-09-18). Cancel the prompt exactly as Ctrl+C does
+                // and leave a note for the command loop to run `exit` once
+                // the command that owned the prompt has returned.
+                self.eof.store(true, Ordering::SeqCst);
                 self.aborted.store(true, Ordering::SeqCst);
                 term.crlf();
                 self.close()?;
@@ -622,6 +639,12 @@ impl Terminal {
     /// Ask a question (input a string until CRLF).
     /// `secret` argument suppresses echoing of the
     /// user input (useful for password entry)
+    /// True once, if Ctrl+D was pressed at a prompt since the last call. The
+    /// command loop checks it after every command and exits the application.
+    pub fn take_eof(&self) -> bool {
+        self.user_input.eof.swap(false, Ordering::SeqCst)
+    }
+
     pub async fn ask(self: &Arc<Terminal>, secret: bool, prompt: &str) -> Result<String> {
         self.reset_line_buffer();
         // Drop any type-ahead BEFORE the modal prompt opens, and again after

@@ -21,7 +21,11 @@ pub enum Error {
     #[error(transparent)]
     WalletError(#[from] WalletError),
 
-    #[error("Cli error {0}")]
+    // Transparent, not "Cli error {0}": a command that runs another command
+    // crosses the handler framework twice, and each crossing re-wrapped the
+    // text, so backing out of the open picker printed "Cli error Cli error
+    // cancelled" (founder, 2026-09-18).
+    #[error(transparent)]
     TerminalError(#[from] TerminalError),
 
     #[error("Channel error")]
