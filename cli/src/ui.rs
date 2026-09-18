@@ -183,10 +183,19 @@ pub fn on_ground<S: AsRef<str>>(text: S) -> String {
 pub fn two_tone(top: (u8, u8, u8), bottom: (u8, u8, u8)) -> String {
     let (tr, tg, tb) = top;
     let (br, bg, bb) = bottom;
+    // The cell hands the background back to the note's green, not to the
+    // terminal's default: a plain reset here left every bloom row grey from
+    // the last cell to the frame (founder, 2026-09-18).
+    let (gr, gg, gb) = Ink::Ground.rgb();
     match depth() {
         Depth::Plain => "▀".to_string(),
-        Depth::True => format!("\x1b[38;2;{tr};{tg};{tb}m\x1b[48;2;{br};{bg};{bb}m▀\x1b[39m\x1b[49m"),
-        Depth::Indexed => format!("\x1b[38;5;{}m\x1b[48;5;{}m▀\x1b[39m\x1b[49m", nearest_256(tr, tg, tb), nearest_256(br, bg, bb)),
+        Depth::True => format!("\x1b[38;2;{tr};{tg};{tb}m\x1b[48;2;{br};{bg};{bb}m▀\x1b[39m\x1b[48;2;{gr};{gg};{gb}m"),
+        Depth::Indexed => format!(
+            "\x1b[38;5;{}m\x1b[48;5;{}m▀\x1b[39m\x1b[48;5;{}m",
+            nearest_256(tr, tg, tb),
+            nearest_256(br, bg, bb),
+            nearest_256(gr, gg, gb)
+        ),
     }
 }
 
