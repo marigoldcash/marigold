@@ -9,13 +9,19 @@ use std::path::PathBuf;
 #[derive(Parser, Debug)]
 #[command(author, version, about = "Marigold finality-anchor trustee signer", long_about = None)]
 struct Args {
-    /// The node's gRPC address
+    /// The node's RPC address: `host:port` for gRPC, or a `ws://` URL for a node
+    /// that speaks only wRPC (the wallet's embedded node)
     #[arg(short, long, default_value = "127.0.0.1:26110")]
     rpc_server: String,
 
     /// This signer's trustee index (0..5) into the network's pinned key set
-    #[arg(short, long)]
-    trustee_index: u8,
+    #[arg(short, long, required_unless_present = "generate_key")]
+    trustee_index: Option<u8>,
+
+    /// Make a fresh trustee key: write the secret to this file (owner-only), print
+    /// the public key to pin in params, and exit. Refuses to overwrite.
+    #[arg(long, value_name = "PATH", exclusive = true)]
+    generate_key: Option<PathBuf>,
 
     /// This trustee's BIP340 secret key, hex-encoded (64 chars). Prefer --key-file.
     #[arg(long, conflicts_with = "key_file")]
@@ -67,6 +73,23 @@ async fn main() {
     kaspa_core::log::init_logger(None, "info");
     let args = Args::parse();
 
+    if let Some(path) = &args.generate_key {
+        let (sk, pk) = secp256k1::generate_keypair(&mut secp256k1::rand::thread_rng());
+        let (xonly, _) = pk.x_only_public_key();
+        let hex_secret = faster_hex::hex_string(&sk.secret_bytes());
+        let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(path).expect("cannot create the key file (does it exist already?)");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            file.set_permissions(std::fs::Permissions::from_mode(0o600)).expect("cannot set the key file's mode");
+        }
+        use std::io::Write;
+        writeln!(file, "{hex_secret}").expect("cannot write the key file");
+        println!("{}", faster_hex::hex_string(&xonly.serialize()));
+        return;
+    }
+    let trustee_index = args.trustee_index.expect("--trustee-index is required");
+
     let secret_key = match (&args.secret_key, &args.key_file) {
         (Some(hex), None) => parse_hex32(hex),
         (None, Some(path)) => {
@@ -90,7 +113,7 @@ async fn main() {
 
     let config = SignerConfig {
         rpc_server: args.rpc_server,
-        trustee_index: args.trustee_index,
+        trustee_index,
         secret_key,
         listen_address: args.listen,
         peer_addresses: args.peers,

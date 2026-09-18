@@ -16,6 +16,7 @@ kaspa-grpc-client.workspace = true
 kaspa-hashes.workspace = true
 kaspa-notify.workspace = true
 kaspa-rpc-core.workspace = true
+kaspa-wrpc-client.workspace = true
 
 borsh.workspace = true
 clap.workspace = true
@@ -26,3 +27,7 @@ tokio = { workspace = true, features = ["rt", "macros", "rt-multi-thread", "net"
 
 [lints]
 workspace = true
+
+[[bin]]
+name = "marigold-trustee-signer"
+path = "src/main.rs"

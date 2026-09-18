@@ -31,6 +31,7 @@ use kaspa_consensus_core::{
 };
 use kaspa_core::{debug, info, warn};
 use kaspa_grpc_client::GrpcClient;
+type DynRpcApi = dyn kaspa_rpc_core::api::rpc::RpcApi;
 use kaspa_hashes::Hash;
 use kaspa_rpc_core::{api::rpc::RpcApi, notify::mode::NotificationMode};
 use std::collections::{BTreeMap, HashMap};
@@ -49,7 +50,9 @@ pub struct PartialAttestation {
 
 #[derive(Debug, Clone)]
 pub struct SignerConfig {
-    /// The node's gRPC address, e.g. "127.0.0.1:16110".
+    /// The node's RPC address: a bare `host:port` (gRPC), or a `ws://` / `wss://`
+    /// URL for a node that speaks only wRPC — the wallet's embedded node exposes
+    /// nothing else.
     pub rpc_server: String,
     /// This signer's trustee index (0..5) into the network's pinned key set.
     pub trustee_index: u8,
@@ -158,7 +161,7 @@ async fn serve_partials(listener: TcpListener, sink: mpsc::UnboundedSender<Parti
 pub struct TrusteeSigner {
     config: SignerConfig,
     keypair: secp256k1::Keypair,
-    client: GrpcClient,
+    client: Arc<DynRpcApi>,
     last_signed: LastSigned,
     /// The selected-chain cursor for target discovery (always a chain block).
     chain_cursor: Option<Hash>,
@@ -175,18 +178,36 @@ impl TrusteeSigner {
         assert!((config.trustee_index as usize) < TRUSTEE_COUNT, "trustee index out of range");
         let keypair = secp256k1::Keypair::from_seckey_slice(secp256k1::SECP256K1, &config.secret_key)
             .map_err(|e| format!("invalid secret key: {e}"))?;
-        let client = GrpcClient::connect_with_args(
-            NotificationMode::Direct,
-            format!("grpc://{}", config.rpc_server),
-            None,
-            true,
-            None,
-            false,
-            Some(500_000),
-            Default::default(),
-        )
-        .await
-        .map_err(|e| format!("failed to connect to {}: {e}", config.rpc_server))?;
+        let client: Arc<DynRpcApi> = if config.rpc_server.starts_with("ws://") || config.rpc_server.starts_with("wss://") {
+            use kaspa_wrpc_client::client::{ConnectOptions, ConnectStrategy};
+            let client = Arc::new(
+                kaspa_wrpc_client::KaspaRpcClient::new(kaspa_wrpc_client::WrpcEncoding::Borsh, Some(&config.rpc_server), None, None, None)
+                    .map_err(|e| format!("{}: {e}", config.rpc_server))?,
+            );
+            let options = ConnectOptions {
+                block_async_connect: true,
+                strategy: ConnectStrategy::Retry,
+                url: Some(config.rpc_server.clone()),
+                ..Default::default()
+            };
+            client.connect(Some(options)).await.map_err(|e| format!("failed to connect to {}: {e}", config.rpc_server))?;
+            client
+        } else {
+            Arc::new(
+                GrpcClient::connect_with_args(
+                    NotificationMode::Direct,
+                    format!("grpc://{}", config.rpc_server),
+                    None,
+                    true,
+                    None,
+                    false,
+                    Some(500_000),
+                    Default::default(),
+                )
+                .await
+                .map_err(|e| format!("failed to connect to {}: {e}", config.rpc_server))?,
+            )
+        };
         let last_signed = read_state(&config.state_file).unwrap_or_default();
         let (incoming_sink, incoming) = mpsc::unbounded_channel();
         Ok(Self {
