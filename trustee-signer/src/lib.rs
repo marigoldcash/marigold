@@ -285,9 +285,32 @@ impl TrusteeSigner {
             return Ok(()); // cadence: nothing eligible yet
         }
 
-        // Walk the selected chain from the cursor (or the pruning point on first
-        // run/reorg reset) and find the highest chain block with score <= bound.
-        let cursor = self.chain_cursor.unwrap_or(dag_info.pruning_point_hash);
+        // No cursor yet (first run, or a reorg reset): walk back from the sink
+        // along selected parents to the first chain block at or below the bound,
+        // and take that. Walking forward from the pruning point instead came back
+        // one page at a time, so a signer joining a synced testnet node signed a
+        // block a million scores old and would have crept forward page by page
+        // for an hour, attesting stale history the whole way (2026-09-18).
+        let cursor = match self.chain_cursor {
+            Some(cursor) => cursor,
+            None => {
+                let mut hash = dag_info.sink;
+                let found = loop {
+                    let block = self.client.get_block(hash, false).await.map_err(|e| e.to_string())?;
+                    if block.header.daa_score <= target_bound {
+                        break (hash, block.header.daa_score);
+                    }
+                    let Some(verbose) = block.verbose_data else { return Err("the node gave a block without verbose data".to_string()) };
+                    hash = verbose.selected_parent_hash;
+                };
+                if found.1 < self.last_signed.score.saturating_add(self.config.interval) || found.0 == self.last_signed.block {
+                    return Ok(());
+                }
+                self.chain_cursor = Some(found.0);
+                self.sign_and_share(found.0, found.1).await;
+                return Ok(());
+            }
+        };
         let chain = match self.client.get_virtual_chain_from_block(cursor, false, None).await {
             Ok(res) => res.added_chain_block_hashes,
             Err(_) => {
@@ -312,13 +335,18 @@ impl TrusteeSigner {
             return Ok(());
         }
 
-        // Sign, persist FIRST (the equivocation-safety order: better to lose a
-        // signing than to double-sign after a crash), then share.
+        self.chain_cursor = Some(target_block);
+        self.sign_and_share(target_block, target_score).await;
+        Ok(())
+    }
+
+    /// Sign the target, persist FIRST (the equivocation-safety order: better to
+    /// lose a signing than to double-sign after a crash), then share the partial.
+    async fn sign_and_share(&mut self, target_block: Hash, target_score: u64) {
         let msg = secp256k1::Message::from_digest(signing_hash(&target_block, target_score).into());
         let signature: [u8; 64] = *secp256k1::SECP256K1.sign_schnorr_no_aux_rand(&msg, &self.keypair).as_ref();
         self.last_signed = LastSigned { score: target_score, block: target_block };
         write_state(&self.config.state_file, self.last_signed);
-        self.chain_cursor = Some(target_block);
         info!(
             "[SIGNER {}] signed anchor attestation for block {} at DAA score {}",
             self.config.trustee_index, target_block, target_score
@@ -334,7 +362,6 @@ impl TrusteeSigner {
             let frame = frame.clone();
             tokio::spawn(send_partial(peer, frame));
         }
-        Ok(())
     }
 
     /// Assembles and submits an anchor for any pair holding a quorum of partials.
