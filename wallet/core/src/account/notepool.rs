@@ -84,6 +84,10 @@ pub fn decompose_amount(petals: u64) -> Option<Vec<DenominationTag>> {
 pub struct MintResult {
     pub transaction_ids: Vec<Hash>,
     pub notes: Vec<NoteKeyEntry>,
+    /// What the whole mint paid the miners, batches included, in petals.
+    /// The wallet tells the user; a figure that only the chain knew sent
+    /// the founder counting by hand (2026-09-18).
+    pub fees: u64,
 }
 
 /// Fee rate for note-pool transactions, in sompi per gram.
@@ -191,7 +195,8 @@ pub async fn mint_with_progress(
         notes.push(entry);
     }
 
-    Ok(MintResult { transaction_ids, notes })
+    let fees = generator.summary().aggregate_fees();
+    Ok(MintResult { transaction_ids, notes, fees })
 }
 
 /// Which notes to redeem: an explicit serial list, or "select owned notes, largest

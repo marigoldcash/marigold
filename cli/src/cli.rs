@@ -234,6 +234,16 @@ pub(crate) fn humanised_minutes(minutes: u64) -> String {
     }
 }
 
+/// "about a block a minute", "a block about every 12 minutes": the cadence
+/// of a miner, in words that survive the one-minute case ("every a minute"
+/// did not, 2026-09-18).
+pub(crate) fn block_cadence(every: Duration) -> String {
+    match every.as_secs() / 60 {
+        0 | 1 => "about a block a minute".to_string(),
+        m => format!("a block about every {}", humanised_minutes(m)),
+    }
+}
+
 impl KaspaCli {
     pub fn init() {
         cfg_if! {
@@ -1796,16 +1806,16 @@ impl KaspaCli {
                             self,
                             "{}",
                             crate::ui::dim(format!(
-                                "Your own miner will mine the tidying (a block about every {}), so the fee comes back to you.",
-                                humanised_minutes((every.as_secs() / 60).max(1))
+                                "Your own miner will mine the tidying ({}), so the fee goes to your miner's wallet.",
+                                block_cadence(every)
                             ))
                         ),
                         OwnLane::TooSlow { every } => tprintln!(
                             self,
                             "{}",
                             crate::ui::dim(format!(
-                                "Your miner finds a block about every {} — too rare to wait for, so the network fee is paid.",
-                                humanised_minutes((every.as_secs() / 60).max(1))
+                                "Your miner finds {} — too rare to wait for, so the network fee is paid.",
+                                block_cadence(every)
                             ))
                         ),
                         OwnLane::NoMiner => {
@@ -1829,18 +1839,43 @@ impl KaspaCli {
                             None,
                         )
                         .await?;
-                        Ok::<_, kaspa_wallet_core::error::Error>(result.map(|(amount, result)| (amount, result.notes.len())))
+                        Ok::<_, kaspa_wallet_core::error::Error>(
+                            result.map(|(amount, result)| (amount, result.notes.len(), result.fees, result.transaction_ids.len())),
+                        )
                     }
                     .await;
                     match minted {
-                        Ok(Some((amount, notes))) => {
-                            self.record("minted", amount, 0, format!("{notes} notes, on its own"), "");
+                        Ok(Some((amount, notes, fees, transactions))) => {
+                            self.record("minted", amount, fees, format!("{notes} notes, on its own"), "");
                             if loud {
                                 tprintln!(
                                     self,
-                                    "Minted {} {ticker} into {notes} note(s).",
-                                    kaspa_wallet_core::utils::sompi_to_kaspa_string(amount)
+                                    "Minted {} {ticker} into {notes} note(s) (fees {} {ticker}).",
+                                    kaspa_wallet_core::utils::sompi_to_kaspa_string(amount),
+                                    kaspa_wallet_core::utils::sompi_to_kaspa_string(fees)
                                 );
+                                // An own-lane mint is not done when it is submitted:
+                                // it is a queue of batches only this machine's miner
+                                // will include, at a handful per block. A mining
+                                // wallet's 212,281 pieces made two thousand of them,
+                                // hours of mining — during which the ledger reads as
+                                // spent and the notes as held, and a node restart
+                                // would lose the queue (founder, 2026-09-18). Say how
+                                // long, and to stay.
+                                if let OwnLane::Use { every } = lane {
+                                    if transactions > 1 {
+                                        // Roughly five batches fit a block.
+                                        let minutes = (transactions as u64 * every.as_secs()).div_ceil(5 * 60).max(1);
+                                        tprintln!(
+                                            self,
+                                            "{}",
+                                            crate::ui::dim(format!(
+                                                "Submitted as {transactions} transactions for your miner to land — about {}. Keep this wallet open until then; the change and the notes settle as they confirm.",
+                                                humanised_minutes(minutes)
+                                            ))
+                                        );
+                                    }
+                                }
                             }
                         }
                         Ok(None) => {
