@@ -428,7 +428,15 @@ impl VirtualStateProcessor {
             // rather than unwrap so direct callers (e.g. templates) stay total.
             let op = PoolOp::decode_payload(&transaction.payload).ok_or(TxRuleError::MalformedNotePoolPayload)?;
             let skip = flags == TxValidationFlags::SkipScriptChecks;
-            match validate_stateful(&op, transaction.id(), &transaction.outputs, pool_view, pov_daa_score, skip, self.note_locks_activation.is_active(pov_daa_score)) {
+            match validate_stateful(
+                &op,
+                transaction.id(),
+                &transaction.outputs,
+                pool_view,
+                pov_daa_score,
+                skip,
+                self.note_locks_activation.is_active(pov_daa_score),
+            ) {
                 Ok(validated) => Some(validated),
                 Err(e) => {
                     info!("Rejecting note-pool transaction {} due to context error: {}", transaction.id(), e);
@@ -520,7 +528,15 @@ impl VirtualStateProcessor {
         // NOTES.md's P6.7 entry), not an oversight.
         let validated_pool_op = if mutable_tx.tx.subnetwork_id == SUBNETWORK_ID_NOTE_POOL {
             let op = PoolOp::decode_payload(&mutable_tx.tx.payload).ok_or(TxRuleError::MalformedNotePoolPayload)?;
-            match validate_stateful(&op, mutable_tx.tx.id(), &mutable_tx.tx.outputs, pool_view, pov_daa_score, false, self.note_locks_activation.is_active(pov_daa_score)) {
+            match validate_stateful(
+                &op,
+                mutable_tx.tx.id(),
+                &mutable_tx.tx.outputs,
+                pool_view,
+                pov_daa_score,
+                false,
+                self.note_locks_activation.is_active(pov_daa_score),
+            ) {
                 Ok(validated) => Some(validated),
                 Err(e) => {
                     info!("Rejecting note-pool transaction {} due to context error: {}", mutable_tx.tx.id(), e);
@@ -786,7 +802,12 @@ impl VirtualStateProcessor {
     /// accepted for now as a documented, correctness-first tradeoff (see NOTES.md's P6.5
     /// entry); a proper incremental, multi-branch-aware store is future optimization
     /// work, not required by this step's own verify condition.
-    pub(super) fn recompute_pool_commitment(&self, pool_state: &DbNotePoolStore, pool_diff: &PoolDiff, mergeset_pool_diff: &PoolDiff) -> Hash {
+    pub(super) fn recompute_pool_commitment(
+        &self,
+        pool_state: &DbNotePoolStore,
+        pool_diff: &PoolDiff,
+        mergeset_pool_diff: &PoolDiff,
+    ) -> Hash {
         let mut entries: PoolCollection = pool_state.iterator().map(|r| r.unwrap()).collect();
         for sn in pool_diff.remove.keys() {
             entries.remove(sn);

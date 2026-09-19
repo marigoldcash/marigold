@@ -138,7 +138,11 @@ impl DbNotePoolSmtStore {
     /// Applies a pool state diff to the commitment: `add` entries set their leaf to
     /// `leaf_hash(d, pk)`, `remove` entries clear their leaf. Pass `diff.to_reversed()`
     /// (or an equivalent add/remove swap) to unapply — see `PoolDiff::to_reversed`.
-    pub fn apply_note_diff(&mut self, add: impl IntoIterator<Item = (Hash, Hash)>, remove: impl IntoIterator<Item = Hash>) -> StoreResult<Hash> {
+    pub fn apply_note_diff(
+        &mut self,
+        add: impl IntoIterator<Item = (Hash, Hash)>,
+        remove: impl IntoIterator<Item = Hash>,
+    ) -> StoreResult<Hash> {
         let mut updates = BTreeMap::new();
         for sn in remove {
             updates.insert(sn, ZERO_HASH);
@@ -292,7 +296,12 @@ impl kaspa_smt::streaming::MergeSink for NotePoolMergeSink<'_> {
         Ok(current_hash)
     }
 
-    fn write_collapsed(&mut self, branch_key: BranchKey, leaf: kaspa_smt::store::CollapsedLeaf, _blue_score: u64) -> Result<(), Self::Error> {
+    fn write_collapsed(
+        &mut self,
+        branch_key: BranchKey,
+        leaf: kaspa_smt::store::CollapsedLeaf,
+        _blue_score: u64,
+    ) -> Result<(), Self::Error> {
         self.put(branch_key, Node::Collapsed(leaf))
     }
 }
@@ -353,11 +362,13 @@ mod tests {
     fn commitment_is_deterministic_across_insertion_order() {
         let (_lifetime, db1) = create_temp_db!(ConnBuilder::default().with_files_limit(10));
         let mut store1 = DbNotePoolSmtStore::new(db1, CachePolicy::Count(16));
-        let root_a = store1.apply_note_diff(vec![(hash(1), leaf(1)), (hash(2), leaf(2)), (hash(3), leaf(3))], std::iter::empty()).unwrap();
+        let root_a =
+            store1.apply_note_diff(vec![(hash(1), leaf(1)), (hash(2), leaf(2)), (hash(3), leaf(3))], std::iter::empty()).unwrap();
 
         let (_lifetime, db2) = create_temp_db!(ConnBuilder::default().with_files_limit(10));
         let mut store2 = DbNotePoolSmtStore::new(db2, CachePolicy::Count(16));
-        let root_b = store2.apply_note_diff(vec![(hash(3), leaf(3)), (hash(1), leaf(1)), (hash(2), leaf(2))], std::iter::empty()).unwrap();
+        let root_b =
+            store2.apply_note_diff(vec![(hash(3), leaf(3)), (hash(1), leaf(1)), (hash(2), leaf(2))], std::iter::empty()).unwrap();
 
         assert_eq!(root_a, root_b);
     }
@@ -401,8 +412,7 @@ mod tests {
         // Incremental reference.
         let (_l1, db1) = create_temp_db!(ConnBuilder::default().with_files_limit(10));
         let mut incremental = DbNotePoolSmtStore::new(db1, CachePolicy::Count(16));
-        let incremental_root =
-            incremental.apply_note_diff((1..=n).map(|b| (hash(b), leaf(b))), std::iter::empty()).unwrap();
+        let incremental_root = incremental.apply_note_diff((1..=n).map(|b| (hash(b), leaf(b))), std::iter::empty()).unwrap();
 
         // Streaming rebuild over the same leaves, sorted ascending by serial.
         let (_l2, db2) = create_temp_db!(ConnBuilder::default().with_files_limit(10));

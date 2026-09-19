@@ -36,11 +36,19 @@ pub fn report() -> String {
         if cfg!(target_endian = "little") { "little" } else { "big" }
     );
     let _ = writeln!(out, "cfg:           unix={} windows={}", cfg!(unix), cfg!(windows));
-    let _ = writeln!(out, "network sync:  {}", if cfg!(feature = "embedded-node") { "compiled in" } else { "NOT compiled in — 'connect' can only reach a public computer" });
+    let _ = writeln!(
+        out,
+        "network sync:  {}",
+        if cfg!(feature = "embedded-node") { "compiled in" } else { "NOT compiled in — 'connect' can only reach a public computer" }
+    );
     let _ = writeln!(
         out,
         "disk space:    {}",
-        if cfg!(unix) { "measured before a sync, mining, or a sweep" } else { "NOT measured on this platform — the wallet assumes there is room" }
+        if cfg!(unix) {
+            "measured before a sync, mining, or a sweep"
+        } else {
+            "NOT measured on this platform — the wallet assumes there is room"
+        }
     );
     let _ = writeln!(
         out,
@@ -74,6 +82,13 @@ pub fn report() -> String {
             }
         }
     }
-    let _ = writeln!(out, "colour:        {:?} (TERM={} COLORTERM={} NO_COLOR={})", crate::ui::depth(), env_or("TERM", "-"), env_or("COLORTERM", "-"), env_or("NO_COLOR", "-"));
+    let _ = writeln!(
+        out,
+        "colour:        {:?} (TERM={} COLORTERM={} NO_COLOR={})",
+        crate::ui::depth(),
+        env_or("TERM", "-"),
+        env_or("COLORTERM", "-"),
+        env_or("NO_COLOR", "-")
+    );
     out
 }

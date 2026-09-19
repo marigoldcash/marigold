@@ -25,9 +25,9 @@ use workflow_core::task::spawn;
 
 use crate::events::Events;
 use crate::result::Result;
-use kaspa_consensus_core::Hash;
 use crate::utxo::{Maturity, OutgoingTransaction, PendingUtxoEntryReference, SyncMonitor, UtxoContext, UtxoEntryId};
 use crate::wallet::WalletBusMessage;
+use kaspa_consensus_core::Hash;
 use kaspa_rpc_core::{
     Notification,
     notify::connection::{ChannelConnection, ChannelType},

@@ -44,14 +44,8 @@ impl Wallet {
                     tprintln!(ctx, "Wallets:");
                     tprintln!(ctx, "");
                     for wallet in wallets {
-                        let hidden = ctx
-                            .store()
-                            .client_metadata(&wallet.filename)
-                            .await
-                            .ok()
-                            .flatten()
-                            .map(|m| m.hidden)
-                            .unwrap_or(false);
+                        let hidden =
+                            ctx.store().client_metadata(&wallet.filename).await.ok().flatten().map(|m| m.hidden).unwrap_or(false);
                         let mark = if hidden { "   (hidden from the picker)" } else { "" };
                         if let Some(title) = wallet.title {
                             tprintln!(ctx, "  {}: {}{mark}", wallet.filename, title);
@@ -115,7 +109,11 @@ impl Wallet {
                             if answer.starts_with('n') {
                                 tprintln!(ctx, "");
                                 tprintln!(ctx, "Nothing opened. 'wallet create' when you are ready.");
-                                tprintln!(ctx, "{}", style("(a wallet you have hidden with 'wallet forget' still shows in 'wallet list')").dim());
+                                tprintln!(
+                                    ctx,
+                                    "{}",
+                                    style("(a wallet you have hidden with 'wallet forget' still shows in 'wallet list')").dim()
+                                );
                                 tprintln!(ctx, "");
                                 return Ok(());
                             }
@@ -247,8 +245,7 @@ impl Wallet {
                     ctx.arm_auto_sweep(wallet_secret.clone(), None, threshold);
                 }
                 if auto_mint_on && !needs_passphrase {
-                    let threshold =
-                        meta.as_ref().map(|m| m.auto_mint_threshold_petals).filter(|t| *t > 0).unwrap_or(100_000_000);
+                    let threshold = meta.as_ref().map(|m| m.auto_mint_threshold_petals).filter(|t| *t > 0).unwrap_or(100_000_000);
                     ctx.arm_auto_mint(wallet_secret.clone(), None, threshold);
                 }
 
@@ -302,7 +299,6 @@ impl Wallet {
                             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_secs());
                         ctx.store().set_client_metadata(name, Some(updated.clone())).await.ok();
                         ctx.wallet().settings().set(WalletSettings::Wallet, name.clone()).await.ok();
-
                     }
                 }
             }
@@ -313,7 +309,10 @@ impl Wallet {
             }
             "destroy" => {
                 let Some(name) = argv.first().cloned() else {
-                    tprintln!(ctx, "usage: 'wallet destroy <name> [force]' — permanently deletes a wallet's file, note vault, and transaction history");
+                    tprintln!(
+                        ctx,
+                        "usage: 'wallet destroy <name> [force]' — permanently deletes a wallet's file, note vault, and transaction history"
+                    );
                     return Ok(());
                 };
                 let force = argv.get(1).map(|s| s.to_lowercase()).as_deref() == Some("force");
@@ -413,7 +412,12 @@ impl Wallet {
                 }
                 tprintln!(ctx, "  any LEDGER balance stays recoverable only through this wallet's 12-word account mnemonic");
                 tprintln!(ctx, "");
-                let confirm = ctx.term().ask(false, &format!("Type the wallet name ('{name}') to confirm destruction: ")).await?.trim().to_string();
+                let confirm = ctx
+                    .term()
+                    .ask(false, &format!("Type the wallet name ('{name}') to confirm destruction: "))
+                    .await?
+                    .trim()
+                    .to_string();
                 if confirm != name {
                     tprintln!(ctx, "Confirmation did not match — nothing was destroyed.");
                     return Ok(());
@@ -500,16 +504,16 @@ impl Wallet {
                         // Incognito: strip recorded details and stop recording.
                         let meta = kaspa_wallet_core::storage::local::ClientMetadata { remember: false, ..Default::default() };
                         ctx.store().set_client_metadata(&descriptor.filename, Some(meta)).await?;
-                        tprintln!(ctx, "Autoconnect off: this wallet no longer stores its network or node, and won't offer to reconnect (stored details removed).");
+                        tprintln!(
+                            ctx,
+                            "Autoconnect off: this wallet no longer stores its network or node, and won't offer to reconnect (stored details removed)."
+                        );
                     }
                     Some("on") => {
                         let meta = kaspa_wallet_core::storage::local::ClientMetadata {
                             network: ctx.wallet().network_id().ok().map(|n| n.to_string()),
                             server: None,
-                            last_opened: std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .ok()
-                                .map(|d| d.as_secs()),
+                            last_opened: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_secs()),
                             remember: true,
                             hidden: false,
                             auto_mint: true,
@@ -520,7 +524,10 @@ impl Wallet {
                             mined: false,
                         };
                         ctx.store().set_client_metadata(&descriptor.filename, Some(meta)).await?;
-                        tprintln!(ctx, "Autoconnect on: this wallet remembers its network and node, and offers to reconnect when opened.");
+                        tprintln!(
+                            ctx,
+                            "Autoconnect on: this wallet remembers its network and node, and offers to reconnect when opened."
+                        );
                     }
                     _ => {
                         let meta = ctx.store().client_metadata(&descriptor.filename).await.ok().flatten();
@@ -602,7 +609,10 @@ impl Wallet {
                         // managed to move before failing.
                         tprintln!(ctx, "");
                         tprintln!(ctx, "Could not rename the file: {err}");
-                        tprintln!(ctx, "Nothing was moved. The wallet is still '{old_filename}' — open it with 'open {old_filename}'.");
+                        tprintln!(
+                            ctx,
+                            "Nothing was moved. The wallet is still '{old_filename}' — open it with 'open {old_filename}'."
+                        );
                     }
                 }
             }
@@ -625,7 +635,10 @@ impl Wallet {
                 meta.hidden = hide;
                 ctx.store().set_client_metadata(&name, Some(meta)).await?;
                 if hide {
-                    tprintln!(ctx, "'{name}' is hidden from the picker. It still exists — 'open {name}' opens it, 'wallet show {name}' unhides it.");
+                    tprintln!(
+                        ctx,
+                        "'{name}' is hidden from the picker. It still exists — 'open {name}' opens it, 'wallet show {name}' unhides it."
+                    );
                 } else {
                     tprintln!(ctx, "'{name}' will appear in the picker again.");
                 }
@@ -756,10 +769,7 @@ impl Wallet {
         // real storage folder — no second guess at where '~' points.
         // <storage>/<name>.wallet/notes -> <storage>/<name>.wallet
         let vault_folder = ctx.wallet().store().as_note_key_store()?.vault_folder().await?;
-        let wallet_dir = vault_folder
-            .parent()
-            .ok_or_else(|| Error::custom("cannot work out the wallet folder"))?
-            .to_path_buf();
+        let wallet_dir = vault_folder.parent().ok_or_else(|| Error::custom("cannot work out the wallet folder"))?.to_path_buf();
         let wallet_file = wallet_dir.join(kaspa_wallet_core::storage::local::keys_file_name(&name));
         if !wallet_file.exists() {
             return Err(Error::custom(format!("{} is missing — nothing to back up", wallet_file.display())));
@@ -842,12 +852,7 @@ impl Wallet {
         let (active, retired) = Self::note_counts(&entries);
         tprintln!(ctx, "");
         tprintln!(ctx, "Wrote {}", style(target.display().to_string()).bold());
-        tprintln!(
-            ctx,
-            "{} files, {} — opened again to check it.",
-            file_count.separated_string(),
-            archive::human_size(packed.len())
-        );
+        tprintln!(ctx, "{} files, {} — opened again to check it.", file_count.separated_string(), archive::human_size(packed.len()));
         tprintln!(ctx, "{} note keys you can spend, {} retired.", active.separated_string(), retired.separated_string());
         if retired > active.saturating_mul(4) {
             tprintln!(ctx, "");
@@ -1008,10 +1013,7 @@ impl Wallet {
         if ctx.wallet().is_open() {
             ctx.wallet().close().await?;
         }
-        let opened = ctx
-            .wallet()
-            .open(&secret, Some(name.clone()), WalletOpenArgs::default_with_legacy_accounts(), guard)
-            .await;
+        let opened = ctx.wallet().open(&secret, Some(name.clone()), WalletOpenArgs::default_with_legacy_accounts(), guard).await;
         if let Err(err) = opened {
             tprintln!(ctx, "");
             tprintln!(ctx, "Could not open it: {err}");

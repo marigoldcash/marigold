@@ -1219,7 +1219,8 @@ impl ConsensusApi for Consensus {
 
         let expired = params.expired(virtual_daa_score);
         let stale = !expired
-            && latest.is_some_and(|a| virtual_daa_score.saturating_sub(a.anchored_daa_score) > params.staleness_bound(virtual_daa_score));
+            && latest
+                .is_some_and(|a| virtual_daa_score.saturating_sub(a.anchored_daa_score) > params.staleness_bound(virtual_daa_score));
         let enforcing = params.trustees.is_some() && !expired && !stale && latest.is_some();
         let mut disqualified: Vec<u8> = deny_list
             .iter()
@@ -1247,8 +1248,7 @@ impl ConsensusApi for Consensus {
         let params = &self.config.params.finality_anchor;
         let Some(trustees) = params.trustees.as_ref() else { return ExternalAnchorOutcome::Ignored };
         let virtual_state = self.lkg_virtual_state.load();
-        let sink_daa_score =
-            self.storage.headers_store.get_daa_score(virtual_state.ghostdag_data.selected_parent).unwrap();
+        let sink_daa_score = self.storage.headers_store.get_daa_score(virtual_state.ghostdag_data.selected_parent).unwrap();
         // Stage 4: consensus-expired keys — no anchor has any effect, whichever
         // channel it arrives through.
         if params.expired(sink_daa_score) || params.expired(anchor.anchored_daa_score) {
@@ -1264,9 +1264,9 @@ impl ConsensusApi for Consensus {
         let deny_list = anchor_write.deny_list().unwrap();
         let countable = bitmap_signers(anchor.signer_bitmap)
             .filter(|&i| {
-                !deny_list.iter().any(|e| {
-                    e.trustee_index == i && self.services.reachability_service.is_chain_ancestor_of(e.accepting_block, sink)
-                })
+                !deny_list
+                    .iter()
+                    .any(|e| e.trustee_index == i && self.services.reachability_service.is_chain_ancestor_of(e.accepting_block, sink))
             })
             .count();
         if countable < ANCHOR_QUORUM {

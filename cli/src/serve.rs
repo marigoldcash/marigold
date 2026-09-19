@@ -8,10 +8,14 @@
 use crate::miner::MinerHost;
 use crate::result::Result;
 use crate::telegram::TelegramConfig;
+use futures::TryStreamExt;
 use kaspa_consensus_core::network::NetworkId;
 use kaspa_consensus_core::notepool::DENOMINATION_PETALS;
 use kaspa_core::signals::{Shutdown, Signals};
-use kaspa_wallet_core::account::notepool::{self, BearerNote, Handover, HandoverSelection, LockedHandover, BEARER_NOTE_PREFIX, HANDOVER_PREFIX, LOCKED_HANDOVER_PREFIX, SHARE_KEY_PREFIX};
+use kaspa_wallet_core::account::notepool::{
+    self, BEARER_NOTE_PREFIX, BearerNote, HANDOVER_PREFIX, Handover, HandoverSelection, LOCKED_HANDOVER_PREFIX, LockedHandover,
+    SHARE_KEY_PREFIX,
+};
 use kaspa_wallet_core::prelude::*;
 use kaspa_wallet_core::rpc::DynRpcApi;
 use kaspa_wallet_core::storage::NoteStatus;
@@ -21,9 +25,9 @@ use kaspa_wallet_core::wallet::Wallet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use futures::TryStreamExt;
 
-pub const USAGE: &str = "usage: marigold-cli serve <wallet> [--password-file <path>] [--node <url>] [--mine <percent>] [--network <id>]
+pub const USAGE: &str =
+    "usage: marigold-cli serve <wallet> [--password-file <path>] [--node <url>] [--mine <percent>] [--network <id>]
 
   <wallet>                the wallet's name, as 'wallet list' shows it
   --password-file <path>  the wallet's password, first line of the file
@@ -71,7 +75,16 @@ fn parse(args: &[String]) -> std::result::Result<Options, String> {
                 let v = value("a url")?;
                 node = Some(if v.contains("://") { v } else { format!("ws://{v}") });
             }
-            "--mine" => mine = Some(value("a percentage")?.trim_end_matches('%').parse::<u32>().ok().filter(|p| (1..=100).contains(p)).ok_or("--mine takes 1-100")?),
+            "--mine" => {
+                mine = Some(
+                    value("a percentage")?
+                        .trim_end_matches('%')
+                        .parse::<u32>()
+                        .ok()
+                        .filter(|p| (1..=100).contains(p))
+                        .ok_or("--mine takes 1-100")?,
+                )
+            }
             "--network" => network = Some(value("a network id")?.parse::<NetworkId>().map_err(|e| format!("--network: {e}"))?),
             "--help" | "-h" => return Err(USAGE.to_string()),
             other if other.starts_with('-') => return Err(format!("unknown option '{other}'\n\n{USAGE}")),
@@ -85,11 +98,15 @@ fn parse(args: &[String]) -> std::result::Result<Options, String> {
     }
     let wallet = wallet.ok_or_else(|| format!("which wallet?\n\n{USAGE}"))?;
     let password = match password_file {
-        Some(path) => std::fs::read_to_string(&path).map_err(|e| format!("cannot read {path}: {e}"))?.lines().next().unwrap_or("").to_string(),
+        Some(path) => {
+            std::fs::read_to_string(&path).map_err(|e| format!("cannot read {path}: {e}"))?.lines().next().unwrap_or("").to_string()
+        }
         None => std::env::var("MARIGOLD_WALLET_PASSWORD").unwrap_or_default(),
     };
     if password.is_empty() {
-        return Err("the wallet's password is needed: --password-file <path>, or MARIGOLD_WALLET_PASSWORD in the environment".to_string());
+        return Err(
+            "the wallet's password is needed: --password-file <path>, or MARIGOLD_WALLET_PASSWORD in the environment".to_string()
+        );
     }
     Ok(Options { wallet, password: Secret::from(password), node, mine, network })
 }
@@ -136,7 +153,16 @@ fn utc_day() -> u64 {
 }
 
 impl WalletService {
-    pub fn new(wallet: Arc<Wallet>, secret: Secret, network_id: NetworkId, folder: &str, name: &str, miner: Option<Arc<MinerHost>>, say: Say, local_miner: Option<LocalMiner>) -> Arc<Self> {
+    pub fn new(
+        wallet: Arc<Wallet>,
+        secret: Secret,
+        network_id: NetworkId,
+        folder: &str,
+        name: &str,
+        miner: Option<Arc<MinerHost>>,
+        say: Say,
+        local_miner: Option<LocalMiner>,
+    ) -> Arc<Self> {
         let rpc = wallet.rpc_api();
         Arc::new(Self {
             wallet,
@@ -257,10 +283,23 @@ impl WalletService {
     }
 
     pub async fn pay(&self, petals: u64) -> std::result::Result<Paid, String> {
-        let result = notepool::hand_over(&self.wallet, self.secret.clone(), HandoverSelection::Amount(petals)).await.map_err(|e| e.to_string())?;
+        let result = notepool::hand_over(&self.wallet, self.secret.clone(), HandoverSelection::Amount(petals))
+            .await
+            .map_err(|e| e.to_string())?;
         let code = result.handover.to_text();
-        self.record("paid", result.value_petals, result.stamp_petals + result.transfer.fee_petals, "code handed over (telegram)", &result.transfer.transaction_id.to_string());
-        Ok(Paid { code, value_petals: result.value_petals, fee_petals: result.transfer.fee_petals, notes: result.handover.notes.len().saturating_sub(1) })
+        self.record(
+            "paid",
+            result.value_petals,
+            result.stamp_petals + result.transfer.fee_petals,
+            "code handed over (telegram)",
+            &result.transfer.transaction_id.to_string(),
+        );
+        Ok(Paid {
+            code,
+            value_petals: result.value_petals,
+            fee_petals: result.transfer.fee_petals,
+            notes: result.handover.notes.len().saturating_sub(1),
+        })
     }
 
     /// 'pay' to a share key under a lock (P8.0g): the receiver's to take until
@@ -269,10 +308,23 @@ impl WalletService {
         let share_pk = notepool::share_key_from_text(key).map_err(|e| e.to_string())?;
         let bps = kaspa_consensus_core::config::params::Params::from(self.network_id).bps();
         let now = self.rpc.get_server_info().await.map_err(|e| e.to_string())?.virtual_daa_score;
-        let result = notepool::hand_over_locked(&self.wallet, self.secret.clone(), petals, share_pk, now + seconds * bps).await.map_err(|e| e.to_string())?;
+        let result = notepool::hand_over_locked(&self.wallet, self.secret.clone(), petals, share_pk, now + seconds * bps)
+            .await
+            .map_err(|e| e.to_string())?;
         let code = result.handover.to_text();
-        self.record("offered", result.value_petals, result.stamp_petals + result.transfer.fee_petals, "locked code (telegram)", &result.transfer.transaction_id.to_string());
-        Ok(Paid { code, value_petals: result.value_petals, fee_petals: result.transfer.fee_petals, notes: result.handover.notes.len().saturating_sub(1) })
+        self.record(
+            "offered",
+            result.value_petals,
+            result.stamp_petals + result.transfer.fee_petals,
+            "locked code (telegram)",
+            &result.transfer.transaction_id.to_string(),
+        );
+        Ok(Paid {
+            code,
+            value_petals: result.value_petals,
+            fee_petals: result.transfer.fee_petals,
+            notes: result.handover.notes.len().saturating_sub(1),
+        })
     }
 
     /// A share key to hand out (P8.0g).
@@ -293,20 +345,35 @@ impl WalletService {
             let stamp = result.notes.iter().any(|(_, d)| *d == kaspa_consensus_core::notepool::DenominationTag::D0_01);
             let value = if stamp { result.value_petals - DENOMINATION_PETALS[0] } else { result.value_petals };
             self.record("received", value, 0, "locked code (telegram)", &result.rotation.transaction_id.to_string());
-            Ok(format!("Received {} {} in {} note(s), taken in time and made yours alone.", sompi_to_kaspa_string(value), self.ticker(), result.notes.len() - usize::from(stamp)))
+            Ok(format!(
+                "Received {} {} in {} note(s), taken in time and made yours alone.",
+                sompi_to_kaspa_string(value),
+                self.ticker(),
+                result.notes.len() - usize::from(stamp)
+            ))
         } else if code.starts_with(HANDOVER_PREFIX) {
             let handover = Handover::from_text(code).map_err(|e| e.to_string())?;
             let result = notepool::receive_handover(&self.wallet, self.secret.clone(), handover).await.map_err(|e| e.to_string())?;
             let stamp = result.notes.iter().any(|(_, d)| *d == kaspa_consensus_core::notepool::DenominationTag::D0_01);
             let value = if stamp { result.value_petals - DENOMINATION_PETALS[0] } else { result.value_petals };
             self.record("received", value, 0, "code (telegram)", &result.rotation.transaction_id.to_string());
-            Ok(format!("Received {} {} in {} note(s). Made yours alone with the payer's stamp.", sompi_to_kaspa_string(value), self.ticker(), result.notes.len() - usize::from(stamp)))
+            Ok(format!(
+                "Received {} {} in {} note(s). Made yours alone with the payer's stamp.",
+                sompi_to_kaspa_string(value),
+                self.ticker(),
+                result.notes.len() - usize::from(stamp)
+            ))
         } else if code.starts_with(BEARER_NOTE_PREFIX) {
             let bearer = BearerNote::from_text(code).map_err(|e| e.to_string())?;
             let result = notepool::bearer_import(&self.wallet, self.secret.clone(), bearer).await.map_err(|e| e.to_string())?;
             let value = DENOMINATION_PETALS[bearer.d as usize];
             self.record("received", value, result.rotation.fee_petals, "note (telegram)", &result.rotation.transaction_id.to_string());
-            Ok(format!("Received {} {} (fee {}).", sompi_to_kaspa_string(value), self.ticker(), sompi_to_kaspa_string(result.rotation.fee_petals)))
+            Ok(format!(
+                "Received {} {} (fee {}).",
+                sompi_to_kaspa_string(value),
+                self.ticker(),
+                sompi_to_kaspa_string(result.rotation.fee_petals)
+            ))
         } else {
             Err("that is not a Marigold code (marigoldpay: or marigoldnote:)".to_string())
         }
@@ -323,7 +390,12 @@ impl WalletService {
         match notepool::await_payment_request(&self.wallet, &self.secret, request.pk, timeout).await {
             Ok(claimed) => {
                 self.record("received", claimed.total_petals, 0, "request (telegram)", "");
-                Ok(Some(format!("Paid: {} {} arrived in {} note(s).", sompi_to_kaspa_string(claimed.total_petals), self.ticker(), claimed.notes.len())))
+                Ok(Some(format!(
+                    "Paid: {} {} arrived in {} note(s).",
+                    sompi_to_kaspa_string(claimed.total_petals),
+                    self.ticker(),
+                    claimed.notes.len()
+                )))
             }
             Err(_) => Ok(None),
         }
@@ -342,7 +414,9 @@ impl WalletService {
             .rev()
             .take(n)
             .map(|e| {
-                let when = chrono::DateTime::<chrono::Utc>::from_timestamp(e.at as i64, 0).map(|t| t.format("%Y-%m-%d %H:%M").to_string()).unwrap_or_default();
+                let when = chrono::DateTime::<chrono::Utc>::from_timestamp(e.at as i64, 0)
+                    .map(|t| t.format("%Y-%m-%d %H:%M").to_string())
+                    .unwrap_or_default();
                 format!("{when}  {:<9} {:>12}  {}", e.kind, sompi_to_kaspa_string(e.petals), e.detail)
             })
             .collect::<Vec<_>>()
@@ -352,10 +426,19 @@ impl WalletService {
     pub async fn status_text(&self) -> String {
         let mut lines = Vec::new();
         match self.rpc.get_server_info().await {
-            Ok(info) => lines.push(format!("Network: {} ({} {})", if info.is_synced { "in sync" } else { "catching up" }, info.network_id, info.server_version)),
+            Ok(info) => lines.push(format!(
+                "Network: {} ({} {})",
+                if info.is_synced { "in sync" } else { "catching up" },
+                info.network_id,
+                info.server_version
+            )),
             Err(_) => lines.push("Network: not reachable".to_string()),
         }
-        lines.push(format!("Wallet: {} for {}", if self.wallet.is_connected() { "connected" } else { "not connected" }, crate::cli::humanised_minutes(self.started.elapsed().as_secs() / 60)));
+        lines.push(format!(
+            "Wallet: {} for {}",
+            if self.wallet.is_connected() { "connected" } else { "not connected" },
+            crate::cli::humanised_minutes(self.started.elapsed().as_secs() / 60)
+        ));
         match self.miner_status().await {
             Some((status, where_)) => {
                 lines.push(Self::miner_line(&status, where_));
@@ -391,7 +474,8 @@ impl WalletService {
             }
             return match self.miner_status().await {
                 Some((s, w)) => format!("{}\nStart and stop it from the terminal.", Self::miner_line(&s, w)),
-                None => "No miner runs with this wallet. In the terminal, 'mine start'; or 'marigold-cli mine-to' as a service.".to_string(),
+                None => "No miner runs with this wallet. In the terminal, 'mine start'; or 'marigold-cli mine-to' as a service."
+                    .to_string(),
             };
         };
         match what {
@@ -406,7 +490,14 @@ impl WalletService {
             _ => {
                 let s = host.status();
                 if s.mining {
-                    format!("Mining: {} on {} threads ({}%), {} blocks found, {} accepted.", crate::miner::format_hashrate(s.hashrate), s.threads, s.percent, s.blocks_found, s.blocks_accepted)
+                    format!(
+                        "Mining: {} on {} threads ({}%), {} blocks found, {} accepted.",
+                        crate::miner::format_hashrate(s.hashrate),
+                        s.threads,
+                        s.percent,
+                        s.blocks_found,
+                        s.blocks_accepted
+                    )
                 } else {
                     "Not mining. /mine start".to_string()
                 }
@@ -432,10 +523,17 @@ pub async fn serve(args: Vec<String>) -> Result<()> {
     // way the terminal wallet does, before anything opens.
     let probe = Wallet::try_with_rpc(None, Wallet::local_store()?, None)?;
     probe.load_settings().await.ok();
-    let folder: String = probe.settings().get::<String>(WalletSettings::Folder).unwrap_or_else(|| kaspa_wallet_core::storage::local::default_storage_folder().to_string());
+    let folder: String = probe
+        .settings()
+        .get::<String>(WalletSettings::Folder)
+        .unwrap_or_else(|| kaspa_wallet_core::storage::local::default_storage_folder().to_string());
     let network_id = match options.network {
         Some(id) => id,
-        None => probe.settings().get::<String>(WalletSettings::Network).and_then(|s| s.parse::<NetworkId>().ok()).unwrap_or(NetworkId::with_suffix(kaspa_consensus_core::network::NetworkType::Testnet, 10)),
+        None => probe
+            .settings()
+            .get::<String>(WalletSettings::Network)
+            .and_then(|s| s.parse::<NetworkId>().ok())
+            .unwrap_or(NetworkId::with_suffix(kaspa_consensus_core::network::NetworkType::Testnet, 10)),
     };
     drop(probe);
 
@@ -447,9 +545,18 @@ pub async fn serve(args: Vec<String>) -> Result<()> {
     let (node, rpc, rpc_ctl): (Node, Arc<DynRpcApi>, kaspa_wallet_core::rpc::Rpc) = match options.node.clone() {
         Some(url) if url.starts_with("grpc://") => {
             let client = Arc::new(
-                kaspa_grpc_client::GrpcClient::connect_with_args(kaspa_rpc_core::notify::mode::NotificationMode::MultiListeners, url.clone(), None, true, None, false, None, Default::default())
-                    .await
-                    .map_err(|err| crate::error::Error::custom(format!("cannot reach {url}: {err}")))?,
+                kaspa_grpc_client::GrpcClient::connect_with_args(
+                    kaspa_rpc_core::notify::mode::NotificationMode::MultiListeners,
+                    url.clone(),
+                    None,
+                    true,
+                    None,
+                    false,
+                    None,
+                    Default::default(),
+                )
+                .await
+                .map_err(|err| crate::error::Error::custom(format!("cannot reach {url}: {err}")))?,
             );
             log::info!("Using the node at {url}");
             let rpc: Arc<DynRpcApi> = client.clone();
@@ -464,7 +571,12 @@ pub async fn serve(args: Vec<String>) -> Result<()> {
                 kaspa_wrpc_client::KaspaRpcClient::new(WrpcEncoding::Borsh, Some(&url), None, Some(network_id), None)
                     .map_err(|err| crate::error::Error::custom(format!("{url}: {err}")))?,
             );
-            let options = ConnectOptions { block_async_connect: true, strategy: ConnectStrategy::Retry, url: Some(url.clone()), ..Default::default() };
+            let options = ConnectOptions {
+                block_async_connect: true,
+                strategy: ConnectStrategy::Retry,
+                url: Some(url.clone()),
+                ..Default::default()
+            };
             log::info!("Using the node at {url}");
             client.connect(Some(options)).await.map_err(|err| crate::error::Error::custom(format!("cannot reach {url}: {err}")))?;
             let rpc: Arc<DynRpcApi> = client.clone();
@@ -551,7 +663,11 @@ pub async fn serve(args: Vec<String>) -> Result<()> {
             // Offers whose lock lapsed come back (P8.0g).
             match notepool::reclaim_lapsed(&wallet, options.password.clone()).await {
                 Ok(report) if !report.taken_back.is_empty() || !report.taken_by_receiver.is_empty() => {
-                    log::info!("offers: {} note(s) taken back after their lock lapsed, {} taken by the receiver in time", report.taken_back.len(), report.taken_by_receiver.len());
+                    log::info!(
+                        "offers: {} note(s) taken back after their lock lapsed, {} taken by the receiver in time",
+                        report.taken_back.len(),
+                        report.taken_by_receiver.len()
+                    );
                 }
                 Ok(_) => {}
                 Err(e) => log::warn!("offers not checked: {e}"),

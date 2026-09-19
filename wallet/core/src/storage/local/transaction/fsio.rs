@@ -124,10 +124,7 @@ impl TransactionStore {
             for file in entries {
                 match TransactionId::from_hex(file.file_name()) {
                     Ok(id) => {
-                        let when = file
-                            .metadata()
-                            .and_then(|meta| meta.created().or_else(|| meta.modified()))
-                            .unwrap_or_default();
+                        let when = file.metadata().and_then(|meta| meta.created().or_else(|| meta.modified())).unwrap_or_default();
                         found.push((id, when));
                     }
                     // A two-character name is a shard directory, not a
@@ -141,8 +138,7 @@ impl TransactionStore {
             }
         };
 
-        let shards: Vec<String> =
-            top.iter().map(|e| e.file_name().to_string()).filter(|name| name.len() == 2).collect();
+        let shards: Vec<String> = top.iter().map(|e| e.file_name().to_string()).filter(|name| name.len() == 2).collect();
         collect(top);
         for shard in shards {
             if let Ok(entries) = fs::readdir(folder.join(&shard), true).await {
@@ -394,8 +390,8 @@ async fn write(path: &Path, record: &TransactionRecord, secret: Option<&Secret>,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::transaction::{TransactionData, UtxoRecord};
     use crate::storage::Binding;
+    use crate::storage::transaction::{TransactionData, UtxoRecord};
     use crate::utxo::UtxoContextId;
     use kaspa_consensus_core::network::NetworkType;
 
@@ -421,10 +417,7 @@ mod tests {
     }
 
     fn network_folder(dir: &tempfile::TempDir, binding: &Binding, network_id: &NetworkId) -> PathBuf {
-        dir.path()
-            .join(crate::storage::local::transactions_dir_name("test"))
-            .join(binding.to_hex())
-            .join(network_id.to_string())
+        dir.path().join(crate::storage::local::transactions_dir_name("test")).join(binding.to_hex()).join(network_id.to_string())
     }
 
     /// The whole point: a record must not land directly in the network

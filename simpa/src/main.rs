@@ -285,11 +285,8 @@ fn main_impl(mut args: Args) {
             args.pool_op_probability,
             |_| Box::new(simpa::simulator::miner::NativeLaneProducer),
         );
-        let (consensus, handles, lifetime) = if args.pool_op_probability > 0.0 {
-            sim.run_and_verify_pool_root_agreement(until)
-        } else {
-            sim.run(until)
-        };
+        let (consensus, handles, lifetime) =
+            if args.pool_op_probability > 0.0 { sim.run_and_verify_pool_root_agreement(until) } else { sim.run(until) };
         consensus.shutdown(handles);
         (consensus, lifetime)
     };

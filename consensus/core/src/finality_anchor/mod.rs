@@ -386,7 +386,10 @@ mod tests {
         // Exactly one interval apart: honest sequential anchoring, NOT equivocation
         // (the rule is a strict `< interval`).
         let ev = EquivocationEvidence { trustee_index: 2, first: make(7.into(), 1_000), second: make(8.into(), 1_300) };
-        assert_eq!(verify_equivocation_evidence(&ev, &keys, |_| interval), Err(FinalityAnchorError::ScoresNotWithinInterval(300, 300)));
+        assert_eq!(
+            verify_equivocation_evidence(&ev, &keys, |_| interval),
+            Err(FinalityAnchorError::ScoresNotWithinInterval(300, 300))
+        );
 
         // Same block twice: not an equivocation, whatever the scores.
         let ev = EquivocationEvidence { trustee_index: 2, first: make(7.into(), 1_000), second: make(7.into(), 1_100) };

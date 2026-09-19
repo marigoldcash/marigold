@@ -181,12 +181,7 @@ fn band(left: &str, right: &str) -> String {
         filler.push_str(MICROTEXT);
     }
     let filler: String = filler.chars().take(room).collect();
-    format!(
-        " {} {} {} ",
-        ui::paint_bold(Petal, left),
-        ui::paint(Micro, &filler),
-        ui::paint_bold(Petal, right)
-    )
+    format!(" {} {} {} ", ui::paint_bold(Petal, left), ui::paint(Micro, &filler), ui::paint_bold(Petal, right))
 }
 
 /// The line naming what this build actually is.

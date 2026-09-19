@@ -117,7 +117,8 @@ pub fn validate_args(args: &Args) -> ConfigResult<()> {
 }
 
 fn request_database_deletion_approval(approve: bool) -> bool {
-    let msg = "Node database is from a different marigoldd *DB* version and needs to be fully deleted, do you confirm the delete? (y/n)";
+    let msg =
+        "Node database is from a different marigoldd *DB* version and needs to be fully deleted, do you confirm the delete? (y/n)";
     request_database_deletion_approval_with_message(msg, approve)
 }
 

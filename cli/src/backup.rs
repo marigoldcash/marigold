@@ -98,8 +98,8 @@ pub fn unpack(archive: &[u8], passphrase: &Secret) -> Result<Vec<ArchiveEntry>> 
     }
 
     let sealed = &archive[ARCHIVE_MAGIC.len() + 1..];
-    let (plain, _legacy) = decrypt_salted_or_legacy(sealed, passphrase)
-        .map_err(|_| Error::custom("wrong passphrase, or the archive is damaged"))?;
+    let (plain, _legacy) =
+        decrypt_salted_or_legacy(sealed, passphrase).map_err(|_| Error::custom("wrong passphrase, or the archive is damaged"))?;
 
     let mut body = Vec::new();
     flate2::read::DeflateDecoder::new(plain.as_ref())
@@ -366,4 +366,3 @@ mod tests {
         assert!(rename_entries(stray, "marigold", "spare").is_err());
     }
 }
-

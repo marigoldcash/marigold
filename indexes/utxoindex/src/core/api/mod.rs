@@ -83,7 +83,9 @@ impl UtxoIndexProxy {
         after: Option<TransactionOutpoint>,
         limit: usize,
     ) -> StoreResult<Vec<(TransactionOutpoint, CompactUtxoEntry)>> {
-        spawn_blocking(move || self.inner.read().get_utxos_page_by_script_public_key(&script_public_key, after.as_ref(), limit)).await.unwrap()
+        spawn_blocking(move || self.inner.read().get_utxos_page_by_script_public_key(&script_public_key, after.as_ref(), limit))
+            .await
+            .unwrap()
     }
 
     pub async fn get_utxos_by_script_public_keys(self, script_public_keys: ScriptPublicKeys) -> StoreResult<UtxoSetByScriptPublicKey> {

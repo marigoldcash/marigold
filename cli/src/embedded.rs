@@ -13,12 +13,12 @@
 //! your own is the only way to close it.
 
 use crate::imports::*;
+use kaspa_core::core::Core;
+use kaspa_core::signals::Shutdown;
 use kaspa_rpc_core::api::ctl::RpcCtl;
 use kaspa_wallet_core::rpc::Rpc;
-use kaspa_core::core::Core;
 use kaspad_lib::args::Args;
 use kaspad_lib::daemon::{Runtime, create_core_with_runtime};
-use kaspa_core::signals::Shutdown;
 use std::path::Path;
 use std::sync::Mutex;
 use std::thread::JoinHandle;
@@ -140,10 +140,8 @@ impl EmbeddedNode {
 
         // Same budget arithmetic as marigoldd's own main(): whatever the
         // process is allowed, less what the node's own listeners will take.
-        let fd_total_budget = kaspa_utils::fd_budget::limit()
-            - args.rpc_max_clients as i32
-            - args.inbound_limit as i32
-            - args.outbound_target as i32;
+        let fd_total_budget =
+            kaspa_utils::fd_budget::limit() - args.rpc_max_clients as i32 - args.inbound_limit as i32 - args.outbound_target as i32;
 
         // The database's own lock, read before anything opens it. rocksdb
         // guards a database with an fcntl lock on its LOCK file, and a second
@@ -154,7 +152,11 @@ impl EmbeddedNode {
         // lock and say so, rather than find out the hard way.
         if let Some((lock, pid)) = database_locked_elsewhere(appdir) {
             // A holder outside this container's view shows as process 0.
-            let who = if pid == 0 { "another program on this machine, outside this container".to_string() } else { format!("another program on this machine (process {pid})") };
+            let who = if pid == 0 {
+                "another program on this machine, outside this container".to_string()
+            } else {
+                format!("another program on this machine (process {pid})")
+            };
             return Err(Error::custom(format!(
                 "Your copy of the network in {} is in use by {who}: a wallet that is mining, or a node. \
                  Two programs on one database would destroy it, so this one stays out. \
@@ -242,7 +244,13 @@ fn database_locked_elsewhere(appdir: &Path) -> Option<(std::path::PathBuf, u32)>
     for entry in std::fs::read_dir(appdir).ok()?.flatten() {
         let lock = entry.path().join("datadir").join("meta").join("LOCK");
         let Ok(file) = std::fs::OpenOptions::new().read(true).write(true).open(&lock) else { continue };
-        let mut probe = libc::flock { l_type: libc::F_WRLCK as libc::c_short, l_whence: libc::SEEK_SET as libc::c_short, l_start: 0, l_len: 0, l_pid: 0 };
+        let mut probe = libc::flock {
+            l_type: libc::F_WRLCK as libc::c_short,
+            l_whence: libc::SEEK_SET as libc::c_short,
+            l_start: 0,
+            l_len: 0,
+            l_pid: 0,
+        };
         // SAFETY: `probe` is a fully initialised libc::flock and the descriptor
         // stays open for the duration of the call.
         let rc = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_OFD_GETLK, &mut probe) };

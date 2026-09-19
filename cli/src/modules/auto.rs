@@ -143,13 +143,17 @@ impl Auto {
                 let threshold = meta.auto_mint_threshold_petals;
                 ctx.store().set_client_metadata(&descriptor.filename, Some(meta)).await?;
                 let account = ctx.wallet().account().ok();
-                        let (wallet_secret, payment_secret) = ctx.ask_wallet_secret(account.as_ref()).await?;
-                        if let Err(err) = ctx.verify_wallet_secret(&wallet_secret, payment_secret.as_ref()).await {
-                            tprintln!(ctx, "{err} — nothing was turned on.");
-                            return Ok(());
-                        }
+                let (wallet_secret, payment_secret) = ctx.ask_wallet_secret(account.as_ref()).await?;
+                if let Err(err) = ctx.verify_wallet_secret(&wallet_secret, payment_secret.as_ref()).await {
+                    tprintln!(ctx, "{err} — nothing was turned on.");
+                    return Ok(());
+                }
                 ctx.arm_auto_mint(wallet_secret, payment_secret, threshold);
-                tprintln!(ctx, "auto-mint on: ledger balance above {} {ticker} becomes notes automatically.", sompi_to_kaspa_string(threshold));
+                tprintln!(
+                    ctx,
+                    "auto-mint on: ledger balance above {} {ticker} becomes notes automatically.",
+                    sompi_to_kaspa_string(threshold)
+                );
             }
             Some("off") => {
                 meta.auto_mint = false;
@@ -164,11 +168,11 @@ impl Auto {
                 ctx.store().set_client_metadata(&descriptor.filename, Some(meta)).await?;
                 if armed && ctx.auto_mint_armed() {
                     let account = ctx.wallet().account().ok();
-                        let (wallet_secret, payment_secret) = ctx.ask_wallet_secret(account.as_ref()).await?;
-                        if let Err(err) = ctx.verify_wallet_secret(&wallet_secret, payment_secret.as_ref()).await {
-                            tprintln!(ctx, "{err} — nothing was turned on.");
-                            return Ok(());
-                        }
+                    let (wallet_secret, payment_secret) = ctx.ask_wallet_secret(account.as_ref()).await?;
+                    if let Err(err) = ctx.verify_wallet_secret(&wallet_secret, payment_secret.as_ref()).await {
+                        tprintln!(ctx, "{err} — nothing was turned on.");
+                        return Ok(());
+                    }
                     ctx.arm_auto_mint(wallet_secret, payment_secret, threshold);
                 }
                 tprintln!(ctx, "auto-mint threshold set to {} {ticker}.", sompi_to_kaspa_string(threshold));

@@ -35,12 +35,12 @@ use crate::encryption::{decrypt_xchacha20poly1305_raw_key, encrypt_xchacha20poly
 use crate::imports::*;
 use crate::storage::interface::StorageStream;
 use crate::storage::notekeys::{NoteKeyEntry, NoteKeyInfo, NoteProvenance, NoteStatus, NotesChangedApplyResult, ShareKeyInfo};
-use secp256k1::{Keypair, SECP256K1, SecretKey};
 use futures::stream;
 use kaspa_bip32::{Language, Mnemonic};
 use kaspa_consensus_core::Hash;
 use kaspa_consensus_core::notepool::DenominationTag;
 use rand::RngCore;
+use secp256k1::{Keypair, SECP256K1, SecretKey};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use workflow_store::fs;
@@ -182,11 +182,8 @@ pub fn new_vault_words() -> Result<String> {
 /// The 24-word account mnemonic implied by a vault recovery phrase.
 pub fn account_mnemonic_from_vault_words(words: &str) -> Result<Mnemonic> {
     let vault = Mnemonic::new(words, Language::English)?;
-    let k: [u8; 32] = vault
-        .entropy()
-        .as_slice()
-        .try_into()
-        .map_err(|_| Error::Custom("a vault recovery phrase must be 24 words".to_string()))?;
+    let k: [u8; 32] =
+        vault.entropy().as_slice().try_into().map_err(|_| Error::Custom("a vault recovery phrase must be 24 words".to_string()))?;
     Ok(Mnemonic::from_entropy(account_entropy_from_vault_key(&k).to_vec(), Language::English)?)
 }
 
@@ -453,8 +450,10 @@ impl NoteVault {
     pub async fn restore_key_from_words(&self, words: &str, wallet_secret: &Secret) -> Result<()> {
         let mnemonic = Mnemonic::new(words, Language::English)?;
         let entropy = mnemonic.entropy();
-        let k: [u8; 32] =
-            entropy.as_slice().try_into().map_err(|_| Error::Custom("recovery words must encode a 32-byte key (24 words)".to_string()))?;
+        let k: [u8; 32] = entropy
+            .as_slice()
+            .try_into()
+            .map_err(|_| Error::Custom("recovery words must encode a 32-byte key (24 words)".to_string()))?;
         self.ensure_dirs().await?;
         let wrapped = wrap_vault_key(&k, wallet_secret)?;
         fs::write(&self.folder.join(VAULT_KEY_FILE), &wrapped).await?;
@@ -476,8 +475,10 @@ impl NoteVault {
     pub async fn words_match_existing_key(&self, words: &str, wallet_secret: &Secret) -> Result<bool> {
         let mnemonic = Mnemonic::new(words, Language::English)?;
         let entropy = mnemonic.entropy();
-        let from_words: [u8; 32] =
-            entropy.as_slice().try_into().map_err(|_| Error::Custom("recovery words must encode a 32-byte key (24 words)".to_string()))?;
+        let from_words: [u8; 32] = entropy
+            .as_slice()
+            .try_into()
+            .map_err(|_| Error::Custom("recovery words must encode a 32-byte key (24 words)".to_string()))?;
         match self.unlock(wallet_secret).await {
             Ok(current) => Ok(current == from_words),
             Err(_) => Ok(false),
@@ -680,7 +681,11 @@ impl NoteVault {
     pub async fn offered_notes(&self) -> Result<Vec<(Arc<NoteKeyInfo>, u64)>> {
         self.ensure_loaded().await?;
         let index = self.index.read().await;
-        Ok(index.values().filter(|row| row.info.status == NoteStatus::Offered).map(|row| (Arc::new(row.info.clone()), row.lock_until)).collect())
+        Ok(index
+            .values()
+            .filter(|row| row.info.status == NoteStatus::Offered)
+            .map(|row| (Arc::new(row.info.clone()), row.lock_until))
+            .collect())
     }
 
     // --- Share keys (P8.0g) ---------------------------------------------------
@@ -886,7 +891,10 @@ impl NoteVault {
                 .added
                 .iter()
                 .filter_map(|entry| {
-                    index.values().find(|row| row.info.pk == entry.pk).map(|row| (entry.sn, row.info.sn, entry.denomination, row.info.provenance))
+                    index
+                        .values()
+                        .find(|row| row.info.pk == entry.pk)
+                        .map(|row| (entry.sn, row.info.sn, entry.denomination, row.info.provenance))
                 })
                 .collect()
         };
@@ -1286,7 +1294,10 @@ mod tests {
         let new_secret = Secret::from("a-different-wallet-secret-after-restore");
         restored.restore_key_from_words(&words, &new_secret).await?;
 
-        assert!(!restored.is_empty().await?, "the copied-in note must be visible after restore, not shadowed by the earlier empty cache");
+        assert!(
+            !restored.is_empty().await?,
+            "the copied-in note must be visible after restore, not shadowed by the earlier empty cache"
+        );
         let sn = Hash::from([0xeeu8; 32]);
         let loaded = restored.load_key(&new_secret, &sn).await?.expect("note recovered via the words after a stale empty cache");
         assert_eq!(loaded.sk, [0x22u8; 32]);

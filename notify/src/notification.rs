@@ -190,11 +190,7 @@ pub mod test_helpers {
             }
         }
 
-        fn apply_notes_changed_subscription(
-            &self,
-            subscription: &NotesChangedSubscription,
-            _: &SubscriptionContext,
-        ) -> Option<Self> {
+        fn apply_notes_changed_subscription(&self, subscription: &NotesChangedSubscription, _: &SubscriptionContext) -> Option<Self> {
             // TestNotification carries no NotesChanged variant; mirrors the fixture's
             // existing scope (only Block/VirtualChain/Utxos are modeled).
             match subscription.active() {

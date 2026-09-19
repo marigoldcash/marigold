@@ -5,9 +5,9 @@ use super::ghostdag::GhostdagData;
 use super::notepool::DbNotePoolStore;
 use super::notepool_smt::DbNotePoolSmtStore;
 use super::utxo_set::DbUtxoSetStore;
-use kaspa_consensus_core::notepool::PoolDiff;
 use arc_swap::ArcSwap;
 use kaspa_consensus_core::api::stats::VirtualStateStats;
+use kaspa_consensus_core::notepool::PoolDiff;
 use kaspa_consensus_core::utxo::pre_toccata::PreToccataUtxoDiff;
 use kaspa_consensus_core::{
     BlockHashMap, BlockHashSet, HashMapCustomHasher, block::VirtualStateApproxId, coinbase::BlockRewardData,

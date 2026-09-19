@@ -60,7 +60,12 @@ fn parse(args: &[String]) -> std::result::Result<Options, String> {
         match flag {
             "--cpu" => {
                 let value = inline.or_else(|| iter.next().cloned()).ok_or("--cpu needs a percentage")?;
-                percent = value.trim_end_matches('%').parse::<u32>().ok().filter(|p| (1..=100).contains(p)).ok_or_else(|| format!("'{value}' is not a percentage between 1 and 100"))?;
+                percent = value
+                    .trim_end_matches('%')
+                    .parse::<u32>()
+                    .ok()
+                    .filter(|p| (1..=100).contains(p))
+                    .ok_or_else(|| format!("'{value}' is not a percentage between 1 and 100"))?;
             }
             "--network" => {
                 let value = inline.or_else(|| iter.next().cloned()).ok_or("--network needs a network id")?;
@@ -74,7 +79,12 @@ fn parse(args: &[String]) -> std::result::Result<Options, String> {
             other if other.starts_with('-') => return Err(format!("unknown option '{other}'\n\n{USAGE}")),
             // A bare number is the share of the machine: 'mine-to <address> 50'.
             other if other.trim_end_matches('%').chars().all(|c| c.is_ascii_digit()) && !other.is_empty() => {
-                percent = other.trim_end_matches('%').parse::<u32>().ok().filter(|p| (1..=100).contains(p)).ok_or_else(|| format!("'{other}' is not a percentage between 1 and 100"))?;
+                percent = other
+                    .trim_end_matches('%')
+                    .parse::<u32>()
+                    .ok()
+                    .filter(|p| (1..=100).contains(p))
+                    .ok_or_else(|| format!("'{other}' is not a percentage between 1 and 100"))?;
             }
             other => {
                 if address.is_some() {
@@ -153,7 +163,10 @@ pub async fn mine_to(args: Vec<String>) -> Result<()> {
             log::info!("Mining against the node at {url}; it keeps reconnecting if that node goes away.");
             if let Ok(info) = client.get_server_info().await {
                 if info.network_id != network_id {
-                    return Err(crate::error::Error::custom(format!("{url} is on {}, but {address} is a {network_id} address", info.network_id)));
+                    return Err(crate::error::Error::custom(format!(
+                        "{url} is on {}, but {address} is a {network_id} address",
+                        info.network_id
+                    )));
                 }
             }
             let rpc: Arc<kaspa_wallet_core::rpc::DynRpcApi> = client.clone();
@@ -165,12 +178,20 @@ pub async fn mine_to(args: Vec<String>) -> Result<()> {
                 kaspa_wrpc_client::KaspaRpcClient::new(WrpcEncoding::Borsh, Some(&url), None, Some(network_id), None)
                     .map_err(|err| crate::error::Error::custom(format!("{url}: {err}")))?,
             );
-            let options = ConnectOptions { block_async_connect: true, strategy: ConnectStrategy::Retry, url: Some(url.clone()), ..Default::default() };
+            let options = ConnectOptions {
+                block_async_connect: true,
+                strategy: ConnectStrategy::Retry,
+                url: Some(url.clone()),
+                ..Default::default()
+            };
             log::info!("Mining against the node at {url}; it keeps reconnecting if that node goes away.");
             client.connect(Some(options)).await.map_err(|err| crate::error::Error::custom(format!("cannot reach {url}: {err}")))?;
             if let Ok(info) = client.get_server_info().await {
                 if info.network_id != network_id {
-                    return Err(crate::error::Error::custom(format!("{url} is on {}, but {address} is a {network_id} address", info.network_id)));
+                    return Err(crate::error::Error::custom(format!(
+                        "{url} is on {}, but {address} is a {network_id} address",
+                        info.network_id
+                    )));
                 }
             }
             let rpc: Arc<kaspa_wallet_core::rpc::DynRpcApi> = client.clone();
@@ -205,7 +226,11 @@ pub async fn mine_to(args: Vec<String>) -> Result<()> {
             match host.start(percent) {
                 Ok(status) => {
                     started_once = true;
-                    log::info!("In sync with the network. Mining started: {} threads at {}% of the machine.", status.threads, status.percent);
+                    log::info!(
+                        "In sync with the network. Mining started: {} threads at {}% of the machine.",
+                        status.threads,
+                        status.percent
+                    );
                 }
                 Err(err) => log::warn!("mining could not start: {err}"),
             }

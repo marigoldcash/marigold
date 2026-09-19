@@ -2,7 +2,7 @@
 
 use crate::{
     BlockAddedNotification, FinalityConflictNotification, FinalityConflictResolvedNotification, NewBlockTemplateNotification,
-    Notification, NotesChangedNotification, PruningPointUtxoSetOverrideNotification, RpcAcceptedTransactionIds, RpcNoteEntry,
+    NotesChangedNotification, Notification, PruningPointUtxoSetOverrideNotification, RpcAcceptedTransactionIds, RpcNoteEntry,
     SinkBlueScoreChangedNotification, UtxosChangedNotification, VirtualChainChangedNotification, VirtualDaaScoreChangedNotification,
     convert::utxo::utxo_set_into_rpc,
 };

@@ -4,27 +4,27 @@ mod backup;
 mod cli;
 #[cfg(feature = "embedded-node")]
 pub mod embedded;
+pub mod error;
+pub mod extensions;
 #[cfg(feature = "embedded-node")]
 pub mod headless;
-#[cfg(feature = "embedded-node")]
-pub mod serve;
-#[cfg(feature = "embedded-node")]
-pub mod telegram;
-pub mod error;
-pub(crate) mod log_sink;
-pub mod extensions;
 mod helpers;
 mod imports;
+pub(crate) mod log_sink;
 mod matchers;
 #[cfg(feature = "embedded-node")]
 pub mod miner;
-pub mod qrpng;
 pub mod modules;
 mod notifier;
-pub mod result;
-pub mod space;
 pub mod platform;
+pub mod qrpng;
+pub mod result;
+#[cfg(feature = "embedded-node")]
+pub mod serve;
+pub mod space;
 pub mod splash;
+#[cfg(feature = "embedded-node")]
+pub mod telegram;
 pub mod ui;
 pub mod utils;
 mod wizards;

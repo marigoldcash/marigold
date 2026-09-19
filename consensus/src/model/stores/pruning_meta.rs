@@ -32,7 +32,12 @@ impl PruningMetaStores {
             utxo_set: DbUtxoSetStore::new(db.clone(), utxoset_cache_policy, DatabaseStorePrefixes::PruningUtxoset.into()),
             // Accessed only during pruning advances and IBD serving — sequential scans
             // and write-throughs, nothing worth caching.
-            pool_state: DbNotePoolStore::with_prefix(db.clone(), CachePolicy::Empty, DatabaseStorePrefixes::PruningNotePool.into(), DatabaseStorePrefixes::PruningNotePoolLocks.into()),
+            pool_state: DbNotePoolStore::with_prefix(
+                db.clone(),
+                CachePolicy::Empty,
+                DatabaseStorePrefixes::PruningNotePool.into(),
+                DatabaseStorePrefixes::PruningNotePoolLocks.into(),
+            ),
             utxoset_position_access: CachedDbItem::new(db.clone(), DatabaseStorePrefixes::PruningUtxosetPosition.into()),
             utxoset_stable_flag_access: CachedDbItem::new(db.clone(), DatabaseStorePrefixes::PruningUtxosetSyncFlag.into()),
             smt_stable_flag_access: CachedDbItem::new(db.clone(), DatabaseStorePrefixes::SmtSyncFlag.into()),

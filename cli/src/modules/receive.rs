@@ -1,6 +1,6 @@
 use crate::imports::*;
 use kaspa_consensus_core::notepool::DENOMINATION_PETALS;
-use kaspa_wallet_core::account::notepool::{self, BearerNote, Handover, HANDOVER_PREFIX, LOCKED_HANDOVER_PREFIX, LockedHandover};
+use kaspa_wallet_core::account::notepool::{self, BearerNote, HANDOVER_PREFIX, Handover, LOCKED_HANDOVER_PREFIX, LockedHandover};
 use kaspa_wallet_core::utils::sompi_to_kaspa_string;
 
 #[derive(Default, Handler)]
@@ -36,7 +36,11 @@ impl Receive {
                 }
                 tprintln!(ctx, "{text}");
                 tprintln!(ctx, "");
-                tpara!(ctx, "Give this to whoever should pay you{}. They type 'pay <amount>' and this key; the money is theirs to send and yours to take for as long as the lock they set lasts, and comes back to them if you never take it.", if label.is_empty() { String::new() } else { format!(" ({label})") });
+                tpara!(
+                    ctx,
+                    "Give this to whoever should pay you{}. They type 'pay <amount>' and this key; the money is theirs to send and yours to take for as long as the lock they set lasts, and comes back to them if you never take it.",
+                    if label.is_empty() { String::new() } else { format!(" ({label})") }
+                );
                 tprintln!(ctx, "");
             } else {
                 let keys = store.share_keys().await?;
@@ -45,7 +49,12 @@ impl Receive {
                     tprintln!(ctx, "No keys yet — 'receive key' makes one.");
                 }
                 for key in keys {
-                    tprintln!(ctx, "{:<16} {}", if key.label.is_empty() { "(no name)".to_string() } else { key.label.clone() }, notepool::share_key_to_text(&key.pk));
+                    tprintln!(
+                        ctx,
+                        "{:<16} {}",
+                        if key.label.is_empty() { "(no name)".to_string() } else { key.label.clone() },
+                        notepool::share_key_to_text(&key.pk)
+                    );
                 }
                 tprintln!(ctx, "");
             }
@@ -61,8 +70,17 @@ impl Receive {
             let value = if stamp { result.value_petals - DENOMINATION_PETALS[0] } else { result.value_petals };
             ctx.record("received", value, 0, "locked code", result.rotation.transaction_id.to_string());
             tprintln!(ctx, "");
-            tprintln!(ctx, "Received {} {ticker} in {} note(s).", sompi_to_kaspa_string(value), result.notes.len() - usize::from(stamp));
-            tprintln!(ctx, "{}", crate::ui::dim(format!("Taken in time and made yours alone (tx {}).", result.rotation.transaction_id)));
+            tprintln!(
+                ctx,
+                "Received {} {ticker} in {} note(s).",
+                sompi_to_kaspa_string(value),
+                result.notes.len() - usize::from(stamp)
+            );
+            tprintln!(
+                ctx,
+                "{}",
+                crate::ui::dim(format!("Taken in time and made yours alone (tx {}).", result.rotation.transaction_id))
+            );
         } else if code.starts_with(HANDOVER_PREFIX) {
             // A payment: the notes come under one key the payer made for this
             // handover, with the stamp for making them ours.
@@ -72,7 +90,12 @@ impl Receive {
             let value = if stamp { result.value_petals - DENOMINATION_PETALS[0] } else { result.value_petals };
             ctx.record("received", value, 0, "code", result.rotation.transaction_id.to_string());
             tprintln!(ctx, "");
-            tprintln!(ctx, "Received {} {ticker} in {} note(s).", sompi_to_kaspa_string(value), result.notes.len() - usize::from(stamp));
+            tprintln!(
+                ctx,
+                "Received {} {ticker} in {} note(s).",
+                sompi_to_kaspa_string(value),
+                result.notes.len() - usize::from(stamp)
+            );
             tprintln!(
                 ctx,
                 "{}",
@@ -86,7 +109,13 @@ impl Receive {
             // costs one of our own stamps.
             let bearer = BearerNote::from_text(code)?;
             let result = notepool::bearer_import(&wallet, wallet_secret.clone(), bearer).await?;
-            ctx.record("received", DENOMINATION_PETALS[bearer.d as usize], result.rotation.fee_petals, "note", result.rotation.transaction_id.to_string());
+            ctx.record(
+                "received",
+                DENOMINATION_PETALS[bearer.d as usize],
+                result.rotation.fee_petals,
+                "note",
+                result.rotation.transaction_id.to_string(),
+            );
             tprintln!(ctx, "");
             tprintln!(ctx, "Received {} {ticker}.", sompi_to_kaspa_string(DENOMINATION_PETALS[bearer.d as usize]));
             tprintln!(

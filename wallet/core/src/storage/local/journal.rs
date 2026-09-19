@@ -42,7 +42,8 @@ impl Journal {
     /// `<folder>/<name>.wallet/journal.tsv`, the folder expanded the way the
     /// vault expands it.
     pub fn new<P: AsRef<Path>>(folder: P, name: &str) -> Self {
-        let base = workflow_store::fs::resolve_path(folder.as_ref().to_str().unwrap_or(".")).unwrap_or_else(|_| folder.as_ref().to_path_buf());
+        let base = workflow_store::fs::resolve_path(folder.as_ref().to_str().unwrap_or("."))
+            .unwrap_or_else(|_| folder.as_ref().to_path_buf());
         Self { path: base.join(crate::storage::local::wallet_dir_name(name)).join(JOURNAL_FILE) }
     }
 
@@ -103,8 +104,22 @@ mod tests {
         let dir = tempfile::tempdir()?;
         let journal = Journal::new(dir.path(), "test");
         assert!(journal.read()?.is_empty());
-        let paid = JournalEntry { at: 10, kind: "paid".into(), petals: 111_000_000, stamp_petals: 2_000_000, detail: "code handed\tover".into(), tx: "abc".into() };
-        let received = JournalEntry { at: 20, kind: "received".into(), petals: 5_000_000, stamp_petals: 0, detail: "request".into(), tx: String::new() };
+        let paid = JournalEntry {
+            at: 10,
+            kind: "paid".into(),
+            petals: 111_000_000,
+            stamp_petals: 2_000_000,
+            detail: "code handed\tover".into(),
+            tx: "abc".into(),
+        };
+        let received = JournalEntry {
+            at: 20,
+            kind: "received".into(),
+            petals: 5_000_000,
+            stamp_petals: 0,
+            detail: "request".into(),
+            tx: String::new(),
+        };
         journal.append(&paid)?;
         journal.append(&received)?;
         std::fs::OpenOptions::new().append(true).open(journal.path())?.write_all(b"garbage line\n")?;

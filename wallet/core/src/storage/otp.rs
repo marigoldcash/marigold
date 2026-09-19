@@ -88,9 +88,7 @@ impl Otp {
     pub fn provisioning_uri(&self, label: &str) -> String {
         let secret = base32_encode(&self.secret);
         let label = percent_encode(label);
-        format!(
-            "otpauth://totp/Marigold:{label}?secret={secret}&issuer=Marigold&algorithm=SHA1&digits={DIGITS}&period={PERIOD_SECS}"
-        )
+        format!("otpauth://totp/Marigold:{label}?secret={secret}&issuer=Marigold&algorithm=SHA1&digits={DIGITS}&period={PERIOD_SECS}")
     }
 
     /// Is `entered` a valid code for `at` (unix seconds)?
@@ -283,9 +281,7 @@ mod tests {
     /// Against the RFC 4648 §10 vectors, and round-trips.
     #[test]
     fn base32_matches_the_rfc_and_round_trips() {
-        for (input, encoded) in
-            [("", ""), ("f", "MY"), ("fo", "MZXQ"), ("foo", "MZXW6"), ("foob", "MZXW6YQ"), ("fooba", "MZXW6YTB")]
-        {
+        for (input, encoded) in [("", ""), ("f", "MY"), ("fo", "MZXQ"), ("foo", "MZXW6"), ("foob", "MZXW6YQ"), ("fooba", "MZXW6YTB")] {
             assert_eq!(base32_encode(input.as_bytes()), encoded, "encoding {input:?}");
             assert_eq!(base32_decode(encoded).unwrap(), input.as_bytes(), "decoding {encoded:?}");
         }

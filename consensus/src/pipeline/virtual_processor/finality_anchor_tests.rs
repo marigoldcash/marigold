@@ -288,7 +288,9 @@ async fn anchors_past_sunset_rejected_and_enforcement_retires() {
     // outright, regardless of signatures — body-in-isolation validation rejects the
     // block carrying it.
     let expired_anchor = sign_anchor(&keypairs, &[0, 1, 2], 15.into(), 20);
-    let result = consensus.add_utxo_valid_block_with_parents(98.into(), vec![tip], vec![anchor_tx(&AnchorPayload::Anchor(expired_anchor))]).await;
+    let result = consensus
+        .add_utxo_valid_block_with_parents(98.into(), vec![tip], vec![anchor_tx(&AnchorPayload::Anchor(expired_anchor))])
+        .await;
     assert!(result.is_err(), "an anchor certifying a score at/beyond the hard expiry must be rejected as a transaction");
 
     // A pre-expiry anchor works normally...

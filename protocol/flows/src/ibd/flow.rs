@@ -75,7 +75,9 @@ pub enum IbdType {
         is_pp_anticone_synced: bool,
     },
     DownloadHeadersProof,
-    PruningCatchUp { highest_known_syncer_chain_hash: Hash },
+    PruningCatchUp {
+        highest_known_syncer_chain_hash: Hash,
+    },
 }
 
 struct QueueChunkOutput {
@@ -128,7 +130,13 @@ impl IbdFlow {
             )
             .await?;
         match ibd_type {
-            IbdType::Sync { highest_known_syncer_chain_hash, is_utxo_stable, is_smt_stable, is_pool_stable, is_pp_anticone_synced } => {
+            IbdType::Sync {
+                highest_known_syncer_chain_hash,
+                is_utxo_stable,
+                is_smt_stable,
+                is_pool_stable,
+                is_pp_anticone_synced,
+            } => {
                 let pruning_point = session.async_pruning_point().await;
 
                 info!("syncing ahead from current pruning point");
@@ -1098,7 +1106,10 @@ staging selected tip ({}) is too small or negative. Aborting IBD...",
         let contains_anchor = match consensus.async_get_header(anchor.anchored_block).await {
             Ok(header) => {
                 header.daa_score == anchor.anchored_daa_score
-                    && consensus.async_is_chain_ancestor_of(anchor.anchored_block, syncer_virtual_selected_parent).await.unwrap_or(false)
+                    && consensus
+                        .async_is_chain_ancestor_of(anchor.anchored_block, syncer_virtual_selected_parent)
+                        .await
+                        .unwrap_or(false)
             }
             Err(_) => false,
         };

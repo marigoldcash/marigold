@@ -30,7 +30,10 @@
 //! [`validate_stateful`] (P6.4) is the second half: full P5.3 validation against a live
 //! composed [`PoolStateView`].
 
-use super::{FreshnessAnchor, MintOp, POOL_FRESHNESS_WINDOW, PoolDiff, PoolEntry, PoolOp, ProducedLock, RedeemOp, SignedGroup, TransferLockedOp, TransferOp};
+use super::{
+    FreshnessAnchor, MintOp, POOL_FRESHNESS_WINDOW, PoolDiff, PoolEntry, PoolOp, ProducedLock, RedeemOp, SignedGroup,
+    TransferLockedOp, TransferOp,
+};
 use super::{PoolStateView, hashing};
 use crate::Hash;
 use crate::errors::notepool::{PoolOpContextError, PoolOpValidationError};
@@ -633,7 +636,10 @@ mod tests {
             let sn = hash(10);
             let view = pool_with(&[(sn, owned_note(&payer, DenominationTag::D1))]);
             let op = locked_rotate_op(&payer, sn, owned_note(&receiver, DenominationTag::D1), &payer, 5_000, 50);
-            assert_eq!(validate_stateful(&op, hash(0xAA), &[], &view, 100, false, false), Err(PoolOpContextError::LocksNotActive { pov: 100 }));
+            assert_eq!(
+                validate_stateful(&op, hash(0xAA), &[], &view, 100, false, false),
+                Err(PoolOpContextError::LocksNotActive { pov: 100 })
+            );
         }
 
         /// The receiver's key takes a locked note before the lock lapses; the refund
@@ -645,19 +651,26 @@ mod tests {
             let receiver = Wallet::new(2);
             let elsewhere = note(9);
             let sn = hash(10);
-            let locked = PoolEntry::locked(owned_note(&receiver, DenominationTag::D1), NoteLock { refund_pk: payer.pk, until_daa: 5_000 });
+            let locked =
+                PoolEntry::locked(owned_note(&receiver, DenominationTag::D1), NoteLock { refund_pk: payer.pk, until_daa: 5_000 });
             let view: PoolCollection = [(sn, locked)].into();
             let by_receiver = rotate_op(&receiver, sn, elsewhere, 50);
             let by_payer = rotate_op(&payer, sn, elsewhere, 50);
             // Before the lock lapses.
             assert!(validate_stateful(&by_receiver, hash(0xAA), &[], &view, 4_999, false, true).is_ok());
-            assert_eq!(validate_stateful(&by_payer, hash(0xAA), &[], &view, 4_999, false, true), Err(PoolOpContextError::BadSignature(0)));
+            assert_eq!(
+                validate_stateful(&by_payer, hash(0xAA), &[], &view, 4_999, false, true),
+                Err(PoolOpContextError::BadSignature(0))
+            );
             // From the lock on: the refund key, and only it. Anchors must be fresh at
             // that score, so re-sign against a matching anchor.
             let by_receiver = rotate_op(&receiver, sn, elsewhere, 5_000);
             let by_payer = rotate_op(&payer, sn, elsewhere, 5_000);
             assert!(validate_stateful(&by_payer, hash(0xAA), &[], &view, 5_000, false, true).is_ok());
-            assert_eq!(validate_stateful(&by_receiver, hash(0xAA), &[], &view, 5_000, false, true), Err(PoolOpContextError::BadSignature(0)));
+            assert_eq!(
+                validate_stateful(&by_receiver, hash(0xAA), &[], &view, 5_000, false, true),
+                Err(PoolOpContextError::BadSignature(0))
+            );
         }
 
         #[test]
@@ -666,10 +679,17 @@ mod tests {
             let receiver = Wallet::new(2);
             let sn = hash(10);
             let view = pool_with(&[(sn, owned_note(&payer, DenominationTag::D1))]);
-            let PoolOp::TransferLocked(mut op) = locked_rotate_op(&payer, sn, owned_note(&receiver, DenominationTag::D1), &payer, 5_000, 50) else { unreachable!() };
+            let PoolOp::TransferLocked(mut op) =
+                locked_rotate_op(&payer, sn, owned_note(&receiver, DenominationTag::D1), &payer, 5_000, 50)
+            else {
+                unreachable!()
+            };
             op.locks[0].lock.until_daa = 6_000;
             let tampered = PoolOp::TransferLocked(op);
-            assert_eq!(validate_stateful(&tampered, hash(0xAA), &[], &view, 100, false, true), Err(PoolOpContextError::BadSignature(0)));
+            assert_eq!(
+                validate_stateful(&tampered, hash(0xAA), &[], &view, 100, false, true),
+                Err(PoolOpContextError::BadSignature(0))
+            );
         }
 
         #[test]
@@ -685,7 +705,10 @@ mod tests {
                 })
             };
             assert_eq!(validate_stateless(&mk(vec![])), Err(PoolOpValidationError::EmptyCollection("locks")));
-            assert_eq!(validate_stateless(&mk(vec![ProducedLock { index: 2, lock }])), Err(PoolOpValidationError::LockIndexOutOfRange(2, 2)));
+            assert_eq!(
+                validate_stateless(&mk(vec![ProducedLock { index: 2, lock }])),
+                Err(PoolOpValidationError::LockIndexOutOfRange(2, 2))
+            );
             assert_eq!(
                 validate_stateless(&mk(vec![ProducedLock { index: 1, lock }, ProducedLock { index: 0, lock }])),
                 Err(PoolOpValidationError::LockIndicesNotAscending)
@@ -727,7 +750,10 @@ mod tests {
             let wallet = Wallet::new(1);
             let op = rotate_op(&wallet, hash(10), note(2), 50);
             let empty = PoolCollection::default();
-            assert_eq!(validate_stateful(&op, hash(0xAA), &[], &empty, 100, false, true), Err(PoolOpContextError::SerialNotFound(hash(10))));
+            assert_eq!(
+                validate_stateful(&op, hash(0xAA), &[], &empty, 100, false, true),
+                Err(PoolOpContextError::SerialNotFound(hash(10)))
+            );
         }
 
         #[test]
@@ -871,10 +897,7 @@ mod tests {
             assert_eq!(validated.diff.remove.len(), 0);
             assert_eq!(
                 validated.diff.add,
-                pool_with(&[
-                    (hashing::serial_hash(&hash(0xAA), 0), note(1)),
-                    (hashing::serial_hash(&hash(0xAA), 1), note(2))
-                ])
+                pool_with(&[(hashing::serial_hash(&hash(0xAA), 0), note(1)), (hashing::serial_hash(&hash(0xAA), 1), note(2))])
             );
         }
 

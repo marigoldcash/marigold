@@ -566,7 +566,10 @@ pub trait ConsensusApi: Send + Sync {
     /// P6.12): verified context-free against the pinned trustee keys and the current
     /// deny-list, then either ratcheted (block locally verifiable), held pending
     /// (block unknown — still guards IBD), or ignored. See `ExternalAnchorOutcome`.
-    fn apply_external_finality_anchor(&self, _anchor: crate::finality_anchor::FinalityAnchor) -> crate::finality_anchor::ExternalAnchorOutcome {
+    fn apply_external_finality_anchor(
+        &self,
+        _anchor: crate::finality_anchor::FinalityAnchor,
+    ) -> crate::finality_anchor::ExternalAnchorOutcome {
         unimplemented!()
     }
 

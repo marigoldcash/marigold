@@ -35,12 +35,24 @@ impl History {
                 .unwrap_or_else(|| "----------- --:--".to_string());
             let amount = kaspa_wallet_core::utils::sompi_to_kaspa_string(entry.petals);
             let stamp = if entry.stamp_petals > 0 {
-                ui::paint(Ink::Moss, format!("  ({} {ticker} stamp and fee, paid by you)", kaspa_wallet_core::utils::sompi_to_kaspa_string(entry.stamp_petals)))
+                ui::paint(
+                    Ink::Moss,
+                    format!(
+                        "  ({} {ticker} stamp and fee, paid by you)",
+                        kaspa_wallet_core::utils::sompi_to_kaspa_string(entry.stamp_petals)
+                    ),
+                )
             } else {
                 String::new()
             };
             let kind = ui::paint(if entry.kind == "received" { Ink::Petal } else { Ink::Cream }, format!("{:<9}", entry.kind));
-            tprintln!(ctx, "{}  {kind} {:>14} {ticker}{stamp}  {}", ui::paint(Ink::Moss, when), amount, ui::paint(Ink::Moss, entry.detail));
+            tprintln!(
+                ctx,
+                "{}  {kind} {:>14} {ticker}{stamp}  {}",
+                ui::paint(Ink::Moss, when),
+                amount,
+                ui::paint(Ink::Moss, entry.detail)
+            );
         }
         tprintln!(ctx, "");
         Ok(())

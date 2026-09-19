@@ -230,7 +230,11 @@ impl RpcApi for RpcCoreMock {
         Err(RpcError::NotImplemented)
     }
 
-    async fn control_miner_call(&self, _connection: Option<&DynRpcConnection>, _request: ControlMinerRequest) -> RpcResult<ControlMinerResponse> {
+    async fn control_miner_call(
+        &self,
+        _connection: Option<&DynRpcConnection>,
+        _request: ControlMinerRequest,
+    ) -> RpcResult<ControlMinerResponse> {
         Err(RpcError::NotImplemented)
     }
 

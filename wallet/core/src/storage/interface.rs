@@ -315,7 +315,11 @@ pub trait Interface: Send + Sync + AnySync {
     /// rewrite a wallet's plaintext client metadata in place. No password
     /// required (the encrypted payload passes through untouched). No-op on
     /// backends that don't support it.
-    async fn set_client_metadata(&self, _filename: &str, _metadata: Option<crate::storage::local::wallet::ClientMetadata>) -> Result<()> {
+    async fn set_client_metadata(
+        &self,
+        _filename: &str,
+        _metadata: Option<crate::storage::local::wallet::ClientMetadata>,
+    ) -> Result<()> {
         Ok(())
     }
 

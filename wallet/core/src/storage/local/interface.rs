@@ -128,9 +128,7 @@ impl WalletLock {
         // NOTE the bool. fs4 returns Ok(false) when the lock is held, and only
         // Err for an actual I/O failure — so `.map_err(...)?` alone silently
         // accepted contention as success and the lock did nothing at all.
-        let taken = file
-            .try_lock_exclusive()
-            .map_err(|err| Error::Custom(format!("cannot lock the wallet file: {err}")))?;
+        let taken = file.try_lock_exclusive().map_err(|err| Error::Custom(format!("cannot lock the wallet file: {err}")))?;
         if !taken {
             return Err(Error::Custom(
                 "that wallet is already open in another Marigold program. Close it there first — two \
@@ -762,7 +760,11 @@ impl Interface for LocalStore {
         Ok(wallet.client_metadata)
     }
 
-    async fn set_client_metadata(&self, filename: &str, metadata: Option<crate::storage::local::wallet::ClientMetadata>) -> Result<()> {
+    async fn set_client_metadata(
+        &self,
+        filename: &str,
+        metadata: Option<crate::storage::local::wallet::ClientMetadata>,
+    ) -> Result<()> {
         let location = self.location.lock().unwrap().clone().unwrap();
         let path = fs::resolve_path(&location.folder)?.join(super::wallet_file_name(filename));
         if !fs::exists(&path).await? {

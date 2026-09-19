@@ -13,8 +13,8 @@ use kaspa_wallet_core::rpc::DynRpcApi;
 use kaspa_wallet_core::rpc::Rpc;
 use kaspa_wallet_core::storage::{IdT, PrvKeyDataInfo};
 use kaspa_wrpc_client::{KaspaRpcClient, Resolver};
-use workflow_core::channel::*;
 use std::sync::atomic::{AtomicU64, AtomicUsize};
+use workflow_core::channel::*;
 use workflow_core::time::Instant;
 use workflow_log::*;
 pub use workflow_terminal::Event as TerminalEvent;
@@ -358,9 +358,9 @@ impl KaspaCli {
     pub async fn ledger_account(&self) -> Result<Arc<dyn Account>> {
         match self.wallet.account() {
             Ok(account) => Ok(account),
-            Err(kaspa_wallet_core::error::Error::AccountSelection) if !self.has_ledger_account().await => Err(Error::custom(
-                "This wallet keeps notes only — there is no ledger account. 'account create bip32' adds one.",
-            )),
+            Err(kaspa_wallet_core::error::Error::AccountSelection) if !self.has_ledger_account().await => {
+                Err(Error::custom("This wallet keeps notes only — there is no ledger account. 'account create bip32' adds one."))
+            }
             Err(err) => Err(err.into()),
         }
     }
@@ -452,7 +452,16 @@ impl KaspaCli {
                 uptime_seconds: miner.uptime().as_secs(),
             })
         });
-        let service = crate::serve::WalletService::new(self.wallet.clone(), secret, network_id, &folder, &descriptor.filename, None, say, Some(local_miner));
+        let service = crate::serve::WalletService::new(
+            self.wallet.clone(),
+            secret,
+            network_id,
+            &folder,
+            &descriptor.filename,
+            None,
+            say,
+            Some(local_miner),
+        );
         let handle = tokio::spawn(crate::telegram::run_bot(service, path, cfg));
         self.telegram_bot.lock().unwrap().replace(handle);
         tprintln!(self, "{}", style("Answering your Telegram bot while this wallet is open.").dim());
@@ -486,7 +495,8 @@ impl KaspaCli {
     /// that went through is not undone by a line that could not be written.
     pub fn record(&self, kind: &str, petals: u64, stamp_petals: u64, detail: impl Into<String>, tx: impl Into<String>) {
         if let Some(journal) = self.journal() {
-            let _ = journal.append(&kaspa_wallet_core::storage::local::journal::JournalEntry::now(kind, petals, stamp_petals, detail, tx));
+            let _ =
+                journal.append(&kaspa_wallet_core::storage::local::journal::JournalEntry::now(kind, petals, stamp_petals, detail, tx));
         }
     }
 
@@ -654,13 +664,25 @@ impl KaspaCli {
             Ok(status) => {
                 self.note_remote_miner(Some(&status));
                 tprintln!(self, "");
-                tprintln!(self, "{}", style(format!("Mining started in the background program — {percent}% of this machine ({} of {} cores).", status.threads, status.cores)).green());
+                tprintln!(
+                    self,
+                    "{}",
+                    style(format!(
+                        "Mining started in the background program — {percent}% of this machine ({} of {} cores).",
+                        status.threads, status.cores
+                    ))
+                    .green()
+                );
                 tprintln!(self, "Rewards go to: {}", status.address);
                 tprintln!(self, "'mine status' to check, 'mine stop' to stop.");
                 tprintln!(self, "");
             }
             Err(err) => {
-                tprintln!(self, "{}", style(format!("The background miner did not start: {}", self.describe_error(&err.to_string()))).yellow());
+                tprintln!(
+                    self,
+                    "{}",
+                    style(format!("The background miner did not start: {}", self.describe_error(&err.to_string()))).yellow()
+                );
             }
         }
         Ok(())
@@ -673,7 +695,11 @@ impl KaspaCli {
                 tprintln!(self, "Mining stopped in the background program. It stays running, idle, until 'mine start'.");
             }
             Err(err) => {
-                tprintln!(self, "{}", style(format!("Could not stop the background miner: {}", self.describe_error(&err.to_string()))).yellow());
+                tprintln!(
+                    self,
+                    "{}",
+                    style(format!("Could not stop the background miner: {}", self.describe_error(&err.to_string()))).yellow()
+                );
             }
         }
         Ok(())
@@ -740,10 +766,7 @@ impl KaspaCli {
     /// naming the same money twice, differently, on every testnet wallet
     /// there is.
     pub fn ticker(&self) -> &'static str {
-        self.wallet
-            .network_id()
-            .map(|id| kaspa_wallet_core::utils::kaspa_suffix(&NetworkType::from(id)))
-            .unwrap_or("{ticker}")
+        self.wallet.network_id().map(|id| kaspa_wallet_core::utils::kaspa_suffix(&NetworkType::from(id))).unwrap_or("{ticker}")
     }
 
     pub fn version(&self) -> String {
@@ -1048,7 +1071,11 @@ impl KaspaCli {
                 match this.adopt_embedded_node(rpc.clone()).await {
                     Ok(()) => {
                         tprintln!(this, "");
-                        tprintln!(this, "{}", style("Your sync has caught up. The wallet is now on its own copy of the network —").green());
+                        tprintln!(
+                            this,
+                            "{}",
+                            style("Your sync has caught up. The wallet is now on its own copy of the network —").green()
+                        );
                         tprintln!(this, "{}", style("nobody else sees your address or which notes you hold.").green());
                         tprintln!(this, "");
                         // The moment this becomes true is the moment to say
@@ -1068,7 +1095,6 @@ impl KaspaCli {
             }
         });
     }
-
 
     /// `mine start [percent]` — lend the machine's spare CPU to the network.
     ///
@@ -1632,7 +1658,11 @@ impl KaspaCli {
             self.ledger_known.store(recovered, Ordering::SeqCst);
             if !recovered {
                 if loud {
-                    tprintln!(self, "{}", crate::ui::dim("(still reading the ledger from the node — nothing is being minted meanwhile)"));
+                    tprintln!(
+                        self,
+                        "{}",
+                        crate::ui::dim("(still reading the ledger from the node — nothing is being minted meanwhile)")
+                    );
                 }
                 self.auto_busy.store(false, Ordering::SeqCst);
                 return;
@@ -1646,18 +1676,52 @@ impl KaspaCli {
             match kaspa_wallet_core::account::notepool::reclaim_lapsed(&self.wallet, secret).await {
                 Ok(report) => {
                     for (_, d) in &report.taken_back {
-                        self.record("returned", kaspa_consensus_core::notepool::DENOMINATION_PETALS[*d as usize], 0, "offer lapsed, taken back", "");
+                        self.record(
+                            "returned",
+                            kaspa_consensus_core::notepool::DENOMINATION_PETALS[*d as usize],
+                            0,
+                            "offer lapsed, taken back",
+                            "",
+                        );
                     }
                     for (_, d) in &report.taken_by_receiver {
-                        self.record("paid", kaspa_consensus_core::notepool::DENOMINATION_PETALS[*d as usize], 0, "locked code, taken in time", "");
+                        self.record(
+                            "paid",
+                            kaspa_consensus_core::notepool::DENOMINATION_PETALS[*d as usize],
+                            0,
+                            "locked code, taken in time",
+                            "",
+                        );
                     }
                     if !report.taken_back.is_empty() {
-                        let back: u64 = report.taken_back.iter().map(|(_, d)| kaspa_consensus_core::notepool::DENOMINATION_PETALS[*d as usize]).sum();
-                        tprintln!(self, "{}", crate::ui::dim(format!("An offer lapsed untaken: {} {ticker} came back to you.", kaspa_wallet_core::utils::sompi_to_kaspa_string(back))));
+                        let back: u64 = report
+                            .taken_back
+                            .iter()
+                            .map(|(_, d)| kaspa_consensus_core::notepool::DENOMINATION_PETALS[*d as usize])
+                            .sum();
+                        tprintln!(
+                            self,
+                            "{}",
+                            crate::ui::dim(format!(
+                                "An offer lapsed untaken: {} {ticker} came back to you.",
+                                kaspa_wallet_core::utils::sompi_to_kaspa_string(back)
+                            ))
+                        );
                     }
                     if !report.taken_by_receiver.is_empty() {
-                        let paid: u64 = report.taken_by_receiver.iter().map(|(_, d)| kaspa_consensus_core::notepool::DENOMINATION_PETALS[*d as usize]).sum();
-                        tprintln!(self, "{}", crate::ui::dim(format!("A locked payment of {} {ticker} was taken in time.", kaspa_wallet_core::utils::sompi_to_kaspa_string(paid))));
+                        let paid: u64 = report
+                            .taken_by_receiver
+                            .iter()
+                            .map(|(_, d)| kaspa_consensus_core::notepool::DENOMINATION_PETALS[*d as usize])
+                            .sum();
+                        tprintln!(
+                            self,
+                            "{}",
+                            crate::ui::dim(format!(
+                                "A locked payment of {} {ticker} was taken in time.",
+                                kaspa_wallet_core::utils::sompi_to_kaspa_string(paid)
+                            ))
+                        );
                     }
                 }
                 Err(err) => {
@@ -1733,12 +1797,22 @@ impl KaspaCli {
                     );
                     tprintln!(self, "{}", crate::ui::dim("so it is left to you rather than started without asking."));
                     tprintln!(self, "");
-                    tprintln!(self, "{}", crate::ui::dim("  'sweep <amount>'   consolidate that much and stop — as many times as you like"));
+                    tprintln!(
+                        self,
+                        "{}",
+                        crate::ui::dim("  'sweep <amount>'   consolidate that much and stop — as many times as you like")
+                    );
                     tprintln!(self, "{}", crate::ui::dim("  'sweep'            consolidate all of it in one run"));
                     tprintln!(self, "");
                     tprintln!(self, "{}", crate::ui::dim("Minting is paused until the ledger is back to a workable size."));
                     if self.own_lane_wants_a_miner() {
-                        tprintln!(self, "{}", crate::ui::dim("Mining here makes all of it free — 'mine start' — your own blocks mine it and the fee comes back to you."));
+                        tprintln!(
+                            self,
+                            "{}",
+                            crate::ui::dim(
+                                "Mining here makes all of it free — 'mine start' — your own blocks mine it and the fee comes back to you."
+                            )
+                        );
                     }
                     tprintln!(self, "");
                 }
@@ -1819,8 +1893,18 @@ impl KaspaCli {
                             ))
                         ),
                         OwnLane::NoMiner => {
-                            tprintln!(self, "{}", crate::ui::dim("Turning the ledger into notes costs the network fee. Mining here makes it free — 'mine start' —"));
-                            tprintln!(self, "{}", crate::ui::dim("because your own blocks mine your own tidying and the fee comes back to you."));
+                            tprintln!(
+                                self,
+                                "{}",
+                                crate::ui::dim(
+                                    "Turning the ledger into notes costs the network fee. Mining here makes it free — 'mine start' —"
+                                )
+                            );
+                            tprintln!(
+                                self,
+                                "{}",
+                                crate::ui::dim("because your own blocks mine your own tidying and the fee comes back to you.")
+                            );
                         }
                         OwnLane::NotOwnCopy => {}
                     }
@@ -1937,7 +2021,15 @@ impl KaspaCli {
                 const SWEEP_TRANSACTIONS_PER_PASS: usize = SWEEP_TRANSACTIONS_PER_PASS_CONST;
                 match account
                     .clone()
-                    .sweep(secret.clone(), payment_secret.clone(), lane_fee_rate, &abortable, notifier, None, Some(SWEEP_TRANSACTIONS_PER_PASS))
+                    .sweep(
+                        secret.clone(),
+                        payment_secret.clone(),
+                        lane_fee_rate,
+                        &abortable,
+                        notifier,
+                        None,
+                        Some(SWEEP_TRANSACTIONS_PER_PASS),
+                    )
                     .await
                 {
                     Ok(summary) => {
@@ -2147,7 +2239,10 @@ impl KaspaCli {
         // Apply the custom wallet-storage folder before anything opens a
         // wallet (the setting itself always lives at the default location).
         if let Some(folder) = self.wallet.settings().get::<String>(WalletSettings::Folder) {
-            self.wallet.store().set_storage_folder(&folder).unwrap_or_else(|err| log_error!("Unable to apply wallet folder setting: {err}"));
+            self.wallet
+                .store()
+                .set_storage_folder(&folder)
+                .unwrap_or_else(|err| log_error!("Unable to apply wallet folder setting: {err}"));
         }
         self.wallet.start().await?;
         Ok(())
@@ -2639,8 +2734,11 @@ impl KaspaCli {
                     tprintln!(
                         self,
                         "{}",
-                        style(format!("That code is not right — {remaining_tries} more {}.", if remaining_tries == 1 { "try" } else { "tries" }))
-                            .red()
+                        style(format!(
+                            "That code is not right — {remaining_tries} more {}.",
+                            if remaining_tries == 1 { "try" } else { "tries" }
+                        ))
+                        .red()
                     );
                 }
                 None => {}
@@ -2942,7 +3040,10 @@ impl KaspaCli {
                     if *level == 0 {
                         Some([crate::ui::paint(crate::ui::Ink::Gold, "SYNC"), style("...").black().to_string()].join(" "))
                     } else {
-                        Some([crate::ui::paint(crate::ui::Ink::Gold, "SYNC PROOF"), style(level.separated_string()).dim().to_string()].join(" "))
+                        Some(
+                            [crate::ui::paint(crate::ui::Ink::Gold, "SYNC PROOF"), style(level.separated_string()).dim().to_string()]
+                                .join(" "),
+                        )
                     }
                 }
                 SyncState::Headers { headers, progress } => Some(
@@ -2969,9 +3070,9 @@ impl KaspaCli {
                         .join(" "),
                     )
                 }
-                SyncState::UtxoSync { total, .. } => {
-                    Some([crate::ui::paint(crate::ui::Ink::Gold, "SYNC UTXO"), style(total.separated_string()).dim().to_string()].join(" "))
-                }
+                SyncState::UtxoSync { total, .. } => Some(
+                    [crate::ui::paint(crate::ui::Ink::Gold, "SYNC UTXO"), style(total.separated_string()).dim().to_string()].join(" "),
+                ),
                 SyncState::SmtSync { processed, total } => Some(
                     [
                         crate::ui::paint(crate::ui::Ink::Gold, "SYNC SMT"),
@@ -2979,8 +3080,12 @@ impl KaspaCli {
                     ]
                     .join(" "),
                 ),
-                SyncState::UtxoResync => Some([crate::ui::paint(crate::ui::Ink::Gold, "SYNC"), style("UTXO").black().to_string()].join(" ")),
-                SyncState::NotSynced => Some([crate::ui::paint(crate::ui::Ink::Gold, "SYNC"), style("...").black().to_string()].join(" ")),
+                SyncState::UtxoResync => {
+                    Some([crate::ui::paint(crate::ui::Ink::Gold, "SYNC"), style("UTXO").black().to_string()].join(" "))
+                }
+                SyncState::NotSynced => {
+                    Some([crate::ui::paint(crate::ui::Ink::Gold, "SYNC"), style("...").black().to_string()].join(" "))
+                }
                 SyncState::Synced => None,
             }
         } else {
@@ -3057,11 +3162,24 @@ impl Cli for KaspaCli {
             match (verb, sub) {
                 ("note", "vault") => Some(vec!["create", "backup", "verify", "restore", "export", "import"]),
                 ("note", _) => Some(vec![
-                    "mint", "rotate", "move", "mirror", "redeem", "request", "pay", "import", "export", "pos", "balance", "list", "history", "verify", "vault",
-                    "help",
+                    "mint", "rotate", "move", "mirror", "redeem", "request", "pay", "import", "export", "pos", "balance", "list",
+                    "history", "verify", "vault", "help",
                 ]),
                 ("wallet", _) => Some(vec![
-                    "list", "create", "import", "open", "close", "where", "autoconnect", "forget", "show", "rename", "tidy", "destroy", "hint", "help",
+                    "list",
+                    "create",
+                    "import",
+                    "open",
+                    "close",
+                    "where",
+                    "autoconnect",
+                    "forget",
+                    "show",
+                    "rename",
+                    "tidy",
+                    "destroy",
+                    "hint",
+                    "help",
                 ]),
                 ("account", _) => Some(vec!["create", "import", "name", "recover", "watch", "help"]),
                 ("history", _) => Some(vec!["list", "details"]),
@@ -3078,11 +3196,7 @@ impl Cli for KaspaCli {
 
         let complete_token = |prefix: &str, candidates: Vec<String>, head: &[String]| -> Vec<String> {
             let head = if head.is_empty() { String::new() } else { format!("{} ", head.join(" ")) };
-            candidates
-                .into_iter()
-                .filter(|c| c.starts_with(prefix) )
-                .map(|c| format!("{head}{c}"))
-                .collect()
+            candidates.into_iter().filter(|c| c.starts_with(prefix)).map(|c| format!("{head}{c}")).collect()
         };
 
         let verbs: Vec<String> = {

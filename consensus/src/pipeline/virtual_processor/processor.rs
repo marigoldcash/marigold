@@ -1,3 +1,4 @@
+use crate::model::stores::finality_anchor::{DenyListEntry, StoredAnchor};
 use crate::{
     consensus::{
         services::{
@@ -21,6 +22,7 @@ use crate::{
             depth::{DbDepthStore, DepthStoreReader},
             ghostdag::{DbGhostdagStore, GhostdagData, GhostdagStoreReader},
             headers::{DbHeadersStore, HeaderStoreReader},
+            notepool_diffs::{DbNotePoolDiffsStore, NotePoolDiffsStoreReader},
             past_pruning_points::DbPastPruningPointsStore,
             pruning::{DbPruningStore, PruningStoreReader},
             pruning_meta::PruningMetaStores,
@@ -30,7 +32,6 @@ use crate::{
             selected_chain::{DbSelectedChainStore, SelectedChainStore},
             statuses::{DbStatusesStore, StatusesStore, StatusesStoreBatchExtensions, StatusesStoreReader},
             tips::{DbTipsStore, TipsStoreReader},
-            notepool_diffs::{DbNotePoolDiffsStore, NotePoolDiffsStoreReader},
             utxo_diffs::{DbUtxoDiffsStore, UtxoDiffsStoreReader},
             utxo_multisets::{DbUtxoMultisetsStore, UtxoMultisetsStoreReader},
             virtual_state::{LkgVirtualState, VirtualState, VirtualStateStoreReader, VirtualStores},
@@ -61,8 +62,8 @@ use kaspa_consensus_core::{
     header::Header,
     merkle::calc_hash_merkle_root,
     mining_rules::MiningRules,
-    pruning::PruningPointsList,
     notepool::PoolViewComposition,
+    pruning::PruningPointsList,
     tx::{MutableTransaction, Transaction},
     utxo::{
         utxo_diff::UtxoDiff,
@@ -71,13 +72,12 @@ use kaspa_consensus_core::{
 };
 use kaspa_consensus_notify::{
     notification::{
-        NewBlockTemplateNotification, Notification, NotesChangedNotification, SinkBlueScoreChangedNotification,
+        NewBlockTemplateNotification, NotesChangedNotification, Notification, SinkBlueScoreChangedNotification,
         UtxosChangedNotification, VirtualChainChangedNotification, VirtualDaaScoreChangedNotification,
     },
     root::ConsensusNotificationRoot,
 };
 use kaspa_consensusmanager::SessionLock;
-use crate::model::stores::finality_anchor::{DenyListEntry, StoredAnchor};
 use kaspa_core::{debug, error, info, time::unix_now, trace, warn};
 use kaspa_database::prelude::{StoreError, StoreResultExt, StoreResultUnitExt};
 use kaspa_hashes::{Hash, ZERO_HASH};
@@ -562,10 +562,9 @@ impl VirtualStateProcessor {
             // in this very loop qualify by construction (their accepting blocks are
             // this block or its added-path ancestors).
             let denied = |trustee: u8, updates: &AnchorStateUpdates| {
-                stored_deny
-                    .iter()
-                    .any(|e| e.trustee_index == trustee && self.reachability_service.is_chain_ancestor_of(e.accepting_block, accepting_block))
-                    || updates.new_deny_entries.iter().any(|e| e.trustee_index == trustee)
+                stored_deny.iter().any(|e| {
+                    e.trustee_index == trustee && self.reachability_service.is_chain_ancestor_of(e.accepting_block, accepting_block)
+                }) || updates.new_deny_entries.iter().any(|e| e.trustee_index == trustee)
             };
 
             let Some(acceptance_data) = self.acceptance_data_store.get(accepting_block).optional().unwrap() else { continue };
@@ -593,9 +592,7 @@ impl VirtualStateProcessor {
                                 "[FINALITY ANCHOR] Equivocation proof accepted at chain block {}: trustee key {} is permanently disqualified",
                                 accepting_block, evidence.trustee_index
                             );
-                            updates
-                                .new_deny_entries
-                                .push(DenyListEntry { trustee_index: evidence.trustee_index, accepting_block });
+                            updates.new_deny_entries.push(DenyListEntry { trustee_index: evidence.trustee_index, accepting_block });
                         }
                         AnchorPayload::Anchor(anchor) => {
                             if verify_anchor(&anchor, trustees).is_err() {
@@ -677,13 +674,7 @@ impl VirtualStateProcessor {
     /// the local-verifiability precondition for enforcing an anchor (guarantees the
     /// sink search can always reach an anchor-compatible candidate).
     pub(crate) fn is_chain_ancestor_of_any_body_tip(&self, block: Hash) -> bool {
-        self.body_tips_store
-            .read()
-            .get()
-            .unwrap()
-            .read()
-            .iter()
-            .any(|&tip| self.reachability_service.is_chain_ancestor_of(block, tip))
+        self.body_tips_store.read().get().unwrap().read().iter().any(|&tip| self.reachability_service.is_chain_ancestor_of(block, tip))
     }
 
     /// Recomputes the enforcement state after a virtual advance and alerts loudly on
@@ -1476,8 +1467,7 @@ impl VirtualStateProcessor {
             // anchor-compatible chain — termination is guaranteed because the ratchet
             // only ever holds anchors accepted on a locally-committed chain, whose
             // blocks (and tip descendants) this node retains.
-            let anchor_ok =
-                anchor_guard.is_none_or(|anchored| self.reachability_service.is_chain_ancestor_of(anchored, candidate));
+            let anchor_ok = anchor_guard.is_none_or(|anchored| self.reachability_service.is_chain_ancestor_of(anchored, candidate));
             if !anchor_ok {
                 warn!(
                     "[FINALITY ANCHOR] Block {} conflicts with the latest finality anchor ({}) and is ignored \
@@ -1769,7 +1759,10 @@ impl VirtualStateProcessor {
         })
     }
 
-    fn validate_block_template_transactions_in_parallel<V: UtxoView + Sync, P: kaspa_consensus_core::notepool::PoolStateView + Sync>(
+    fn validate_block_template_transactions_in_parallel<
+        V: UtxoView + Sync,
+        P: kaspa_consensus_core::notepool::PoolStateView + Sync,
+    >(
         &self,
         txs: &[Transaction],
         virtual_state: &VirtualState,
@@ -1835,7 +1828,8 @@ impl VirtualStateProcessor {
         let virtual_pool_view = &virtual_read.pool_state;
 
         let mut invalid_transactions = HashMap::new();
-        let results = self.validate_block_template_transactions_in_parallel(&txs, &virtual_state, &virtual_utxo_view, virtual_pool_view);
+        let results =
+            self.validate_block_template_transactions_in_parallel(&txs, &virtual_state, &virtual_utxo_view, virtual_pool_view);
         for (tx, res) in txs.iter().zip(results) {
             match res {
                 Err(e) => {
@@ -1856,8 +1850,12 @@ impl VirtualStateProcessor {
         while has_rejections {
             has_rejections = false;
             let next_batch = tx_selector.select_transactions(); // Note that once next_batch is empty the loop will exit
-            let next_batch_results =
-                self.validate_block_template_transactions_in_parallel(&next_batch, &virtual_state, &virtual_utxo_view, virtual_pool_view);
+            let next_batch_results = self.validate_block_template_transactions_in_parallel(
+                &next_batch,
+                &virtual_state,
+                &virtual_utxo_view,
+                virtual_pool_view,
+            );
             for (tx, res) in next_batch.into_iter().zip(next_batch_results) {
                 match res {
                     Err(e) => {

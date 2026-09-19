@@ -84,7 +84,12 @@ impl FinalityAnchorFlow {
                         kaspa_consensus_core::finality_anchor::ExternalAnchorOutcome::Ignored => {}
                     }
                 }
-                _ => return Err(ProtocolError::UnexpectedMessage(stringify!(FinalityAnchorFlow), msg.payload.as_ref().map(|v| v.into()))),
+                _ => {
+                    return Err(ProtocolError::UnexpectedMessage(
+                        stringify!(FinalityAnchorFlow),
+                        msg.payload.as_ref().map(|v| v.into()),
+                    ));
+                }
             }
         }
         Err(ProtocolError::ConnectionClosed)

@@ -473,7 +473,9 @@ where
 pub(crate) fn change_address(network_type: NetworkType) -> Address {
     match network_type {
         NetworkType::Mainnet => Address::try_from("marigold:qq93vgfvxapy6krrdeucfru65kcth3k3mnnl9lggzv0zjdplff2kqnate7vnh").unwrap(),
-        NetworkType::Testnet => Address::try_from("marigoldtest:qqgjyv6y24n80zye42aueh0wlugzzvjr23jhdpuc4xavhh8dlc8jqqvrryc5l").unwrap(),
+        NetworkType::Testnet => {
+            Address::try_from("marigoldtest:qqgjyv6y24n80zye42aueh0wlugzzvjr23jhdpuc4xavhh8dlc8jqqvrryc5l").unwrap()
+        }
         _ => unreachable!("network type not supported"),
     }
 }
@@ -481,7 +483,9 @@ pub(crate) fn change_address(network_type: NetworkType) -> Address {
 pub(crate) fn output_address(network_type: NetworkType) -> Address {
     match network_type {
         NetworkType::Mainnet => Address::try_from("marigold:qqx35fe5g989k6r4s28ee2dkc0gdm6hhqsg3u2ecg4f97mres6f6qahy8xy9r").unwrap(),
-        NetworkType::Testnet => Address::try_from("marigoldtest:qqfjvw2vtaegtx9thmg7fac2r5cyx4nf0j869dwgm0hqz9p88fxkqghg8xdm9").unwrap(),
+        NetworkType::Testnet => {
+            Address::try_from("marigoldtest:qqfjvw2vtaegtx9thmg7fac2r5cyx4nf0j869dwgm0hqz9p88fxkqghg8xdm9").unwrap()
+        }
         _ => unreachable!("network type not supported"),
     }
 }

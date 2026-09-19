@@ -11,15 +11,22 @@ impl Export {
         let ctx = ctx.clone().downcast_arc::<KaspaCli>()?;
 
         if argv.is_empty() || argv.first() == Some(&"help".to_string()) {
-            tprintln!(ctx, "usage: 'export <amount>' or 'export <serial>' writes note keys for another wallet of yours; 'export mnemonic' shows the ledger's phrase");
+            tprintln!(
+                ctx,
+                "usage: 'export <amount>' or 'export <serial>' writes note keys for another wallet of yours; 'export mnemonic' shows the ledger's phrase"
+            );
             return Ok(());
         }
 
         let what = argv.first().unwrap();
         let selection = if what.len() == 64 && what.chars().all(|c| c.is_ascii_hexdigit()) {
-            Some(kaspa_wallet_core::account::notepool::HandoverSelection::Serial(what.parse::<Hash>().map_err(|_| Error::custom("that is not a note serial"))?))
+            Some(kaspa_wallet_core::account::notepool::HandoverSelection::Serial(
+                what.parse::<Hash>().map_err(|_| Error::custom("that is not a note serial"))?,
+            ))
         } else if what.parse::<f64>().is_ok() {
-            Some(kaspa_wallet_core::account::notepool::HandoverSelection::Amount(try_parse_required_nonzero_kaspa_as_sompi_u64(argv.first())?))
+            Some(kaspa_wallet_core::account::notepool::HandoverSelection::Amount(try_parse_required_nonzero_kaspa_as_sompi_u64(
+                argv.first(),
+            )?))
         } else {
             None
         };
@@ -35,7 +42,13 @@ impl Export {
             let total: u64 = bearers.iter().map(|b| kaspa_consensus_core::notepool::DENOMINATION_PETALS[b.d as usize]).sum();
             ctx.record("exported", total, 0, format!("{} note keys for another wallet", bearers.len()), "");
             tprintln!(ctx, "{} note key(s), marked handed over here. 'import' takes them in the other wallet.", bearers.len());
-            tprintln!(ctx, "{}", crate::ui::warn("They stay spendable from this wallet until the other one has rotated them — this is for wallets you control."));
+            tprintln!(
+                ctx,
+                "{}",
+                crate::ui::warn(
+                    "They stay spendable from this wallet until the other one has rotated them — this is for wallets you control."
+                )
+            );
             tprintln!(ctx, "");
             return Ok(());
         }

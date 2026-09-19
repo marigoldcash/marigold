@@ -27,15 +27,15 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use clap::{Parser, Subcommand};
 use futures::TryStreamExt;
-use kaspa_consensus_core::notepool::{DenominationTag, DENOMINATION_PETALS};
+use kaspa_consensus_core::notepool::{DENOMINATION_PETALS, DenominationTag};
 use kaspa_hashes::Hash;
-use kaspa_wallet_core::account::notepool;
 use kaspa_wallet_core::account::Account;
+use kaspa_wallet_core::account::notepool;
 use kaspa_wallet_core::api::WalletApi;
 use kaspa_wallet_core::prelude::*;
 use kaspa_wallet_core::rpc::Rpc;
+use kaspa_wallet_core::storage::NoteStatus;
 use kaspa_wallet_core::storage::keydata::PrvKeyDataVariantKind;
-use kaspa_wallet_core::storage::{NoteStatus};
 use kaspa_wallet_core::utils::sompi_to_kaspa_string;
 use kaspa_wrpc_client::prelude::{ConnectOptions, ConnectStrategy, NetworkId};
 use kaspa_wrpc_client::{KaspaRpcClient, WrpcEncoding};
@@ -216,7 +216,9 @@ struct Claimant {
 }
 
 fn claimant(state: &FaucetState, headers: &HeaderMap, ip: IpAddr) -> Claimant {
-    if let (Some(token), Some(init)) = (state.telegram_bot_token.as_deref(), headers.get("x-telegram-init-data").and_then(|v| v.to_str().ok())) {
+    if let (Some(token), Some(init)) =
+        (state.telegram_bot_token.as_deref(), headers.get("x-telegram-init-data").and_then(|v| v.to_str().ok()))
+    {
         if let Some(user_id) = telegram_user_id(init, token) {
             return Claimant { key: format!("tg:{user_id}"), telegram_user: Some(user_id) };
         }
@@ -260,7 +262,9 @@ async fn telegram_call(token: &str, method: &str, params: &[(&str, String)]) -> 
 /// each code tap-to-copy. Sent after the claim is answered; a failure is
 /// logged, never shown — the page already has the notes.
 async fn telegram_send_codes(token: String, user_id: i64, notes: Vec<(String, String)>) {
-    let mut text = String::from("Your notes. Each line is a bearer note: whoever holds it owns it, so take them into your wallet with <code>receive &lt;code&gt;</code>, the big one first.\n");
+    let mut text = String::from(
+        "Your notes. Each line is a bearer note: whoever holds it owns it, so take them into your wallet with <code>receive &lt;code&gt;</code>, the big one first.\n",
+    );
     for (denomination, payload) in &notes {
         text.push_str(&format!("\n<b>{} MAGLD</b>\n<code>{}</code>\n", html_escape(denomination), html_escape(payload)));
     }
@@ -297,8 +301,14 @@ async fn telegram_updates_loop(token: String, mini_app_url: String) {
             } else {
                 "Tap the button to take a note. Your wallet takes it with <code>receive &lt;code&gt;</code>."
             };
-            let markup = serde_json::json!({ "inline_keyboard": [[{ "text": "Take a note", "web_app": { "url": mini_app_url } }]] }).to_string();
-            let params = [("chat_id", chat_id.to_string()), ("text", reply.to_string()), ("parse_mode", "HTML".to_string()), ("reply_markup", markup)];
+            let markup = serde_json::json!({ "inline_keyboard": [[{ "text": "Take a note", "web_app": { "url": mini_app_url } }]] })
+                .to_string();
+            let params = [
+                ("chat_id", chat_id.to_string()),
+                ("text", reply.to_string()),
+                ("parse_mode", "HTML".to_string()),
+                ("reply_markup", markup),
+            ];
             if let Err(e) = telegram_call(&token, "sendMessage", &params).await {
                 log::warn!("Telegram reply to {chat_id}: {e}");
             }
@@ -489,7 +499,11 @@ async fn claim(
             *daily = (today, 0);
         }
         if daily.1 >= state.daily_cap {
-            return (StatusCode::TOO_MANY_REQUESTS, Json(serde_json::json!({"error": "The faucet reached its daily limit — try again tomorrow."}))).into_response();
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                Json(serde_json::json!({"error": "The faucet reached its daily limit — try again tomorrow."})),
+            )
+                .into_response();
         }
         daily.1 += 1;
     }
@@ -545,7 +559,10 @@ async fn claim(
             }
             Err(e) => {
                 log::error!("bearer_export of {sn} failed mid-claim: {e}");
-                return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Internal faucet error — please report this."})))
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": "Internal faucet error — please report this."})),
+                )
                     .into_response();
             }
         }
@@ -586,7 +603,11 @@ async fn index() -> Html<&'static str> {
 /// Browser cross-origin rules for the Mini App at marigold.cash: the page
 /// there may POST a claim here with its Telegram launch data. Origins not on
 /// the list get no CORS headers, and the browser refuses on their behalf.
-async fn cors(State(state): State<Arc<FaucetState>>, req: axum::extract::Request, next: axum::middleware::Next) -> axum::response::Response {
+async fn cors(
+    State(state): State<Arc<FaucetState>>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
     let origin = req.headers().get("origin").and_then(|v| v.to_str().ok()).map(str::to_owned);
     let mut resp = next.run(req).await;
     if let Some(origin) = origin.filter(|o| state.cors_origins.iter().any(|allowed| allowed == o)) {
@@ -694,8 +715,27 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Init => cmd_init(&cli.network, &cli.wrpc_url).await,
-        Command::Serve { listen, buffer_bundles, per_ip_cooldown_secs, daily_cap, cors_origins, telegram_bot_token_file, mini_app_url } => {
-            cmd_serve(&cli.network, &cli.wrpc_url, listen, buffer_bundles, per_ip_cooldown_secs, daily_cap, cors_origins, telegram_bot_token_file, mini_app_url).await
+        Command::Serve {
+            listen,
+            buffer_bundles,
+            per_ip_cooldown_secs,
+            daily_cap,
+            cors_origins,
+            telegram_bot_token_file,
+            mini_app_url,
+        } => {
+            cmd_serve(
+                &cli.network,
+                &cli.wrpc_url,
+                listen,
+                buffer_bundles,
+                per_ip_cooldown_secs,
+                daily_cap,
+                cors_origins,
+                telegram_bot_token_file,
+                mini_app_url,
+            )
+            .await
         }
     }
 }

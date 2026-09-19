@@ -27,7 +27,8 @@ use kaspa_consensus_core::config::params::Params;
 use kaspa_consensus_core::constants::TX_VERSION_TOCCATA;
 use kaspa_consensus_core::mass::MassCalculator;
 use kaspa_consensus_core::notepool::{
-    DENOMINATION_PETALS, DenominationTag, FreshnessAnchor, MintOp, NewNote, NoteLock, PoolOp, ProducedLock, RedeemOp, SignedGroup, TransferLockedOp, TransferOp,
+    DENOMINATION_PETALS, DenominationTag, FreshnessAnchor, MintOp, NewNote, NoteLock, PoolOp, ProducedLock, RedeemOp, SignedGroup,
+    TransferLockedOp, TransferOp,
     hashing::{serial_hash, signing_hash, transparent_outputs_hash},
 };
 use kaspa_consensus_core::subnets::SUBNETWORK_ID_NOTE_POOL;
@@ -262,7 +263,9 @@ pub async fn redeem_with(
     let change_script = match (&change, &destination) {
         (Some(address), _) => Some(pay_to_address_script(address)),
         (None, Some(_)) => None,
-        (None, None) => return Err(Error::Custom("redeem: this wallet keeps notes only — there is no ledger to redeem to".to_string())),
+        (None, None) => {
+            return Err(Error::Custom("redeem: this wallet keeps notes only — there is no ledger to redeem to".to_string()));
+        }
     };
 
     let serials = match selection {
@@ -294,9 +297,7 @@ pub async fn redeem_with(
             }
             let total: u64 = candidates.iter().map(|info| DENOMINATION_PETALS[info.d as usize]).sum();
             let Some(take) = cover_amount(&counts, target_petals) else {
-                return Err(Error::Custom(format!(
-                    "insufficient note balance: {total} petals available, {target_petals} requested"
-                )));
+                return Err(Error::Custom(format!("insufficient note balance: {total} petals available, {target_petals} requested")));
             };
             let mut take = take;
             let mut selected = Vec::new();
@@ -617,7 +618,8 @@ impl Handover {
         let mut notes = Vec::with_capacity((bytes.len() - 32) / 33);
         for chunk in bytes[32..].chunks(33) {
             let sn = Hash::from_slice(&chunk[..32]);
-            let d = DenominationTag::try_from(chunk[32]).map_err(|_| Error::Custom(format!("unknown denomination tag {}", chunk[32])))?;
+            let d =
+                DenominationTag::try_from(chunk[32]).map_err(|_| Error::Custom(format!("unknown denomination tag {}", chunk[32])))?;
             notes.push((sn, d));
         }
         Ok(Self { sk, notes })
@@ -775,7 +777,12 @@ pub async fn hand_over(wallet: &Arc<Wallet>, wallet_secret: Secret, selection: H
             return Err(Error::Custom("handover: the transfer did not produce the notes it was asked for".to_string()));
         }
         let notes = transfer.external_serials.iter().copied().zip(denoms.iter().copied()).collect();
-        return Ok(HandoverResult { handover: Handover { sk: handover_key.sk, notes }, transfer, value_petals: value, stamp_petals: stamp });
+        return Ok(HandoverResult {
+            handover: Handover { sk: handover_key.sk, notes },
+            transfer,
+            value_petals: value,
+            stamp_petals: stamp,
+        });
     }
     Err(Error::Custom("transfer fee sizing did not converge".to_string()))
 }
@@ -798,10 +805,9 @@ pub async fn receive_handover(wallet: &Arc<Wallet>, wallet_secret: Secret, hando
     let serials: Vec<Hash> = handover.notes.iter().map(|(sn, _)| *sn).collect();
     let on_chain = wallet.rpc_api().get_notes_by_serial(serials.clone()).await?;
     for (sn, d) in &handover.notes {
-        let entry = on_chain
-            .iter()
-            .find(|entry| entry.sn == *sn)
-            .ok_or_else(|| Error::Custom(format!("note {sn} is not in the pool yet — if it was just handed over, try again in a moment")))?;
+        let entry = on_chain.iter().find(|entry| entry.sn == *sn).ok_or_else(|| {
+            Error::Custom(format!("note {sn} is not in the pool yet — if it was just handed over, try again in a moment"))
+        })?;
         if entry.pk != derived_pk {
             return Err(Error::Custom(format!("note {sn} is no longer under the handed-over key — it has already been taken")));
         }
@@ -862,7 +868,10 @@ pub async fn export_keys(wallet: &Arc<Wallet>, wallet_secret: Secret, selection:
     };
     let mut bearers = Vec::with_capacity(chosen.len());
     for sn in &chosen {
-        let entry = note_key_store.load_key(&wallet_secret, sn).await?.ok_or_else(|| Error::Custom(format!("serial {sn} has no stored key")))?;
+        let entry = note_key_store
+            .load_key(&wallet_secret, sn)
+            .await?
+            .ok_or_else(|| Error::Custom(format!("serial {sn} has no stored key")))?;
         bearers.push(BearerNote { sn: *sn, sk: entry.sk, d: entry.d });
     }
     for sn in &chosen {
@@ -982,7 +991,18 @@ async fn submit_transfer(
     freshness: FreshnessAnchor,
     fee_petals: u64,
 ) -> Result<TransferResult> {
-    submit_transfer_with_locks(wallet, wallet_secret, consumed_entries, external, own_fresh, own_provenance, freshness, fee_petals, &[]).await
+    submit_transfer_with_locks(
+        wallet,
+        wallet_secret,
+        consumed_entries,
+        external,
+        own_fresh,
+        own_provenance,
+        freshness,
+        fee_petals,
+        &[],
+    )
+    .await
 }
 
 /// [`submit_transfer`] with locks on some of the external notes (POOL-SPEC.md
@@ -1011,7 +1031,14 @@ async fn submit_transfer_with_locks(
     let op_type: u8 = if locks.is_empty() { 1 } else { 3 };
     let mut signed_groups = Vec::with_capacity(groups_by_sk.len());
     for (sk_bytes, group_serials) in groups_by_sk {
-        let hash = kaspa_consensus_core::notepool::signing_hash_with_locks(op_type, &group_serials, &produced, locks, outputs_hash, freshness.anchor_daa_score);
+        let hash = kaspa_consensus_core::notepool::signing_hash_with_locks(
+            op_type,
+            &group_serials,
+            &produced,
+            locks,
+            outputs_hash,
+            freshness.anchor_daa_score,
+        );
         let keypair =
             Keypair::from_seckey_slice(SECP256K1, &sk_bytes).map_err(|e| Error::Custom(format!("invalid note secret key: {e}")))?;
         let signature: [u8; 64] = *keypair.sign_schnorr(Message::from_digest(hash.into())).as_ref();
@@ -1021,7 +1048,13 @@ async fn submit_transfer_with_locks(
     let payload = if locks.is_empty() {
         PoolOp::Transfer(TransferOp { consumed: signed_groups, produced: produced.clone(), freshness }).encode_payload()
     } else {
-        PoolOp::TransferLocked(TransferLockedOp { consumed: signed_groups, produced: produced.clone(), locks: locks.to_vec(), freshness }).encode_payload()
+        PoolOp::TransferLocked(TransferLockedOp {
+            consumed: signed_groups,
+            produced: produced.clone(),
+            locks: locks.to_vec(),
+            freshness,
+        })
+        .encode_payload()
     };
     let tx = Transaction::new(TX_VERSION_TOCCATA, vec![], vec![], 0, SUBNETWORK_ID_NOTE_POOL, 0, payload);
 
@@ -1090,8 +1123,10 @@ pub async fn rotate_notes(wallet: &Arc<Wallet>, wallet_secret: Secret, serials: 
 
     let mut rotate_entries = Vec::with_capacity(serials.len());
     for sn in &serials {
-        let entry =
-            note_key_store.load_key(&wallet_secret, sn).await?.ok_or_else(|| Error::Custom(format!("serial {sn} has no stored key")))?;
+        let entry = note_key_store
+            .load_key(&wallet_secret, sn)
+            .await?
+            .ok_or_else(|| Error::Custom(format!("serial {sn} has no stored key")))?;
         rotate_entries.push(entry);
     }
     let rotate_value: u64 = rotate_entries.iter().map(|e| DENOMINATION_PETALS[e.d as usize]).sum();
@@ -1249,10 +1284,16 @@ pub async fn bearer_import(wallet: &Arc<Wallet>, wallet_secret: Secret, bearer: 
 
 /// Create (and persist, before anything is displayed) a payment request
 /// (FORK-PLAN P7.3 flow (b), POOL-SPEC.md P5.5b "sign-to-fresh-pk").
-pub async fn create_payment_request(wallet: &Arc<Wallet>, wallet_secret: &Secret, amount_petals: Option<u64>) -> Result<PaymentRequest> {
+pub async fn create_payment_request(
+    wallet: &Arc<Wallet>,
+    wallet_secret: &Secret,
+    amount_petals: Option<u64>,
+) -> Result<PaymentRequest> {
     if let Some(amount) = amount_petals {
         decompose_amount(amount).ok_or_else(|| {
-            Error::Custom(format!("{amount} petals is not representable in the denomination ladder (must be a nonzero multiple of 0.01 MAGLD)"))
+            Error::Custom(format!(
+                "{amount} petals is not representable in the denomination ladder (must be a nonzero multiple of 0.01 MAGLD)"
+            ))
         })?;
     }
     let sk = SecretKey::new(&mut secp256k1::rand::thread_rng());
@@ -1369,7 +1410,8 @@ pub struct BearerExportResult {
 /// selection, flipping to `Superseded` when the receiver's rotation is observed.
 pub async fn bearer_export(wallet: &Arc<Wallet>, wallet_secret: Secret, sn: Hash) -> Result<BearerExportResult> {
     let note_key_store = wallet.store().as_note_key_store()?;
-    let info = note_key_store.load_info(&sn).await?.ok_or_else(|| Error::Custom(format!("serial {sn} is not in the note key database")))?;
+    let info =
+        note_key_store.load_info(&sn).await?.ok_or_else(|| Error::Custom(format!("serial {sn} is not in the note key database")))?;
     if info.status != NoteStatus::Active {
         return Err(Error::Custom(format!("serial {sn} is not active ({:?})", info.status)));
     }
@@ -1411,10 +1453,7 @@ pub async fn bearer_export(wallet: &Arc<Wallet>, wallet_secret: Secret, sn: Hash
         })?
         .clone();
     note_key_store.mark_status(&isolated.sn, NoteStatus::HandedOver).await?;
-    Ok(BearerExportResult {
-        bearer: BearerNote { sn: isolated.sn, sk: isolated.sk, d: isolated.d },
-        isolation: Some(rotation),
-    })
+    Ok(BearerExportResult { bearer: BearerNote { sn: isolated.sn, sk: isolated.sk, d: isolated.d }, isolation: Some(rotation) })
 }
 
 pub struct ClaimedPayment {
@@ -1673,12 +1712,8 @@ pub async fn light_verify_vault(
     vault: &crate::storage::local::notevault::NoteVault,
     rpc: &Arc<DynRpcApi>,
 ) -> Result<LightVerifyReport> {
-    let active: Vec<Arc<NoteKeyInfo>> = vault
-        .iter()
-        .await?
-        .try_filter(|info| futures::future::ready(info.status == NoteStatus::Active))
-        .try_collect()
-        .await?;
+    let active: Vec<Arc<NoteKeyInfo>> =
+        vault.iter().await?.try_filter(|info| futures::future::ready(info.status == NoteStatus::Active)).try_collect().await?;
     if active.is_empty() {
         return Ok(LightVerifyReport::default());
     }
@@ -2076,7 +2111,11 @@ mod tests {
     fn handover_bundle_round_trips() {
         let handover = Handover {
             sk: [7u8; 32],
-            notes: vec![(Hash::from_u64_word(1), DenominationTag::D1), (Hash::from_u64_word(2), DenominationTag::D0_1), (Hash::from_u64_word(3), DenominationTag::D0_01)],
+            notes: vec![
+                (Hash::from_u64_word(1), DenominationTag::D1),
+                (Hash::from_u64_word(2), DenominationTag::D0_1),
+                (Hash::from_u64_word(3), DenominationTag::D0_01),
+            ],
         };
         assert_eq!(handover.encode().len(), 32 + 3 * 33);
         assert_eq!(handover.value_petals(), 111_000_000);
@@ -2234,8 +2273,7 @@ pub async fn max_mintable_petals(
         let Some(payload) = dummy_payload(candidate) else { return Ok(0) };
         let change_address = account.change_address()?;
         let destination = PaymentDestination::PaymentOutputs(PaymentOutputs::from((change_address, mature)));
-        let summary =
-            account.clone().estimate(destination, fee_rate, Fees::ReceiverPays(0), Some(payload), abortable).await?;
+        let summary = account.clone().estimate(destination, fee_rate, Fees::ReceiverPays(0), Some(payload), abortable).await?;
         let next = mature.saturating_sub(summary.aggregate_fees()) / quantum * quantum;
         if next == 0 || next == candidate {
             candidate = next;
@@ -2355,11 +2393,10 @@ pub async fn mint_max(
 /// with different numbers — as opposed to a wrong password or a dead node,
 /// where retrying just fails again more slowly.
 fn is_transaction_sizing_error(err: &Error) -> bool {
-    matches!(err, Error::MassCalculationError | Error::MassCalculationFailed(_))
-        || {
-            let text = err.to_string();
-            text.contains("storage mass") || text.contains("mass") && text.contains("limit")
-        }
+    matches!(err, Error::MassCalculationError | Error::MassCalculationFailed(_)) || {
+        let text = err.to_string();
+        text.contains("storage mass") || text.contains("mass") && text.contains("limit")
+    }
 }
 
 /// Pay `amount_petals` to `address` using BOTH sides of the wallet in one
@@ -2440,9 +2477,7 @@ pub async fn send_combined(
     // --- build inputs, then shape outputs and cost the transaction ---
     let inputs: Vec<kaspa_consensus_core::tx::TransactionInput> = mature
         .iter()
-        .map(|entry| {
-            kaspa_consensus_core::tx::TransactionInput::new(entry.utxo.outpoint.clone().into(), vec![], 0, 1)
-        })
+        .map(|entry| kaspa_consensus_core::tx::TransactionInput::new(entry.utxo.outpoint.clone().into(), vec![], 0, 1))
         .collect();
     let utxo_entries: Vec<kaspa_consensus_core::tx::UtxoEntry> = mature.iter().map(|entry| entry.utxo.as_ref().into()).collect();
 
@@ -2457,15 +2492,8 @@ pub async fn send_combined(
         TransactionOutput::new(amount_petals, recipient_script.clone()),
         TransactionOutput::new(available_total - amount_petals, change_script.clone()),
     ];
-    let placeholder_tx = Transaction::new(
-        TX_VERSION_TOCCATA,
-        inputs.clone(),
-        placeholder_outputs,
-        0,
-        SUBNETWORK_ID_NOTE_POOL,
-        0,
-        placeholder_payload,
-    );
+    let placeholder_tx =
+        Transaction::new(TX_VERSION_TOCCATA, inputs.clone(), placeholder_outputs, 0, SUBNETWORK_ID_NOTE_POOL, 0, placeholder_payload);
     let populated = PopulatedTransaction::new(&placeholder_tx, utxo_entries.clone());
     let masses = mass_calculator
         .calc_contextual_masses(&populated)
@@ -2762,11 +2790,8 @@ pub async fn merge_held_notes(wallet: &Arc<Wallet>, wallet_secret: Secret, limit
     // ten 0.1s become a 1, and that new 1 may complete a group of ten 1s that
     // becomes a 10. Planning once would climb a single rung per run.
     while merged < limit {
-        let plans: Vec<Vec<Hash>> = plan_merges(wallet)
-            .await?
-            .into_iter()
-            .filter(|group| group.iter().all(|sn| !spent.contains(sn)))
-            .collect();
+        let plans: Vec<Vec<Hash>> =
+            plan_merges(wallet).await?.into_iter().filter(|group| group.iter().all(|sn| !spent.contains(sn))).collect();
         if plans.is_empty() {
             break;
         }
@@ -2850,12 +2875,7 @@ mod paper_export_salt_tests {
     /// was derived from the password itself.
     #[test]
     fn two_backups_under_one_password_differ() {
-        let entries = vec![NoteKeyEntry::new(
-            Hash::from_bytes([0x11u8; 32]),
-            [0x22u8; 32],
-            DenominationTag::D1,
-            NoteProvenance::Cold,
-        )];
+        let entries = vec![NoteKeyEntry::new(Hash::from_bytes([0x11u8; 32]), [0x22u8; 32], DenominationTag::D1, NoteProvenance::Cold)];
         let password = Secret::from("the same password both times");
         let a = paper_export_encode(&entries, &password).unwrap();
         let b = paper_export_encode(&entries, &password).unwrap();
@@ -2923,7 +2943,9 @@ mod mirror_export_tests {
     #[test]
     fn more_than_a_page_of_notes_chunks() {
         let entries: Vec<NoteKeyEntry> = (0..90u8)
-            .map(|i| NoteKeyEntry::new(Hash::from_bytes([i; 32]), [i.wrapping_add(1); 32], DenominationTag::D0_1, NoteProvenance::Cold))
+            .map(|i| {
+                NoteKeyEntry::new(Hash::from_bytes([i; 32]), [i.wrapping_add(1); 32], DenominationTag::D0_1, NoteProvenance::Cold)
+            })
             .collect();
         let password = Secret::from("pw");
         let pages = mirror_export_pages(&entries, &password).unwrap();
@@ -2954,7 +2976,10 @@ pub fn share_key_to_text(pk: &[u8; 32]) -> String {
 }
 
 pub fn share_key_from_text(text: &str) -> Result<[u8; 32]> {
-    let hex = text.trim().strip_prefix(SHARE_KEY_PREFIX).ok_or_else(|| Error::Custom(format!("a share key starts with '{SHARE_KEY_PREFIX}'")))?;
+    let hex = text
+        .trim()
+        .strip_prefix(SHARE_KEY_PREFIX)
+        .ok_or_else(|| Error::Custom(format!("a share key starts with '{SHARE_KEY_PREFIX}'")))?;
     let bytes = Vec::<u8>::from_hex(hex).map_err(|e| Error::Custom(format!("invalid share key hex: {e}")))?;
     bytes.try_into().map_err(|_| Error::Custom("a share key is 32 bytes".to_string()))
 }
@@ -2966,7 +2991,8 @@ fn onetime_tweak(shared_x: &[u8; 32]) -> Result<secp256k1::Scalar> {
     hasher.update(b"marigold-onetime-v1");
     hasher.update(shared_x);
     let t: [u8; 32] = hasher.finalize().into();
-    secp256k1::Scalar::from_be_bytes(t).map_err(|_| Error::Custom("one-time tweak out of range (astronomically unlikely); retry".to_string()))
+    secp256k1::Scalar::from_be_bytes(t)
+        .map_err(|_| Error::Custom("one-time tweak out of range (astronomically unlikely); retry".to_string()))
 }
 
 /// The payer's side: from the receiver's share key (x-only, taken as its even-y
@@ -3036,7 +3062,8 @@ impl LockedHandover {
         let mut notes = Vec::with_capacity((bytes.len() - 41) / 33);
         for chunk in bytes[41..].chunks(33) {
             let sn = Hash::from_slice(&chunk[..32]);
-            let d = DenominationTag::try_from(chunk[32]).map_err(|_| Error::Custom(format!("unknown denomination tag {}", chunk[32])))?;
+            let d =
+                DenominationTag::try_from(chunk[32]).map_err(|_| Error::Custom(format!("unknown denomination tag {}", chunk[32])))?;
             notes.push((sn, d));
         }
         Ok(Self { ephemeral_pk, until_daa, notes })
@@ -3068,7 +3095,13 @@ pub struct LockedHandoverResult {
 /// share key, each locked with a fresh refund key of ours behind it. The refund
 /// key is stored `Offered`; housekeeping takes the notes back once the lock has
 /// lapsed unclaimed.
-pub async fn hand_over_locked(wallet: &Arc<Wallet>, wallet_secret: Secret, petals: u64, share_pk: [u8; 32], until_daa: u64) -> Result<LockedHandoverResult> {
+pub async fn hand_over_locked(
+    wallet: &Arc<Wallet>,
+    wallet_secret: Secret,
+    petals: u64,
+    share_pk: [u8; 32],
+    until_daa: u64,
+) -> Result<LockedHandoverResult> {
     let note_key_store = wallet.store().as_note_key_store()?;
     let active: Vec<Arc<NoteKeyInfo>> = note_key_store
         .iter()
@@ -3153,11 +3186,18 @@ pub async fn hand_over_locked(wallet: &Arc<Wallet>, wallet_secret: Secret, petal
         // The refund key, one row per offered note, so what comes back is
         // accounted for note by note.
         for (sn, d) in transfer.external_serials.iter().zip(denoms.iter()) {
-            note_key_store.store_offered(&wallet_secret, NoteKeyEntry::new(*sn, refund.sk, *d, NoteProvenance::Cold), until_daa).await?;
+            note_key_store
+                .store_offered(&wallet_secret, NoteKeyEntry::new(*sn, refund.sk, *d, NoteProvenance::Cold), until_daa)
+                .await?;
         }
         wallet.store().commit(&wallet_secret).await?;
         let notes = transfer.external_serials.iter().copied().zip(denoms.iter().copied()).collect();
-        return Ok(LockedHandoverResult { handover: LockedHandover { ephemeral_pk, until_daa, notes }, transfer, value_petals: petals, stamp_petals: stamp });
+        return Ok(LockedHandoverResult {
+            handover: LockedHandover { ephemeral_pk, until_daa, notes },
+            transfer,
+            value_petals: petals,
+            stamp_petals: stamp,
+        });
     }
     Err(Error::Custom("transfer fee sizing did not converge".to_string()))
 }
@@ -3169,10 +3209,9 @@ pub async fn receive_locked(wallet: &Arc<Wallet>, wallet_secret: Secret, handove
     let note_key_store = wallet.store().as_note_key_store()?;
     let serials: Vec<Hash> = handover.notes.iter().map(|(sn, _)| *sn).collect();
     let on_chain = wallet.rpc_api().get_notes_by_serial(serials.clone()).await?;
-    let first = on_chain
-        .iter()
-        .find(|entry| entry.sn == serials[0])
-        .ok_or_else(|| Error::Custom(format!("note {} is not in the pool yet — if it was just paid, try again in a moment", serials[0])))?;
+    let first = on_chain.iter().find(|entry| entry.sn == serials[0]).ok_or_else(|| {
+        Error::Custom(format!("note {} is not in the pool yet — if it was just paid, try again in a moment", serials[0]))
+    })?;
     // Which of our share keys was this paid to? Try each until the derived
     // one-time key matches what the chain holds.
     let mut onetime_sk: Option<[u8; 32]> = None;
@@ -3201,7 +3240,9 @@ pub async fn receive_locked(wallet: &Arc<Wallet>, wallet_secret: Secret, handove
         }
         if let Some(lock) = &entry.lock {
             if server_info.virtual_daa_score >= lock.until_daa {
-                return Err(Error::Custom("this payment's lock has lapsed — it is the payer's again; ask them to pay afresh".to_string()));
+                return Err(Error::Custom(
+                    "this payment's lock has lapsed — it is the payer's again; ask them to pay afresh".to_string(),
+                ));
             }
         }
     }
@@ -3289,7 +3330,11 @@ mod escrow_tests {
 
     #[test]
     fn locked_handover_text_round_trips() {
-        let h = LockedHandover { ephemeral_pk: [2u8; 33], until_daa: 123_456, notes: vec![(Hash::from_bytes([9; 32]), DenominationTag::D10), (Hash::from_bytes([8; 32]), DenominationTag::D0_01)] };
+        let h = LockedHandover {
+            ephemeral_pk: [2u8; 33],
+            until_daa: 123_456,
+            notes: vec![(Hash::from_bytes([9; 32]), DenominationTag::D10), (Hash::from_bytes([8; 32]), DenominationTag::D0_01)],
+        };
         let text = h.to_text();
         assert!(text.starts_with(LOCKED_HANDOVER_PREFIX));
         assert_eq!(LockedHandover::from_text(&text).unwrap(), h);

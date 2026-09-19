@@ -95,7 +95,10 @@ impl Node {
                 tprintln!(ctx, "is complete.");
             } else {
                 tprintln!(ctx, "Using: {} Your own sync: {}.", style("nothing yet.").bold(), Self::sync_step(ctx));
-                tpara!(ctx, "Your notes are safe on this disk, but the ledger stays unread and some things wait until the sync has caught up. Nothing is being announced to anyone in the meantime.");
+                tpara!(
+                    ctx,
+                    "Your notes are safe on this disk, but the ledger stays unread and some things wait until the sync has caught up. Nothing is being announced to anyone in the meantime."
+                );
             }
             // The one thing worth interrupting for. A stalled sync looks
             // identical to a working one — the numbers simply stop — and

@@ -167,12 +167,7 @@ impl log::Log for TerminalLogger {
             return;
         }
 
-        let line = format!(
-            "{} [{}] {}",
-            chrono::Local::now().format("%H:%M:%S"),
-            record.level(),
-            record.args()
-        );
+        let line = format!("{} [{}] {}", chrono::Local::now().format("%H:%M:%S"), record.level(), record.args());
         let cli = slot().read().unwrap().clone();
         match cli.as_ref().and_then(|cli| cli.try_term()) {
             Some(term) => term.writeln(line),
@@ -212,9 +207,7 @@ mod tests {
             Some(SyncProgress::ChainSegment { headers }) => assert_eq!(headers, 351_596),
             other => panic!("finished segment not parsed: {other:?}"),
         }
-        match parse_progress(
-            "IBD: Processed 113763 block headers (9%) last block timestamp: 2026-09-06 04:09:19.000:-0300",
-        ) {
+        match parse_progress("IBD: Processed 113763 block headers (9%) last block timestamp: 2026-09-06 04:09:19.000:-0300") {
             Some(SyncProgress::Headers { headers, percent, block_time }) => {
                 assert_eq!(headers, 113_763);
                 assert_eq!(percent, 9);

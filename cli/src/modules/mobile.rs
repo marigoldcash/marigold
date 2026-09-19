@@ -21,7 +21,7 @@ impl Mobile {
     /// forgets it all. The bot answers only while 'marigold-cli serve' runs.
     #[cfg(feature = "embedded-node")]
     async fn telegram(ctx: &Arc<KaspaCli>, argv: &[String]) -> Result<()> {
-        use crate::telegram::{TelegramConfig, DEFAULT_DAILY_LIMIT_PETALS};
+        use crate::telegram::{DEFAULT_DAILY_LIMIT_PETALS, TelegramConfig};
         let Some(descriptor) = ctx.wallet().store().descriptor() else {
             tprintln!(ctx, "Open the wallet first — the bot is paired to one wallet.");
             return Ok(());
@@ -38,7 +38,10 @@ impl Mobile {
                 tprintln!(ctx, "");
                 match existing {
                     None => {
-                        tpara!(ctx, "No Telegram bot yet. Make one with BotFather in Telegram (/newbot), then here: 'mobile telegram <token>'.");
+                        tpara!(
+                            ctx,
+                            "No Telegram bot yet. Make one with BotFather in Telegram (/newbot), then here: 'mobile telegram <token>'."
+                        );
                     }
                     Some(cfg) => {
                         match (cfg.user_id, cfg.pairing_code) {
@@ -87,13 +90,26 @@ impl Mobile {
                     tprintln!(ctx, "They differ — nothing set up.");
                     return Ok(());
                 }
-                let cfg = TelegramConfig::new(token.to_string(), &pin, existing.as_ref().map(|c| c.daily_limit_petals).unwrap_or(DEFAULT_DAILY_LIMIT_PETALS));
+                let cfg = TelegramConfig::new(
+                    token.to_string(),
+                    &pin,
+                    existing.as_ref().map(|c| c.daily_limit_petals).unwrap_or(DEFAULT_DAILY_LIMIT_PETALS),
+                );
                 cfg.save(&path).map_err(|e| Error::custom(e.to_string()))?;
                 tprintln!(ctx, "");
                 tprintln!(ctx, "{}", style("Saved.").green());
-                tprintln!(ctx, "Start the service:   marigold-cli serve {} --password-file <file with the wallet password>", descriptor.filename);
+                tprintln!(
+                    ctx,
+                    "Start the service:   marigold-cli serve {} --password-file <file with the wallet password>",
+                    descriptor.filename
+                );
                 tprintln!(ctx, "Then send your bot:  /start {}", cfg.pairing_code.as_deref().unwrap_or(""));
-                tprintln!(ctx, "Daily limit {} {}; 'mobile telegram limit <amount>' changes it.", sompi_to_kaspa_string(cfg.daily_limit_petals), ctx.ticker());
+                tprintln!(
+                    ctx,
+                    "Daily limit {} {}; 'mobile telegram limit <amount>' changes it.",
+                    sompi_to_kaspa_string(cfg.daily_limit_petals),
+                    ctx.ticker()
+                );
                 tpara!(ctx, "{}", style("The Telegram account that pairs can then move money here. Turn on two-step verification in Telegram: accounts recover by SMS otherwise.").yellow());
                 tprintln!(ctx, "");
             }

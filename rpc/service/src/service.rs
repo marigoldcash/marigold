@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use kaspa_consensus_core::api::counters::ProcessingCounters;
 use kaspa_consensus_core::daa_score_timestamp::DaaScoreTimestamp;
 use kaspa_consensus_core::errors::block::RuleError;
+use kaspa_consensus_core::tx::{ScriptPublicKey, TransactionOutpoint};
 use kaspa_consensus_core::tx::{TransactionQueryResult, TransactionType};
 use kaspa_consensus_core::utxo::utxo_inquirer::UtxoInquirerError;
 use kaspa_consensus_core::{
@@ -33,6 +34,7 @@ use kaspa_core::{
     trace, warn,
 };
 use kaspa_index_core::indexed_utxos::BalanceByScriptPublicKey;
+use kaspa_index_core::indexed_utxos::CompactUtxoEntry;
 use kaspa_index_core::{
     connection::IndexChannelConnection, indexed_utxos::UtxoSetByScriptPublicKey, notification::Notification as IndexNotification,
     notifier::IndexNotifier,
@@ -67,11 +69,9 @@ use kaspa_rpc_core::{
     model::*,
     notify::connection::ChannelConnection,
 };
+use kaspa_rpc_core::{RpcUtxoEntry, RpcUtxosByAddressesCursor, RpcUtxosByAddressesEntry};
 use kaspa_system_info::SystemInfo;
 use kaspa_txscript::{extract_script_pub_key_address, pay_to_address_script};
-use kaspa_consensus_core::tx::{ScriptPublicKey, TransactionOutpoint};
-use kaspa_index_core::indexed_utxos::CompactUtxoEntry;
-use kaspa_rpc_core::{RpcUtxosByAddressesCursor, RpcUtxoEntry, RpcUtxosByAddressesEntry};
 use kaspa_utils::expiring_cache::ExpiringCache;
 use kaspa_utils::{channel::Channel, triggers::SingleTrigger};
 use kaspa_utils_tower::counters::TowerConnectionCounters;
@@ -557,7 +557,14 @@ NOTE: This error usually indicates an RPC conversion error between the node and 
             .serials
             .iter()
             .zip(notes)
-            .filter_map(|(sn, entry)| entry.map(|e| RpcNoteEntry { sn: *sn, denomination: e.note.d as u8, pk: e.note.pk, lock: e.lock.map(|l| kaspa_rpc_core::RpcNoteLock { refund_pk: l.refund_pk, until_daa: l.until_daa }) }))
+            .filter_map(|(sn, entry)| {
+                entry.map(|e| RpcNoteEntry {
+                    sn: *sn,
+                    denomination: e.note.d as u8,
+                    pk: e.note.pk,
+                    lock: e.lock.map(|l| kaspa_rpc_core::RpcNoteLock { refund_pk: l.refund_pk, until_daa: l.until_daa }),
+                })
+            })
             .collect();
         Ok(GetNotesBySerialResponse::new(entries))
     }
@@ -574,7 +581,11 @@ NOTE: This error usually indicates an RPC conversion error between the node and 
         Ok(GetMinerStatusResponse::new(control.map(|c| c.status()).unwrap_or_default()))
     }
 
-    async fn control_miner_call(&self, _connection: Option<&DynRpcConnection>, request: ControlMinerRequest) -> RpcResult<ControlMinerResponse> {
+    async fn control_miner_call(
+        &self,
+        _connection: Option<&DynRpcConnection>,
+        request: ControlMinerRequest,
+    ) -> RpcResult<ControlMinerResponse> {
         let control = self.miner_control.read().unwrap().clone();
         match control {
             Some(control) => Ok(ControlMinerResponse::new(control.control(request.mining, request.percent)?)),

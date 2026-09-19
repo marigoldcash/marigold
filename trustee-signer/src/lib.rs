@@ -181,8 +181,14 @@ impl TrusteeSigner {
         let client: Arc<DynRpcApi> = if config.rpc_server.starts_with("ws://") || config.rpc_server.starts_with("wss://") {
             use kaspa_wrpc_client::client::{ConnectOptions, ConnectStrategy};
             let client = Arc::new(
-                kaspa_wrpc_client::KaspaRpcClient::new(kaspa_wrpc_client::WrpcEncoding::Borsh, Some(&config.rpc_server), None, None, None)
-                    .map_err(|e| format!("{}: {e}", config.rpc_server))?,
+                kaspa_wrpc_client::KaspaRpcClient::new(
+                    kaspa_wrpc_client::WrpcEncoding::Borsh,
+                    Some(&config.rpc_server),
+                    None,
+                    None,
+                    None,
+                )
+                .map_err(|e| format!("{}: {e}", config.rpc_server))?,
             );
             let options = ConnectOptions {
                 block_async_connect: true,
@@ -305,7 +311,9 @@ impl TrusteeSigner {
                     if block.header.daa_score <= target_bound {
                         break (hash, block.header.daa_score);
                     }
-                    let Some(verbose) = block.verbose_data else { return Err("the node gave a block without verbose data".to_string()) };
+                    let Some(verbose) = block.verbose_data else {
+                        return Err("the node gave a block without verbose data".to_string());
+                    };
                     hash = verbose.selected_parent_hash;
                 };
                 if found.1 < self.last_signed.score.saturating_add(self.config.interval) || found.0 == self.last_signed.block {

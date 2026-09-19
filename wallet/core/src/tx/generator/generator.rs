@@ -669,7 +669,11 @@ impl Generator {
         // the floor keep the old behaviour: the larger of the two.
         match self.inner.fee_rate {
             Some(rate) if rate < OWN_LANE_FLOOR_SOMPI_PER_GRAM => ((rate * transaction_mass as f64) as u64).max(1),
-            _ => self.inner.mass_calculator.calc_minimum_transaction_fee_from_mass(compute_mass).max(self.calc_fee_rate(transaction_mass)),
+            _ => self
+                .inner
+                .mass_calculator
+                .calc_minimum_transaction_fee_from_mass(compute_mass)
+                .max(self.calc_fee_rate(transaction_mass)),
         }
     }
 
@@ -1007,7 +1011,8 @@ impl Generator {
                         } else {
                             self.calc_storage_mass(
                                 data,
-                                calc.calc_storage_mass_output_harmonic_single(net_change) + self.inner.final_transaction_outputs_harmonic,
+                                calc.calc_storage_mass_output_harmonic_single(net_change)
+                                    + self.inner.final_transaction_outputs_harmonic,
                             )
                         };
                         if difference > net_change || storage_mass_net > MAXIMUM_STANDARD_TRANSACTION_MASS {
@@ -1162,8 +1167,8 @@ impl Generator {
                 let inputs = if version == TX_VERSION {
                     inputs
                 } else {
-                    let compute_budget = ((self.inner.sig_op_count as u64) * GRAMS_PER_SIGOP_COUNT_UNIT)
-                        .div_ceil(GRAMS_PER_COMPUTE_BUDGET_UNIT) as u16;
+                    let compute_budget =
+                        ((self.inner.sig_op_count as u64) * GRAMS_PER_SIGOP_COUNT_UNIT).div_ceil(GRAMS_PER_COMPUTE_BUDGET_UNIT) as u16;
                     inputs
                         .into_iter()
                         .map(|input| {

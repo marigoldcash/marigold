@@ -188,8 +188,13 @@ fn conflicting_rotate_is_accepted_once_the_first_is_evicted_by_confirmation() {
 
     let rotate_to_bob = pool_tx(&alice.rotate(vec![sn, fee_sn], vec![bob.note(DenominationTag::D0_01)], 0));
 
-    let first =
-        manager.validate_and_insert_transaction(consensus.as_ref(), rotate_to_bob.clone(), Priority::Low, Orphan::Allowed, RbfPolicy::Forbidden);
+    let first = manager.validate_and_insert_transaction(
+        consensus.as_ref(),
+        rotate_to_bob.clone(),
+        Priority::Low,
+        Orphan::Allowed,
+        RbfPolicy::Forbidden,
+    );
     assert!(into_mempool_result(first).is_ok());
 
     // A different rotate of the same serials gets confirmed elsewhere (e.g. mined by another
@@ -200,7 +205,10 @@ fn conflicting_rotate_is_accepted_once_the_first_is_evicted_by_confirmation() {
 
     let (populated, _) = manager.get_all_transactions(TransactionQuery::All);
     let populated_txs: Vec<Transaction> = populated.into_iter().map(|mtx| mtx.tx.as_ref().clone()).collect();
-    assert!(!contained_by(rotate_to_bob.id(), &populated_txs), "the now-stale rotate must be evicted once its serial is confirmed spent");
+    assert!(
+        !contained_by(rotate_to_bob.id(), &populated_txs),
+        "the now-stale rotate must be evicted once its serial is confirmed spent"
+    );
 
     // rotate_to_carol itself is now identical to what got confirmed, so submitting it again
     // would be rejected as already-accepted — the meaningful assertion is that submitting a
@@ -208,7 +216,13 @@ fn conflicting_rotate_is_accepted_once_the_first_is_evicted_by_confirmation() {
     // by a live mempool transaction) succeeds, proving the conflict lock was actually released.
     let dave = Wallet::new(4);
     let rotate_to_dave = pool_tx(&alice.rotate(vec![sn, fee_sn], vec![dave.note(DenominationTag::D0_01)], 0));
-    let result = manager.validate_and_insert_transaction(consensus.as_ref(), rotate_to_dave, Priority::Low, Orphan::Allowed, RbfPolicy::Forbidden);
+    let result = manager.validate_and_insert_transaction(
+        consensus.as_ref(),
+        rotate_to_dave,
+        Priority::Low,
+        Orphan::Allowed,
+        RbfPolicy::Forbidden,
+    );
     assert!(
         into_mempool_result(result).is_ok(),
         "once the conflicting mempool tx is evicted, a fresh rotate of the same serial is no longer conflict-blocked at the mempool layer \
@@ -231,8 +245,13 @@ fn block_template_under_load_includes_pool_ops() {
         let (sn, fee_sn) = fund_note_with_fee_stamp(&consensus, &owner);
 
         let rotate = pool_tx(&owner.rotate(vec![sn, fee_sn], vec![recipient.note(DenominationTag::D0_01)], 0));
-        let result =
-            manager.validate_and_insert_transaction(consensus.as_ref(), rotate.clone(), Priority::Low, Orphan::Allowed, RbfPolicy::Forbidden);
+        let result = manager.validate_and_insert_transaction(
+            consensus.as_ref(),
+            rotate.clone(),
+            Priority::Low,
+            Orphan::Allowed,
+            RbfPolicy::Forbidden,
+        );
         assert!(into_mempool_result(result).is_ok(), "rotate {i} (distinct serials, no conflict) must be accepted");
         submitted.push(rotate);
     }

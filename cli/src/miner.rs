@@ -24,18 +24,18 @@
 //! far back that the mergeset limit rejects it, which a sub-second refresh is
 //! nowhere near.
 
+use kaspa_addresses::Address;
 use kaspa_consensus_core::block::Block;
 use kaspa_consensus_core::header::Header;
 use kaspa_pow::State;
-use kaspa_addresses::Address;
 use kaspa_rpc_core::api::miner::MinerControl;
 use kaspa_rpc_core::model::RpcRawBlock;
 use kaspa_rpc_core::{RpcError, RpcMinerStatus, RpcResult};
 use kaspa_wallet_core::rpc::DynRpcApi;
-use workflow_log::log_warn;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread::JoinHandle;
+use workflow_log::log_warn;
 
 /// How often to ask the node for fresh work.
 pub const TEMPLATE_REFRESH_MS: u64 = 400;
@@ -361,7 +361,12 @@ impl MinerHost {
     /// A host whose payout address comes later — the wallet service learns
     /// its own address only once the wallet is open.
     pub fn new_unbound(shutdown: Arc<AtomicBool>) -> Arc<Self> {
-        Arc::new(Self { address: std::sync::OnceLock::new(), rpc: std::sync::OnceLock::new(), miner: std::sync::Mutex::new(None), shutdown })
+        Arc::new(Self {
+            address: std::sync::OnceLock::new(),
+            rpc: std::sync::OnceLock::new(),
+            miner: std::sync::Mutex::new(None),
+            shutdown,
+        })
     }
 
     pub fn bind_address(&self, address: Address) {
@@ -415,7 +420,12 @@ impl MinerHost {
     }
 
     pub fn status(&self) -> RpcMinerStatus {
-        let mut status = RpcMinerStatus { available: true, cores: cores() as u32, address: self.address.get().map(|a| a.to_string()).unwrap_or_default(), ..Default::default() };
+        let mut status = RpcMinerStatus {
+            available: true,
+            cores: cores() as u32,
+            address: self.address.get().map(|a| a.to_string()).unwrap_or_default(),
+            ..Default::default()
+        };
         if let Some(miner) = self.miner() {
             status.mining = true;
             status.percent = miner.percent();

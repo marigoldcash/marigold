@@ -229,9 +229,7 @@ impl TransactionsPool {
         let forced: Vec<_> = self
             .all_transactions
             .values()
-            .filter(|mempool_tx| {
-                mempool_tx.mtx.tx.subnetwork_id == kaspa_consensus_core::subnets::SUBNETWORK_ID_FINALITY_ANCHOR
-            })
+            .filter(|mempool_tx| mempool_tx.mtx.tx.subnetwork_id == kaspa_consensus_core::subnets::SUBNETWORK_ID_FINALITY_ANCHOR)
             .map(|mempool_tx| mempool_tx.mtx.tx.as_ref().clone())
             .collect();
         if forced.is_empty() { inner } else { Box::new(super::frontier::selectors::ForcedInclusionSelector::new(forced, inner)) }

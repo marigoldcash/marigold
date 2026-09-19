@@ -3,7 +3,9 @@ use crate::ui;
 use std::sync::atomic::AtomicU64;
 
 #[derive(Default, Handler)]
-#[help("Consolidate this account's coins into fewer, larger ones (fixes \"storage mass\" errors; for recovering funds from old derivation paths see 'account recover')")]
+#[help(
+    "Consolidate this account's coins into fewer, larger ones (fixes \"storage mass\" errors; for recovering funds from old derivation paths see 'account recover')"
+)]
 pub struct Sweep;
 
 impl Sweep {
@@ -87,14 +89,24 @@ impl Sweep {
             crate::cli::OwnLane::Use { every } => tprintln!(
                 ctx,
                 "{}",
-                ui::dim(format!("Your own miner will mine these (a block about every {}), so the fee comes back to you.", crate::cli::humanised_minutes((every.as_secs() / 60).max(1))))
+                ui::dim(format!(
+                    "Your own miner will mine these (a block about every {}), so the fee comes back to you.",
+                    crate::cli::humanised_minutes((every.as_secs() / 60).max(1))
+                ))
             ),
             crate::cli::OwnLane::TooSlow { every } => tprintln!(
                 ctx,
                 "{}",
-                ui::dim(format!("Your miner finds a block about every {} — too rare to wait for, so this pays the network fee.", crate::cli::humanised_minutes((every.as_secs() / 60).max(1))))
+                ui::dim(format!(
+                    "Your miner finds a block about every {} — too rare to wait for, so this pays the network fee.",
+                    crate::cli::humanised_minutes((every.as_secs() / 60).max(1))
+                ))
             ),
-            crate::cli::OwnLane::NoMiner => tprintln!(ctx, "{}", ui::dim("This costs the network fee. Mining here would make it free — 'mine start' first, then sweep.")),
+            crate::cli::OwnLane::NoMiner => tprintln!(
+                ctx,
+                "{}",
+                ui::dim("This costs the network fee. Mining here would make it free — 'mine start' first, then sweep.")
+            ),
             crate::cli::OwnLane::NotOwnCopy => {}
         }
         let abortable = Abortable::default();

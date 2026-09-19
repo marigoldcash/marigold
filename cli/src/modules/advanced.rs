@@ -7,8 +7,25 @@ use crate::imports::*;
 /// 2026-09-15: the basics, without the techno-babble).
 pub async fn everyday(ctx: &Arc<KaspaCli>) -> Vec<&'static str> {
     let mut verbs = vec![
-        "balance", "pay", "receive", "request", "exchange", "move", "mobile", "backup", "history", "wallet", "create", "open", "close", "connect",
-        "disconnect", "guide", "help", "advanced", "exit",
+        "balance",
+        "pay",
+        "receive",
+        "request",
+        "exchange",
+        "move",
+        "mobile",
+        "backup",
+        "history",
+        "wallet",
+        "create",
+        "open",
+        "close",
+        "connect",
+        "disconnect",
+        "guide",
+        "help",
+        "advanced",
+        "exit",
     ];
     // ...or when the background miner on this machine is the wallet's to steer.
     if ctx.remote_miner_present() {
@@ -60,7 +77,9 @@ impl Advanced {
         }
 
         let state = if ctx.advanced() { "on" } else { "off" };
-        term.writeln(format!("\nAdvanced commands — you rarely need these. Advanced mode is {state} ('advanced on' / 'advanced off').").crlf());
+        term.writeln(
+            format!("\nAdvanced commands — you rarely need these. Advanced mode is {state} ('advanced on' / 'advanced off').").crlf(),
+        );
 
         let everyday = everyday(&ctx).await;
         let handlers = ctx.handlers().collect();

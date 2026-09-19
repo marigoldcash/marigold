@@ -39,7 +39,10 @@ const MINT_AMOUNT_PETALS: u64 = 111_000_000;
 /// bindings use (see `wallet_notepool_mint_redeem_test`'s comments for why wRPC and
 /// why this path). Shared by every notepool wallet test; P7.3+ tests need several
 /// wallets against one daemon.
-async fn connect_and_bootstrap_wallet(kaspad: &Daemon, wallet_secret: &Secret) -> (Arc<Wallet>, Arc<dyn kaspa_wallet_core::account::Account>) {
+async fn connect_and_bootstrap_wallet(
+    kaspad: &Daemon,
+    wallet_secret: &Secret,
+) -> (Arc<Wallet>, Arc<dyn kaspa_wallet_core::account::Account>) {
     let wrpc_client = Arc::new(kaspad.new_wrpc_client());
     let rpc_ctl = wrpc_client.ctl().clone();
     let rpc_api: Arc<DynRpcApi> = wrpc_client.clone();
@@ -100,8 +103,14 @@ async fn wallet_notepool_mint_redeem_test() {
     init_allocator_with_default_settings();
     kaspa_core::log::try_init_logger("INFO,kaspa_testing_integration=trace,kaspa_wallet_core=debug");
 
-    let args =
-        Args { simnet: true, unsafe_rpc: true, enable_unsynced_mining: true, disable_upnp: true, utxoindex: true, ..Default::default() };
+    let args = Args {
+        simnet: true,
+        unsafe_rpc: true,
+        enable_unsynced_mining: true,
+        disable_upnp: true,
+        utxoindex: true,
+        ..Default::default()
+    };
     let total_fd_limit = 10;
     let mut kaspad = Daemon::new_random_with_args(args, total_fd_limit);
     // `miner_client` plays the role every other daemon test's `rpc_client1` plays: submit
@@ -171,11 +180,8 @@ async fn wallet_notepool_mint_redeem_test() {
 
     // --- Mint: 1.11 MAGLD -> D1 + D0_1 + D0_01 ---
     let abortable = Abortable::default();
-    let mint_result = account
-        .clone()
-        .mint(wallet_secret.clone(), None, MINT_AMOUNT_PETALS, None, &abortable)
-        .await
-        .expect("mint failed");
+    let mint_result =
+        account.clone().mint(wallet_secret.clone(), None, MINT_AMOUNT_PETALS, None, &abortable).await.expect("mint failed");
 
     assert_eq!(mint_result.notes.len(), 3, "1.11 MAGLD should decompose into exactly 3 notes (D1 + D0_1 + D0_01)");
     let mut denominations: Vec<DenominationTag> = mint_result.notes.iter().map(|n| n.d).collect();
@@ -236,11 +242,8 @@ async fn wallet_notepool_mint_redeem_test() {
     assert!(mint_fee < 1_000_000, "mint fee ({mint_fee} sompi) is unexpectedly large for a single-input mint");
 
     // --- Redeem: hand back the exact serials just minted ---
-    let redeem_result = account
-        .clone()
-        .redeem(wallet_secret.clone(), RedeemSelection::Serials(mint_serials.clone()))
-        .await
-        .expect("redeem failed");
+    let redeem_result =
+        account.clone().redeem(wallet_secret.clone(), RedeemSelection::Serials(mint_serials.clone())).await.expect("redeem failed");
     assert_eq!(redeem_result.redeemed_value_petals, MINT_AMOUNT_PETALS);
     assert_eq!(redeem_result.serials, mint_serials);
     println!(
@@ -340,8 +343,14 @@ async fn wallet_notepool_receive_flows_test() {
     init_allocator_with_default_settings();
     kaspa_core::log::try_init_logger("INFO,kaspa_testing_integration=trace");
 
-    let args =
-        Args { simnet: true, unsafe_rpc: true, enable_unsynced_mining: true, disable_upnp: true, utxoindex: true, ..Default::default() };
+    let args = Args {
+        simnet: true,
+        unsafe_rpc: true,
+        enable_unsynced_mining: true,
+        disable_upnp: true,
+        utxoindex: true,
+        ..Default::default()
+    };
     let total_fd_limit = 10;
     let mut kaspad = Daemon::new_random_with_args(args, total_fd_limit);
     let miner_client = kaspad.start().await;
@@ -534,8 +543,14 @@ async fn wallet_notepool_spend_flows_test() {
     init_allocator_with_default_settings();
     kaspa_core::log::try_init_logger("INFO,kaspa_testing_integration=trace");
 
-    let args =
-        Args { simnet: true, unsafe_rpc: true, enable_unsynced_mining: true, disable_upnp: true, utxoindex: true, ..Default::default() };
+    let args = Args {
+        simnet: true,
+        unsafe_rpc: true,
+        enable_unsynced_mining: true,
+        disable_upnp: true,
+        utxoindex: true,
+        ..Default::default()
+    };
     let total_fd_limit = 10;
     let mut kaspad = Daemon::new_random_with_args(args, total_fd_limit);
     let miner_client = kaspad.start().await;
@@ -701,8 +716,14 @@ async fn wallet_notepool_pos_test() {
     init_allocator_with_default_settings();
     kaspa_core::log::try_init_logger("INFO,kaspa_testing_integration=trace");
 
-    let args =
-        Args { simnet: true, unsafe_rpc: true, enable_unsynced_mining: true, disable_upnp: true, utxoindex: true, ..Default::default() };
+    let args = Args {
+        simnet: true,
+        unsafe_rpc: true,
+        enable_unsynced_mining: true,
+        disable_upnp: true,
+        utxoindex: true,
+        ..Default::default()
+    };
     let total_fd_limit = 10;
     let mut kaspad = Daemon::new_random_with_args(args, total_fd_limit);
     let miner_client = kaspad.start().await;
@@ -834,11 +855,11 @@ async fn wallet_notepool_pos_test() {
 #[ignore]
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn wallet_notepool_vault_test() {
+    use futures_util::TryStreamExt;
+    use kaspa_utils::hex::ToHex;
     use kaspa_wallet_core::account::notepool::{deep_verify, light_verify, light_verify_vault, plan_restore_rotation};
     use kaspa_wallet_core::storage::NoteKeyInfo;
     use kaspa_wallet_core::storage::local::notevault::NoteVault;
-    use kaspa_utils::hex::ToHex;
-    use futures_util::TryStreamExt;
 
     fn copy_dir_recursive(from: &std::path::Path, to: &std::path::Path) {
         std::fs::create_dir_all(to).unwrap();
@@ -856,8 +877,14 @@ async fn wallet_notepool_vault_test() {
     init_allocator_with_default_settings();
     kaspa_core::log::try_init_logger("INFO,kaspa_testing_integration=trace,kaspa_wallet_core=debug");
 
-    let args =
-        Args { simnet: true, unsafe_rpc: true, enable_unsynced_mining: true, disable_upnp: true, utxoindex: true, ..Default::default() };
+    let args = Args {
+        simnet: true,
+        unsafe_rpc: true,
+        enable_unsynced_mining: true,
+        disable_upnp: true,
+        utxoindex: true,
+        ..Default::default()
+    };
     let total_fd_limit = 10;
     let mut kaspad = Daemon::new_random_with_args(args, total_fd_limit);
     let miner_client = kaspad.start().await;
@@ -903,8 +930,7 @@ async fn wallet_notepool_vault_test() {
 
     // --- Mint, then back up the vault files to a standalone directory ---
     let abortable = Abortable::default();
-    let mint_result =
-        account_a.clone().mint(secret_a.clone(), None, MINT_AMOUNT_PETALS, None, &abortable).await.expect("mint failed");
+    let mint_result = account_a.clone().mint(secret_a.clone(), None, MINT_AMOUNT_PETALS, None, &abortable).await.expect("mint failed");
     assert_eq!(mint_result.notes.len(), 3, "1.11 MAGLD should decompose into exactly 3 notes");
     let minted_serials: Vec<Hash> = mint_result.notes.iter().map(|n| n.sn).collect();
     mine(10, throwaway.clone()).await;
@@ -1004,9 +1030,11 @@ async fn wallet_notepool_vault_test() {
     let corrupt_info = active_after_rotation[0].clone();
     let corrupt_note =
         rotated_notes.iter().find(|n| n.sn == corrupt_info.sn).expect("the active row must correspond to a rotated entry");
-    let note_path = vault_b_folder
-        .join("active")
-        .join(format!("{}_{}.note", DENOMINATION_PETALS[corrupt_note.d as usize], corrupt_note.sn.to_hex()));
+    let note_path = vault_b_folder.join("active").join(format!(
+        "{}_{}.note",
+        DENOMINATION_PETALS[corrupt_note.d as usize],
+        corrupt_note.sn.to_hex()
+    ));
     assert!(note_path.exists(), "expected the rotated note's file to exist at {note_path:?}");
     std::fs::write(&note_path, b"not-valid-ciphertext-at-all").expect("failed to corrupt note file");
 

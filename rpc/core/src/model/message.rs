@@ -2,7 +2,11 @@ use crate::model::*;
 use borsh::{BorshDeserialize, BorshSerialize};
 use kaspa_consensus_core::api::stats::BlockCount;
 use kaspa_core::debug;
-use kaspa_notify::subscription::{Command, context::SubscriptionContext, single::{NotesChangedSubscription, UtxosChangedSubscription}};
+use kaspa_notify::subscription::{
+    Command,
+    context::SubscriptionContext,
+    single::{NotesChangedSubscription, UtxosChangedSubscription},
+};
 use kaspa_utils::hex::ToHex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -4326,7 +4330,19 @@ impl Deserializer for RpcMinerStatus {
         let blocks_rejected = load!(u64, reader)?;
         let address = load!(String, reader)?;
         let uptime_seconds = load!(u64, reader)?;
-        Ok(Self { available, mining, percent, threads, cores, hashrate, blocks_found, blocks_accepted, blocks_rejected, address, uptime_seconds })
+        Ok(Self {
+            available,
+            mining,
+            percent,
+            threads,
+            cores,
+            hashrate,
+            blocks_found,
+            blocks_accepted,
+            blocks_rejected,
+            address,
+            uptime_seconds,
+        })
     }
 }
 

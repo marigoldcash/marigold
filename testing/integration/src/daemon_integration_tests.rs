@@ -1479,9 +1479,10 @@ async fn daemon_ibd_pool_state_sync_test() {
     let rotate2 = build_rotate(&holder_key, holder_serials.clone(), vec![NewNote { d: DenominationTag::D1, pk: final_pk }]);
     let rotate2_id = rotate2.id();
     rpc_client2.submit_transaction((&rotate2).into(), false).await.unwrap();
-    rpc_client2.get_mempool_entry(rotate2_id.into(), false, false).await.expect(
-        "syncee mempool rejected a rotate of imported notes — the imported pool state is not serving mempool validation",
-    );
+    rpc_client2
+        .get_mempool_entry(rotate2_id.into(), false, false)
+        .await
+        .expect("syncee mempool rejected a rotate of imported notes — the imported pool state is not serving mempool validation");
 
     // Phase 6b: mine post-IBD blocks on the syncer and assert the syncee follows — every
     // new chain block's pool commitment now builds on the imported state. (The rotate may
@@ -1533,8 +1534,14 @@ async fn daemon_notes_changed_notification_test() {
     init_allocator_with_default_settings();
     kaspa_core::log::try_init_logger("INFO,kaspa_testing_integration=trace,kaspa_notify=debug,kaspa_rpc_core=debug");
 
-    let args =
-        Args { simnet: true, unsafe_rpc: true, enable_unsynced_mining: true, disable_upnp: true, utxoindex: true, ..Default::default() };
+    let args = Args {
+        simnet: true,
+        unsafe_rpc: true,
+        enable_unsynced_mining: true,
+        disable_upnp: true,
+        utxoindex: true,
+        ..Default::default()
+    };
     let total_fd_limit = 10;
     let mut kaspad1 = Daemon::new_random_with_args(args, total_fd_limit);
     let rpc_client1 = kaspad1.start().await;
@@ -1569,7 +1576,8 @@ async fn daemon_notes_changed_notification_test() {
     // policy exactly like a zero-fee transparent transaction would be.
     let utxos = fetch_spendable_utxos(&rpc_client1, miner_address.clone(), coinbase_maturity).await;
     let (outpoint, entry) = utxos.first().expect("mature utxo").clone();
-    let mint_notes = vec![NewNote { d: DenominationTag::D1, pk: miner_note_pk }, NewNote { d: DenominationTag::D0_01, pk: miner_note_pk }];
+    let mint_notes =
+        vec![NewNote { d: DenominationTag::D1, pk: miner_note_pk }, NewNote { d: DenominationTag::D0_01, pk: miner_note_pk }];
     let notes_value: u64 = mint_notes.iter().map(|n| n.d.petals()).sum();
     let mint_fee = 2 * fee::calc_for_plain_standard_tx_with_extra_serialized_bytes(1, 1, 200);
     assert!(entry.amount > notes_value + mint_fee, "coinbase utxo too small to fund the mint");
@@ -1594,9 +1602,11 @@ async fn daemon_notes_changed_notification_test() {
     }
 
     let mint_notification = client
-        .wait_for_notification(EventType::NotesChanged, Duration::from_secs(30), |n| {
-            matches!(n, Notification::NotesChanged(msg) if msg.added.iter().any(|e| e.sn == mint_serials[0]))
-        })
+        .wait_for_notification(
+            EventType::NotesChanged,
+            Duration::from_secs(30),
+            |n| matches!(n, Notification::NotesChanged(msg) if msg.added.iter().any(|e| e.sn == mint_serials[0])),
+        )
         .await;
     let Notification::NotesChanged(msg) = mint_notification else { unreachable!() };
     assert_eq!(msg.added.len(), 2);
@@ -1646,9 +1656,11 @@ async fn daemon_notes_changed_notification_test() {
     }
 
     let rotate_notification = client
-        .wait_for_notification(EventType::NotesChanged, Duration::from_secs(30), |n| {
-            matches!(n, Notification::NotesChanged(msg) if msg.removed.iter().any(|e| e.sn == mint_serials[0]))
-        })
+        .wait_for_notification(
+            EventType::NotesChanged,
+            Duration::from_secs(30),
+            |n| matches!(n, Notification::NotesChanged(msg) if msg.removed.iter().any(|e| e.sn == mint_serials[0])),
+        )
         .await;
     let Notification::NotesChanged(msg) = rotate_notification else { unreachable!() };
     assert_eq!(msg.removed.len(), 2);
@@ -1679,8 +1691,14 @@ async fn daemon_notepool_multi_node_agreement_test() {
     init_allocator_with_default_settings();
     kaspa_core::log::try_init_logger("INFO,kaspa_testing_integration=trace");
 
-    let args =
-        Args { simnet: true, unsafe_rpc: true, enable_unsynced_mining: true, disable_upnp: true, utxoindex: true, ..Default::default() };
+    let args = Args {
+        simnet: true,
+        unsafe_rpc: true,
+        enable_unsynced_mining: true,
+        disable_upnp: true,
+        utxoindex: true,
+        ..Default::default()
+    };
     let total_fd_limit = 10;
     let mut kaspad1 = Daemon::new_random_with_args(args.clone(), total_fd_limit);
     let mut kaspad2 = Daemon::new_random_with_args(args.clone(), total_fd_limit);
@@ -2156,7 +2174,11 @@ async fn daemon_trustee_signers_produce_anchors_test() {
                     status.has_anchor && status.enforcing && !status.stale
                 })
             },
-            if name == "A" { "node A did not reach enforced anchored finality" } else { "node B did not reach enforced anchored finality" },
+            if name == "A" {
+                "node A did not reach enforced anchored finality"
+            } else {
+                "node B did not reach enforced anchored finality"
+            },
         )
         .await;
     }

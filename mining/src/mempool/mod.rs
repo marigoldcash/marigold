@@ -65,7 +65,15 @@ impl Mempool {
         let transaction_pool = TransactionsPool::new(config.clone());
         let orphan_pool = OrphanPool::new(config.clone());
         let accepted_transactions = AcceptedTransactions::new(config.clone());
-        Self { config, toccata_activation, transaction_pool, orphan_pool, accepted_transactions, counters, withheld_from_relay: Default::default() }
+        Self {
+            config,
+            toccata_activation,
+            transaction_pool,
+            orphan_pool,
+            accepted_transactions,
+            counters,
+            withheld_from_relay: Default::default(),
+        }
     }
 
     /// Accepted from this node's own wallet below the relay floor: for this

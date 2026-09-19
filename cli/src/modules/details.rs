@@ -36,7 +36,11 @@ impl Details {
         }
         if !historical.is_empty() {
             tprintln!(ctx, "");
-            tprintln!(ctx, "Older addresses still holding coins ({}) — spendable as normal, and consolidated by 'sweep':", historical.len());
+            tprintln!(
+                ctx,
+                "Older addresses still holding coins ({}) — spendable as normal, and consolidated by 'sweep':",
+                historical.len()
+            );
             for (address, amount) in historical {
                 tprintln!(
                     ctx.term(),

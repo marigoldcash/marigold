@@ -458,7 +458,10 @@ mod salted_container_tests {
 
         // ...and an Encrypted built from bytes written by older software still
         // decrypts through the same call, reporting itself as legacy.
-        let old = Encrypted::new(EncryptionKind::XChaCha20Poly1305, encrypt_xchacha20poly1305(&borsh::to_vec(&value).unwrap(), &secret).unwrap());
+        let old = Encrypted::new(
+            EncryptionKind::XChaCha20Poly1305,
+            encrypt_xchacha20poly1305(&borsh::to_vec(&value).unwrap(), &secret).unwrap(),
+        );
         assert!(old.is_legacy());
         assert_eq!(old.decrypt::<Vec<u8>>(&secret).unwrap().unwrap(), value);
     }

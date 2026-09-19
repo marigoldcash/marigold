@@ -61,7 +61,8 @@ pub(crate) async fn create(
             tprintln!(ctx, "This wallet will be stored as: {}", style(format!("{folder}/{file}")).cyan());
         }
         tprintln!(ctx, "(change the folder for all wallets with 'settings set folder <path>' before creating)");
-        let prompt = if taken { "Type a name for the new wallet: " } else { "Press <enter> to accept, or type a different wallet name: " };
+        let prompt =
+            if taken { "Type a name for the new wallet: " } else { "Press <enter> to accept, or type a different wallet name: " };
         let input = term.ask(false, prompt).await?.trim().to_string();
         if input.is_empty() {
             if taken {
@@ -283,7 +284,12 @@ pub(crate) async fn create(
         // Derived, not random: the vault phrase reproduces it, so there is one
         // phrase to keep rather than two.
         let account = kaspa_wallet_core::storage::local::notevault::account_mnemonic_from_vault_words(&vault_words)?;
-        Some(PrvKeyDataCreateArgs::new(None, payment_secret.clone(), Secret::from(account.phrase_string()), PrvKeyDataVariantKind::Mnemonic))
+        Some(PrvKeyDataCreateArgs::new(
+            None,
+            payment_secret.clone(),
+            Secret::from(account.phrase_string()),
+            PrvKeyDataVariantKind::Mnemonic,
+        ))
     };
 
     let notifier = ctx.notifier().show(Notification::Processing).await;
@@ -291,7 +297,8 @@ pub(crate) async fn create(
     // suspend commits for multiple operations
     wallet.store().batch().await?;
 
-    let wallet_args = WalletCreateArgs::new(name.map(String::from), custom_filename.clone(), EncryptionKind::XChaCha20Poly1305, hint, true);
+    let wallet_args =
+        WalletCreateArgs::new(name.map(String::from), custom_filename.clone(), EncryptionKind::XChaCha20Poly1305, hint, true);
     let (wallet_descriptor, storage_descriptor) = ctx.wallet().create_wallet(&wallet_secret, wallet_args).await?;
     // No key and no account on a notes-only wallet: the ledger address is
     // never derived, which is the point (P8.0b) — nothing to sweep, nothing
@@ -382,11 +389,20 @@ pub(crate) async fn create(
         }
         term.writeln("");
     } else {
-        term.writeln("This wallet keeps notes only. 'note request' makes a payment request; 'account create bip32' adds a ledger later.");
+        term.writeln(
+            "This wallet keeps notes only. 'note request' makes a payment request; 'account create bip32' adds a ledger later.",
+        );
         term.writeln("");
     }
 
-    wallet.open(&wallet_secret, custom_filename.clone().or_else(|| name.map(String::from)), WalletOpenArgs::default_with_legacy_accounts(), &guard).await?;
+    wallet
+        .open(
+            &wallet_secret,
+            custom_filename.clone().or_else(|| name.map(String::from)),
+            WalletOpenArgs::default_with_legacy_accounts(),
+            &guard,
+        )
+        .await?;
     wallet.activate_accounts(None, &guard).await?;
 
     // Remember this wallet: plaintext client metadata in the wallet file

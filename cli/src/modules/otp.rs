@@ -1,6 +1,6 @@
 use crate::imports::*;
 use crate::modules::note::qr_string;
-use kaspa_wallet_core::storage::otp::{self, Otp as Authenticator, MAX_GRACE_SECS};
+use kaspa_wallet_core::storage::otp::{self, MAX_GRACE_SECS, Otp as Authenticator};
 
 #[derive(Default, Handler)]
 #[help("Ask for a code from your phone before this wallet spends anything")]

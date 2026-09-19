@@ -753,11 +753,15 @@ mod tests {
         let mtx = new_mtx(script_public_key, masses, insufficient_fee);
         assert!(mempool.check_transaction_standard_in_context(&mtx, Priority::High, u64::MAX).is_err(), "off: the floor holds");
 
-        let own = Config::build_default(params.target_time_per_block(), false, params.mempool_block_mass_limits(), params.block_lane_limits)
-            .with_accept_own_below_floor(true);
+        let own =
+            Config::build_default(params.target_time_per_block(), false, params.mempool_block_mass_limits(), params.block_lane_limits)
+                .with_accept_own_below_floor(true);
         let mempool = Mempool::new(Arc::new(own), params.toccata_activation, counters);
         assert_eq!(mempool.check_transaction_standard_in_context(&mtx, Priority::High, u64::MAX), Ok(()), "on: our own wallet may");
-        assert!(mempool.check_transaction_standard_in_context(&mtx, Priority::Low, u64::MAX).is_err(), "on: a peer's transaction may not");
+        assert!(
+            mempool.check_transaction_standard_in_context(&mtx, Priority::Low, u64::MAX).is_err(),
+            "on: a peer's transaction may not"
+        );
         assert!(mempool.fee_is_below_relay_floor(&mtx), "and it is known to be below the floor, so it is withheld from relay");
     }
 }

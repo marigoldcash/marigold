@@ -4,9 +4,9 @@ use kaspa_consensus_core::Hash;
 use kaspa_consensus_core::notepool::DENOMINATION_PETALS;
 use kaspa_wallet_core::account::notepool;
 use kaspa_wallet_core::account::notepool::{
-    PaymentRequest, await_payment_request, create_payment_request, deep_verify, export_active_entries,
-    light_verify, light_verify_vault, paper_export_decode_page, paper_export_encode, paper_export_missing_pages,
-    paper_export_peek_header, plan_restore_rotation,
+    PaymentRequest, await_payment_request, create_payment_request, deep_verify, export_active_entries, light_verify,
+    light_verify_vault, paper_export_decode_page, paper_export_encode, paper_export_missing_pages, paper_export_peek_header,
+    plan_restore_rotation,
 };
 use kaspa_wallet_core::storage::local::notevault::NoteVault;
 use kaspa_wallet_core::storage::{NoteKeyEntry, NoteKeyInfo, NoteProvenance, NoteStatus};
@@ -116,7 +116,12 @@ impl Note {
         match await_payment_request(&ctx.wallet(), &wallet_secret, request.pk, timeout).await {
             Ok(claimed) => {
                 ctx.record("received", claimed.total_petals, 0, "request", "");
-                tprintln!(ctx, "payment received: {} {ticker} in {} note(s):", sompi_to_kaspa_string(claimed.total_petals), claimed.notes.len());
+                tprintln!(
+                    ctx,
+                    "payment received: {} {ticker} in {} note(s):",
+                    sompi_to_kaspa_string(claimed.total_petals),
+                    claimed.notes.len()
+                );
                 for note in &claimed.notes {
                     tprintln!(ctx, "  {} - {}", note.sn, sompi_to_kaspa_string(DENOMINATION_PETALS[note.d as usize]));
                 }
@@ -138,8 +143,7 @@ impl Note {
             return Ok(());
         }
         let request = PaymentRequest::from_text(&argv[0])?;
-        let amount_override =
-            if argv.len() > 1 { Some(try_parse_required_nonzero_kaspa_as_sompi_u64(argv.get(1))?) } else { None };
+        let amount_override = if argv.len() > 1 { Some(try_parse_required_nonzero_kaspa_as_sompi_u64(argv.get(1))?) } else { None };
         let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(None).await?;
 
         let paid = request.amount_petals.or(amount_override).unwrap_or(0);
@@ -209,9 +213,13 @@ impl Note {
         let all = match argv.first().map(|s| s.to_lowercase()).as_deref() {
             None => {
                 let abortable = Abortable::default();
-                tprintln!(ctx, "Estimating the largest mintable amount — this dry-runs a sweep of your entire ledger balance and can take a while on a large wallet...");
+                tprintln!(
+                    ctx,
+                    "Estimating the largest mintable amount — this dry-runs a sweep of your entire ledger balance and can take a while on a large wallet..."
+                );
                 let progress = Self::progress_printer(ctx);
-                let max = notepool::max_mintable_petals(account.clone(), ctx.own_lane_fee_rate().await, &abortable, Some(progress)).await?;
+                let max =
+                    notepool::max_mintable_petals(account.clone(), ctx.own_lane_fee_rate().await, &abortable, Some(progress)).await?;
                 if max == 0 {
                     tprintln!(ctx, "usage: 'note mint <amount>' or 'note mint all'  (no mintable balance right now)\r\n");
                     return Ok(());
@@ -231,9 +239,13 @@ impl Note {
             Some("all") => {
                 argv.remove(0);
                 let abortable = Abortable::default();
-                tprintln!(ctx, "Estimating the largest mintable amount — this dry-runs a sweep of your entire ledger balance and can take a while on a large wallet...");
+                tprintln!(
+                    ctx,
+                    "Estimating the largest mintable amount — this dry-runs a sweep of your entire ledger balance and can take a while on a large wallet..."
+                );
                 let progress = Self::progress_printer(ctx);
-                let max = notepool::max_mintable_petals(account.clone(), ctx.own_lane_fee_rate().await, &abortable, Some(progress)).await?;
+                let max =
+                    notepool::max_mintable_petals(account.clone(), ctx.own_lane_fee_rate().await, &abortable, Some(progress)).await?;
                 if max == 0 {
                     tprintln!(ctx, "no mintable balance right now\r\n");
                     return Ok(());
@@ -266,7 +278,16 @@ impl Note {
         // shaped differently from the real mint and cannot be made exact. An
         // explicit amount is taken literally: the user asked for a number.
         let (amount_petals, result) = if all.is_some() {
-            match notepool::mint_max(account.clone(), wallet_secret, payment_secret, ctx.own_lane_fee_rate().await, &abortable, Some(progress)).await? {
+            match notepool::mint_max(
+                account.clone(),
+                wallet_secret,
+                payment_secret,
+                ctx.own_lane_fee_rate().await,
+                &abortable,
+                Some(progress),
+            )
+            .await?
+            {
                 Some((amount, result)) => (amount, result),
                 None => {
                     tprintln!(ctx, "Nothing could be minted — the fee would exceed what is on the ledger.\r\n");
@@ -296,7 +317,6 @@ impl Note {
 
         Ok(())
     }
-
 
     /// Interactive vault ceremony for wallets created before vaults moved into
     /// the creation wizard — replaces the lazy auto-create that logged the 24
@@ -412,7 +432,8 @@ impl Note {
         } else {
             let mut serials = Vec::with_capacity(argv.len());
             for raw in argv.drain(..) {
-                let sn = raw.parse::<Hash>().map_err(|_| Error::Custom(format!("'{raw}' is not a valid note serial (32-byte hex)")))?;
+                let sn =
+                    raw.parse::<Hash>().map_err(|_| Error::Custom(format!("'{raw}' is not a valid note serial (32-byte hex)")))?;
                 serials.push(sn);
             }
             serials
@@ -482,7 +503,10 @@ impl Note {
         let wallets = ctx.store().wallet_list().await?;
         let others: Vec<_> = wallets.into_iter().filter(|w| w.filename != descriptor.filename).collect();
         if others.is_empty() {
-            tprintln!(ctx, "No other wallet exists to move notes into — create one first with 'wallet create <name>', then 'move' again.\r\n");
+            tprintln!(
+                ctx,
+                "No other wallet exists to move notes into — create one first with 'wallet create <name>', then 'move' again.\r\n"
+            );
             return Ok(());
         }
         tprintln!(ctx, "");
@@ -506,7 +530,12 @@ impl Note {
 
         // Secrets: source (decrypt keys out) and destination (write them in).
         let wallet_secret = Secret::new(
-            ctx.term().ask(true, &format!("Enter the CURRENT wallet's ('{}') password: ", descriptor.filename)).await?.trim().as_bytes().to_vec(),
+            ctx.term()
+                .ask(true, &format!("Enter the CURRENT wallet's ('{}') password: ", descriptor.filename))
+                .await?
+                .trim()
+                .as_bytes()
+                .to_vec(),
         );
         let dest_secret =
             Secret::new(ctx.term().ask(true, &format!("Enter the password for '{dest}': ")).await?.trim().as_bytes().to_vec());
@@ -586,7 +615,12 @@ impl Note {
         // a commit; without one, 'close' straight after a move panicked.
         ctx.wallet().store().commit(&wallet_secret).await?;
         ctx.record("moved", moved_petals, 0, format!("{moved} notes to '{dest}'"), "");
-        tprintln!(ctx, "moved {} note(s) ({} {ticker}) into '{dest}' — no chain transaction involved.", moved, sompi_to_kaspa_string(moved_petals));
+        tprintln!(
+            ctx,
+            "moved {} note(s) ({} {ticker}) into '{dest}' — no chain transaction involved.",
+            moved,
+            sompi_to_kaspa_string(moved_petals)
+        );
         tprintln!(ctx, "They no longer exist in this wallet. Open '{dest}' to use them (it holds them as imported Hot keys).\r\n");
         Ok(())
     }
@@ -688,7 +722,9 @@ impl Note {
             tprintln!(ctx, "");
             return Ok(());
         }
-        let answer = ctx.term().ask(false, &format!("Write off {} {ticker} as unrecoverable? [y/N]: ", sompi_to_kaspa_string(lost)))
+        let answer = ctx
+            .term()
+            .ask(false, &format!("Write off {} {ticker} as unrecoverable? [y/N]: ", sompi_to_kaspa_string(lost)))
             .await?
             .trim()
             .to_lowercase();
@@ -753,7 +789,11 @@ impl Note {
                     tprintln!(ctx, "  {} - {} {ticker}", info.sn, sompi_to_kaspa_string(DENOMINATION_PETALS[info.d as usize]));
                 }
                 tprintln!(ctx, "");
-                tprintln!(ctx, "{}", style("This wallet will not spend or merge these. 'note mirror revoke' if the phone is lost.").dim());
+                tprintln!(
+                    ctx,
+                    "{}",
+                    style("This wallet will not spend or merge these. 'note mirror revoke' if the phone is lost.").dim()
+                );
                 tprintln!(ctx, "");
             }
             Some("return") => {
@@ -771,7 +811,8 @@ impl Note {
                 tprintln!(
                     ctx,
                     "{}",
-                    style("Do this only when the phone no longer holds them — a copy still on the phone can still be spent there.").dim()
+                    style("Do this only when the phone no longer holds them — a copy still on the phone can still be spent there.")
+                        .dim()
                 );
                 tprintln!(ctx, "Use 'note mirror revoke' instead if you are not sure.");
             }
@@ -816,7 +857,13 @@ impl Note {
                 }
                 let pages = notepool::mirror_export_pages(&entries, &Secret::from(pass.as_bytes().to_vec()))?;
                 tprintln!(ctx, "");
-                tprintln!(ctx, "{} {ticker} in {} note(s), as {} block(s):", sompi_to_kaspa_string(total(&mirrored)), entries.len(), pages.len());
+                tprintln!(
+                    ctx,
+                    "{} {ticker} in {} note(s), as {} block(s):",
+                    sompi_to_kaspa_string(total(&mirrored)),
+                    entries.len(),
+                    pages.len()
+                );
                 for (i, page) in pages.iter().enumerate() {
                     tprintln!(ctx, "");
                     tprintln!(ctx, "{}", style(format!("--- block {} of {} ---", i + 1, pages.len())).dim());
@@ -899,7 +946,11 @@ impl Note {
                     );
                 }
                 tprintln!(ctx, "");
-                tprintln!(ctx, "{}", style("This wallet keeps the keys and will not spend these. If the phone is lost, 'note mirror revoke'.").dim());
+                tprintln!(
+                    ctx,
+                    "{}",
+                    style("This wallet keeps the keys and will not spend these. If the phone is lost, 'note mirror revoke'.").dim()
+                );
                 tprintln!(ctx, "");
             }
         }
@@ -957,9 +1008,7 @@ impl Note {
             notes
                 .iter()
                 .filter(|i| i.status == NoteStatus::Active)
-                .map(|i| {
-                    vec![money(i.d as u8), serial(&i.sn), ui::paint(ui::Ink::Moss, format!("{:?}", i.provenance).to_lowercase())]
-                })
+                .map(|i| vec![money(i.d as u8), serial(&i.sn), ui::paint(ui::Ink::Moss, format!("{:?}", i.provenance).to_lowercase())])
                 .collect(),
         );
 
@@ -1213,7 +1262,12 @@ impl Note {
                 }
             }
             if still_active.is_empty() {
-                tprintln!(ctx, "  batch {}/{}: already rotated as a side effect of an earlier batch's fee stamp - skipped", i + 1, batches.len());
+                tprintln!(
+                    ctx,
+                    "  batch {}/{}: already rotated as a side effect of an earlier batch's fee stamp - skipped",
+                    i + 1,
+                    batches.len()
+                );
                 continue;
             }
             // One batch can genuinely conflict without the others being at fault —

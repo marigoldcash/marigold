@@ -31,28 +31,28 @@ pub mod network;
 // The upstream `node` module drives a kaspad child process through the NW.js
 // daemon runtime; it is inert here (its verb() returns None without a Daemons
 // handle) and the embedded node takes the name.
+pub mod backup;
+pub mod import;
+#[cfg(feature = "embedded-node")]
+pub mod mine;
+pub mod mint;
+pub mod mobile;
+pub mod mv;
 #[cfg(not(feature = "embedded-node"))]
 pub mod node;
 #[cfg(feature = "embedded-node")]
 #[path = "embnode.rs"]
 pub mod node;
-#[cfg(feature = "embedded-node")]
-pub mod mine;
 pub mod note;
-pub mod pay;
-pub mod receive;
-pub mod request;
-pub mod mv;
-pub mod mint;
-pub mod mobile;
-pub mod backup;
-pub mod import;
 pub mod open;
 pub mod otp;
+pub mod pay;
 pub mod ping;
 pub mod pskb;
 pub mod quit;
+pub mod receive;
 pub mod reload;
+pub mod request;
 pub mod rpc;
 pub mod select;
 pub mod server;
@@ -82,10 +82,10 @@ pub fn register_handlers(cli: &Arc<KaspaCli>) -> Result<()> {
         cli,
         cli.handlers(),
         [
-            about, account, address, advanced, auto, backup, balance, close, connect, create, details, disconnect, estimate, exchange, exit, export, guide, help, history, import, rpc, list,
-            mint, mobile, mv, pay, receive, request,
-            miner, message, monitor, mute, network, node, note, open, otp, ping, pskb, quit, reload, select, server, settings, sweep,
-            track, transfer, utxos, wallet,
+            about, account, address, advanced, auto, backup, balance, close, connect, create, details, disconnect, estimate, exchange,
+            exit, export, guide, help, history, import, rpc, list, mint, mobile, mv, pay, receive, request, miner, message, monitor,
+            mute, network, node, note, open, otp, ping, pskb, quit, reload, select, server, settings, sweep, track, transfer, utxos,
+            wallet,
             // halt,
             // theme,  start, stop
         ]

@@ -439,8 +439,15 @@ mod tests {
 
             let verifiable_tx = signed_tx.as_verifiable();
 
-            let result =
-                tv.validate_populated_transaction_and_get_fee(&verifiable_tx, 0, 0, TxValidationFlags::SkipMassCheck, None, None, None);
+            let result = tv.validate_populated_transaction_and_get_fee(
+                &verifiable_tx,
+                0,
+                0,
+                TxValidationFlags::SkipMassCheck,
+                None,
+                None,
+                None,
+            );
             assert_match!(
                 result,
                 Err(TxRuleError::SignatureInvalid(TxScriptError::ExceededCommittedScriptUnits { .. })),

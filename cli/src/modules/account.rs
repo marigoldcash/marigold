@@ -64,10 +64,18 @@ impl Account {
                 // the same recovery phrase as the vault, so adding a ledger later is
                 // exactly what the wizard promised — until now this fell into
                 // "no private keys found in this wallet" (founder, 2026-09-19).
-                if account_kind == kaspa_wallet_core::account::BIP32_ACCOUNT_KIND && !ctx.wallet().keys().await?.try_next().await?.is_some() {
+                if account_kind == kaspa_wallet_core::account::BIP32_ACCOUNT_KIND
+                    && !ctx.wallet().keys().await?.try_next().await?.is_some()
+                {
                     let name = match account_name {
                         Some(name) => Some(name),
-                        None => Some(ctx.term().ask(false, "Please enter account name (optional, press <enter> to skip): ").await?.trim().to_string()),
+                        None => Some(
+                            ctx.term()
+                                .ask(false, "Please enter account name (optional, press <enter> to skip): ")
+                                .await?
+                                .trim()
+                                .to_string(),
+                        ),
                     };
                     let (wallet_secret, _) = ctx.ask_wallet_secret(None).await?;
                     let store = ctx.wallet().store().as_note_key_store()?;
@@ -82,10 +90,18 @@ impl Account {
                     let prv_key_data_id = ctx.wallet().create_prv_key_data(&wallet_secret, args).await?;
                     let account = ctx
                         .wallet()
-                        .create_account_bip32(&wallet_secret, prv_key_data_id, None, kaspa_wallet_core::wallet::args::AccountCreateArgsBip32::new(name, None))
+                        .create_account_bip32(
+                            &wallet_secret,
+                            prv_key_data_id,
+                            None,
+                            kaspa_wallet_core::wallet::args::AccountCreateArgsBip32::new(name, None),
+                        )
                         .await?;
                     tprintln!(ctx, "\naccount created: {}\n", account.get_list_string()?);
-                    tprintln!(ctx, "The ledger comes from the same recovery phrase as your notes; 'address' shows where to mine or be paid by an exchange.");
+                    tprintln!(
+                        ctx,
+                        "The ledger comes from the same recovery phrase as your notes; 'address' shows where to mine or be paid by an exchange."
+                    );
                     ctx.wallet().select(Some(&account)).await?;
                     return Ok(());
                 }
@@ -103,10 +119,7 @@ impl Account {
                     tprintln!(ctx, "");
                     ctx.term().help(
                         &[
-                            (
-                                "account import mnemonic bip32",
-                                "Import a Bip32 account from a 12 or 24 word mnemonic",
-                            ),
+                            ("account import mnemonic bip32", "Import a Bip32 account from a 12 or 24 word mnemonic"),
                             (
                                 "account import mnemonic multisig [additional keys]",
                                 "Import mnemonic and additional keys for a multisig account",

@@ -15,7 +15,10 @@ use kaspa_consensus_core::{
     coinbase::MinerData,
     config::params::MAINNET_PARAMS,
     constants::TX_VERSION_TOCCATA,
-    hashing::{sighash::{SigHashReusedValuesUnsync, calc_schnorr_signature_hash}, sighash_type::SIG_HASH_ALL},
+    hashing::{
+        sighash::{SigHashReusedValuesUnsync, calc_schnorr_signature_hash},
+        sighash_type::SIG_HASH_ALL,
+    },
     mass::MassCalculator,
     notepool::{
         DenominationTag, FreshnessAnchor, MintOp, NewNote, PoolOp, RedeemOp, SignedGroup, TransferOp, hashing as pool_hashing,
@@ -116,7 +119,10 @@ impl Wallet {
         let msg_hash = pool_hashing::signing_hash(2, &serials, &[], outputs_hash, anchor);
         let msg = secp256k1::Message::from_digest(msg_hash.into());
         let signature = *secp256k1::SECP256K1.sign_schnorr_no_aux_rand(&msg, &self.keypair).as_ref();
-        PoolOp::Redeem(RedeemOp { consumed: vec![SignedGroup { serials, signature }], freshness: FreshnessAnchor { anchor_daa_score: anchor } })
+        PoolOp::Redeem(RedeemOp {
+            consumed: vec![SignedGroup { serials, signature }],
+            freshness: FreshnessAnchor { anchor_daa_score: anchor },
+        })
     }
 }
 
@@ -154,7 +160,13 @@ fn config() -> crate::config::Config {
 /// own (`consensus/src/processes/coinbase.rs`'s `expected_coinbase_transaction` loops
 /// `ghostdag_data.mergeset_blues`, not the current block). Returns the funding
 /// `(outpoint, entry)` and B's hash (the new tip for whatever the caller builds next).
-async fn fund(consensus: &TestConsensus, wallet: &Wallet, parent: Hash, hash_a: Hash, hash_b: Hash) -> (TransactionOutpoint, UtxoEntry, Hash) {
+async fn fund(
+    consensus: &TestConsensus,
+    wallet: &Wallet,
+    parent: Hash,
+    hash_a: Hash,
+    hash_b: Hash,
+) -> (TransactionOutpoint, UtxoEntry, Hash) {
     let block_a = consensus.build_utxo_valid_block_with_parents(hash_a, vec![parent], MinerData::new(wallet.script(), vec![]), vec![]);
     let daa_score_a = block_a.header.daa_score;
     consensus.validate_and_insert_block(block_a.to_immutable()).virtual_state_task.await.unwrap();
@@ -177,7 +189,8 @@ async fn fund(consensus: &TestConsensus, wallet: &Wallet, parent: Hash, hash_a: 
 /// hand-built test path goes through, so it's done explicitly here instead.
 fn commit_storage_mass(tx: Transaction, entries: Vec<UtxoEntry>) -> Transaction {
     let populated = kaspa_consensus_core::tx::PopulatedTransaction::new(&tx, entries);
-    let storage_mass = MassCalculator::new_with_consensus_params(&MAINNET_PARAMS).calc_contextual_masses(&populated).unwrap().storage_mass;
+    let storage_mass =
+        MassCalculator::new_with_consensus_params(&MAINNET_PARAMS).calc_contextual_masses(&populated).unwrap().storage_mass;
     tx.set_storage_mass(storage_mass);
     tx
 }
@@ -201,7 +214,8 @@ fn mint_funded_with_outputs(
         0,
         PoolOp::Mint(MintOp { new_notes: notes }).encode_payload(),
     );
-    let signed = sign_deterministic(kaspa_consensus_core::tx::SignableTransaction::with_entries(tx, vec![entry.clone()]), &wallet.keypair);
+    let signed =
+        sign_deterministic(kaspa_consensus_core::tx::SignableTransaction::with_entries(tx, vec![entry.clone()]), &wallet.keypair);
     commit_storage_mass(signed.tx, vec![entry])
 }
 
@@ -437,7 +451,8 @@ async fn out_of_window_anchor_op_rejected_in_context() {
 
     // Anchor far in the future of any POV this test can reach.
     let bad_rotate = pool_tx(&alice.rotate(vec![sn], vec![bob.note(DenominationTag::D0_01)], u64::MAX));
-    let miner_data = kaspa_consensus_core::coinbase::MinerData::new(kaspa_consensus_core::tx::ScriptPublicKey::from_vec(0, vec![]), vec![]);
+    let miner_data =
+        kaspa_consensus_core::coinbase::MinerData::new(kaspa_consensus_core::tx::ScriptPublicKey::from_vec(0, vec![]), vec![]);
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         consensus.build_utxo_valid_block_with_parents(12.into(), vec![11.into()], miner_data, vec![bad_rotate])
     }));
@@ -727,8 +742,7 @@ async fn malformed_pool_payload_rejected_in_block() {
 
     // Discriminant 3 doesn't exist (only Mint=0, Transfer=1, Redeem=2) — same invalid
     // payload consensus-core's own `malformed_pool_op_discriminant_rejected` uses.
-    let malformed =
-        Transaction::new(TX_VERSION_TOCCATA, vec![], vec![], 0, SUBNETWORK_ID_NOTE_POOL, 0, vec![3u8]);
+    let malformed = Transaction::new(TX_VERSION_TOCCATA, vec![], vec![], 0, SUBNETWORK_ID_NOTE_POOL, 0, vec![3u8]);
     let miner_data = MinerData::new(kaspa_consensus_core::tx::ScriptPublicKey::from_vec(0, vec![]), vec![]);
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         consensus.build_utxo_valid_block_with_parents(11.into(), vec![genesis], miner_data, vec![malformed])
@@ -996,7 +1010,8 @@ async fn locked_note_lands_and_answers_to_the_right_key() {
 
     // Alice cannot take it back while the lock holds: her rotate is refused in
     // context (the block builder panics on it, as it does for a stale anchor).
-    let miner_data = kaspa_consensus_core::coinbase::MinerData::new(kaspa_consensus_core::tx::ScriptPublicKey::from_vec(0, vec![]), vec![]);
+    let miner_data =
+        kaspa_consensus_core::coinbase::MinerData::new(kaspa_consensus_core::tx::ScriptPublicKey::from_vec(0, vec![]), vec![]);
     let refused = |tx: Transaction, hash: u64| {
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             consensus.build_utxo_valid_block_with_parents(hash.into(), vec![12.into()], miner_data.clone(), vec![tx])

@@ -171,12 +171,8 @@ impl KaspaNetworkSimulator {
     /// shared consensus, so this is a real cross-node agreement check.
     pub fn run_and_verify_pool_root_agreement(&mut self, until: u64) -> ConsensusWrapper {
         self.simulation.run(until);
-        let roots: Vec<kaspa_hashes::Hash> =
-            self.consensuses.iter().map(|(consensus, _, _)| consensus.get_pool_root()).collect();
-        assert!(
-            roots.windows(2).all(|w| w[0] == w[1]),
-            "miners disagree on the note-pool root after the simulation: {roots:?}"
-        );
+        let roots: Vec<kaspa_hashes::Hash> = self.consensuses.iter().map(|(consensus, _, _)| consensus.get_pool_root()).collect();
+        assert!(roots.windows(2).all(|w| w[0] == w[1]), "miners disagree on the note-pool root after the simulation: {roots:?}");
         for (consensus, handles, _) in self.consensuses.drain(1..) {
             consensus.shutdown(handles);
         }

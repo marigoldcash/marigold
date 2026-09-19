@@ -403,9 +403,20 @@ mod paging_tests {
         let b = spk(4);
         let (_db, store) = store_with(&[(a.clone(), &[10, 11, 12])]);
 
-        assert!(store.get_utxos_page_from_script_public_key(&b, None, 5).unwrap().is_empty(), "nothing under an address that holds nothing");
-        assert_eq!(store.get_utxos_page_from_script_public_key(&a, None, 1_000).unwrap().len(), 3, "a limit above the count returns the lot");
-        assert_eq!(store.get_utxos_page_from_script_public_key(&a, None, 0).unwrap().len(), 0, "a zero limit returns nothing rather than everything");
+        assert!(
+            store.get_utxos_page_from_script_public_key(&b, None, 5).unwrap().is_empty(),
+            "nothing under an address that holds nothing"
+        );
+        assert_eq!(
+            store.get_utxos_page_from_script_public_key(&a, None, 1_000).unwrap().len(),
+            3,
+            "a limit above the count returns the lot"
+        );
+        assert_eq!(
+            store.get_utxos_page_from_script_public_key(&a, None, 0).unwrap().len(),
+            0,
+            "a zero limit returns nothing rather than everything"
+        );
     }
 
     /// Buckets are per script public key; a page of one address must never

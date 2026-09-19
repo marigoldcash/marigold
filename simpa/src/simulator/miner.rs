@@ -9,8 +9,7 @@ use kaspa_consensus_core::coinbase::MinerData;
 use kaspa_consensus_core::constants::{TX_VERSION, TX_VERSION_TOCCATA};
 use kaspa_consensus_core::mass::MassCalculator;
 use kaspa_consensus_core::notepool::{
-    DenominationTag, FreshnessAnchor, MintOp, NewNote, PoolOp, RedeemOp, SignedGroup, TransferOp,
-    hashing as pool_hashing,
+    DenominationTag, FreshnessAnchor, MintOp, NewNote, PoolOp, RedeemOp, SignedGroup, TransferOp, hashing as pool_hashing,
 };
 use kaspa_consensus_core::sign::sign;
 use kaspa_consensus_core::subnets::{SUBNETWORK_ID_NATIVE, SUBNETWORK_ID_NOTE_POOL, SubnetworkId};
@@ -341,10 +340,10 @@ impl Miner {
         // Matches `get_spendable_entry`'s own maturity check exactly (this is a free
         // function so it can't call that `&self` method directly).
         let is_spendable = |entry: &UtxoEntry| {
-            entry.amount >= 2
-                && !(entry.is_coinbase && (daa_score as i64 - entry.block_daa_score as i64) <= coinbase_maturity as i64)
+            entry.amount >= 2 && !(entry.is_coinbase && (daa_score as i64 - entry.block_daa_score as i64) <= coinbase_maturity as i64)
         };
-        let outpoint = possible_unspent_outpoints.iter().copied().find(|o| virtual_utxo_view.get(o).is_some_and(|e| is_spendable(&e)))?;
+        let outpoint =
+            possible_unspent_outpoints.iter().copied().find(|o| virtual_utxo_view.get(o).is_some_and(|e| is_spendable(&e)))?;
         let entry = virtual_utxo_view.get(&outpoint)?;
         let denomination = (0..8u8)
             .rev()
@@ -369,7 +368,8 @@ impl Miner {
             produced,
             freshness: FreshnessAnchor { anchor_daa_score },
         });
-        let tx = Transaction::new_non_finalized(TX_VERSION_TOCCATA, vec![], vec![], 0, SUBNETWORK_ID_NOTE_POOL, 0, op.encode_payload());
+        let tx =
+            Transaction::new_non_finalized(TX_VERSION_TOCCATA, vec![], vec![], 0, SUBNETWORK_ID_NOTE_POOL, 0, op.encode_payload());
         MutableTransaction::with_entries(tx, vec![])
     }
 
@@ -384,7 +384,8 @@ impl Miner {
         let msg_hash = pool_hashing::signing_hash(2, &[sn], &[], outputs_hash, anchor_daa_score);
         let msg = secp256k1::Message::from_digest(msg_hash.into());
         let signature = *schnorr_key.sign_schnorr(msg).as_ref();
-        let op = RedeemOp { consumed: vec![SignedGroup { serials: vec![sn], signature }], freshness: FreshnessAnchor { anchor_daa_score } };
+        let op =
+            RedeemOp { consumed: vec![SignedGroup { serials: vec![sn], signature }], freshness: FreshnessAnchor { anchor_daa_score } };
         let tx = Transaction::new_non_finalized(
             TX_VERSION_TOCCATA,
             vec![],

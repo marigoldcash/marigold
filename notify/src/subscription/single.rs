@@ -190,7 +190,12 @@ pub struct NotesChangedSubscription {
 }
 
 impl NotesChangedSubscription {
-    pub fn new(active: bool, all: bool, serials: Arc<std::collections::BTreeSet<kaspa_hashes::Hash>>, pks: Arc<std::collections::BTreeSet<[u8; 32]>>) -> Self {
+    pub fn new(
+        active: bool,
+        all: bool,
+        serials: Arc<std::collections::BTreeSet<kaspa_hashes::Hash>>,
+        pks: Arc<std::collections::BTreeSet<[u8; 32]>>,
+    ) -> Self {
         Self { active, all, serials, pks }
     }
 

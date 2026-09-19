@@ -87,9 +87,9 @@ pub const GENESIS: GenesisBlock = GenesisBlock {
     ]),
     utxo_commitment: EMPTY_MUHASH,
     timestamp: 1786742438234, // Phase 2 development placeholder; real launch epoch set at P9.5
-    bits: 0x1e21bc1c, // Easy start (~zero launch hashrate), copied from the devnet approach
-    nonce: 0,          // Genesis is trusted by definition; no real PoW needed
-    daa_score: 0,      // No checkpoint history — this is a from-scratch genesis
+    bits: 0x1e21bc1c,         // Easy start (~zero launch hashrate), copied from the devnet approach
+    nonce: 0,                 // Genesis is trusted by definition; no real PoW needed
+    daa_score: 0,             // No checkpoint history — this is a from-scratch genesis
     #[rustfmt::skip]
     coinbase_payload: &[
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Blue score
@@ -119,7 +119,7 @@ pub const TESTNET_GENESIS: GenesisBlock = GenesisBlock {
     ]),
     utxo_commitment: EMPTY_MUHASH,
     timestamp: 1786742438234, // Phase 2 development placeholder; real launch epoch set at P9.5
-    bits: 0x1e7fffff, // Kept as-is — already testnet-grade difficulty
+    bits: 0x1e7fffff,         // Kept as-is — already testnet-grade difficulty
     nonce: 0x14582,
     daa_score: 0,
     #[rustfmt::skip]

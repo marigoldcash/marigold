@@ -26,11 +26,21 @@ impl Import {
         let (count, verified) = notepool::import_keys(&ctx.wallet(), wallet_secret, bearers).await?;
         ctx.record("imported", total, 0, format!("{count} note keys from another wallet"), "");
         tprintln!(ctx, "");
-        tprintln!(ctx, "Imported {count} note key(s){}.", if verified { ", checked against the chain" } else { " — not checked, no network; 'note verify' does that once connected" });
+        tprintln!(
+            ctx,
+            "Imported {count} note key(s){}.",
+            if verified {
+                ", checked against the chain"
+            } else {
+                " — not checked, no network; 'note verify' does that once connected"
+            }
+        );
         tprintln!(
             ctx,
             "{}",
-            crate::ui::dim("These keys came from another wallet, which can still spend them until you rotate: 'note rotate all' (0.01 a group) makes them yours alone.")
+            crate::ui::dim(
+                "These keys came from another wallet, which can still spend them until you rotate: 'note rotate all' (0.01 a group) makes them yours alone."
+            )
         );
         tprintln!(ctx, "");
         Ok(())

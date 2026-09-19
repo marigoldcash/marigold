@@ -420,11 +420,8 @@ mod tests {
     fn pool_op_borsh_discriminants_match_op_type_numbering() {
         // NotePoolSigningHash's op_type: 0=Mint (unused, no note signature), 1=Transfer, 2=Redeem.
         let mint = PoolOp::Mint(MintOp { new_notes: vec![] });
-        let transfer = PoolOp::Transfer(TransferOp {
-            consumed: vec![],
-            produced: vec![],
-            freshness: FreshnessAnchor { anchor_daa_score: 0 },
-        });
+        let transfer =
+            PoolOp::Transfer(TransferOp { consumed: vec![], produced: vec![], freshness: FreshnessAnchor { anchor_daa_score: 0 } });
         let redeem = PoolOp::Redeem(RedeemOp { consumed: vec![], freshness: FreshnessAnchor { anchor_daa_score: 0 } });
 
         assert_eq!(borsh::to_vec(&mint).unwrap()[0], 0);
@@ -461,9 +458,7 @@ mod tests {
 
     #[test]
     fn mint_op_round_trip_five_notes() {
-        let op = PoolOp::Mint(MintOp {
-            new_notes: (0..5).map(|i| NewNote { d: DenominationTag::D1, pk: sample_pk(i) }).collect(),
-        });
+        let op = PoolOp::Mint(MintOp { new_notes: (0..5).map(|i| NewNote { d: DenominationTag::D1, pk: sample_pk(i) }).collect() });
         let bytes = borsh::to_vec(&op).unwrap();
         // 1 + 4 + 33*5 = 170 bytes, per P5.2's worked example.
         assert_eq!(bytes.len(), 170);
@@ -512,10 +507,7 @@ mod tests {
     #[test]
     fn transfer_op_round_trip_merchant_sweep() {
         let op = PoolOp::Transfer(TransferOp {
-            consumed: vec![SignedGroup {
-                serials: (0..20).map(sample_hash).collect(),
-                signature: sample_sig(0xFF),
-            }],
+            consumed: vec![SignedGroup { serials: (0..20).map(sample_hash).collect(), signature: sample_sig(0xFF) }],
             produced: (0..20).map(|i| NewNote { d: DenominationTag::D1, pk: sample_pk(i) }).collect(),
             freshness: FreshnessAnchor { anchor_daa_score: 7 },
         });
@@ -529,10 +521,7 @@ mod tests {
     #[test]
     fn redeem_op_round_trip() {
         let op = PoolOp::Redeem(RedeemOp {
-            consumed: vec![SignedGroup {
-                serials: (0..3).map(sample_hash).collect(),
-                signature: sample_sig(0x77),
-            }],
+            consumed: vec![SignedGroup { serials: (0..3).map(sample_hash).collect(), signature: sample_sig(0x77) }],
             freshness: FreshnessAnchor { anchor_daa_score: 42 },
         });
         let bytes = borsh::to_vec(&op).unwrap();
@@ -561,7 +550,10 @@ mod tests {
         // with several serials, and a sizeable produced list — exercises multi-group
         // encoding, which the worked-example tests above (all single-group) don't.
         let consumed: Vec<SignedGroup> = (0..10u8)
-            .map(|g| SignedGroup { serials: (0..10).map(|i| sample_hash(g.wrapping_mul(10).wrapping_add(i))).collect(), signature: sample_sig(g) })
+            .map(|g| SignedGroup {
+                serials: (0..10).map(|i| sample_hash(g.wrapping_mul(10).wrapping_add(i))).collect(),
+                signature: sample_sig(g),
+            })
             .collect();
         let produced: Vec<NewNote> = (0..50u8).map(|i| NewNote { d: DenominationTag::D10, pk: sample_pk(i) }).collect();
         let op = PoolOp::Transfer(TransferOp { consumed, produced, freshness: FreshnessAnchor { anchor_daa_score: u64::MAX } });

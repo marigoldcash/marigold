@@ -82,7 +82,10 @@ impl Connect {
             if arg_or_server_address.is_none() && !own_sync_running {
                 if let Some(status) = probe_local_node(network_id).await {
                     if status.available {
-                        tpara!(ctx, "Found the Marigold miner running in the background on this machine — using its copy of the network.");
+                        tpara!(
+                            ctx,
+                            "Found the Marigold miner running in the background on this machine — using its copy of the network."
+                        );
                     } else {
                         tpara!(ctx, "A Marigold node is already running on this machine — using it.");
                     }
@@ -101,7 +104,12 @@ impl Connect {
                     SyncStart::Settled => return Ok(()),
                     SyncStart::PublicMeanwhile(rpc) => {
                         let target = public.expect("offered only when there is one");
-                        let dial = ConnectOptions { block_async_connect: true, strategy: ConnectStrategy::Fallback, url: Some(target), ..Default::default() };
+                        let dial = ConnectOptions {
+                            block_async_connect: true,
+                            strategy: ConnectStrategy::Fallback,
+                            url: Some(target),
+                            ..Default::default()
+                        };
                         if let Err(err) = wrpc_client.connect(Some(dial)).await {
                             tprintln!(ctx, "{}", style("Could not reach the public computer.").yellow());
                             if ctx.advanced() {
@@ -135,9 +143,7 @@ impl Connect {
                 // to inherit wholesale. Marigold's testnet-10 answers to the
                 // same network-id string as Kaspa's, so being handed one of
                 // their nodes would attach the wallet to a different chain.
-                Some("public") | None
-                    if !kaspa_wrpc_client::resolver::public_nodes(network_id).is_empty() =>
-                {
+                Some("public") | None if !kaspa_wrpc_client::resolver::public_nodes(network_id).is_empty() => {
                     let node = kaspa_wrpc_client::resolver::public_nodes(network_id).remove(0);
                     let which = if network_id.is_mainnet() { "" } else { " test" };
                     tprintln!(ctx, "Connecting to a public Marigold{which} computer.");
@@ -296,7 +302,11 @@ impl Connect {
                 ctx.note_remote_miner(status.as_ref());
                 if let Some(status) = status {
                     if status.mining {
-                        tprintln!(ctx, "The background miner is at work: {} — 'mine status' for more.", crate::miner::format_hashrate(status.hashrate));
+                        tprintln!(
+                            ctx,
+                            "The background miner is at work: {} — 'mine status' for more.",
+                            crate::miner::format_hashrate(status.hashrate)
+                        );
                     } else {
                         tprintln!(ctx, "The background miner is idle — 'mine start' sets it going.");
                     }
@@ -434,7 +444,10 @@ async fn start_network_sync(ctx: &Arc<KaspaCli>, public_available: bool) -> Resu
         }
         tprintln!(ctx, "There is no public computer to use. Staying on your own copy while it catches up.");
     } else {
-        tpara!(ctx, "Staying on your own. The ledger stays unread and some things wait until sync has caught up — 'connect status' shows progress.");
+        tpara!(
+            ctx,
+            "Staying on your own. The ledger stays unread and some things wait until sync has caught up — 'connect status' shows progress."
+        );
     }
     ctx.adopt_embedded_node(rpc).await?;
     tprintln!(ctx, "");

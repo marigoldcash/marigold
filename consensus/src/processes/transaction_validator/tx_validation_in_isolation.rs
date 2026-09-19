@@ -6,8 +6,8 @@ use crate::constants::{MAX_SOMPI, TX_VERSION_TOCCATA};
 use kaspa_consensus_core::finality_anchor::{AnchorPayload, verify_anchor, verify_equivocation_evidence};
 use kaspa_consensus_core::notepool::{PoolOp, validate_stateless};
 use kaspa_consensus_core::subnets::{
-    CoinbaseSubnetwork, NativeSubnetwork, SUBNETWORK_NAMESPACE_LEN, SUBNETWORK_ZERO_TAIL_LEN, SUBNETWORK_ID_FINALITY_ANCHOR,
-    SUBNETWORK_ID_NOTE_POOL, Subnetwork,
+    CoinbaseSubnetwork, NativeSubnetwork, SUBNETWORK_ID_FINALITY_ANCHOR, SUBNETWORK_ID_NOTE_POOL, SUBNETWORK_NAMESPACE_LEN,
+    SUBNETWORK_ZERO_TAIL_LEN, Subnetwork,
 };
 use kaspa_consensus_core::tx::Transaction;
 use std::collections::HashSet;

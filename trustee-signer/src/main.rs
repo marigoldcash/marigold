@@ -77,7 +77,11 @@ async fn main() {
         let (sk, pk) = secp256k1::generate_keypair(&mut secp256k1::rand::thread_rng());
         let (xonly, _) = pk.x_only_public_key();
         let hex_secret = faster_hex::hex_string(&sk.secret_bytes());
-        let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(path).expect("cannot create the key file (does it exist already?)");
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+            .expect("cannot create the key file (does it exist already?)");
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;

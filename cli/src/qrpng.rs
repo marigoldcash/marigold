@@ -41,7 +41,11 @@ pub fn qr_png(text: &str) -> Option<Vec<u8>> {
         let my = y / SCALE;
         for x in 0..side {
             let mx = x / SCALE;
-            let dark = my >= QUIET && mx >= QUIET && my < QUIET + modules && mx < QUIET + modules && colors[(my - QUIET) * modules + (mx - QUIET)] == qrcode::Color::Dark;
+            let dark = my >= QUIET
+                && mx >= QUIET
+                && my < QUIET + modules
+                && mx < QUIET + modules
+                && colors[(my - QUIET) * modules + (mx - QUIET)] == qrcode::Color::Dark;
             raw.push(if dark { 0x00 } else { 0xFF });
         }
     }

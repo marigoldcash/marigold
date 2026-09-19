@@ -2,12 +2,13 @@ use crate::protowire::{
     BlockAddedNotificationMessage, KaspadResponse, NewBlockTemplateNotificationMessage, RpcNotifyCommand, kaspad_response::Payload,
 };
 use crate::protowire::{
-    FinalityConflictNotificationMessage, FinalityConflictResolvedNotificationMessage, NotifyPruningPointUtxoSetOverrideRequestMessage,
-    NotifyPruningPointUtxoSetOverrideResponseMessage, NotifyUtxosChangedRequestMessage, NotifyUtxosChangedResponseMessage,
-    PruningPointUtxoSetOverrideNotificationMessage, SinkBlueScoreChangedNotificationMessage,
-    StopNotifyingPruningPointUtxoSetOverrideRequestMessage, StopNotifyingPruningPointUtxoSetOverrideResponseMessage,
-    NotesChangedNotificationMessage, StopNotifyingUtxosChangedRequestMessage, StopNotifyingUtxosChangedResponseMessage,
-    UtxosChangedNotificationMessage, VirtualChainChangedNotificationMessage, VirtualDaaScoreChangedNotificationMessage,
+    FinalityConflictNotificationMessage, FinalityConflictResolvedNotificationMessage, NotesChangedNotificationMessage,
+    NotifyPruningPointUtxoSetOverrideRequestMessage, NotifyPruningPointUtxoSetOverrideResponseMessage,
+    NotifyUtxosChangedRequestMessage, NotifyUtxosChangedResponseMessage, PruningPointUtxoSetOverrideNotificationMessage,
+    SinkBlueScoreChangedNotificationMessage, StopNotifyingPruningPointUtxoSetOverrideRequestMessage,
+    StopNotifyingPruningPointUtxoSetOverrideResponseMessage, StopNotifyingUtxosChangedRequestMessage,
+    StopNotifyingUtxosChangedResponseMessage, UtxosChangedNotificationMessage, VirtualChainChangedNotificationMessage,
+    VirtualDaaScoreChangedNotificationMessage,
 };
 use crate::{from, try_from};
 use kaspa_notify::subscription::Command;
