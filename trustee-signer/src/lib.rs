@@ -280,7 +280,12 @@ impl TrusteeSigner {
     async fn tick(&mut self) -> Result<(), String> {
         let dag_info = self.client.get_block_dag_info().await.map_err(|e| e.to_string())?;
         let virtual_daa_score = dag_info.virtual_daa_score;
-        let target_bound = virtual_daa_score.saturating_sub(self.config.depth);
+        // The bound snaps to the cadence grid. Signers on different nodes see tips
+        // a few scores apart; an unsnapped bound gave the two hosts of the testnet
+        // quorum two different target blocks every interval, so no assembly ever
+        // held three partials (2026-09-19). On the grid every signer names the
+        // same score, and the same chain block at that depth.
+        let target_bound = virtual_daa_score.saturating_sub(self.config.depth) / self.config.interval * self.config.interval;
         if target_bound < self.last_signed.score.saturating_add(self.config.interval) {
             return Ok(()); // cadence: nothing eligible yet
         }
