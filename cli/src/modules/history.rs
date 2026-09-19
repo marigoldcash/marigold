@@ -254,7 +254,7 @@ impl History {
         // migration still has the old folder, so both are cleared rather
         // than swapping one wrong answer for another.
         let mut targets: Vec<std::path::PathBuf> = Vec::new();
-        let mut push_if_dir = |path: std::path::PathBuf, targets: &mut Vec<std::path::PathBuf>| {
+        let push_if_dir = |path: std::path::PathBuf, targets: &mut Vec<std::path::PathBuf>| {
             if path.is_dir() {
                 targets.push(path);
             }

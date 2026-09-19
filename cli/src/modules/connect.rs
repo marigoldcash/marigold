@@ -64,7 +64,7 @@ impl Connect {
             // A cleared setting is stored as an empty string; treat it as absent.
             // A remembered "public", or a remembered address on this machine,
             // is not a target either: bare 'connect' means the network here.
-            let typed_a_target = argv.first().is_some();
+            let typed_a_target = !argv.is_empty();
             let mut arg_or_server_address = argv.first().cloned().or_else(|| {
                 ctx.wallet()
                     .settings()
@@ -79,18 +79,16 @@ impl Connect {
             let own_sync_running = ctx.embedded_node_running();
             #[cfg(not(feature = "embedded-node"))]
             let own_sync_running = false;
-            if arg_or_server_address.is_none() && !own_sync_running {
-                if let Some(status) = probe_local_node(network_id).await {
-                    if status.available {
-                        tpara!(
-                            ctx,
-                            "Found the Marigold miner running in the background on this machine — using its copy of the network."
-                        );
-                    } else {
-                        tpara!(ctx, "A Marigold node is already running on this machine — using it.");
-                    }
-                    arg_or_server_address = Some(format!("127.0.0.1:{}", network_id.default_borsh_rpc_port()));
+            if arg_or_server_address.is_none()
+                && !own_sync_running
+                && let Some(status) = probe_local_node(network_id).await
+            {
+                if status.available {
+                    tpara!(ctx, "Found the Marigold miner running in the background on this machine — using its copy of the network.");
+                } else {
+                    tpara!(ctx, "A Marigold node is already running on this machine — using it.");
                 }
+                arg_or_server_address = Some(format!("127.0.0.1:{}", network_id.default_borsh_rpc_port()));
             }
 
             // Bare 'connect' with the network compiled in: start syncing here.
@@ -288,8 +286,13 @@ impl Connect {
                 tprintln!(ctx, "Public computer connected.");
             }
             #[cfg(not(feature = "embedded-node"))]
-            if is_public {
-                tprintln!(ctx, "Public computer connected.");
+            {
+                // Set above for the build with a node; read here so this one
+                // does not call the assignment dead.
+                let _ = fell_back;
+                if is_public {
+                    tprintln!(ctx, "Public computer connected.");
+                }
             }
 
             // A node on this machine may have the miner program in it. If so
@@ -330,23 +333,22 @@ impl Connect {
             // case, which is how most people connect and which previously
             // recorded nothing, so the wallet could never offer to reconnect.
             let recorded = argv.first().cloned().or_else(|| ctx.wallet().settings().get::<String>(WalletSettings::Server));
-            if let Some(explicit) = recorded.as_ref() {
-                if explicit != "public" {
-                    ctx.wallet().settings().set(WalletSettings::Server, explicit.clone()).await.ok();
-                    if ctx.wallet().is_open() {
-                        if let Some(descriptor) = ctx.wallet().store().descriptor() {
-                            if let Ok(meta) = ctx.wallet().store().client_metadata(&descriptor.filename).await {
-                                // Absent metadata means a pre-v1 wallet: remembering is the
-                                // default. An explicit remember=false is an opt-out — honor it.
-                                let remember = meta.as_ref().map(|m| m.remember).unwrap_or(true);
-                                if remember {
-                                    let mut meta = meta.unwrap_or_default();
-                                    meta.remember = true;
-                                    meta.server = Some(explicit.clone());
-                                    ctx.wallet().store().set_client_metadata(&descriptor.filename, Some(meta)).await.ok();
-                                }
-                            }
-                        }
+            if let Some(explicit) = recorded.as_ref()
+                && explicit != "public"
+            {
+                ctx.wallet().settings().set(WalletSettings::Server, explicit.clone()).await.ok();
+                if ctx.wallet().is_open()
+                    && let Some(descriptor) = ctx.wallet().store().descriptor()
+                    && let Ok(meta) = ctx.wallet().store().client_metadata(&descriptor.filename).await
+                {
+                    // Absent metadata means a pre-v1 wallet: remembering is the
+                    // default. An explicit remember=false is an opt-out — honor it.
+                    let remember = meta.as_ref().map(|m| m.remember).unwrap_or(true);
+                    if remember {
+                        let mut meta = meta.unwrap_or_default();
+                        meta.remember = true;
+                        meta.server = Some(explicit.clone());
+                        ctx.wallet().store().set_client_metadata(&descriptor.filename, Some(meta)).await.ok();
                     }
                 }
             }

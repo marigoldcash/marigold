@@ -62,7 +62,6 @@ kaspa-utils.workspace = true
 kaspa-wallet-core.workspace = true
 kaspa-wallet-keys.workspace = true
 kaspa-wallet-pskt.workspace = true
-kaspa-grpc-client.workspace = true
 kaspa-wrpc-client.workspace = true
 # The Telegram Bot API, which takes every method as a GET.
 workflow-http.workspace = true
@@ -111,6 +110,9 @@ features = [
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread"] }
+# gRPC pulls tonic, hyper and mio, none of which build for the browser; the
+# only callers are the headless miner and `serve`, which are native anyway.
+kaspa-grpc-client.workspace = true
 
 
 [dev-dependencies]

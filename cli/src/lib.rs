@@ -10,9 +10,13 @@ pub mod extensions;
 pub mod headless;
 mod helpers;
 mod imports;
+// The sync-progress side of the log sink is read only by the embedded node.
+#[cfg_attr(not(feature = "embedded-node"), allow(dead_code))]
 pub(crate) mod log_sink;
 mod matchers;
-#[cfg(feature = "embedded-node")]
+// Not feature-gated: `cores()`, `format_hashrate` and the `MinerControl`
+// plumbing are used by the status paths whether or not a node is compiled
+// in, and everything the module needs is an unconditional dependency.
 pub mod miner;
 pub mod modules;
 mod notifier;

@@ -130,13 +130,17 @@ fn deprioritise_current_thread() {
     }
 }
 
-/// Anything else gets the strongest thing it has, which is weaker.
-#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+/// Any other Unix gets the strongest thing it has, which is weaker.
+#[cfg(all(unix, not(target_os = "linux"), not(target_os = "macos")))]
 fn deprioritise_current_thread() {
     unsafe {
         libc::setpriority(libc::PRIO_PROCESS, 0, 19);
     }
 }
+
+/// Anywhere else, the browser included, there is no thread to slow down.
+#[cfg(not(any(unix, windows)))]
+fn deprioritise_current_thread() {}
 
 impl Miner {
     /// Start hashing. The caller has already established that the wallet is on
