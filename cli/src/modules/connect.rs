@@ -100,6 +100,34 @@ impl Connect {
                     .and_then(|node| wrpc_client.parse_url_with_network_type(node, network_id.into()).ok());
                 match start_network_sync(&ctx, public.is_some()).await? {
                     SyncStart::Settled => return Ok(()),
+                    SyncStart::PublicOnly => {
+                        let target = public.expect("offered only when there is one");
+                        let dial = ConnectOptions {
+                            block_async_connect: true,
+                            strategy: ConnectStrategy::Fallback,
+                            url: Some(target),
+                            ..Default::default()
+                        };
+                        if let Err(err) = wrpc_client.connect(Some(dial)).await {
+                            tprintln!(ctx, "{}", style("Could not reach the public computer.").yellow());
+                            if ctx.advanced() {
+                                tprintln!(ctx, "{}", style(format!("({err})")).dim());
+                            }
+                            return Ok(());
+                        }
+                        for _ in 0..40 {
+                            if ctx.wallet().is_connected() {
+                                break;
+                            }
+                            workflow_core::task::sleep(std::time::Duration::from_millis(250)).await;
+                        }
+                        tprintln!(ctx, "Public computer connected.");
+                        ctx.print_next_step().await;
+                        if ctx.wallet().is_open() {
+                            ctx.request_open_housekeeping();
+                        }
+                        return Ok(());
+                    }
                     SyncStart::PublicMeanwhile(rpc) => {
                         let target = public.expect("offered only when there is one");
                         let dial = ConnectOptions {
@@ -193,6 +221,11 @@ impl Connect {
                     .and_then(|node| wrpc_client.parse_url_with_network_type(node, network_id.into()).ok());
                 match start_network_sync(&ctx, public.is_some()).await? {
                     SyncStart::Settled => return Ok(()),
+                    SyncStart::PublicOnly => {
+                        let target = public.expect("offered only when there is one");
+                        outcome = wrpc_client.connect(Some(dial(target))).await;
+                        is_public = true;
+                    }
                     SyncStart::PublicMeanwhile(rpc) => {
                         let target = public.expect("offered only when there is one");
                         outcome = wrpc_client.connect(Some(dial(target))).await;
@@ -394,6 +427,9 @@ enum SyncStart {
     /// The person wants a public computer meanwhile; the caller dials it and
     /// hands over to this sync once it has caught up.
     PublicMeanwhile(Rpc),
+    /// No sync of our own could start (no room for one); the person chose a
+    /// public computer outright.
+    PublicOnly,
 }
 
 /// Start syncing the network on this machine and say what that means.
@@ -414,7 +450,30 @@ async fn start_network_sync(ctx: &Arc<KaspaCli>, public_available: bool) -> Resu
             tprintln!(ctx, "");
             return Ok(SyncStart::Settled);
         }
-        Ok(None) => return Ok(SyncStart::Settled),
+        Ok(None) => {
+            // Already syncing here: nothing to add. Refused (no room): the
+            // wallet used to stop there, disconnected, on a Mac with a small
+            // disk (founder, 2026-09-19). Offer the public computer, with the
+            // same caveat the catching-up case gives.
+            if ctx.embedded_node_running() || !public_available {
+                return Ok(SyncStart::Settled);
+            }
+            tpara!(
+                ctx,
+                "{}",
+                style("A public computer has all the data already, but whoever runs it sees which notes your wallet asks about.")
+                    .dim()
+            );
+            tprintln!(ctx, "");
+            let answer = ctx.term().ask(false, "Use a public computer instead? [y/N]: ").await?.trim().to_lowercase();
+            tprintln!(ctx, "");
+            if answer.starts_with('y') {
+                return Ok(SyncStart::PublicOnly);
+            }
+            tprintln!(ctx, "Staying disconnected. 'connect public' reaches a public computer whenever you want one.");
+            tprintln!(ctx, "");
+            return Ok(SyncStart::Settled);
+        }
         Ok(Some(rpc)) => rpc,
     };
     if KaspaCli::node_is_synced(&rpc).await {
