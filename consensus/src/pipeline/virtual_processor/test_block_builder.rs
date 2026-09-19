@@ -75,7 +75,7 @@ impl TestBlockBuilder {
         // (that's the entire point of this method), so it must NOT reuse
         // `virtual_stores.pool_smt`'s fast incremental root (which only ever tracks the real
         // one); the same full-rebuild `recompute_pool_commitment` verification will use is the
-        // only mechanism guaranteed correct for an arbitrary pov (POOL-SPEC.md P5.1, FORK-PLAN P6.5).
+        // only mechanism guaranteed correct for an arbitrary pov (POOL-SPEC.md P5.1, PLAN P6.5).
         let pool_commitment = self.recompute_pool_commitment(
             &virtual_read.pool_state,
             &accumulated_pool_diff,

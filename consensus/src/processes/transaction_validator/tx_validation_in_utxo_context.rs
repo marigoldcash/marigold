@@ -35,7 +35,7 @@ pub enum TxValidationFlags {
 
 impl TransactionValidator {
     /// `pool_value` is `Some((consumed_petals, produced_petals))` for a note-pool op
-    /// transaction (FORK-PLAN P6.6) — the pool's own contribution to this transaction's
+    /// transaction (PLAN P6.6) — the pool's own contribution to this transaction's
     /// value conservation, unifying with the ordinary transparent in/out totals exactly
     /// as POOL-SPEC.md P5.2/P5.3 specify per op: `consumed_petals` acts like additional
     /// transparent input value (funding transparent outputs and/or fee — Redeem's role;
@@ -127,7 +127,7 @@ impl TransactionValidator {
     }
 
     /// `reserved` is note-pool value already spoken for beyond the transparent outputs
-    /// (FORK-PLAN P6.6) — `produced_petals` for a pool op that creates notes (Mint,
+    /// (PLAN P6.6) — `produced_petals` for a pool op that creates notes (Mint,
     /// Transfer), zero otherwise. `available` is the transparent input total, already
     /// including any pool `consumed_petals` (Redeem's/Transfer's funding side) — see
     /// `validate_populated_transaction_and_get_fee`'s doc comment for the full picture.

@@ -15,7 +15,7 @@ use super::utxo_set::DbUtxoSetStore;
 /// Used in order to group stores related to the pruning point utxoset under a single lock
 pub struct PruningMetaStores {
     pub utxo_set: DbUtxoSetStore,
-    /// The pool state map positioned at the pruning point (FORK-PLAN P6.8) — the pool
+    /// The pool state map positioned at the pruning point (PLAN P6.8) — the pool
     /// analog of `utxo_set`, advanced in lockstep with it (same loop, same batch, so
     /// `utxoset_position` speaks for both) and served to IBD peers.
     pub pool_state: DbNotePoolStore,

@@ -1,6 +1,6 @@
 # P8.0b verify — a wallet that keeps notes only
 
-The pexpect driver that runs FORK-PLAN P8.0b's verify against the live public testnet. Not CI: it moves real testnet notes on rpc1 and needs a payer wallet that already holds some (P8.0's wallet B, restored from the faucet claim, is the one it was written against).
+The pexpect driver that runs PLAN P8.0b's verify against the live public testnet. Not CI: it moves real testnet notes on rpc1 and needs a payer wallet that already holds some (P8.0's wallet B, restored from the faucet claim, is the one it was written against).
 
 Run from the repo root with a release `marigold-cli` built (`scripts/remote-build.sh`):
 

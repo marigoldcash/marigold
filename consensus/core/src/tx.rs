@@ -563,7 +563,7 @@ pub struct ValidatedTransaction<'a> {
     pub tx: &'a Transaction,
     pub entries: Vec<UtxoEntry>,
     pub calculated_fee: u64,
-    /// `Some` iff this is a note-pool op transaction (FORK-PLAN P6.4): the op's validated
+    /// `Some` iff this is a note-pool op transaction (PLAN P6.4): the op's validated
     /// pool-state mutation, ready to fold into the mergeset's accumulated `PoolDiff`.
     pub validated_pool_op: Option<crate::notepool::ValidatedPoolOp>,
 }

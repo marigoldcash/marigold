@@ -74,7 +74,7 @@ impl From<HeaderWithBlockLevel2> for HeaderWithBlockLevel {
                 utxo_commitment: value.header.utxo_commitment,
                 // Legacy rows (the `Header2` pre-`CompressedParents` shape) necessarily
                 // predate the note-pool feature entirely, so the empty pool's root is the
-                // only consistent backfill (mirrors genesis's treatment, FORK-PLAN P6.5).
+                // only consistent backfill (mirrors genesis's treatment, PLAN P6.5).
                 pool_commitment: <kaspa_hashes::NotePoolSmt as kaspa_smt::SmtHasher>::empty_root(),
                 timestamp: value.header.timestamp,
                 bits: value.header.bits,

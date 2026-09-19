@@ -216,7 +216,7 @@ impl<'a, 'b> PruningPointUtxosetChunkStream<'a, 'b> {
 /// A chunk of note-pool entries
 pub type PoolStateChunk = Vec<(Hash, kaspa_consensus_core::notepool::PoolEntry)>;
 
-/// Stream of pruning-point note-pool state chunks (FORK-PLAN P6.8) — a structural clone
+/// Stream of pruning-point note-pool state chunks (PLAN P6.8) — a structural clone
 /// of [`PruningPointUtxosetChunkStream`]: Done-sentinel terminated, flow-controlled every
 /// [`IBD_BATCH_SIZE`] chunks. Verification is entirely the importer's job (rebuilt SMT
 /// root vs the pruning point header's `pool_commitment`), so the stream itself only

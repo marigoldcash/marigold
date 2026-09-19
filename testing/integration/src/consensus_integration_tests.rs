@@ -431,7 +431,7 @@ async fn header_in_isolation_validation_test() {
         .edit_consensus_params(|p| {
             p.skip_proof_of_work = true;
             // Isolate this test's own toccata-version assertions from the note-pool fork
-            // (FORK-PLAN P6.5): MAINNET_PARAMS has pool_activation active from genesis by
+            // (PLAN P6.5): MAINNET_PARAMS has pool_activation active from genesis by
             // default, which would make block_version() report NOTE_POOL_BLOCK_VERSION here.
             p.pool_activation = ForkActivation::never();
         })

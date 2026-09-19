@@ -172,7 +172,7 @@ impl Subscription for VirtualChainChangedSubscription {
     }
 }
 
-/// Subscription to NotesChanged notifications (FORK-PLAN P6.9), scoped by watched note
+/// Subscription to NotesChanged notifications (PLAN P6.9), scoped by watched note
 /// serials and/or note owner pubkeys. Deliberately simpler than
 /// [`UtxosChangedSubscription`]: notes have no analog of "many independent wallets
 /// watching overlapping address sets through a shared index," which is what motivates

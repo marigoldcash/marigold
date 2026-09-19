@@ -1,7 +1,7 @@
 use crate::Hash;
 use thiserror::Error;
 
-/// Stateless `PoolOp` validation failures (POOL-SPEC.md P5.3, FORK-PLAN P6.3) — checks
+/// Stateless `PoolOp` validation failures (POOL-SPEC.md P5.3, PLAN P6.3) — checks
 /// that hold regardless of any pool/consensus state: structural shape, duplicate
 /// serials, and collection-size bounds. Everything requiring the live pool view is
 /// [`PoolOpContextError`]'s domain instead.
@@ -26,7 +26,7 @@ pub enum PoolOpValidationError {
     LockIndicesNotAscending,
 }
 
-/// Stateful `PoolOp` validation failures (POOL-SPEC.md P5.3's validation orders, FORK-PLAN
+/// Stateful `PoolOp` validation failures (POOL-SPEC.md P5.3's validation orders, PLAN
 /// P6.4) — checks against a live composed pool view. A transaction failing one of these
 /// is excluded from its context's accepted transactions (the P5.3 "first accepted wins"
 /// mechanism), exactly like a UTXO double-spend in a merged block.

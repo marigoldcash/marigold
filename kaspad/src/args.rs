@@ -57,7 +57,7 @@ pub struct Args {
     pub utxoindex: bool,
     /// Accept this node's own wallet's transactions below the relay-fee floor and
     /// keep them out of relay, so its own blocks mine them and the fee comes back
-    /// (FORK-PLAN P8.3b). Set by the wallet's embedded node, not a flag.
+    /// (PLAN P8.3b). Set by the wallet's embedded node, not a flag.
     pub accept_own_below_floor: bool,
     pub reset_db: bool,
     #[serde(rename = "outpeers")]

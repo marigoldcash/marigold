@@ -1391,7 +1391,7 @@ try_from! ( args: GetVirtualChainFromBlockV2Response, IGetVirtualChainFromBlockV
 });
 
 // ---------------------------------------------------------------------------
-// Marigold: the note pool (FORK-PLAN P6.9). A phone that holds mirrored note
+// Marigold: the note pool (PLAN P6.9). A phone that holds mirrored note
 // keys asks whether each serial is still live; a wallet asks the pool's size.
 
 declare! {

@@ -102,7 +102,7 @@ struct Args {
 
     /// Per-block probability [0.0, 1.0] each miner attempts one note-pool op (mint/
     /// rotate/merge/redeem, self-targeted) alongside its ordinary transfers, for
-    /// DAG-level pool stress (FORK-PLAN P6.10). `0.0` (the default) generates none.
+    /// DAG-level pool stress (PLAN P6.10). `0.0` (the default) generates none.
     /// When positive, the simulation additionally asserts every miner's own consensus
     /// instance agrees on the live note-pool root once it completes.
     #[arg(long, default_value_t = 0.0)]
@@ -208,7 +208,7 @@ fn main_impl(mut args: Args) {
     args.bps = if args.testnet11 { TenBps::bps() as f64 } else { args.bps };
     let mut params = if args.testnet11 { SIMNET_PARAMS } else { DEVNET_PARAMS };
     params.crescendo_activation = ForkActivation::always();
-    // FORK-PLAN P6.10: note-pool transactions carry TX_VERSION_TOCCATA, gated the same
+    // PLAN P6.10: note-pool transactions carry TX_VERSION_TOCCATA, gated the same
     // way `crescendo_activation` already is above — without these, `--pool-op-probability`
     // runs reject every pool-op tx as UnknownTxVersion (toccata/pool never activate
     // during a short simulation otherwise). `test_pruning`'s own `toccata_activation`
@@ -540,7 +540,7 @@ mod tests {
     /// time. Rust's default test harness runs `#[test]`s concurrently, so without this
     /// lock the two tests' budgets overlap and can together exceed the real ulimit
     /// (observed as an `fd_budget`/semaphore acquire error during a 5000-block pruning
-    /// run racing FORK-PLAN P6.10's own `test_pool_ops_via_simpa`).
+    /// run racing PLAN P6.10's own `test_pool_ops_via_simpa`).
     static SIMPA_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
@@ -558,7 +558,7 @@ mod tests {
         main_impl(args);
     }
 
-    /// FORK-PLAN P6.10's own verify criterion: "simpa run with pool ops completes with
+    /// PLAN P6.10's own verify criterion: "simpa run with pool ops completes with
     /// all nodes agreeing on the pool root." Three independent miners (not one — a
     /// single miner trivially "agrees" with itself) relay blocks to each other while
     /// each also mints/rotates/merges/redeems its own notes;

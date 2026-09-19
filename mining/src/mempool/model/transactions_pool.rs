@@ -81,7 +81,7 @@ pub(crate) struct TransactionsPool {
     /// Store of UTXOs
     utxo_set: MempoolUtxoSet,
 
-    /// Store of note-pool serial conflict locks (FORK-PLAN P6.7)
+    /// Store of note-pool serial conflict locks (PLAN P6.7)
     pool_note_set: MempoolPoolNoteSet,
 }
 
@@ -223,7 +223,7 @@ impl TransactionsPool {
             .build_selector(&Policy::new(self.config.mempool_mass_cofactors.after().reference, self.config.block_lane_limits));
         // Finality-anchor lane transactions are zero-fee (weight 0 — the sampling
         // selectors would never pick them) yet templates must carry them for the
-        // anchor to reach the chain (FORK-PLAN P6.12). They have no inputs, hence no
+        // anchor to reach the chain (PLAN P6.12). They have no inputs, hence no
         // parents in the pool, hence are always ready. Rare by construction (trustee
         // cadence), so this scan is effectively free.
         let forced: Vec<_> = self
@@ -335,7 +335,7 @@ impl TransactionsPool {
     }
 
     /// Make sure no other transaction in the mempool is already consuming a serial this
-    /// transaction also consumes (FORK-PLAN P6.7 — no RBF variant, first-seen always holds).
+    /// transaction also consumes (PLAN P6.7 — no RBF variant, first-seen always holds).
     pub(crate) fn check_serial_conflicts(&self, transaction: &MutableTransaction) -> RuleResult<()> {
         self.pool_note_set.check_serial_conflicts(transaction)
     }

@@ -345,7 +345,7 @@ pub fn is_legacy_encryption(data: &[u8]) -> bool {
 }
 
 /// Encrypts with `XChaCha20Poly1305` using `key` directly as the cipher key — no
-/// Argon2 stretching (FORK-PLAN P7.6, DECISIONS.md's "Note vault" entry). Argon2
+/// Argon2 stretching (PLAN P7.6, DECISIONS.md's "Note vault" entry). Argon2
 /// exists in [`encrypt_xchacha20poly1305`] to slow down brute-forcing a *human*
 /// password; it's pure waste (tens of ms per call, deliberately) when `key` is
 /// already 32 bytes of CSPRNG output, as the note vault's key `K` is — every

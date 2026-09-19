@@ -413,7 +413,7 @@ pub trait Account: AnySync + Send + Sync + 'static {
     }
 
     /// Mint `amount_petals` worth of notes into the P7.1 note key database, funded
-    /// from this account's transparent balance (FORK-PLAN P7.2). See
+    /// from this account's transparent balance (PLAN P7.2). See
     /// `account::notepool` for the construction details.
     async fn mint(
         self: Arc<Self>,
@@ -426,19 +426,19 @@ pub trait Account: AnySync + Send + Sync + 'static {
         notepool::mint(self.as_dyn_arc(), wallet_secret, payment_secret, amount_petals, fee_rate, abortable).await
     }
 
-    /// Redeem notes back to transparent balance (FORK-PLAN P7.2). See
+    /// Redeem notes back to transparent balance (PLAN P7.2). See
     /// `account::notepool` for the construction details.
     async fn redeem(self: Arc<Self>, wallet_secret: Secret, selection: notepool::RedeemSelection) -> Result<notepool::RedeemResult> {
         notepool::redeem(self.as_dyn_arc(), wallet_secret, selection).await
     }
 
-    /// Rotate owned notes to fresh Cold keys (FORK-PLAN P7.3; the P5.6 receive
+    /// Rotate owned notes to fresh Cold keys (PLAN P7.3; the P5.6 receive
     /// flow's step 3 and the future P7.4 isolation primitive).
     async fn rotate_notes(self: Arc<Self>, wallet_secret: Secret, serials: Vec<Hash>) -> Result<notepool::TransferResult> {
         notepool::rotate_notes(self.wallet(), wallet_secret, serials).await
     }
 
-    /// Import a bearer note and immediately rotate it (FORK-PLAN P7.3 flow (a)).
+    /// Import a bearer note and immediately rotate it (PLAN P7.3 flow (a)).
     async fn bearer_import(
         self: Arc<Self>,
         wallet_secret: Secret,
@@ -447,7 +447,7 @@ pub trait Account: AnySync + Send + Sync + 'static {
         notepool::bearer_import(self.wallet(), wallet_secret, bearer).await
     }
 
-    /// Pay a payment request (FORK-PLAN P7.3 flow (b) payer half; split planning
+    /// Pay a payment request (PLAN P7.3 flow (b) payer half; split planning
     /// per P7.4 — payment, split, change, and fee in one `TransferOp`).
     async fn pay_payment_request(
         self: Arc<Self>,
@@ -459,13 +459,13 @@ pub trait Account: AnySync + Send + Sync + 'static {
     }
 
     /// Bearer-export a note, auto-isolating first if its key isn't solo
-    /// (FORK-PLAN P7.4 flow (b)).
+    /// (PLAN P7.4 flow (b)).
     async fn bearer_export(self: Arc<Self>, wallet_secret: Secret, sn: Hash) -> Result<notepool::BearerExportResult> {
         notepool::bearer_export(self.wallet(), wallet_secret, sn).await
     }
 
     /// One POS checkout: request, await payment, immediately sweep off the shared
-    /// landing-pad key (FORK-PLAN P7.5). `on_request` fires as soon as the checkout
+    /// landing-pad key (PLAN P7.5). `on_request` fires as soon as the checkout
     /// `pk` exists, before the (potentially long) wait for payment.
     async fn pos_checkout(
         self: Arc<Self>,

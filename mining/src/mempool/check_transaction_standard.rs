@@ -124,7 +124,7 @@ impl Mempool {
             }
         }
 
-        // Finality-anchor lane transactions (POOL-SPEC.md P5.8, FORK-PLAN P6.12) are
+        // Finality-anchor lane transactions (POOL-SPEC.md P5.8, PLAN P6.12) are
         // exempt from the relay-fee floor: the trustees hold no funds by design
         // ("produce no blocks, hold no mining reward, can only veto"), so anchors are
         // zero-input, zero-fee. This is not a spam surface — consensus isolation
@@ -136,7 +136,7 @@ impl Mempool {
             return Ok(());
         }
 
-        // The node's own wallet, on a node that has opted in (FORK-PLAN P8.3b):
+        // The node's own wallet, on a node that has opted in (PLAN P8.3b):
         // no floor. RPC submissions are the only high-priority ones, and what
         // comes in this way is kept out of relay (see `withheld_from_relay`),
         // so only this node's own blocks can include it and the fee goes to
@@ -184,7 +184,7 @@ impl Mempool {
 
     /// Would the ordinary relay floor have refused this transaction? Used to
     /// decide what is kept out of relay on a node that accepts its own
-    /// wallet's transactions below the floor (FORK-PLAN P8.3b).
+    /// wallet's transactions below the floor (PLAN P8.3b).
     pub(crate) fn fee_is_below_relay_floor(&self, transaction: &MutableTransaction) -> bool {
         let (Some(masses), Some(fee)) = (transaction.calculated_non_contextual_masses, transaction.calculated_fee) else {
             return false;
@@ -715,7 +715,7 @@ mod tests {
         assert_eq!(mempool.check_transaction_standard_in_context(&high_storage, Priority::High, in_window), Ok(()));
     }
 
-    /// FORK-PLAN P8.3b: a node that accepts its own wallet's transactions
+    /// PLAN P8.3b: a node that accepts its own wallet's transactions
     /// below the relay floor does so only for RPC submissions, and knows
     /// which ones to keep out of relay.
     #[test]

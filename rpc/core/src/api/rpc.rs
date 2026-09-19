@@ -250,7 +250,7 @@ pub trait RpcApi: Sync + Send + AnySync {
         request: GetSeqCommitLaneProofRequest,
     ) -> RpcResult<GetSeqCommitLaneProofResponse>;
 
-    /// Get note(s) by serial (FORK-PLAN P6.9). Serials not currently in the pool are
+    /// Get note(s) by serial (PLAN P6.9). Serials not currently in the pool are
     /// simply absent from the response.
     async fn get_notes_by_serial(&self, serials: Vec<RpcHash>) -> RpcResult<Vec<RpcNoteEntry>> {
         Ok(self.get_notes_by_serial_call(None, GetNotesBySerialRequest::new(serials)).await?.notes)
@@ -261,7 +261,7 @@ pub trait RpcApi: Sync + Send + AnySync {
         request: GetNotesBySerialRequest,
     ) -> RpcResult<GetNotesBySerialResponse>;
 
-    /// The miner inside this node, if there is one (FORK-PLAN P8.3c). A node
+    /// The miner inside this node, if there is one (PLAN P8.3c). A node
     /// without a miner program answers with `available: false`.
     async fn get_miner_status(&self) -> RpcResult<RpcMinerStatus> {
         Ok(self.get_miner_status_call(None, GetMinerStatusRequest {}).await?.status)
@@ -272,7 +272,7 @@ pub trait RpcApi: Sync + Send + AnySync {
         request: GetMinerStatusRequest,
     ) -> RpcResult<GetMinerStatusResponse>;
 
-    /// Start, stop or resize the miner inside this node (FORK-PLAN P8.3c).
+    /// Start, stop or resize the miner inside this node (PLAN P8.3c).
     async fn control_miner(&self, mining: bool, percent: Option<u32>) -> RpcResult<RpcMinerStatus> {
         Ok(self.control_miner_call(None, ControlMinerRequest::new(mining, percent)).await?.status)
     }
@@ -282,11 +282,11 @@ pub trait RpcApi: Sync + Send + AnySync {
         request: ControlMinerRequest,
     ) -> RpcResult<ControlMinerResponse>;
 
-    /// Get live note-pool stats: note count per denomination (FORK-PLAN P6.9).
+    /// Get live note-pool stats: note count per denomination (PLAN P6.9).
     async fn get_pool_stats(&self) -> RpcResult<[u64; 8]> {
         Ok(self.get_pool_stats_call(None, GetPoolStatsRequest {}).await?.counts)
     }
-    /// The node's finality-anchor status (POOL-SPEC.md P5.8, FORK-PLAN P6.12) —
+    /// The node's finality-anchor status (POOL-SPEC.md P5.8, PLAN P6.12) —
     /// including the wallet-visible `finality_anchor_stale` fail-open flag.
     async fn get_finality_anchor_status(&self) -> RpcResult<GetFinalityAnchorStatusResponse> {
         self.get_finality_anchor_status_call(None, GetFinalityAnchorStatusRequest {}).await

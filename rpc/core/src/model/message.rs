@@ -3937,7 +3937,7 @@ impl Deserializer for GetSeqCommitLaneProofResponse {
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~
-// Note-pool RPC (FORK-PLAN P6.9)
+// Note-pool RPC (PLAN P6.9)
 
 /// A single live note, as served over RPC: its serial plus everything
 /// `PoolStateView::get_note` returns (`d`, `pk`) — `denomination` is
@@ -4110,7 +4110,7 @@ impl Deserializer for GetFinalityAnchorStatusRequest {
     }
 }
 
-/// The node's finality-anchor state (POOL-SPEC.md P5.8, FORK-PLAN P6.12): the
+/// The node's finality-anchor state (POOL-SPEC.md P5.8, PLAN P6.12): the
 /// latest-anchor ratchet, whether the anchor-conflict rule is being enforced, the
 /// spec's `finality_anchor_stale` fail-open flag (wallet-visible by requirement — "a
 /// user accepting a large payment during an extended anchor outage ... should be able
@@ -4278,7 +4278,7 @@ impl Deserializer for NotesChangedNotification {
     }
 }
 
-/// What the miner inside a node is doing (FORK-PLAN P8.3c). `available` is
+/// What the miner inside a node is doing (PLAN P8.3c). `available` is
 /// false on a node with no miner program in it, such as marigoldd; the wallet
 /// uses that to tell a background miner from any other node on the machine.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]

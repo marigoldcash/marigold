@@ -53,7 +53,7 @@ pub struct MinerOptions {
     pub target_blocks: Option<u64>,
     pub long_payload: bool,
     pub lane_producer: Box<dyn LaneProducer>,
-    /// FORK-PLAN P6.10: per-block probability this miner attempts one note-pool
+    /// PLAN P6.10: per-block probability this miner attempts one note-pool
     /// operation (mint/rotate/split-lite/merge/redeem, self-targeted) in addition to
     /// its ordinary native transfers. `0.0` (the default via [`NativeLaneProducer`]'s
     /// own callers) leaves existing simpa behavior completely unchanged.
@@ -67,7 +67,7 @@ struct OnetimeTxSelector {
     /// surfaces as `build_new_block`'s own `.expect(...)` panicking with the actual
     /// `RuleError` — simulation txs are expected to always be valid, so any rejection
     /// is still a hard bug, just now a debuggable one instead of an opaque
-    /// `unimplemented!()` (FORK-PLAN P6.10 found two real bugs this way: the retry
+    /// `unimplemented!()` (PLAN P6.10 found two real bugs this way: the retry
     /// loop's second `select_transactions()` call unconditionally panicking on `None`,
     /// and pool-op transactions needing `toccata_activation`/`pool_activation` forced
     /// on in `main_impl`, same as `crescendo_activation` already was).
@@ -106,13 +106,13 @@ pub struct Miner {
     miner_data: MinerData,
     secret_key: secp256k1::SecretKey,
     /// This miner's own x-only public key, used as `NewNote.pk` for every note-pool
-    /// op it self-targets (FORK-PLAN P6.10) — the same key material as `miner_data`'s
+    /// op it self-targets (PLAN P6.10) — the same key material as `miner_data`'s
     /// P2PK script, just in the pool's raw 32-byte form.
     note_pk: [u8; 32],
 
     // UTXO data related to this miner
     possible_unspent_outpoints: IndexSet<TransactionOutpoint>,
-    /// Serials of notes this miner believes it currently owns (FORK-PLAN P6.10),
+    /// Serials of notes this miner believes it currently owns (PLAN P6.10),
     /// tracked the same way `possible_unspent_outpoints` tracks UTXOs: populated by
     /// scanning each processed block's own note-pool transactions, pruned on
     /// consumption. Since this miner only ever targets its own `note_pk`, only its
@@ -204,7 +204,7 @@ impl Miner {
         let schnorr_key = secp256k1::Keypair::from_seckey_slice(secp256k1::SECP256K1, &self.secret_key.secret_bytes()).unwrap();
         let mut mutable_txs = Vec::with_capacity(self.target_txs_per_block as usize);
 
-        // FORK-PLAN P6.10: at most one note-pool op per block, ahead of the ordinary
+        // PLAN P6.10: at most one note-pool op per block, ahead of the ordinary
         // native transfers below — reserves any UTXO it consumes (for a mint) before
         // the native loop gets a chance to spend the same outpoint. A free function
         // (not a `&mut self` method) so the compiler can see `rng`/`possible_notes`/
@@ -277,7 +277,7 @@ impl Miner {
         txs
     }
 
-    /// FORK-PLAN P6.10: decides whether to build one note-pool operation this block and,
+    /// PLAN P6.10: decides whether to build one note-pool operation this block and,
     /// if so, builds it. A free function rather than a `&mut self` method — its params are
     /// disjoint field projections of `self` (`rng`/`possible_notes`/
     /// `possible_unspent_outpoints`) plus `pool_state`/`virtual_utxo_view`, which alias
@@ -420,7 +420,7 @@ impl Miner {
     }
 
     /// Scans a just-inserted block for note-pool activity affecting this miner's own
-    /// `note_pk` (FORK-PLAN P6.10) — the pool analog of `process_block`'s existing UTXO
+    /// `note_pk` (PLAN P6.10) — the pool analog of `process_block`'s existing UTXO
     /// output scan. Since this miner only ever targets its own key, only its own
     /// transactions (built by `maybe_build_pool_op`) ever touch `possible_notes`.
     fn scan_block_for_notes(&mut self, block: &Block) {

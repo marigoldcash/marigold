@@ -196,7 +196,7 @@ impl LkgVirtualState {
 pub struct VirtualStores {
     pub state: DbVirtualStateStore,
     pub utxo_set: DbUtxoSetStore,
-    /// The note pool's state map at virtual (`sn -> (d, pk)`, FORK-PLAN P6.4) — the pool
+    /// The note pool's state map at virtual (`sn -> (d, pk)`, PLAN P6.4) — the pool
     /// analog of `utxo_set`, updated by the same accumulated-diff application in
     /// `commit_virtual_state`.
     pub pool_state: DbNotePoolStore,

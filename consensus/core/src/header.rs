@@ -142,7 +142,7 @@ pub struct Header {
     pub hash_merkle_root: Hash,
     pub accepted_id_merkle_root: Hash,
     pub utxo_commitment: Hash,
-    /// The note-pool commitment (POOL-SPEC.md P5.1, FORK-PLAN P6.5): the SMT root of
+    /// The note-pool commitment (POOL-SPEC.md P5.1, PLAN P6.5): the SMT root of
     /// `PoolState` as of this block. A dedicated field, not a reuse of
     /// `accepted_id_merkle_root` (which seq-commit already reinterprets post-Toccata —
     /// overloading it a second time would make one field mean two unrelated things

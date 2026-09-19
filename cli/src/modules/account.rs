@@ -145,7 +145,7 @@ impl Account {
 
                         match account_kind.as_ref() {
                             // The legacy (KDX/kaspanet) import path was removed in
-                            // FORK-PLAN P7.0 — typing real Kaspa key material into
+                            // PLAN P7.0 — typing real Kaspa key material into
                             // Marigold software is a key-reuse hazard on a
                             // fair-launch chain (see docs/marigold/DECISIONS.md)
                             LEGACY_ACCOUNT_KIND => {

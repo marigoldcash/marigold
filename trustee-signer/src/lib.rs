@@ -1,4 +1,4 @@
-//! Marigold trustee signer (POOL-SPEC.md P5.8, FORK-PLAN P6.12): "a small tool that
+//! Marigold trustee signer (POOL-SPEC.md P5.8, PLAN P6.12): "a small tool that
 //! watches its own node, signs the depth-D block on the P5.8 cadence, aggregates
 //! k-of-n partial signatures, and submits the anchor tx."
 //!

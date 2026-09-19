@@ -52,7 +52,7 @@ pub struct Config {
     /// the relay-fee floor, and keep them out of relay. Only the node's own
     /// blocks can then include them, and the fee, whatever it is, goes to the
     /// node's own coinbase: a miner tidying its own rewards pays itself
-    /// (FORK-PLAN P8.3b). Off by default; the wallet's embedded node turns it on.
+    /// (PLAN P8.3b). Off by default; the wallet's embedded node turns it on.
     pub accept_own_below_floor: bool,
 }
 

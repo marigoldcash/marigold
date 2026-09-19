@@ -1,6 +1,6 @@
 # P8.0 recovery verify — "one secret, words alone recover the ledger, words + files recover the notes"
 
-The pexpect pair that runs FORK-PLAN P8.0's verify against the live public testnet. Not CI: it claims real bearer notes from faucet.marigold.cash (one claim per IP per hour) and rotates on rpc1.
+The pexpect pair that runs PLAN P8.0's verify against the live public testnet. Not CI: it claims real bearer notes from faucet.marigold.cash (one claim per IP per hour) and rotates on rpc1.
 
 Run from the repo root with a release `marigold-cli` built (`scripts/remote-build.sh`):
 

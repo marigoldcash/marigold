@@ -2,7 +2,7 @@
 //! # Finality anchors
 //!
 //! Wire types and verification for Marigold's launch finality anchors
-//! (POOL-SPEC.md P5.8, FORK-PLAN P6.11). **Not a note-pool feature** — a chain-level
+//! (POOL-SPEC.md P5.8, PLAN P6.11). **Not a note-pool feature** — a chain-level
 //! security mechanism: a 3-of-5 trustee quorum periodically countersigns a block
 //! already settled ~600 DAA-score-units deep, and a chain conflicting with the latest
 //! valid anchor is invalid regardless of accumulated work. The trustees can only veto
@@ -179,7 +179,7 @@ pub enum FinalityAnchorError {
 }
 
 /// The outcome of offering an externally-received (gossiped) anchor to consensus
-/// (FORK-PLAN P6.12). Drives the P2P flow's rebroadcast decision: `Ratcheted` and
+/// (PLAN P6.12). Drives the P2P flow's rebroadcast decision: `Ratcheted` and
 /// `Pending` anchors improved local state and are worth relaying; `Ignored` ones are
 /// stale, invalid, or quorum-dead and propagate no further.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

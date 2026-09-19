@@ -125,7 +125,7 @@ pub trait NoteKeyStore: Send + Sync {
 
     /// The serial turned up after all — reset its strikes.
     async fn clear_missing(&self, sn: &Hash) -> Result<()>;
-    /// Apply a live `NotesChanged` notification (FORK-PLAN P6.9). See the trait-level
+    /// Apply a live `NotesChanged` notification (PLAN P6.9). See the trait-level
     /// doc on [`crate::storage::notekeys::NotesChangedApplyResult`] for the split
     /// between what always applies (status) and what needs `wallet_secret` (new rows).
     async fn apply_notes_changed(
@@ -134,7 +134,7 @@ pub trait NoteKeyStore: Send + Sync {
         notification: &kaspa_rpc_core::message::NotesChangedNotification,
     ) -> Result<crate::storage::notekeys::NotesChangedApplyResult>;
 
-    // ~~~ payment-request keys (FORK-PLAN P7.3, sign-to-fresh-pk receive flow) ~~~
+    // ~~~ payment-request keys (PLAN P7.3, sign-to-fresh-pk receive flow) ~~~
 
     /// Persist a freshly generated payment-request key. Returns the plaintext info
     /// (pk derived from the key). Must be called BEFORE the request's QR is shown
@@ -143,7 +143,7 @@ pub trait NoteKeyStore: Send + Sync {
     /// All outstanding (not yet claimed/removed) payment requests, plaintext half only.
     async fn payment_requests(&self) -> Result<Vec<PaymentRequestInfo>>;
     /// Does this password open the vault? A wallet that keeps notes only
-    /// (FORK-PLAN P8.0b) has no account key to check a password against, and
+    /// (PLAN P8.0b) has no account key to check a password against, and
     /// the vault key is wrapped under the same password.
     async fn verify_secret(&self, wallet_secret: &Secret) -> Result<()>;
     /// The vault's 24 recovery words, for whoever wants them on paper. The
@@ -152,7 +152,7 @@ pub trait NoteKeyStore: Send + Sync {
     async fn load_payment_request_key(&self, wallet_secret: &Secret, pk: &[u8; 32]) -> Result<Option<PaymentRequestKey>>;
     async fn remove_payment_request(&self, wallet_secret: &Secret, pk: &[u8; 32]) -> Result<()>;
 
-    // ~~~ vault ceremony (FORK-PLAN P7.6) ~~~
+    // ~~~ vault ceremony (PLAN P7.6) ~~~
     //
     // Backends that store notes some other way (there are none today, but the
     // trait stays storage-agnostic on principle) simply don't support these —
@@ -174,7 +174,7 @@ pub trait NoteKeyStore: Send + Sync {
         Err(Error::NotImplemented)
     }
     /// Recover `K` from its 24-word encoding, re-wrapping it under `wallet_secret`
-    /// for daily use afterward (FORK-PLAN P7.6 restore flow: "24 words + the
+    /// for daily use afterward (PLAN P7.6 restore flow: "24 words + the
     /// files" — the files themselves are a separate, out-of-band copy step).
     async fn vault_restore_from_words(&self, _words: &str, _wallet_secret: &Secret) -> Result<()> {
         Err(Error::NotImplemented)

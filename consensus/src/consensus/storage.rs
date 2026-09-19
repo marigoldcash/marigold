@@ -68,11 +68,11 @@ pub struct ConsensusStorage {
     pub utxo_multisets_store: Arc<DbUtxoMultisetsStore>,
     pub acceptance_data_store: Arc<DbAcceptanceDataStore>,
 
-    // Note-pool stores (FORK-PLAN P6.4): per-chain-block pool diffs, the pool analog of
+    // Note-pool stores (PLAN P6.4): per-chain-block pool diffs, the pool analog of
     // `utxo_diffs_store`. The virtual pool state itself lives inside `virtual_stores`.
     pub notepool_diffs_store: Arc<DbNotePoolDiffsStore>,
 
-    // Finality-anchor node state (POOL-SPEC.md P5.8, FORK-PLAN P6.11): the
+    // Finality-anchor node state (POOL-SPEC.md P5.8, PLAN P6.11): the
     // latest-anchor ratchet + trustee deny-list. Monotone (never rolled back), written
     // under the virtual write lock in `commit_virtual_state`'s batch.
     pub finality_anchor_store: Arc<RwLock<DbFinalityAnchorStore>>,

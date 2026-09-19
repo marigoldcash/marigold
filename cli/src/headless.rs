@@ -1,4 +1,4 @@
-//! The miner as a service (FORK-PLAN P8.3c).
+//! The miner as a service (PLAN P8.3c).
 //!
 //! `marigold-cli mine-to <address> [--cpu N] [--network <id>]` runs with no
 //! terminal and no wallet: the network syncing on this machine, a CPU miner

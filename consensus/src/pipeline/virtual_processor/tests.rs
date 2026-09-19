@@ -181,7 +181,7 @@ async fn block_template_version_changes_to_v2_upon_activation() {
         .edit_consensus_params(|p| {
             p.toccata_activation = ForkActivation::new(activation);
             // Isolate the version transition this test asserts (BLOCK_VERSION ->
-            // TOCCATA_BLOCK_VERSION) from the note-pool fork (FORK-PLAN P6.5): MAINNET_PARAMS
+            // TOCCATA_BLOCK_VERSION) from the note-pool fork (PLAN P6.5): MAINNET_PARAMS
             // has both active from genesis by default, which would make block_version() jump
             // straight to NOTE_POOL_BLOCK_VERSION regardless of toccata_activation.
             p.pool_activation = ForkActivation::never();

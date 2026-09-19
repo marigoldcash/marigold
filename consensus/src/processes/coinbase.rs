@@ -442,7 +442,7 @@ mod tests {
     /// P3.2: the P1.4 economics decision (210,000,000 MAGLD cap, no tail emission) is enforced
     /// by construction — this must keep passing for every future edit to
     /// [`SUBSIDY_BY_MONTH_TABLE`]. This is the "provably sums below the cap" verification the
-    /// Phase 3 goal in FORK-PLAN.md asks for.
+    /// Phase 3 goal in PLAN.md asks for.
     #[test]
     fn total_emission_stays_under_cap() {
         const CAP_PETALS: u128 = 210_000_000 * SOMPI_PER_KASPA as u128;

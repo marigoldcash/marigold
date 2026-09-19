@@ -22,7 +22,7 @@ pub trait Notification: Clone + Debug + Display + Send + Sync + 'static {
     fn apply_utxos_changed_subscription(&self, subscription: &UtxosChangedSubscription, context: &SubscriptionContext)
     -> Option<Self>;
 
-    /// FORK-PLAN P6.9. Most implementors (anything without direct access to per-note
+    /// PLAN P6.9. Most implementors (anything without direct access to per-note
     /// serial/pk data — the raw `consensus_notify`/`indexes_core` layers) give this a
     /// trivial passthrough, exactly like `apply_utxos_changed_subscription` does at
     /// those same layers ("achieved farther along the notification backbone"); real

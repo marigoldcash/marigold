@@ -698,7 +698,7 @@ impl FlowContext {
             .validate_and_insert_transaction(consensus, transaction, Priority::High, orphan, RbfPolicy::Forbidden)
             .await?;
         // What the mempool accepted below the relay floor from this node's own
-        // wallet stays here for this node's own blocks (FORK-PLAN P8.3b).
+        // wallet stays here for this node's own blocks (PLAN P8.3b).
         let mut to_broadcast = Vec::with_capacity(transaction_insertion.accepted.len());
         for tx in transaction_insertion.accepted.iter() {
             let id = tx.id();

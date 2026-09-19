@@ -14,12 +14,12 @@ pub struct Payload {
     pub address_book: Vec<AddressBookEntry>,
     pub encrypt_transactions: Option<EncryptionKind>,
     // Note key database rows lived here as `note_key_data: Vec<NoteKeyEntry>`
-    // through FORK-PLAN P7.1-P7.5; P7.6 moved them out into the file-per-note
+    // through PLAN P7.1-P7.5; P7.6 moved them out into the file-per-note
     // vault (`storage::local::notevault::NoteVault`) entirely — they no longer
     // round-trip through this blob or through `wallet_export`/`wallet_import` at
     // all. Note backup/restore is the vault's own mechanism (DECISIONS.md's
     // "Note vault, backup, and restore-rotation policy").
-    /// Outstanding payment-request keys (FORK-PLAN P7.3, POOL-SPEC.md P5.5b) —
+    /// Outstanding payment-request keys (PLAN P7.3, POOL-SPEC.md P5.5b) —
     /// explicitly NOT migrated to the vault (still short-lived, unpaid-invoice
     /// state rather than held bearer value); unchanged by P7.6.
     pub payment_request_keys: Vec<PaymentRequestKey>,

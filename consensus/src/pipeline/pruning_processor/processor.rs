@@ -267,7 +267,7 @@ impl PruningProcessor {
 
             let utxo_diff = self.utxo_diffs_store.get(chain_block).expect("chain blocks have utxo state");
             // The pruning-position pool state advances in the same batch as the utxoset
-            // (FORK-PLAN P6.8) so `utxoset_position` remains a single truth for both.
+            // (PLAN P6.8) so `utxoset_position` remains a single truth for both.
             let pool_diff = self.notepool_diffs_store.get(chain_block).expect("chain blocks have pool state");
             let mut batch = WriteBatch::default();
             pruning_meta_write.utxo_set.write_diff_batch(&mut batch, utxo_diff.as_ref()).unwrap();
@@ -297,7 +297,7 @@ impl PruningProcessor {
         info!("Pruning point UTXO commitment was verified correctly (sanity test)");
     }
 
-    /// The pool analog of [`Self::assert_utxo_commitment`] (FORK-PLAN P6.8): the advanced
+    /// The pool analog of [`Self::assert_utxo_commitment`] (PLAN P6.8): the advanced
     /// pruning-position pool state must hash to the pruning point header's `pool_commitment`.
     fn assert_pool_commitment(&self, pruning_point: Hash) {
         use kaspa_consensus_core::notepool::leaf_hash_entry;

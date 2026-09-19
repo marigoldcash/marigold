@@ -1,4 +1,4 @@
-//! FORK-PLAN P7.2's verify criterion: "on local testnet: mint from mined funds, redeem
+//! PLAN P7.2's verify criterion: "on local testnet: mint from mined funds, redeem
 //! back, transparent balance reconciles minus fees" — proven here against a genuine
 //! live daemon and a real [`kaspa_wallet_core::wallet::Wallet`] instance, using the same
 //! non-interactive `WalletApi` bootstrap path the CLI/wasm bindings use (not a hand-rolled
@@ -319,7 +319,7 @@ async fn wallet_notepool_mint_redeem_test() {
     kaspad.shutdown();
 }
 
-/// FORK-PLAN P7.3's verify criterion: "both flows succeed on local testnet between two
+/// PLAN P7.3's verify criterion: "both flows succeed on local testnet between two
 /// wallet instances; imported key is never left unrotated after confirmation." Two
 /// real `Wallet` instances (A = payer, B = receiver) against one live daemon:
 ///
@@ -519,7 +519,7 @@ async fn wallet_notepool_receive_flows_test() {
     kaspad.shutdown();
 }
 
-/// FORK-PLAN P7.4's verify criterion: "spends of amounts requiring splits succeed;
+/// PLAN P7.4's verify criterion: "spends of amounts requiring splits succeed;
 /// bearer-exporting a shared-key note demonstrably isolates first (two txs
 /// on-chain)."
 ///
@@ -696,7 +696,7 @@ async fn wallet_notepool_spend_flows_test() {
     kaspad.shutdown();
 }
 
-/// FORK-PLAN P7.5's verify criterion: "scripted two-wallet POS demo passes; merchant
+/// PLAN P7.5's verify criterion: "scripted two-wallet POS demo passes; merchant
 /// wallet ends with one-note-one-key state within seconds of payment." B is the
 /// merchant (`note pos`), A is the customer (`note pay`, requiring a split — the
 /// same "amount not a single denomination" shape as the other flows, exercising the
@@ -845,7 +845,7 @@ async fn wallet_notepool_pos_test() {
     kaspad.shutdown();
 }
 
-/// FORK-PLAN P7.6's verify criterion: mint -> back up the vault -> restore into a
+/// PLAN P7.6's verify criterion: mint -> back up the vault -> restore into a
 /// completely independent wallet using only "24 words + the files" -> deep-verify
 /// recovers exactly the still-owned notes -> accept batched restore-time rotation
 /// -> the OLD backup copy is now provably stale (light-verifiable without ever

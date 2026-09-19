@@ -1,4 +1,4 @@
-//! Stateless `PoolOp` validation (POOL-SPEC.md P5.3, FORK-PLAN P6.3) — checks that hold
+//! Stateless `PoolOp` validation (POOL-SPEC.md P5.3, PLAN P6.3) — checks that hold
 //! for an op in complete isolation, with no pool state, no consensus context, and no
 //! enclosing transaction. Everything requiring the live pool view — serial existence,
 //! signature verification against a serial's *current* `pk`, the freshness-window
@@ -156,7 +156,7 @@ pub struct ValidatedPoolOp {
 
 /// Full stateful validation of a `PoolOp` against a composed pool view — POOL-SPEC.md
 /// P5.3's validation orders, executed inside the virtual pipeline's mergeset walk
-/// (FORK-PLAN P6.4). Assumes [`validate_stateless`] already passed (enforced at block
+/// (PLAN P6.4). Assumes [`validate_stateless`] already passed (enforced at block
 /// body validation); debug-asserts it.
 ///
 /// `skip_signature_and_freshness` mirrors `TxValidationFlags::SkipScriptChecks`'s role
@@ -171,7 +171,7 @@ pub struct ValidatedPoolOp {
 /// the replay basis).
 ///
 /// Value binding to the transparent side (mint input sums, redeem output sums, fee
-/// crediting) is deliberately NOT checked here — FORK-PLAN P6.6 owns it. `Transfer`
+/// crediting) is deliberately NOT checked here — PLAN P6.6 owns it. `Transfer`
 /// conservation (pool-side only, needs nothing transparent) IS enforced.
 pub fn validate_stateful<V: PoolStateView>(
     op: &PoolOp,

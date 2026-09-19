@@ -1,4 +1,4 @@
-//! Consensus-level note-pool tests (FORK-PLAN P6.4's verify criteria): parallel-block
+//! Consensus-level note-pool tests (PLAN P6.4's verify criteria): parallel-block
 //! double-rotate resolving deterministically via the composed-view mergeset walk, reorg
 //! apply/unapply restoring pool state exactly, and freshness-anchor rejection in context.
 //!
@@ -144,7 +144,7 @@ fn config() -> crate::config::Config {
             // Locked notes (P5.9) from the start, so their tests need no 11M blocks.
             p.note_locks_activation = kaspa_consensus_core::config::params::ForkActivation::always();
             // These tests fund real mint transactions from real mined coinbase rewards
-            // (FORK-PLAN P6.6 requires mint's transparent inputs to actually cover the
+            // (PLAN P6.6 requires mint's transparent inputs to actually cover the
             // notes it creates); zeroing maturity avoids mining ~1000 throwaway blocks
             // per test just to wait it out, matching this codebase's own established
             // pattern (e.g. `testing/integration`'s `toccata_activation_test`).
@@ -544,7 +544,7 @@ async fn incremental_and_full_rebuild_commitments_agree() {
     consensus.shutdown(join_handles);
 }
 
-/// FORK-PLAN P6.6 verify criterion: a mint whose transparent inputs don't sum to at least
+/// PLAN P6.6 verify criterion: a mint whose transparent inputs don't sum to at least
 /// its new notes' total value is rejected — the value-binding conservation check added by
 /// P6.6, not the stateless shape rules (those are unit-tested in consensus-core).
 #[tokio::test]
@@ -576,7 +576,7 @@ async fn mint_with_insufficient_transparent_inputs_rejected() {
     consensus.shutdown(join_handles);
 }
 
-/// FORK-PLAN P6.6 verify criterion: a redeem claiming more transparent value than its
+/// PLAN P6.6 verify criterion: a redeem claiming more transparent value than its
 /// consumed notes are worth is rejected.
 #[tokio::test]
 async fn redeem_with_excessive_transparent_outputs_rejected() {
@@ -619,7 +619,7 @@ async fn redeem_with_excessive_transparent_outputs_rejected() {
     consensus.shutdown(join_handles);
 }
 
-/// FORK-PLAN P6.10: split's own happy path mined end-to-end (previously only unit-tested
+/// PLAN P6.10: split's own happy path mined end-to-end (previously only unit-tested
 /// at the `validate_stateful` level, `transfer_split_under_conservation_passes`) — one
 /// consumed note fans out into several smaller produced notes, same shape and ratio as
 /// that unit test (1 MAGLD -> 9 x 0.1, scaled down one denomination tier so it fits a
@@ -656,7 +656,7 @@ async fn split_happy_path_mines_and_updates_pool_state() {
     consensus.shutdown(join_handles);
 }
 
-/// FORK-PLAN P6.10: merge's own happy path mined end-to-end (previously only unit-tested
+/// PLAN P6.10: merge's own happy path mined end-to-end (previously only unit-tested
 /// at the `validate_stateful` level, `merchant_sweep_one_signature_many_serials` — which
 /// re-keys the same note *count*, not a value merge). Two consumed notes under one shared
 /// key, one signature, fold into a single smaller produced note.
@@ -693,7 +693,7 @@ async fn merge_happy_path_mines_and_updates_pool_state() {
     consensus.shutdown(join_handles);
 }
 
-/// FORK-PLAN P6.10: `PoolOpContextError::BadPublicKey` had no test anywhere in the
+/// PLAN P6.10: `PoolOpContextError::BadPublicKey` had no test anywhere in the
 /// codebase before this. A note minted with a `pk` that isn't a valid secp256k1 x-only
 /// public key (P5.1's mint validation never checks curve membership, only denomination
 /// validity — see `validate_mint`) can't be consumed: any attempt to rotate/redeem it
@@ -729,7 +729,7 @@ async fn bad_public_key_on_stored_note_rejects_consumption() {
     consensus.shutdown(join_handles);
 }
 
-/// FORK-PLAN P6.10: `TxRuleError::MalformedNotePoolPayload` (an on-`SUBNETWORK_ID_NOTE_POOL`
+/// PLAN P6.10: `TxRuleError::MalformedNotePoolPayload` (an on-`SUBNETWORK_ID_NOTE_POOL`
 /// transaction whose payload doesn't borsh-decode as any `PoolOp` variant) was previously
 /// tested only at `PoolOp::decode_payload` itself (consensus-core's own unit tests); this
 /// drives the identical invalid payload through a real block build, pinning the
@@ -752,7 +752,7 @@ async fn malformed_pool_payload_rejected_in_block() {
     consensus.shutdown(join_handles);
 }
 
-/// FORK-PLAN P6.10: a conflict across two DIFFERENT op *types* on the same serial, not
+/// PLAN P6.10: a conflict across two DIFFERENT op *types* on the same serial, not
 /// just two rotates (`parallel_double_rotate_resolves_deterministically`) — a rotate and a
 /// redeem race to consume the same note in parallel blocks. Same first-accepted-wins
 /// mechanism, exercised on a shape the existing conflict test never covers (Transfer vs.
@@ -798,7 +798,7 @@ async fn parallel_rotate_vs_redeem_conflict_resolves_deterministically() {
     consensus.shutdown(join_handles);
 }
 
-/// FORK-PLAN P6.10's "deep reorg" verify criterion: the same walk-down/walk-up correctness
+/// PLAN P6.10's "deep reorg" verify criterion: the same walk-down/walk-up correctness
 /// `reorg_past_pool_op_restores_prior_pool_state` already proves at a 3-block scale must
 /// hold over a materially longer replacement chain too — not just as a matter of degree,
 /// since a bounded-depth optimization bug in the mergeset/diff walk could pass a shallow
@@ -864,7 +864,7 @@ async fn deep_reorg_past_pool_op_restores_prior_pool_state() {
     reference.shutdown(reference_handles);
 }
 
-/// FORK-PLAN P6.10's value-conservation verify criterion extended to split and merge (
+/// PLAN P6.10's value-conservation verify criterion extended to split and merge (
 /// `value_conservation_across_mint_transfer_redeem` already covers plain mint/transfer/
 /// redeem): `Σ pool notes + transparent supply` stays constant — modulo each op's own
 /// fee, which strictly decreases it — across a mint, a split, and a merge.
@@ -909,7 +909,7 @@ async fn value_conservation_across_split_and_merge() {
     consensus.shutdown(join_handles);
 }
 
-/// FORK-PLAN P6.6's own stated verify condition: `Σ pool notes + transparent supply ==
+/// PLAN P6.6's own stated verify condition: `Σ pool notes + transparent supply ==
 /// emitted supply` holds across a real mint -> transfer -> redeem sequence. Restricted to
 /// the value this test itself injects (one funding block's coinbase reward) rather than
 /// the whole chain's total emission — every other block mined along the way (including the

@@ -1,4 +1,4 @@
-//! Finality-anchor node state (POOL-SPEC.md P5.8, FORK-PLAN P6.11): the latest-anchor
+//! Finality-anchor node state (POOL-SPEC.md P5.8, PLAN P6.11): the latest-anchor
 //! ratchet and the trustee deny-list.
 //!
 //! Both items are deliberately **monotone** — appended to, never rolled back — which is

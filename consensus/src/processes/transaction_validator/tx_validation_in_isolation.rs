@@ -33,7 +33,7 @@ impl TransactionValidator {
         self.check_finality_anchor_payload(tx)
     }
 
-    /// For anchor-lane transactions (POOL-SPEC.md P5.8, FORK-PLAN P6.11): the payload
+    /// For anchor-lane transactions (POOL-SPEC.md P5.8, PLAN P6.11): the payload
     /// must borsh-decode to exactly one `AnchorPayload` and pass full context-free
     /// verification — quorum shape and every carried BIP340 signature for anchors, the
     /// exact overlap rule plus both signatures for equivocation evidence, and the hard
@@ -251,7 +251,7 @@ fn check_transaction_subnetwork(tx: &Transaction) -> TxResult<()> {
     }
 }
 
-/// For note-pool lane transactions (FORK-PLAN P6.4): the payload must borsh-decode to
+/// For note-pool lane transactions (PLAN P6.4): the payload must borsh-decode to
 /// exactly one `PoolOp` (no trailing bytes — "malformed encodings are consensus-invalid,
 /// not coerced", POOL-SPEC.md P5.1) and pass every stateless P5.3 rule (P6.3's
 /// `validate_stateless`). Other subnetworks' payloads remain free-form.

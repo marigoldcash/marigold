@@ -73,7 +73,7 @@ impl Connect {
             });
 
             // Something on this machine may already be syncing the network:
-            // the background miner (FORK-PLAN P8.3c), or a marigoldd. Use it
+            // the background miner (PLAN P8.3c), or a marigoldd. Use it
             // rather than start a second sync beside it.
             #[cfg(feature = "embedded-node")]
             let own_sync_running = ctx.embedded_node_running();

@@ -1,4 +1,4 @@
-//! Mempool integration for note-pool transactions (FORK-PLAN P6.7).
+//! Mempool integration for note-pool transactions (PLAN P6.7).
 //!
 //! Covers this step's own stated verify condition: a conflicting rotate arriving second is
 //! rejected, and a block template built under load includes pool ops and validates. Uses
@@ -230,7 +230,7 @@ fn conflicting_rotate_is_accepted_once_the_first_is_evicted_by_confirmation() {
     );
 }
 
-/// FORK-PLAN P6.7's second verify criterion: a block template built under load includes
+/// PLAN P6.7's second verify criterion: a block template built under load includes
 /// pool ops and validates.
 #[test]
 fn block_template_under_load_includes_pool_ops() {

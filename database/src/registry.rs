@@ -88,7 +88,7 @@ pub enum DatabaseStorePrefixes {
     NotePoolSmtRoot = 92,
     NotePoolDiffs = 93,
     VirtualNotePoolDiff = 94,
-    /// The pool state map positioned at the pruning point (FORK-PLAN P6.8) — the pool
+    /// The pool state map positioned at the pruning point (PLAN P6.8) — the pool
     /// analog of `PruningUtxoset`, advanced by the pruning processor and served to
     /// IBD peers.
     PruningNotePool = 95,
@@ -102,7 +102,7 @@ pub enum DatabaseStorePrefixes {
     NotePoolDiffsV2 = 103,
     VirtualNotePoolDiffV2 = 104,
 
-    // ---- Finality anchors (POOL-SPEC.md P5.8, FORK-PLAN P6.11) ----
+    // ---- Finality anchors (POOL-SPEC.md P5.8, PLAN P6.11) ----
     /// The node's highest-scoring accepted anchor (the ratchet — monotone, never
     /// rolled back, surviving restarts/resyncs/reorgs by design).
     FinalityAnchorLatest = 97,
@@ -110,7 +110,7 @@ pub enum DatabaseStorePrefixes {
     /// chain block whose accepted equivocation evidence produced it.
     FinalityAnchorDenyList = 98,
     /// The complete latest anchor (signatures included), kept alongside the ratchet so
-    /// the node can re-serve it to peers over P2P gossip (FORK-PLAN P6.12).
+    /// the node can re-serve it to peers over P2P gossip (PLAN P6.12).
     FinalityAnchorLatestFull = 99,
     /// A gossiped anchor whose anchored block this node does not know yet — held
     /// pending, promoted to the ratchet once the block is locally verifiable.

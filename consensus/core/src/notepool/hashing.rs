@@ -1,5 +1,5 @@
 //! Hash functions for note-pool state and authorization (POOL-SPEC.md P5.1/P5.2,
-//! FORK-PLAN P6.2/P6.4).
+//! PLAN P6.2/P6.4).
 //!
 //! Separate hasher types per purpose, mirroring `consensus/seq-commit`'s split between
 //! `SeqCommitActiveLeaf` (external leaf value) and `SeqCommitActiveNode` (SMT internal

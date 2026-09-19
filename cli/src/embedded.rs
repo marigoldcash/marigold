@@ -70,7 +70,7 @@ impl EmbeddedNode {
         Self::start_with(network_id, appdir, None)
     }
 
-    /// The same node with a miner in it (FORK-PLAN P8.3c): the RPC answers
+    /// The same node with a miner in it (PLAN P8.3c): the RPC answers
     /// `get_miner_status` and `control_miner` through `miner`, and listens on
     /// 127.0.0.1 — this machine only — so a wallet here can find it and steer
     /// it. The wallet's own node passes `None` and opens no socket at all.

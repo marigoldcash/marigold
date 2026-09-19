@@ -11,7 +11,7 @@ pub struct Balance;
 impl Balance {
     async fn main(self: Arc<Self>, ctx: &Arc<dyn Context>, _argv: Vec<String>, _cmd: &str) -> Result<()> {
         let ctx = ctx.clone().downcast_arc::<KaspaCli>()?;
-        // None on a wallet that keeps notes only (FORK-PLAN P8.0b): then
+        // None on a wallet that keeps notes only (PLAN P8.0b): then
         // there is no ledger row, because there is no ledger.
         let account = ctx.wallet().account().ok();
 

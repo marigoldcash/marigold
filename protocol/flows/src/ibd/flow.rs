@@ -170,7 +170,7 @@ impl IbdFlow {
 
                 // Note-pool state syncs before the utxoset for the same reason SMT does:
                 // `sync_new_utxo_set`'s import validates the pruning point's own txs (pool
-                // ops included) against virtual's pool state (FORK-PLAN P6.8).
+                // ops included) against virtual's pool state (PLAN P6.8).
                 if !is_pool_stable {
                     info!(
                         "note-pool state corresponding to the current pruning point {} is incomplete, attempting to download it from {}",
@@ -246,7 +246,7 @@ impl IbdFlow {
             }
         }
 
-        // Anchor-aware IBD (POOL-SPEC.md P5.8, FORK-PLAN P6.12): all three IBD types
+        // Anchor-aware IBD (POOL-SPEC.md P5.8, PLAN P6.12): all three IBD types
         // converge here with the syncer's headers fully synced, before any body
         // download or virtual advance — the single point where "any candidate chain
         // not building at-or-beyond the latest known anchor is rejected outright
@@ -326,7 +326,7 @@ impl IbdFlow {
                 } else {
                     true
                 };
-                // Same pre-activation reasoning for the note-pool state flag (FORK-PLAN P6.8).
+                // Same pre-activation reasoning for the note-pool state flag (PLAN P6.8).
                 let is_pool_stable = if self.ctx.config.pool_activation.is_active(pp_header.daa_score) {
                     consensus.async_is_pruning_pool_state_stable().await
                 } else {
@@ -827,7 +827,7 @@ impl IbdFlow {
         Ok(())
     }
 
-    /// Downloads and imports the note-pool state at `pruning_point` (FORK-PLAN P6.8) —
+    /// Downloads and imports the note-pool state at `pruning_point` (PLAN P6.8) —
     /// the pool analog of [`Self::sync_new_utxo_set`]. Must run BEFORE the utxoset sync:
     /// `import_pruning_point_utxo_set` validates the pruning point's own transactions
     /// (pool ops included) against virtual's pool state, which this function populates.
@@ -1060,7 +1060,7 @@ staging selected tip ({}) is too small or negative. Aborting IBD...",
         }
         Ok(())
     }
-    /// Anchor-aware IBD enforcement (POOL-SPEC.md P5.8, FORK-PLAN P6.12): with the
+    /// Anchor-aware IBD enforcement (POOL-SPEC.md P5.8, PLAN P6.12): with the
     /// syncer's headers fully synced, the chain it offers must contain the newest
     /// anchor this node holds — from its persisted ratchet or from a gossiped anchor
     /// still pending (an anchored block this node couldn't verify locally *yet* is

@@ -52,7 +52,7 @@ it simply never records who holds a note, the same way a banknote doesn't.
   therefore hold nothing but note keys: no addresses, no balances, no seed phrase.
 
 The full design, with every decision and its rationale, lives in
-[FORK-PLAN.md](FORK-PLAN.md) and [docs/marigold/](docs/marigold/) — start with
+[PLAN.md](PLAN.md) and [docs/marigold/](docs/marigold/) — start with
 [POOL-SPEC.md](docs/marigold/POOL-SPEC.md) (the pool specification),
 [DECISIONS.md](docs/marigold/DECISIONS.md) (locked parameters and why), and
 [WALLET.md](docs/marigold/WALLET.md) (wallet usage).
@@ -195,7 +195,7 @@ consensus-critical work externally reviewed: the pool specification passed revie
 external cryptographers (see [docs/marigold/reviews/](docs/marigold/reviews/)), a full
 security audit precedes mainnet, and the network soaks on a public testnet for months
 before any real value touches it. The development record — including the step-by-step
-[FORK-PLAN.md](FORK-PLAN.md) this project is built from — is published as-is; trust
+[PLAN.md](PLAN.md) this project is built from — is published as-is; trust
 should rest on tests, review, audit, and soak, not on who typed the code.
 
 Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). Consensus changes
@@ -211,7 +211,7 @@ Do not open public issues for security-sensitive reports.
 ## Links
 
 - Website: [marigold.cash](https://marigold.cash)
-- Plan & roadmap: [FORK-PLAN.md](FORK-PLAN.md)
+- Plan & roadmap: [PLAN.md](PLAN.md)
 - Design docs: [docs/marigold/](docs/marigold/)
 - Upstream: [kaspanet/rusty-kaspa](https://github.com/kaspanet/rusty-kaspa)
 

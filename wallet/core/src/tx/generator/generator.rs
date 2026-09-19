@@ -662,7 +662,7 @@ impl Generator {
     /// transient byte mass.
     fn calc_transaction_fees(&self, compute_mass: u64, transaction_mass: u64) -> u64 {
         // A fee rate asked for BELOW the relay floor is meant: the own lane
-        // (FORK-PLAN P8.3b) asks for 1 sompi per gram on transactions its own
+        // (PLAN P8.3b) asks for 1 sompi per gram on transactions its own
         // node will mine and keep out of relay. Applying the floor on top of
         // it made the lane pay the network fee after all — and, worse, a fee
         // the node then relayed, so any miner could take it. Rates at or above

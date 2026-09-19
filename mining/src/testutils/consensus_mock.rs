@@ -31,7 +31,7 @@ pub(crate) struct ConsensusMock {
     transactions: RwLock<HashMap<TransactionId, Arc<Transaction>>>,
     statuses: RwLock<HashMap<TransactionId, TxResult<()>>>,
     utxos: RwLock<UtxoCollection>,
-    /// Live note-pool state (FORK-PLAN P6.7's test surface) — mirrors `utxos` for the
+    /// Live note-pool state (PLAN P6.7's test surface) — mirrors `utxos` for the
     /// pool side. `PoolCollection` implements `PoolStateView` directly, so it's a drop-in
     /// base view for `validate_stateful`, the same real consensus-core logic the actual
     /// virtual pipeline uses, rather than a hand-rolled reimplementation of pool op rules.
@@ -170,7 +170,7 @@ impl ConsensusApi for ConsensusMock {
             return Err(TxRuleError::MissingTxOutpoints);
         }
 
-        // Note-pool ops validate against the mock's live note-pool state (FORK-PLAN P6.7),
+        // Note-pool ops validate against the mock's live note-pool state (PLAN P6.7),
         // reusing the real consensus-core `validate_stateful` rather than a second
         // hand-rolled reimplementation of pool op rules.
         let (consumed_petals, produced_petals) = if mutable_tx.tx.subnetwork_id == SUBNETWORK_ID_NOTE_POOL {

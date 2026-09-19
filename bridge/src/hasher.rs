@@ -222,7 +222,7 @@ pub fn serialize_block_header(block: &kaspa_consensus_core::block::Block) -> Res
     let _ = header.pool_commitment.as_bytes();
     let _ = header.pruning_point.as_bytes();
 
-    // Write header fields. `pool_commitment` (POOL-SPEC.md P5.1, FORK-PLAN P6.5) MUST be
+    // Write header fields. `pool_commitment` (POOL-SPEC.md P5.1, PLAN P6.5) MUST be
     // written here, in exactly this position, to match
     // `kaspa_consensus_core::hashing::header::hash_override_nonce_time` byte-for-byte —
     // this is the pre-PoW hash handed to external miners over stratum; any divergence

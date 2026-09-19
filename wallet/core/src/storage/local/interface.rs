@@ -181,7 +181,7 @@ pub(crate) struct LocalStoreInner {
     pub cache: Arc<RwLock<Cache>>,
     pub store: RwLock<Arc<Store>>,
     pub transactions: Arc<dyn TransactionRecordStore>,
-    /// Note key storage (FORK-PLAN P7.6): the file-per-note vault, replacing
+    /// Note key storage (PLAN P7.6): the file-per-note vault, replacing
     /// P7.1's single-blob `note_key_data`/`note_key_info` cache fields (which the
     /// `Cache`/`Payload` types still carry only for `PaymentRequestKey` storage —
     /// per DECISIONS.md, explicitly not migrated). Constructed the same way as
@@ -468,7 +468,7 @@ impl LocalStoreInner {
     /// note-storing call reaches it without one already existing on disk. This
     /// keeps every pre-P7.6 flow (mint/receive/import — none of which know about
     /// vault setup) working unmodified; a wallet that explicitly ran the vault
-    /// creation command first (FORK-PLAN P7.6/P7.9's `note vault create`) never
+    /// creation command first (PLAN P7.6/P7.9's `note vault create`) never
     /// hits this path since `notevault.exists()` is already true by then. The
     /// words are only `log_warn!`'d here as a stopgap — this is not a substitute
     /// for the real interactive ceremony, which the CLI command surfaces properly.

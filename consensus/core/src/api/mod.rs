@@ -494,7 +494,7 @@ pub trait ConsensusApi: Send + Sync {
 
     /// Serves a chunk of the note-pool state positioned at the pruning point, in
     /// ascending serial order — the pool analog of [`Self::get_pruning_point_utxos`]
-    /// (FORK-PLAN P6.8).
+    /// (PLAN P6.8).
     fn get_pruning_point_pool_entries(
         &self,
         expected_pruning_point: Hash,
@@ -523,7 +523,7 @@ pub trait ConsensusApi: Send + Sync {
     }
 
     /// A live point lookup of a single note by serial, against virtual's own pool state
-    /// (FORK-PLAN P6.9) — `None` if `sn` doesn't currently exist in the pool. This is the
+    /// (PLAN P6.9) — `None` if `sn` doesn't currently exist in the pool. This is the
     /// first single-key live-state RPC-facing query this trait exposes (the UTXO side has
     /// no equivalent either — `get_virtual_utxos` is chunk/scan-only).
     fn get_pool_note(&self, _sn: Hash) -> Option<crate::notepool::PoolEntry> {
@@ -538,7 +538,7 @@ pub trait ConsensusApi: Send + Sync {
         unimplemented!()
     }
 
-    /// Live note count per denomination (FORK-PLAN P6.9's "pool stats") — a full scan of
+    /// Live note count per denomination (PLAN P6.9's "pool stats") — a full scan of
     /// virtual's pool state, the same correctness-first tradeoff `recompute_pool_commitment`
     /// (P6.5) already established for this fork's pool rather than an incremental counter.
     fn get_pool_stats(&self) -> crate::notepool::PoolStats {
@@ -546,7 +546,7 @@ pub trait ConsensusApi: Send + Sync {
     }
 
     /// Virtual's live note-pool commitment root (the same value `TestConsensus::pool_root`
-    /// exposes internally, FORK-PLAN P6.10) — lets callers outside the `kaspa-consensus`
+    /// exposes internally, PLAN P6.10) — lets callers outside the `kaspa-consensus`
     /// crate (simpa, cross-node agreement checks) compare pool roots without needing a
     /// block header's `pool_commitment`, which reflects a block's ancestors rather than its
     /// own body (see `notepool_tests.rs`'s `incremental_and_full_rebuild_commitments_agree`).
@@ -554,7 +554,7 @@ pub trait ConsensusApi: Send + Sync {
         unimplemented!()
     }
 
-    /// The node's finality-anchor state (POOL-SPEC.md P5.8, FORK-PLAN P6.11): the
+    /// The node's finality-anchor state (POOL-SPEC.md P5.8, PLAN P6.11): the
     /// latest-anchor ratchet, whether the anchor-conflict rule is currently enforced,
     /// the spec's `finality_anchor_stale` fail-open flag, and the trustee deny-list as
     /// of the current virtual chain.
@@ -562,7 +562,7 @@ pub trait ConsensusApi: Send + Sync {
         unimplemented!()
     }
 
-    /// Offers an externally-received (P2P-gossiped) anchor to consensus (FORK-PLAN
+    /// Offers an externally-received (P2P-gossiped) anchor to consensus (PLAN
     /// P6.12): verified context-free against the pinned trustee keys and the current
     /// deny-list, then either ratcheted (block locally verifiable), held pending
     /// (block unknown — still guards IBD), or ignored. See `ExternalAnchorOutcome`.
@@ -574,7 +574,7 @@ pub trait ConsensusApi: Send + Sync {
     }
 
     /// The complete latest anchor (signatures included), for serving to peers over
-    /// gossip (FORK-PLAN P6.12). Prefers the enforced ratchet; falls back to a pending
+    /// gossip (PLAN P6.12). Prefers the enforced ratchet; falls back to a pending
     /// gossiped anchor so relaying continues even before this node can verify the
     /// anchored block itself.
     fn get_latest_full_finality_anchor(&self) -> Option<crate::finality_anchor::FinalityAnchor> {
@@ -632,7 +632,7 @@ pub trait ConsensusApi: Send + Sync {
     }
 
     /// Lowers the pool-state stable flag and clears both the staged pruning-position pool
-    /// store and the virtual pool stores, ahead of a from-scratch download (FORK-PLAN P6.8).
+    /// store and the virtual pool stores, ahead of a from-scratch download (PLAN P6.8).
     fn clear_pruning_pool_state(&self) {
         unimplemented!()
     }

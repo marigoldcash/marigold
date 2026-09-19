@@ -98,7 +98,7 @@ impl NotificationTrait for Notification {
     ) -> Option<Self> {
         // Same rationale as `apply_utxos_changed_subscription` above: this raw,
         // unindexed layer has no per-serial/per-pk resolution to apply; real filtering
-        // happens in `rpc_core::Notification` (FORK-PLAN P6.9).
+        // happens in `rpc_core::Notification` (PLAN P6.9).
         Some(self.clone())
     }
 
@@ -169,7 +169,7 @@ impl UtxosChangedNotification {
     }
 }
 
-/// The note-pool analog of [`UtxosChangedNotification`] (FORK-PLAN P6.9) — raw,
+/// The note-pool analog of [`UtxosChangedNotification`] (PLAN P6.9) — raw,
 /// unfiltered accumulated pool diff between the last virtual state and the current one.
 /// Filtering by watched serial/pk happens farther along the notification backbone
 /// (`rpc_core::Notification::apply_notes_changed_subscription`), exactly like the UTXO

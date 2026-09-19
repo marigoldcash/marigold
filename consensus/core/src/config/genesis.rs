@@ -36,7 +36,7 @@ impl From<&GenesisBlock> for Header {
             genesis.hash_merkle_root,
             ZERO_HASH,
             genesis.utxo_commitment,
-            // The empty pool's real SMT root (POOL-SPEC.md P5.1, FORK-PLAN P6.5) — not
+            // The empty pool's real SMT root (POOL-SPEC.md P5.1, PLAN P6.5) — not
             // ZERO_HASH, since an empty sparse Merkle tree's root is a deterministic
             // non-zero hash chain, not literally zero. Genesis predates any pool
             // activity on every network, so this value is the same everywhere.
@@ -168,7 +168,7 @@ pub const DEVNET_GENESIS: GenesisBlock = GenesisBlock {
         // Rust devnet genesis hash updated according to the modified bits field (P2.5)
         // 0x4c, 0xb4, 0x8d, 0x0b, 0x20, 0x73, 0xb8, 0x02, 0x36, 0x01, 0x45, 0xa1, 0x5a, 0xd1, 0xab, 0xdc, 0x01, 0xd8, 0x9b, 0x5c, 0x2f,
         // 0xe4, 0x72, 0x26, 0x30, 0xab, 0x9b, 0x5f, 0xe9, 0xdf, 0xc4, 0xf2,
-        // Updated again for the new `pool_commitment` header field (FORK-PLAN P6.5)
+        // Updated again for the new `pool_commitment` header field (PLAN P6.5)
         0x1e, 0xfa, 0xde, 0x8a, 0xf9, 0x60, 0xc8, 0x19, 0x56, 0x62, 0xb0, 0x8a, 0xd2, 0xe0, 0x0f, 0x95, 0xc4, 0xd4, 0x03, 0x12, 0xd1,
         0x8d, 0x3b, 0x1c, 0x1f, 0x2c, 0x5d, 0x97, 0x74, 0x58, 0x04, 0x93,
     ]),

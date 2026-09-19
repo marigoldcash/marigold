@@ -565,7 +565,7 @@ impl MiningManager {
     }
 
     /// Accepted from this node's own wallet below the relay floor: for this
-    /// node's blocks only, never announced (FORK-PLAN P8.3b).
+    /// node's blocks only, never announced (PLAN P8.3b).
     pub fn is_withheld_from_relay(&self, transaction_id: &TransactionId) -> bool {
         self.mempool.read().is_withheld_from_relay(transaction_id)
     }

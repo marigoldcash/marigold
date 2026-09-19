@@ -1,4 +1,4 @@
-//! Finality-anchor gossip (POOL-SPEC.md P5.8, FORK-PLAN P6.12): the second, mining-
+//! Finality-anchor gossip (POOL-SPEC.md P5.8, PLAN P6.12): the second, mining-
 //! independent distribution channel for anchors — "gossiped directly over P2P, so an
 //! anchor's availability doesn't depend on it having been mined into a block yet".
 //!

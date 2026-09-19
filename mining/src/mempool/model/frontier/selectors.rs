@@ -208,7 +208,7 @@ impl TemplateTransactionSelector for SequenceSelector {
 }
 
 /// Wraps an inner selector, force-including a small set of transactions ahead of its
-/// first batch (FORK-PLAN P6.12: finality-anchor lane transactions). Zero-fee anchor
+/// first batch (PLAN P6.12: finality-anchor lane transactions). Zero-fee anchor
 /// txs have weight `(0/mass)^3 = 0` and would never be sampled by the feerate-weighted
 /// selectors, yet the chain's protection layer wants every produced template to carry
 /// the freshest anchor — so they bypass weighting entirely. The forced set is bounded

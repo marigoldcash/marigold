@@ -55,7 +55,7 @@ pub(crate) struct Mempool {
     orphan_pool: OrphanPool,
     accepted_transactions: AcceptedTransactions,
     counters: Arc<MiningCounters>,
-    /// Own-wallet transactions accepted below the relay floor (FORK-PLAN
+    /// Own-wallet transactions accepted below the relay floor (PLAN
     /// P8.3b): in the pool for this node's own blocks, never announced.
     withheld_from_relay: std::collections::HashSet<TransactionId>,
 }
@@ -77,7 +77,7 @@ impl Mempool {
     }
 
     /// Accepted from this node's own wallet below the relay floor: for this
-    /// node's blocks only, never announced (FORK-PLAN P8.3b).
+    /// node's blocks only, never announced (PLAN P8.3b).
     pub(crate) fn is_withheld_from_relay(&self, transaction_id: &TransactionId) -> bool {
         self.withheld_from_relay.contains(transaction_id)
     }

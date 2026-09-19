@@ -16,7 +16,7 @@ impl Mobile {
 
 impl Mobile {
     /// 'mobile telegram <token>' pairs your own Telegram bot with this
-    /// wallet (FORK-PLAN P8.0h); 'mobile telegram' shows the state; 'mobile
+    /// wallet (PLAN P8.0h); 'mobile telegram' shows the state; 'mobile
     /// telegram limit <amount>' sets the daily limit; 'mobile telegram off'
     /// forgets it all. The bot answers only while 'marigold-cli serve' runs.
     #[cfg(feature = "embedded-node")]

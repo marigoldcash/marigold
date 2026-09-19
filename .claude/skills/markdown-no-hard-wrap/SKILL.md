@@ -17,7 +17,7 @@ Hard-wrapping and git diffs actively fight each other: edit one word in the midd
 hard-wrapped paragraph and every following line in that paragraph reflows, so a
 one-word change shows up as a multi-line diff. One line per paragraph means an edit to
 a sentence touches exactly the one line it's in — nothing else. This matters more here
-than in most repos: FORK-PLAN.md and docs/marigold/ are living documents edited
+than in most repos: PLAN.md and docs/marigold/ are living documents edited
 continuously across many sessions, and this project already cares a lot about clean,
 single-concern diffs (see the git history's commit discipline). Soft-wrap in the
 reader's own editor/viewer costs nothing; hard-wrap in the source costs a clean diff
@@ -67,7 +67,7 @@ rule above isn't a house style, so it applies wherever you touch a `.md` file, u
 docs included (that's why `docs/testnet12.md`, an inherited-upstream doc, got its fences
 fixed alongside the others in the commit that added this rule).
 
-The no-hard-wrap rule itself: `FORK-PLAN.md`, everything under `docs/marigold/`,
+The no-hard-wrap rule itself: `PLAN.md`, everything under `docs/marigold/`,
 `CONTRIBUTING.md`, and `README.md`. **Not** the inherited-upstream docs
 (`docs/crescendo-guide.md`, `docs/archival.md`, `docs/override-params.md`,
 `docs/testnet10-transition.md`, `docs/testnet12.md`, `docs/toccata-guide.md`,

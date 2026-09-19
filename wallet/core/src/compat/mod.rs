@@ -1,5 +1,5 @@
 //!
-//! Compatibility layer for legacy wallets — **emptied by FORK-PLAN P7.0**.
+//! Compatibility layer for legacy wallets — **emptied by PLAN P7.0**.
 //!
 //! The legacy-Kaspa import surfaces that lived here (`gen0.rs`, the KDX keydata
 //! import; `gen1.rs`, the Go-`kaspawallet` file import) were removed: on a

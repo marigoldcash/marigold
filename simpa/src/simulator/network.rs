@@ -164,7 +164,7 @@ impl KaspaNetworkSimulator {
         self.consensuses.pop().unwrap()
     }
 
-    /// FORK-PLAN P6.10's own verify criterion: run the simulation, then assert every
+    /// PLAN P6.10's own verify criterion: run the simulation, then assert every
     /// miner's own consensus instance agrees on the live note-pool root — before `run`'s
     /// own shutdown/drain would otherwise discard all but the first. Genuinely
     /// independent per-miner instances relaying blocks to each other, not a single

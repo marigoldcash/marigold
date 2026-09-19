@@ -364,7 +364,7 @@ impl MassCalculator {
             total_sigops * GRAMS_PER_SIGOP_COUNT_UNIT
         };
 
-        // Note-pool op signature verification (POOL-SPEC.md P5.3, FORK-PLAN P6.6): a
+        // Note-pool op signature verification (POOL-SPEC.md P5.3, PLAN P6.6): a
         // SignedGroup's Schnorr verify is real CPU cost that `tx.inputs`-based costing
         // above cannot see at all for Transfer/Redeem (both have zero transparent
         // inputs by design). Charged once per signature (per `SignedGroup`), not once

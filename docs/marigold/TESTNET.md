@@ -1,6 +1,6 @@
 # TESTNET.md — Public testnet deployment runbook
 
-Deployment runbook for the topology recorded in [STATE.md](STATE.md)'s "Live infrastructure" section: a small number of fixed-IP machines running `marigoldd` as public seed nodes, some of them also bridging an ASIC via `stratum-bridge`. This is infrastructure work in support of FORK-PLAN's **P8.7 — Public testnet soak**; it is not itself a numbered FORK-PLAN step, and running it does not close P8.7 (that needs months of actual soak time with outside participants).
+Deployment runbook for the topology recorded in [STATE.md](STATE.md)'s "Live infrastructure" section: a small number of fixed-IP machines running `marigoldd` as public seed nodes, some of them also bridging an ASIC via `stratum-bridge`. This is infrastructure work in support of PLAN's **P8.7 — Public testnet soak**; it is not itself a numbered PLAN step, and running it does not close P8.7 (that needs months of actual soak time with outside participants).
 
 Deployment is via the Ansible playbook in [`deploy/ansible/`](../../deploy/ansible/) — built to be reusable, not a one-off script for this specific testnet. The same playbook stands up a mainnet node by changing one variable (`marigold_network: mainnet`); nothing in it is hardcoded to exactly three hosts or to this testnet's IPs.
 

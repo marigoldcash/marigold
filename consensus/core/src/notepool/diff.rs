@@ -1,6 +1,6 @@
 //! The pool's analog of `UtxoDiff` (`crate::utxo::utxo_diff`) — mutations plus their
 //! inverses, so pool state can be applied and unapplied per chain block with the same
-//! discipline the UTXO set already uses (POOL-SPEC.md P5.1/P5.4, FORK-PLAN P6.2/P6.4).
+//! discipline the UTXO set already uses (POOL-SPEC.md P5.1/P5.4, PLAN P6.2/P6.4).
 //!
 //! The composition algebra (`with_diff_in_place`) mirrors `UtxoDiff`'s exactly, minus the
 //! DAA-score dimension: a live serial's `(d, pk)` value is immutable (invariants I1/I3,

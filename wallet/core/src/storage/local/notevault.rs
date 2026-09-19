@@ -1,5 +1,5 @@
 //!
-//! Note vault: file-per-note storage for the note key database (FORK-PLAN P7.6,
+//! Note vault: file-per-note storage for the note key database (PLAN P7.6,
 //! DECISIONS.md's "Note vault, backup, and restore-rotation policy" entry,
 //! POOL-SPEC.md P5.6's "Note vault (primary backup) and paper export"). Replaces
 //! P7.1's single encrypted `sn -> NoteKeyEntry` map: one file per note, plaintext
@@ -327,7 +327,7 @@ impl NoteVault {
     }
 
     /// Create a fresh vault: generate `K`, wrap it under `wallet_secret`, return
-    /// the 24 English BIP39 words encoding `K` directly (FORK-PLAN P7.6's
+    /// the 24 English BIP39 words encoding `K` directly (PLAN P7.6's
     /// ceremony — `K` *is* the entropy, the words are purely an encoding, not a
     /// derivation; see DECISIONS.md). Errors if a vault already exists here.
     pub async fn create(&self, wallet_secret: &Secret) -> Result<String> {
@@ -601,7 +601,7 @@ impl NoteVault {
 }
 
 impl NoteVault {
-    // ~~~ NoteKeyStore-shaped methods (FORK-PLAN P7.7 wires these into
+    // ~~~ NoteKeyStore-shaped methods (PLAN P7.7 wires these into
     // `LocalStoreInner`'s `NoteKeyStore` impl, which continues to serve the
     // `store_payment_request`/`payment_requests`/`load_payment_request_key`/
     // `remove_payment_request` quartet from the existing `Payload`/`Cache` blob —

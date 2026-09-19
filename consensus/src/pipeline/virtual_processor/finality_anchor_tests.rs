@@ -1,4 +1,4 @@
-//! Consensus-level finality-anchor tests (FORK-PLAN P6.11's verify criteria,
+//! Consensus-level finality-anchor tests (PLAN P6.11's verify criteria,
 //! POOL-SPEC.md P5.8): a heavier attacker chain lacking the latest anchor loses to the
 //! anchored chain; an equivocating quorum is ignored after its proof is processed;
 //! anchors past the hard sunset score are rejected; and anchor-free/stale operation

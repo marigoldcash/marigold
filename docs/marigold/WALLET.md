@@ -12,7 +12,7 @@ cargo build --release --bin marigoldd --bin marigold-cli
 
 `kaspa-miner` (the community `elichai/kaspa-miner` tool) must be installed separately — see NOTES.md's Environment section.
 
-**Use `simnet`, not `devnet`, for anything in this document.** This is not a style preference: `DEVNET_PARAMS` sets `pool_activation: ForkActivation::never()` (and `toccata_activation: never()` too) — the note-pool subnetwork is consensus-gated off on devnet specifically, so every `note` command in this walkthrough would be rejected at the consensus level on a devnet node. This isn't a wallet bug: devnet is the one network shape deliberately kept pool-inactive (useful for isolating pre-pool behavior; see FORK-PLAN P6.5's activation notes). Mainnet, testnet, and simnet all run with `pool_activation: ForkActivation::always()` — all upgrades active from block 0, per P2.6's new-chain rule. Simnet is the right choice *locally* because it's also the only network with `skip_proof_of_work: true`, letting mined blocks confirm instantly without a real miner grinding.
+**Use `simnet`, not `devnet`, for anything in this document.** This is not a style preference: `DEVNET_PARAMS` sets `pool_activation: ForkActivation::never()` (and `toccata_activation: never()` too) — the note-pool subnetwork is consensus-gated off on devnet specifically, so every `note` command in this walkthrough would be rejected at the consensus level on a devnet node. This isn't a wallet bug: devnet is the one network shape deliberately kept pool-inactive (useful for isolating pre-pool behavior; see PLAN P6.5's activation notes). Mainnet, testnet, and simnet all run with `pool_activation: ForkActivation::always()` — all upgrades active from block 0, per P2.6's new-chain rule. Simnet is the right choice *locally* because it's also the only network with `skip_proof_of_work: true`, letting mined blocks confirm instantly without a real miner grinding.
 
 ## 1. Launch a local simnet node
 
@@ -104,7 +104,7 @@ note list
 
 ## 6. The note vault: create, backup, verify, export
 
-The vault (FORK-PLAN P7.6) is the wallet's note key database — one encrypted file per note, backed by its own 24-word recovery key `K` (unrelated to the wallet's own BIP32 mnemonic from step 3; see DECISIONS.md's "Note vault, backup, and restore-rotation policy" for the full design).
+The vault (PLAN P7.6) is the wallet's note key database — one encrypted file per note, backed by its own 24-word recovery key `K` (unrelated to the wallet's own BIP32 mnemonic from step 3; see DECISIONS.md's "Note vault, backup, and restore-rotation policy" for the full design).
 
 ```
 note vault create

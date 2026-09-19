@@ -296,7 +296,7 @@ impl Miner {
 /// Keeping them together means there is a single place where the job
 /// generation is advanced, so a solution can never be matched against a
 /// template that has already been replaced. The same loop serves the wallet's
-/// own miner and the background miner program (FORK-PLAN P8.3c).
+/// own miner and the background miner program (PLAN P8.3c).
 pub fn spawn_session(
     rpc: Arc<DynRpcApi>,
     address: Address,
@@ -350,7 +350,7 @@ pub fn spawn_session(
 }
 
 /// A miner with a fixed payout address that a node's RPC can read and steer
-/// (FORK-PLAN P8.3c): what `marigold-cli mine-to` runs, and what a wallet on
+/// (PLAN P8.3c): what `marigold-cli mine-to` runs, and what a wallet on
 /// the same machine finds when it connects.
 pub struct MinerHost {
     address: std::sync::OnceLock<Address>,

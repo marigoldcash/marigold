@@ -40,7 +40,7 @@ pub enum RpcApiOps {
     NotifyVirtualDaaScoreChanged = 16,
     NotifyVirtualChainChanged = 17,
     NotifySinkBlueScoreChanged = 18,
-    /// FORK-PLAN P6.9: subscribe to note-pool changes, scoped to watched serials/pks.
+    /// PLAN P6.9: subscribe to note-pool changes, scoped to watched serials/pks.
     NotifyNotesChanged = 19,
 
     // Notification ops required by wRPC
@@ -147,15 +147,15 @@ pub enum RpcApiOps {
     GetBlockRewardInfo = 152,
     /// Get Seq-Commit Lane Proof
     GetSeqCommitLaneProof = 153,
-    /// Get note(s) by serial (FORK-PLAN P6.9)
+    /// Get note(s) by serial (PLAN P6.9)
     GetNotesBySerial = 154,
-    /// Get note-pool stats: live note count per denomination (FORK-PLAN P6.9)
+    /// Get note-pool stats: live note count per denomination (PLAN P6.9)
     GetPoolStats = 155,
     /// The node's finality-anchor status (POOL-SPEC.md P5.8's `finality_anchor_stale` visibility flag and friends)
     GetFinalityAnchorStatus = 156,
-    /// The miner running inside this node, if any: speed, share of the machine, blocks (FORK-PLAN P8.3c)
+    /// The miner running inside this node, if any: speed, share of the machine, blocks (PLAN P8.3c)
     GetMinerStatus = 157,
-    /// Start, stop or resize the miner running inside this node (FORK-PLAN P8.3c)
+    /// Start, stop or resize the miner running inside this node (PLAN P8.3c)
     ControlMiner = 158,
 }
 

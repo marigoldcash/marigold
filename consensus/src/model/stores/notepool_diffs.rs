@@ -14,7 +14,7 @@ use rocksdb::WriteBatch;
 
 /// Store for holding the pool-state difference (delta) of a chain block relative to its
 /// selected parent — the note pool's exact analog of `utxo_diffs.rs`'s `DbUtxoDiffsStore`
-/// (FORK-PLAN P6.4). Kept in lockstep with that store: a block with `StatusUTXOValid` has
+/// (PLAN P6.4). Kept in lockstep with that store: a block with `StatusUTXOValid` has
 /// both diffs, written in the same batch (`commit_utxo_state`), so reorg walks can
 /// apply/unapply the two in the same pass. The `remove` side carries each consumed note's
 /// `(d, pk)`, which is what makes reversal possible at all — after removal the value

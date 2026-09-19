@@ -81,7 +81,7 @@ impl Mempool {
         })
     }
 
-    /// The note-pool serial-keyed analog of `remove_double_spends` (FORK-PLAN P6.7): a
+    /// The note-pool serial-keyed analog of `remove_double_spends` (PLAN P6.7): a
     /// confirmed pool op's consumed serials can no longer be validly consumed by any
     /// mempool-resident transaction, so evict any that were racing to consume the same one.
     fn remove_serial_conflicts(&mut self, transaction: &Transaction) -> RuleResult<()> {

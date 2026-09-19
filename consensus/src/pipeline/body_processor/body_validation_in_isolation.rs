@@ -134,7 +134,7 @@ impl BlockBodyProcessor {
         Ok(())
     }
 
-    /// The note-pool analog of [`Self::check_block_double_spends`] (FORK-PLAN P6.4): no
+    /// The note-pool analog of [`Self::check_block_double_spends`] (PLAN P6.4): no
     /// serial may be consumed by two pool-op transactions in one block. Required for the
     /// same reason the UTXO rule exists — transactions within a block are validated in
     /// parallel against the same composed view, so intra-block conflicts must be a

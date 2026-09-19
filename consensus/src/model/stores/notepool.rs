@@ -7,7 +7,7 @@ use kaspa_database::registry::DatabaseStorePrefixes;
 use rocksdb::WriteBatch;
 use std::sync::Arc;
 
-/// The pool state map: `sn -> (d, pk)` (POOL-SPEC.md P5.1, FORK-PLAN P6.2). Mirrors
+/// The pool state map: `sn -> (d, pk)` (POOL-SPEC.md P5.1, PLAN P6.2). Mirrors
 /// `consensus/src/model/stores/utxo_set.rs`'s `DbUtxoSetStore` — same store shape,
 /// keyed by note serial instead of transaction outpoint.
 pub trait NotePoolStoreReader {
@@ -38,7 +38,7 @@ impl DbNotePoolStore {
     }
 
     /// A pool state store under an explicit prefix — used for the pruning-point-positioned
-    /// copy (`DatabaseStorePrefixes::PruningNotePool`, FORK-PLAN P6.8), mirroring how
+    /// copy (`DatabaseStorePrefixes::PruningNotePool`, PLAN P6.8), mirroring how
     /// `DbUtxoSetStore::new` takes its prefix so the virtual and pruning UTXO sets share
     /// one implementation.
     pub fn with_prefix(db: Arc<DB>, cache_policy: CachePolicy, prefix: Vec<u8>, locks_prefix: Vec<u8>) -> Self {
@@ -69,7 +69,7 @@ impl DbNotePoolStore {
 
     /// Chunked, resumable iteration in ascending serial order — the pool analog of
     /// `DbUtxoSetStore::seek_iterator`, used to serve pruning-point pool state to IBD
-    /// peers (FORK-PLAN P6.8).
+    /// peers (PLAN P6.8).
     pub fn seek_iterator(
         &self,
         from_sn: Option<Hash>,
@@ -111,7 +111,7 @@ impl DbNotePoolStore {
 }
 
 /// The virtual pool state store is the base view the composed mergeset views stack on
-/// (POOL-SPEC.md P5.3, FORK-PLAN P6.4) — the pool analog of `DbUtxoSetStore: UtxoView`.
+/// (POOL-SPEC.md P5.3, PLAN P6.4) — the pool analog of `DbUtxoSetStore: UtxoView`.
 impl PoolStateView for DbNotePoolStore {
     fn get_note(&self, sn: &Hash) -> Option<PoolEntry> {
         self.access.read(*sn).optional().unwrap().map(|note| self.entry(*sn, note))

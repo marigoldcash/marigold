@@ -92,13 +92,13 @@ pub struct KaspaCli {
     #[cfg(feature = "embedded-node")]
     cpu_miner: Mutex<Option<Arc<crate::miner::Miner>>>,
     /// A miner program running in the background on this machine, on the
-    /// node this wallet is connected to (FORK-PLAN P8.3c). Its miner is ours:
+    /// node this wallet is connected to (PLAN P8.3c). Its miner is ours:
     /// 'mine' steers it and the own lane counts on it. `remote_mining` is
     /// what it last said it was doing.
     remote_miner: Arc<AtomicBool>,
     remote_mining: Arc<AtomicBool>,
     /// The Telegram bot answered from inside this program while a paired
-    /// wallet is open (FORK-PLAN P8.0h), so nothing has to be closed to use
+    /// wallet is open (PLAN P8.0h), so nothing has to be closed to use
     /// the phone. Aborted on close and on exit.
     #[cfg(feature = "embedded-node")]
     telegram_bot: Mutex<Option<tokio::task::JoinHandle<()>>>,
@@ -338,7 +338,7 @@ impl KaspaCli {
 
     /// Whether the ledger figure can be stated as fact — see `ledger_known`.
     /// Does this wallet have a ledger account at all? A wallet that keeps
-    /// notes only (FORK-PLAN P8.0b) has none, and `account()` failing is then
+    /// notes only (PLAN P8.0b) has none, and `account()` failing is then
     /// the normal state rather than a selection that has not happened yet.
     ///
     /// Asked of the store, not of `wallet.accounts()`: that needs the wallet
@@ -501,7 +501,7 @@ impl KaspaCli {
     }
 
     /// Whether this wallet's own miner will mine what it submits, and how
-    /// long that takes (FORK-PLAN P8.3b). The lane is taken only on our own
+    /// long that takes (PLAN P8.3b). The lane is taken only on our own
     /// copy of the network, only while mining here, and only when a block of
     /// our own is expected within the hour: a transaction below the relay
     /// floor is kept out of relay by our node, so nobody else will ever mine
@@ -546,6 +546,14 @@ impl KaspaCli {
 
     pub fn remote_miner_present(&self) -> bool {
         self.remote_miner.load(Ordering::SeqCst)
+    }
+
+    /// Connected to a node on this machine's own loopback: a marigoldd the
+    /// user runs beside the wallet. Its operator is the user, so mining
+    /// through it gives nothing away.
+    pub fn connected_to_local_node(&self) -> bool {
+        self.wallet().is_connected()
+            && self.wallet().try_wrpc_client().and_then(|c| c.url()).is_some_and(|url| crate::modules::connect::is_local_target(&url))
     }
 
     /// A background miner is there but not mining.
@@ -1113,13 +1121,15 @@ impl KaspaCli {
         }
         // Mining against somebody else's node would hand them the address your
         // rewards are paid to, which is the one thing this wallet works to keep
-        // off other people's machines.
-        if !self.embedded_node_in_use() {
+        // off other people's machines. A node on this machine's own loopback is
+        // not somebody else's: the founder ran a plain marigoldd beside the
+        // wallet and was refused (2026-09-19).
+        if !self.embedded_node_in_use() && !self.connected_to_local_node() {
             tprintln!(self, "");
             if self.embedded_node_pending() {
                 tprintln!(self, "The sync is still catching up. Mining starts once it is ready —");
                 tprintln!(self, "'connect status' shows how far along it is.");
-            } else if self.wallet().is_connected() && !self.remote_miner_present() {
+            } else if self.wallet().is_connected() && !self.remote_miner_present() && !self.connected_to_local_node() {
                 // Connected, but not to a node of ours and not to the background
                 // miner: another wallet on this machine holds the network, and
                 // 'connect' just finds it again. Saying "type connect" here sent
@@ -1240,7 +1250,7 @@ impl KaspaCli {
             }
             None => {
                 tprintln!(self, "Not mining.");
-                if self.embedded_node_in_use() {
+                if self.embedded_node_in_use() || self.connected_to_local_node() {
                     tprintln!(self, "'mine start' begins, using whatever CPU nothing else wants.");
                 } else {
                     tprintln!(self, "Mining needs the network synced on this machine — 'connect'.");
@@ -1676,7 +1686,7 @@ impl KaspaCli {
                 return;
             }
         }
-        // Offered notes (FORK-PLAN P8.0g): once a lock has lapsed, what the
+        // Offered notes (PLAN P8.0g): once a lock has lapsed, what the
         // receiver never took comes back under its refund key; what they took
         // in time is marked paid. Needs the secret the automation holds.
         let secret_for_offers = self.auto_secret.lock().unwrap().clone();
@@ -1828,7 +1838,7 @@ impl KaspaCli {
                 return;
             }
 
-            // Whether our own miner will mine what follows (FORK-PLAN P8.3b):
+            // Whether our own miner will mine what follows (PLAN P8.3b):
             // decided once for the pass, used by the mint and the sweep alike.
             let lane = self.own_lane().await;
             let lane_fee_rate = match lane {

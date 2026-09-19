@@ -1,5 +1,5 @@
 //!
-//! Wallet-side construction of note-pool operation transactions (FORK-PLAN P7.2+).
+//! Wallet-side construction of note-pool operation transactions (PLAN P7.2+).
 //!
 //! Mint needs real transparent inputs (funding the new notes), so it goes through the
 //! ordinary [`Generator`]/[`Signer`] pipeline exactly like [`Account::send`] — the only
@@ -44,7 +44,7 @@ use std::time::Duration;
 use workflow_core::abortable::Abortable;
 use workflow_core::channel::Channel;
 
-/// The fee granularity of a pure pool `Transfer` (FORK-PLAN P7.3 design decision,
+/// The fee granularity of a pure pool `Transfer` (PLAN P7.3 design decision,
 /// recorded in NOTES.md): since every consumed and produced value is a multiple of the
 /// smallest denomination, `fee = Σconsumed − Σproduced` is *necessarily* a multiple of
 /// 0.01 MAGLD — pool-op fees are quantized whether we like it or not. The wallet
@@ -111,7 +111,7 @@ pub const POOL_FEE_RATE: f64 = 105.0;
 pub type NoteProgress = std::sync::Arc<dyn Fn(String) + Send + Sync>;
 
 /// Mint `amount_petals` worth of notes, splitting into the P1.6 denomination ladder,
-/// funded from the account's transparent balance (FORK-PLAN P7.2).
+/// funded from the account's transparent balance (PLAN P7.2).
 pub async fn mint(
     account: Arc<dyn Account>,
     wallet_secret: Secret,
@@ -217,7 +217,7 @@ pub struct RedeemResult {
     pub serials: Vec<Hash>,
 }
 
-/// Redeem notes back to transparent balance (FORK-PLAN P7.2). Builds a zero-transparent-
+/// Redeem notes back to transparent balance (PLAN P7.2). Builds a zero-transparent-
 /// input `RedeemOp` transaction directly (see this module's doc comment for why),
 /// signs each `SignedGroup` with its notes' own key(s), and submits over RPC.
 pub async fn redeem(account: Arc<dyn Account>, wallet_secret: Secret, selection: RedeemSelection) -> Result<RedeemResult> {
@@ -245,7 +245,7 @@ pub async fn redeem_to(
 
 /// The redeem itself, bound to a wallet rather than an account. `change` is
 /// where value beyond the destination amount (less the fee) goes; a wallet
-/// that keeps notes only has no such place (FORK-PLAN P8.0b), and passes
+/// that keeps notes only has no such place (PLAN P8.0b), and passes
 /// `None`. Then the notes must cover the destination amount to within one
 /// [`FEE_QUANTUM_PETALS`], and the whole redeemed value less the fee goes to
 /// the destination — a deposit may arrive a fraction over what was asked,
@@ -474,7 +474,7 @@ pub async fn redeem_with(
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// Receive flows (FORK-PLAN P7.3): QR/text payloads, the pure-pool transfer builder,
+// Receive flows (PLAN P7.3): QR/text payloads, the pure-pool transfer builder,
 // bearer import, and the sign-to-fresh-pk payment-request flow.
 
 /// The payment-request QR/text payload (POOL-SPEC.md P5.6 "QR payload formats"):
@@ -580,7 +580,7 @@ impl BearerNote {
 /// Text-encoding prefix for a handover bundle — a payment handed over as one code.
 pub const HANDOVER_PREFIX: &str = "marigoldpay:";
 
-/// A payment handed to someone as one code (FORK-PLAN P8.0f, POOL-SPEC P5.6
+/// A payment handed to someone as one code (PLAN P8.0f, POOL-SPEC P5.6
 /// "Handover bundle"): every note in it sits under **one** fresh key made for
 /// this handover, so the code is 32 bytes plus 33 per note rather than 65 per
 /// note, and the receiver's import is one signature for the lot. It carries
@@ -1108,7 +1108,7 @@ fn required_fee_quanta(mass: u64, feerate: f64) -> u64 {
     required.div_ceil(FEE_QUANTUM_PETALS).max(1)
 }
 
-/// Rotate the given (owned, Active) serials to fresh keys (FORK-PLAN P7.3 — the
+/// Rotate the given (owned, Active) serials to fresh keys (PLAN P7.3 — the
 /// receive flow's step 3, also the future P7.4 isolation primitive). The rotated
 /// value is re-produced under fresh Cold keys, preserving denominations. The fee is
 /// sourced from the wallet's smallest spare notes (consumed alongside, their excess
@@ -1244,7 +1244,7 @@ pub struct BearerImportResult {
     pub rotation: TransferResult,
 }
 
-/// Bearer-note import (FORK-PLAN P7.3 flow (a), POOL-SPEC.md P5.5a/P5.6): verify the
+/// Bearer-note import (PLAN P7.3 flow (a), POOL-SPEC.md P5.5a/P5.6): verify the
 /// serial's current on-chain `pk` matches the handed-over key, store it — Hot,
 /// structurally (P7.1's `import_bearer_key` accepts no other provenance) — and
 /// **immediately** rotate it to a fresh Cold key. The note is not considered
@@ -1283,7 +1283,7 @@ pub async fn bearer_import(wallet: &Arc<Wallet>, wallet_secret: Secret, bearer: 
 }
 
 /// Create (and persist, before anything is displayed) a payment request
-/// (FORK-PLAN P7.3 flow (b), POOL-SPEC.md P5.5b "sign-to-fresh-pk").
+/// (PLAN P7.3 flow (b), POOL-SPEC.md P5.5b "sign-to-fresh-pk").
 pub async fn create_payment_request(
     wallet: &Arc<Wallet>,
     wallet_secret: &Secret,
@@ -1303,7 +1303,7 @@ pub async fn create_payment_request(
 }
 
 /// Pay a payment request (the payer's half of sign-to-fresh-pk, upgraded by
-/// FORK-PLAN P7.4 with split planning): select own notes covering `amount + fee`
+/// PLAN P7.4 with split planning): select own notes covering `amount + fee`
 /// (exact if the held multiset allows, else a covering superset — see
 /// [`select_covering`]), produce `decompose(amount)` under the request's `pk` and
 /// the overshoot minus the fee as change to own fresh Cold keys — payment, split,
@@ -1399,7 +1399,7 @@ pub struct BearerExportResult {
     pub isolation: Option<TransferResult>,
 }
 
-/// Bearer-export a note (FORK-PLAN P7.4 flow (b), POOL-SPEC.md P5.6's one wallet
+/// Bearer-export a note (PLAN P7.4 flow (b), POOL-SPEC.md P5.6's one wallet
 /// invariant: **bearer handover requires a solo key** — revealing a shared `sk`
 /// hands over every note under that `pk`, not just the one being paid). If the
 /// note's key is shared (any other live row under the same `pk` — the
@@ -1539,7 +1539,7 @@ pub async fn await_payment_request(
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// POS landing-pad mode (FORK-PLAN P7.5, POOL-SPEC.md P5.6 "POS 'landing pad' flow").
+// POS landing-pad mode (PLAN P7.5, POOL-SPEC.md P5.6 "POS 'landing pad' flow").
 
 /// Callback type for [`pos_checkout`]'s `on_request` hook — pulled out as a named
 /// alias (rather than inlined in each signature) so the anonymous lifetime in
@@ -1556,7 +1556,7 @@ pub struct PosCheckoutResult {
     pub sweep: TransferResult,
 }
 
-/// One POS sale (FORK-PLAN P7.5's primary, spec-recommended mode — "fresh `pk` per
+/// One POS sale (PLAN P7.5's primary, spec-recommended mode — "fresh `pk` per
 /// checkout... gives free payment matching," POOL-SPEC.md P5.6): create a
 /// single-use payment request (fresh `pk`, matching one sale to one confirmed
 /// rotation), wait for the exact payment, and the instant it confirms, immediately
@@ -1595,7 +1595,7 @@ pub async fn pos_checkout(
     Ok(PosCheckoutResult { request, claimed, sweep })
 }
 
-// ~~~ FORK-PLAN P7.6: vault verify, restore-rotation planning, paper QR export ~~~
+// ~~~ PLAN P7.6: vault verify, restore-rotation planning, paper QR export ~~~
 //
 // DECISIONS.md's "Note vault, backup, and restore-rotation policy" / POOL-SPEC.md
 // P5.6's "Restore flow" section, implemented here rather than in
@@ -2152,7 +2152,7 @@ mod tests {
 /// Largest-first greed is wrong here: asked for 1.1 with two 1s and a 0.1 in
 /// hand it took both 1s and never looked at the 0.1 (2026-09-15). On a ledger
 /// wallet that only means more change; on a notes-only wallet, where a
-/// payout must cover the amount to within one 0.01 (FORK-PLAN P8.0b), it
+/// payout must cover the amount to within one 0.01 (PLAN P8.0b), it
 /// turned a payable amount into a refusal. A bounded knapsack over 0.01
 /// units answers exactly; the space is the target plus the largest note held,
 /// since any cover further over can drop a note and still cover.
@@ -2958,7 +2958,7 @@ mod mirror_export_tests {
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// Escrowed handover (FORK-PLAN P8.0g, POOL-SPEC.md P5.9): pay to someone's share
+// Escrowed handover (PLAN P8.0g, POOL-SPEC.md P5.9): pay to someone's share
 // key under a lock. The notes go to a one-time key only the receiver can derive;
 // the payer keeps a refund key that works once the lock lapses.
 

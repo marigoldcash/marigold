@@ -144,7 +144,7 @@ pub struct VirtualStateProcessor {
     pub(super) utxo_diffs_store: Arc<DbUtxoDiffsStore>,
     pub(super) utxo_multisets_store: Arc<DbUtxoMultisetsStore>,
     pub(super) acceptance_data_store: Arc<DbAcceptanceDataStore>,
-    // Note-pool per-chain-block diffs (FORK-PLAN P6.4), kept in lockstep with `utxo_diffs_store`
+    // Note-pool per-chain-block diffs (PLAN P6.4), kept in lockstep with `utxo_diffs_store`
     pub(super) notepool_diffs_store: Arc<DbNotePoolDiffsStore>,
     pub(super) virtual_stores: Arc<RwLock<VirtualStores>>,
     pub(super) pruning_meta_stores: Arc<RwLock<PruningMetaStores>>,
@@ -183,7 +183,7 @@ pub struct VirtualStateProcessor {
     pub(crate) note_locks_activation: ForkActivation,
     pub(crate) toccata_logger: ForkLogger,
 
-    // Finality anchors (POOL-SPEC.md P5.8, FORK-PLAN P6.11)
+    // Finality anchors (POOL-SPEC.md P5.8, PLAN P6.11)
     pub(super) finality_anchor_params: kaspa_consensus_core::config::params::FinalityAnchorParams,
     pub(super) finality_anchor_store: Arc<RwLock<crate::model::stores::finality_anchor::DbFinalityAnchorStore>>,
     /// Last observed enforcement state, for alert edge detection (see
@@ -200,7 +200,7 @@ pub struct VirtualStateProcessor {
 }
 
 /// The finality-anchor enforcement state as of the latest virtual advance
-/// (POOL-SPEC.md P5.8's fail-open visibility requirement, FORK-PLAN P6.11).
+/// (POOL-SPEC.md P5.8's fail-open visibility requirement, PLAN P6.11).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum AnchorEnforcementState {
@@ -452,7 +452,7 @@ impl VirtualStateProcessor {
         self.notification_root
             .notify(Notification::UtxosChanged(UtxosChangedNotification::new(accumulated_diff, virtual_parents.clone())))
             .expect("expecting an open unbounded channel");
-        // The note-pool analog of the UTXO notification above (FORK-PLAN P6.9) — same
+        // The note-pool analog of the UTXO notification above (PLAN P6.9) — same
         // accumulated-diff shape, same unconditional emission; per-serial/per-pk
         // filtering happens downstream at the subscription layer, not here.
         self.notification_root
@@ -489,7 +489,7 @@ impl VirtualStateProcessor {
         }
     }
 
-    /// The finality-anchor fork-choice guard (POOL-SPEC.md P5.8, FORK-PLAN P6.11): the
+    /// The finality-anchor fork-choice guard (POOL-SPEC.md P5.8, PLAN P6.11): the
     /// block every sink candidate must have on its selected chain, or `None` when the
     /// anchor-conflict rule is not currently enforced. Enforcement requires ALL of:
     /// trustee keys pinned in params, the hard trustee-expiry score not yet reached,
@@ -1456,7 +1456,7 @@ impl VirtualStateProcessor {
         // (and it can't be in the future by induction)
         loop {
             let candidate = heap.pop().expect("valid sink must exist").hash;
-            // The finality-anchor fork-choice override (POOL-SPEC.md P5.8, FORK-PLAN
+            // The finality-anchor fork-choice override (POOL-SPEC.md P5.8, PLAN
             // P6.11): while a fresh anchor is enforced, a candidate whose selected
             // chain does not contain the anchored block is refused regardless of
             // accumulated work — the second, faster-triggering enforcement of the same
@@ -1879,7 +1879,7 @@ impl VirtualStateProcessor {
             (TemplateBuildMode::Standard, true) | (TemplateBuildMode::Infallible, _) => {}
         }
 
-        // Virtual's own pool commitment (POOL-SPEC.md P5.1, FORK-PLAN P6.5): `virtual_read.pool_state`
+        // Virtual's own pool commitment (POOL-SPEC.md P5.1, PLAN P6.5): `virtual_read.pool_state`
         // directly holds virtual's own live state (unlike `selected_parent`-relative stores), so no
         // diff overlay is needed here — mirrors `recompute_pool_commitment`'s full-rebuild approach for
         // consistency with what `verify_expected_utxo_state` will check once this block is submitted.

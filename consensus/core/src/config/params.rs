@@ -146,7 +146,7 @@ impl<T: Copy> From<T> for ForkedParam<T> {
 }
 
 /// The block version as a function of DAA score, across a genuine three-tier version
-/// history (pre-Toccata → Toccata/KIP-21 → note-pool, FORK-PLAN P6.5). Not expressed as
+/// history (pre-Toccata → Toccata/KIP-21 → note-pool, PLAN P6.5). Not expressed as
 /// a second `ForkedParam<u16>` layered on the first: `ForkedParam` is a strictly binary
 /// pre/post construct tied to one activation, and a third tier needs an explicit
 /// priority chain (most-recently-activated fork wins), not another independent pair.
@@ -199,7 +199,7 @@ impl<T: Copy + Ord> ForkedParam<T> {
     }
 }
 
-/// Launch finality-anchor consensus params (POOL-SPEC.md P5.8, FORK-PLAN P6.11).
+/// Launch finality-anchor consensus params (POOL-SPEC.md P5.8, PLAN P6.11).
 /// Grouped under one struct — same reasoning as [`BlockrateParams`] — so the four
 /// network const blocks and [`OverrideParams`] each carry a single field.
 ///
@@ -230,7 +230,7 @@ pub struct FinalityAnchorParams {
     /// P9.5-gated sensitivity model exists (POOL-SPEC.md P5.8, "Calibration is a hard
     /// pre-launch gate") — wiring live trigger evaluation against an unfrozen T would
     /// be premature. These `ForkActivation` scores are the exact hook that evaluation
-    /// (or the FORK-PLAN P9.x governance mechanism that upgrades the sunset story)
+    /// (or the PLAN P9.x governance mechanism that upgrades the sunset story)
     /// sets when the parameters freeze. Stage 4 (expiry) is [`Self::hard_expiry`],
     /// enforced unconditionally regardless of these stages.
     pub decay_stages: [(ForkActivation, u64); 3],
@@ -375,13 +375,13 @@ pub struct OverrideParams {
 
     pub toccata_activation: Option<ForkActivation>,
 
-    /// Note-pool activation DAA score (POOL-SPEC.md P5.1, FORK-PLAN P6.5)
+    /// Note-pool activation DAA score (POOL-SPEC.md P5.1, PLAN P6.5)
     pub pool_activation: Option<ForkActivation>,
 
-    /// Time-locked notes activation DAA score (POOL-SPEC.md P5.9, FORK-PLAN P8.0g)
+    /// Time-locked notes activation DAA score (POOL-SPEC.md P5.9, PLAN P8.0g)
     pub note_locks_activation: Option<ForkActivation>,
 
-    /// Launch finality-anchor params (POOL-SPEC.md P5.8, FORK-PLAN P6.11)
+    /// Launch finality-anchor params (POOL-SPEC.md P5.8, PLAN P6.11)
     pub finality_anchor: Option<FinalityAnchorParams>,
 }
 
@@ -488,7 +488,7 @@ pub struct Params {
 
     pub toccata_activation: ForkActivation,
 
-    /// Note-pool activation DAA score (POOL-SPEC.md P5.1, FORK-PLAN P6.5) — from this
+    /// Note-pool activation DAA score (POOL-SPEC.md P5.1, PLAN P6.5) — from this
     /// score onward, block headers carry a meaningful `pool_commitment` and blocks are
     /// mined at `NOTE_POOL_BLOCK_VERSION`. Modeled as its own `ForkActivation`, not a
     /// reuse of `toccata_activation`, per the same "one field, one meaning" reasoning
@@ -498,12 +498,12 @@ pub struct Params {
     /// separate switch.
     pub pool_activation: ForkActivation,
 
-    /// Time-locked notes (POOL-SPEC.md P5.9, FORK-PLAN P8.0g): from this DAA score
+    /// Time-locked notes (POOL-SPEC.md P5.9, PLAN P8.0g): from this DAA score
     /// onward a `TransferLocked` op is valid and a note may carry a lock. Its own
     /// switch, after `pool_activation`, so every node reading locks has upgraded.
     pub note_locks_activation: ForkActivation,
 
-    /// Launch finality-anchor params (POOL-SPEC.md P5.8, FORK-PLAN P6.11): the pinned
+    /// Launch finality-anchor params (POOL-SPEC.md P5.8, PLAN P6.11): the pinned
     /// trustee keys, anchoring depth, staged cadence schedule, and the unconditional
     /// hard trustee-expiry score. Ships unkeyed (mechanism inert) on every network
     /// until the P9.1 trustee ceremony.
@@ -864,7 +864,7 @@ pub const MAINNET_PARAMS: Params = Params {
     finality_anchor: FinalityAnchorParams::LAUNCH_UNKEYED,
 };
 
-/// Testnet-10's trustee keys (FORK-PLAN P9.1, testnet rehearsal, 2026-09-18): five
+/// Testnet-10's trustee keys (PLAN P9.1, testnet rehearsal, 2026-09-18): five
 /// throwaway keys made on the two small Hetzner hosts with `marigold-trustee-signer
 /// --generate-key`, so the finality-anchor guard runs live on the public testnet
 /// before mainnet's ceremony produces the real ones. Indices 0, 1 and 4 live on

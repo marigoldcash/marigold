@@ -1,6 +1,6 @@
 # Spec reviews
 
-This directory holds written external reviews of frozen specs, per FORK-PLAN.md's
+This directory holds written external reviews of frozen specs, per PLAN.md's
 review-gate steps (currently just P5.9).
 
 ## P5.9 — Pool spec review (CLOSED 2026-08-15 — spec tagged `pool-spec-v1.1`)
@@ -21,7 +21,7 @@ person with an applied-cryptography background, outside the project**, before Ph
   new flaw; independently confirms the review-1 fix. Demanded rigor artifacts (theorem,
   field matrix, threat model, canonicalization, IBD trust-root design, equivocation
   lifecycle) — all now written into the spec; launch-phase demands gated into
-  FORK-PLAN (P8.5, P9.1, P9.5).
+  PLAN (P8.5, P9.1, P9.5).
 - **Cross-review concurrence received**:
   [pool-spec-review-1-response-to-review-2.md](pool-spec-review-1-response-to-review-2.md)
   — reviewer 1 read review 2 and endorses its priority list ("the Redeem gap I found

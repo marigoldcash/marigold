@@ -178,7 +178,7 @@ impl GeneratorSettings {
 
     /// Override the final transaction's subnetwork id (default
     /// `SUBNETWORK_ID_NATIVE`) — e.g. `SUBNETWORK_ID_NOTE_POOL` for a note-pool op
-    /// transaction (FORK-PLAN P7.2+) carrying its `payload` (set via
+    /// transaction (PLAN P7.2+) carrying its `payload` (set via
     /// `final_transaction_payload` above). Intermediate compound transactions, if
     /// the aggregation needs more than one, are unaffected — only the final
     /// transaction (the one actually carrying `final_transaction_payload`) uses this.

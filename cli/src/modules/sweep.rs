@@ -79,7 +79,7 @@ impl Sweep {
             ),
         }
         // As good as free when this wallet's own miner will mine it: the fee
-        // comes back to our own coinbase (FORK-PLAN P8.3b).
+        // comes back to our own coinbase (PLAN P8.3b).
         let lane = ctx.own_lane().await;
         let fee_rate = match lane {
             crate::cli::OwnLane::Use { .. } => Some(crate::cli::OWN_LANE_FEE_RATE),

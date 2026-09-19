@@ -1,4 +1,4 @@
-//! The phone is a remote (FORK-PLAN P8.0h): a person's own Telegram bot,
+//! The phone is a remote (PLAN P8.0h): a person's own Telegram bot,
 //! long-polled by their wallet running as a service. Nothing but Telegram is
 //! reached, nothing listens, and no key ever leaves the machine the wallet
 //! is on. One Telegram user is paired; everyone else is ignored.

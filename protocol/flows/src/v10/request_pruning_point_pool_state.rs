@@ -14,7 +14,7 @@ use kaspa_p2p_lib::{
 };
 use std::sync::Arc;
 
-/// Serves the note-pool state positioned at the pruning point to IBD peers (FORK-PLAN
+/// Serves the note-pool state positioned at the pruning point to IBD peers (PLAN
 /// P6.8) — a structural clone of v7's `RequestPruningPointUtxoSetFlow`, chunked in
 /// ascending serial order and terminated by an explicit Done sentinel. The client
 /// verifies the rebuilt pool SMT root against the pruning point header's own

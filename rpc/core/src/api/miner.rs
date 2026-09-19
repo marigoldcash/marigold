@@ -1,5 +1,5 @@
 //! The hook a node's RPC service uses to reach a miner running in the same
-//! process (FORK-PLAN P8.3c). marigoldd has none; the wallet's background
+//! process (PLAN P8.3c). marigoldd has none; the wallet's background
 //! miner registers one so a wallet on the same machine can read and steer it.
 
 use crate::{RpcMinerStatus, RpcResult};

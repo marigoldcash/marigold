@@ -1253,7 +1253,7 @@ async fn daemon_ibd_smt_state_sync_test() {
     kaspad2.shutdown();
 }
 
-// IBD test focused on `sync_new_pool_state` (FORK-PLAN P6.8): a fresh node syncing from a
+// IBD test focused on `sync_new_pool_state` (PLAN P6.8): a fresh node syncing from a
 // pruning point whose note pool is non-empty must download the pool state, verify it
 // against the pruning point header's `pool_commitment`, and end up with a genuinely
 // usable pool — proven by (a) IBD completing at all (a root mismatch aborts it), (b) the
@@ -1519,7 +1519,7 @@ async fn daemon_ibd_pool_state_sync_test() {
     kaspad2.shutdown();
 }
 
-// FORK-PLAN P6.9's verify condition: a client subscribed to NotesChanged sees a notification
+// PLAN P6.9's verify condition: a client subscribed to NotesChanged sees a notification
 // when a mint lands and again when a rotate consumes/produces notes, proving the full
 // consensus -> notify -> rpc-core -> grpc wiring end to end (the notify crate's own unit
 // tests already cover the subscription-filtering logic in isolation). Also exercises the two
@@ -1673,7 +1673,7 @@ async fn daemon_notes_changed_notification_test() {
     kaspad1.shutdown();
 }
 
-/// FORK-PLAN P6.10's "pool-root agreement across nodes" verify criterion: three real,
+/// PLAN P6.10's "pool-root agreement across nodes" verify criterion: three real,
 /// independent nodes (not two, unlike `daemon_ibd_pool_state_sync_test` — genuinely N,
 /// not a special-cased pair) in a star topology around a miner, fed a real mix of mint,
 /// split, merge, and redeem transactions relayed over P2P (not hand-imported), converge
@@ -1886,7 +1886,7 @@ async fn daemon_notepool_multi_node_agreement_test() {
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// Finality-anchor distribution tests (POOL-SPEC.md P5.8, FORK-PLAN P6.12)
+// Finality-anchor distribution tests (POOL-SPEC.md P5.8, PLAN P6.12)
 
 mod finality_anchor_helpers {
     use super::*;

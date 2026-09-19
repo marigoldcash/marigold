@@ -81,7 +81,7 @@ impl Pay {
         // amount or a serial becomes one code the receiver types into
         // 'receive', with the receiver's stamp inside — the sender pays.
         // 'pay <amount> <key> [for <n> days|hours]': to someone's share key,
-        // under a lock (FORK-PLAN P8.0g). Theirs to take until the lock lapses,
+        // under a lock (PLAN P8.0g). Theirs to take until the lock lapses,
         // ours again after; the code carries no key the payer could use.
         if let (Some(amount), Some(key)) = (argv.first(), argv.get(1))
             && key.starts_with(notepool::SHARE_KEY_PREFIX)

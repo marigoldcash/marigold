@@ -36,7 +36,7 @@ message RpcBlockHeader {
   uint64 blueScore = 13;
   string pruningPoint = 14;
   string hash = 15;
-  // The note-pool commitment (POOL-SPEC.md P5.1, FORK-PLAN P6.5).
+  // The note-pool commitment (POOL-SPEC.md P5.1, PLAN P6.5).
   string poolCommitment = 16;
 }
 
@@ -1019,7 +1019,7 @@ message RpcOptionalHeader {
   optional string blueWork = 12;
   optional uint64 blueScore = 13;
   optional string pruningPoint = 14;
-  // The note-pool commitment (POOL-SPEC.md P5.1, FORK-PLAN P6.5).
+  // The note-pool commitment (POOL-SPEC.md P5.1, PLAN P6.5).
   optional string poolCommitment = 15;
 }
 
@@ -1182,7 +1182,7 @@ message GetSeqCommitLaneProofResponseMessage {
 }
 
 // NotifyNotesChangedRequestMessage registers this connection for notesChanged
-// notifications (FORK-PLAN P6.9), scoped to the given note serials and/or owner
+// notifications (PLAN P6.9), scoped to the given note serials and/or owner
 // pubkeys. Leave both empty to start/stop all updates.
 //
 // See: NotesChangedNotificationMessage
@@ -1214,7 +1214,7 @@ message RpcNoteEntryMessage {
 }
 
 // GetNotesBySerialRequestMessage requests the current pool notes for the given
-// serials (FORK-PLAN P6.9). Serials not currently in the pool are simply absent
+// serials (PLAN P6.9). Serials not currently in the pool are simply absent
 // from the response.
 message GetNotesBySerialRequestMessage {
   repeated bytes serials = 1;
@@ -1227,7 +1227,7 @@ message GetNotesBySerialResponseMessage {
 }
 
 // GetPoolStatsRequestMessage requests the live note-pool stats: note count per
-// denomination (FORK-PLAN P6.9), indexed by DenominationTag's declaration order.
+// denomination (PLAN P6.9), indexed by DenominationTag's declaration order.
 message GetPoolStatsRequestMessage {
 }
 
@@ -1238,7 +1238,7 @@ message GetPoolStatsResponseMessage {
 }
 
 // GetFinalityAnchorStatusRequestMessage requests the node's finality-anchor status
-// (POOL-SPEC.md P5.8, FORK-PLAN P6.12) — including the wallet-visible
+// (POOL-SPEC.md P5.8, PLAN P6.12) — including the wallet-visible
 // finality_anchor_stale fail-open flag.
 message GetFinalityAnchorStatusRequestMessage {
 }
@@ -1256,7 +1256,7 @@ message GetFinalityAnchorStatusResponseMessage {
   RPCError error = 1000;
 }
 
-// The miner inside a node, if any (FORK-PLAN P8.3c). `available` is false on a
+// The miner inside a node, if any (PLAN P8.3c). `available` is false on a
 // node that has no miner program in it.
 message RpcMinerStatusMessage {
   bool available = 1;

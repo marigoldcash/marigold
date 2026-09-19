@@ -183,7 +183,7 @@ pub const SUBNETWORK_ID_REGISTRY: SubnetworkId = RegistrySubnetwork::SUBNETWORK_
 pub const SUBNETWORK_ID_NOTE_POOL: SubnetworkId = SubnetworkId::from_namespace([0x50, 0x4f, 0x4f, 0x4c]);
 
 /// The user-lane subnetwork ID for Marigold finality anchors and equivocation evidence
-/// (POOL-SPEC.md P5.8, FORK-PLAN P6.11) — "a second, independent namespace, not the
+/// (POOL-SPEC.md P5.8, PLAN P6.11) — "a second, independent namespace, not the
 /// pool's", per the spec's own instruction. Namespace bytes spell "ANCR" in ASCII.
 pub const SUBNETWORK_ID_FINALITY_ANCHOR: SubnetworkId = SubnetworkId::from_namespace([0x41, 0x4e, 0x43, 0x52]);
 

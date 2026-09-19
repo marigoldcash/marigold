@@ -1,6 +1,6 @@
 [package]
 name = "kaspa-trustee-signer"
-description = "Marigold finality-anchor trustee signer daemon (POOL-SPEC.md P5.8, FORK-PLAN P6.12)"
+description = "Marigold finality-anchor trustee signer daemon (POOL-SPEC.md P5.8, PLAN P6.12)"
 rust-version.workspace = true
 version.workspace = true
 edition.workspace = true

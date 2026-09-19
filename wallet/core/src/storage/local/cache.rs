@@ -25,7 +25,7 @@ pub struct Cache {
     // P7.1-P7.5; P7.6 moved it out to `storage::local::notevault::NoteVault`
     // (file-per-note, its own in-memory index) — `LocalStoreInner`'s `NoteKeyStore`
     // impl now delegates there directly instead of touching this cache.
-    /// Outstanding payment-request keys (FORK-PLAN P7.3) — encrypted `pk -> key` map.
+    /// Outstanding payment-request keys (PLAN P7.3) — encrypted `pk -> key` map.
     pub payment_request_data: Encrypted,
     /// Plaintext index alongside `payment_request_data` (the pk is the QR's own
     /// public content; the amount is invoice metadata). Plain Vec, not a

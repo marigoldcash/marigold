@@ -65,7 +65,7 @@ impl From<&DoubleSpend> for RuleError {
     }
 }
 
-/// The note-pool serial-keyed analog of [`DoubleSpend`] (FORK-PLAN P6.7).
+/// The note-pool serial-keyed analog of [`DoubleSpend`] (PLAN P6.7).
 pub(crate) struct SerialConflict {
     pub serial: Hash,
     pub owner_id: TransactionId,

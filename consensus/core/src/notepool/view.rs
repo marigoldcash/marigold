@@ -2,7 +2,7 @@
 //! `crate::utxo::utxo_view` (`UtxoView`/`ComposedUtxoView`), existing for the same
 //! reason: the virtual pipeline validates each merged block against the selected
 //! parent's state *plus* the mergeset diff accumulated so far, without materializing
-//! intermediate states (POOL-SPEC.md P5.3's composed view, FORK-PLAN P6.4).
+//! intermediate states (POOL-SPEC.md P5.3's composed view, PLAN P6.4).
 
 use super::PoolEntry;
 use super::diff::{ImmutablePoolDiff, PoolCollection};

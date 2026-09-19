@@ -11,7 +11,7 @@ Found a way to spend a note twice, take a note that is not yours, or stop the ne
 - `consensus/`, `consensus/core/src/notepool/`: the chain, and the note pool that makes it Marigold. The specification is [docs/marigold/POOL-SPEC.md](docs/marigold/POOL-SPEC.md).
 - `cli/`: the wallet. `wallet/core/`: what it stands on.
 - `bridge/`: the stratum bridge for miners. `faucet/`: the testnet faucet. `trustee-signer/`: the finality-anchor signer.
-- `docs/marigold/`: the plan ([FORK-PLAN.md](FORK-PLAN.md) at the root), the decisions ([DECISIONS.md](docs/marigold/DECISIONS.md)), the state of the project ([STATE.md](docs/marigold/STATE.md)) and the working notes. Read DECISIONS.md before proposing to change something it records; it says why things are the way they are.
+- `docs/marigold/`: the plan ([PLAN.md](PLAN.md) at the root), the decisions ([DECISIONS.md](docs/marigold/DECISIONS.md)), the state of the project ([STATE.md](docs/marigold/STATE.md)) and the working notes. Read DECISIONS.md before proposing to change something it records; it says why things are the way they are.
 
 ## Rules that keep the fork mergeable
 

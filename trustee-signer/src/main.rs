@@ -1,4 +1,4 @@
-//! The trustee signer daemon binary (FORK-PLAN P6.12) — see the library doc for the
+//! The trustee signer daemon binary (PLAN P6.12) — see the library doc for the
 //! signing discipline and transport. One instance per trustee key.
 
 use clap::Parser;

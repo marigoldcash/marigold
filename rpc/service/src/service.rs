@@ -129,7 +129,7 @@ pub struct RpcCoreService {
     fee_estimate_cache: ExpiringCache<RpcFeeEstimate>,
     fee_estimate_verbose_cache: ExpiringCache<kaspa_mining::errors::MiningManagerResult<GetFeeEstimateExperimentalResponse>>,
     mining_rule_engine: Arc<MiningRuleEngine>,
-    /// A miner living in this process, when there is one (FORK-PLAN P8.3c).
+    /// A miner living in this process, when there is one (PLAN P8.3c).
     /// marigoldd never sets it; the wallet's background miner does.
     miner_control: std::sync::RwLock<Option<Arc<dyn MinerControl>>>,
 }
@@ -554,7 +554,7 @@ NOTE: This error usually indicates an RPC conversion error between the node and 
         request: GetNotesBySerialRequest,
     ) -> RpcResult<GetNotesBySerialResponse> {
         // A live point lookup against virtual's own pool state — no index dependency,
-        // unlike `get_utxos_by_addresses_call` above (FORK-PLAN P6.9).
+        // unlike `get_utxos_by_addresses_call` above (PLAN P6.9).
         let session = self.consensus_manager.consensus().unguarded_session();
         let notes = session.async_get_pool_notes(request.serials.clone()).await;
         let entries = request

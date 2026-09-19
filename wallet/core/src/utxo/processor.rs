@@ -247,7 +247,7 @@ impl UtxoProcessor {
         Ok(())
     }
 
-    /// Subscribe for `NotesChanged` notifications (FORK-PLAN P6.9) touching the given
+    /// Subscribe for `NotesChanged` notifications (PLAN P6.9) touching the given
     /// note serials/owner pks — the note-pool analog of [`Self::register_addresses`].
     /// Unlike UTXO addresses, note serials/pks aren't tracked in a local map here (the
     /// note key database lives in wallet storage, not `UtxoProcessor`); this just
@@ -420,7 +420,7 @@ impl UtxoProcessor {
         Ok(())
     }
 
-    /// Forward a live `NotesChanged` notification (FORK-PLAN P6.9) to the owning
+    /// Forward a live `NotesChanged` notification (PLAN P6.9) to the owning
     /// wallet, mirroring [`Self::handle_discovery`]'s wallet_bus cascade. The note key
     /// store's mutation surface lives in `wallet/core::storage`, not here, and (for
     /// rows that add a new key) needs the wallet secret — so this is a pure forward;

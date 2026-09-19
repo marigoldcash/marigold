@@ -1190,7 +1190,7 @@ impl Wallet {
     }
 
     /// Reconcile the note key database against a live `NotesChanged` notification
-    /// (FORK-PLAN P6.9/P7.1). Only ever applied without a wallet secret here — status
+    /// (PLAN P6.9/P7.1). Only ever applied without a wallet secret here — status
     /// flips (a watched serial was superseded on-chain) are plaintext-only and always
     /// go through; new rows (a note landed on a `pk` we hold a key for) need the
     /// secret to write, so they're left `deferred` for a caller — a receive/spend
@@ -1488,7 +1488,7 @@ impl Wallet {
     // }
 
     // The legacy-Kaspa import surfaces (`import_kaspawallet_golang_*`,
-    // `import_legacy_keydata`/KDX, `import_gen1_keydata`) were removed in FORK-PLAN
+    // `import_legacy_keydata`/KDX, `import_gen1_keydata`) were removed in PLAN
     // P7.0: on a fair-launch chain they could never find funds — their only possible
     // real-world effect was inviting users to expose real Kaspa keys inside Marigold
     // software (key-reuse hazard). See docs/marigold/DECISIONS.md.

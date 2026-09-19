@@ -171,7 +171,7 @@ pub trait WalletApi: Send + Sync + AnySync {
     /// If `legacy_accounts` is true, the wallet will enable legacy account compatibility mode,
     /// allowing it to OPEN pre-existing wallet storage containing legacy accounts (a deprecated
     /// derivation path inherited from upstream). Note that every way to *import* legacy-Kaspa
-    /// key material was removed in FORK-PLAN P7.0 (key-reuse hazard on a fair-launch chain);
+    /// key material was removed in PLAN P7.0 (key-reuse hazard on a fair-launch chain);
     /// this flag exists only for storage compatibility and should not be used by new code.
     ///
     /// See [`wallet_open`](Self::wallet_open) for a convenience wrapper around this call.

@@ -1,4 +1,4 @@
-//! The wallet as a service (FORK-PLAN P8.0h): `marigold-cli serve <wallet>`
+//! The wallet as a service (PLAN P8.0h): `marigold-cli serve <wallet>`
 //! keeps a wallet open with no terminal, syncing its own copy of the network
 //! (or using a node already running), optionally mining, and — when
 //! `mobile telegram <token>` has been run — answering the person's own

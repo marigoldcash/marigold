@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-/// The pool's SMT commitment (POOL-SPEC.md P5.1, FORK-PLAN P6.2): a single current-state
+/// The pool's SMT commitment (POOL-SPEC.md P5.1, PLAN P6.2): a single current-state
 /// tree over `sn -> leaf_hash(d, pk)`, plus the RocksDB-backed branch-node storage
 /// [`compute_root_update`] needs to update it incrementally. Deliberately NOT built on
 /// `consensus/smt-store`'s `SmtProcessor`/`BranchVersionKey` apparatus — that crate solves
@@ -180,7 +180,7 @@ impl DbNotePoolSmtStore {
     }
 
     /// Deletes all branch nodes and resets the root to the canonical empty-tree state —
-    /// used before a from-scratch pruning-point import (FORK-PLAN P6.8).
+    /// used before a from-scratch pruning-point import (PLAN P6.8).
     pub fn clear(&mut self) -> StoreResult<()> {
         use kaspa_database::prelude::DirectDbWriter;
         self.access.delete_all(DirectDbWriter::new(&self.db))?;
@@ -191,7 +191,7 @@ impl DbNotePoolSmtStore {
     /// Rebuilds the whole tree in a single streaming pass over `leaves` (`(sn, leaf_hash)`
     /// pairs in strictly ascending `sn` order — RocksDB's native key order, so a store
     /// iterator can be fed directly), writing each branch node exactly once and returning
-    /// the final root. Used by pruning-point pool-state import (FORK-PLAN P6.8), where the
+    /// the final root. Used by pruning-point pool-state import (PLAN P6.8), where the
     /// state arrives as a full sorted snapshot rather than incremental diffs — an O(n)
     /// single pass via `crypto/smt`'s [`StreamingSmtBuilder`] instead of `expected_count`
     /// incremental [`compute_root_update`] applications.

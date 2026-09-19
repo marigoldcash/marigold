@@ -10,7 +10,7 @@ impl Exchange {
         let ctx = ctx.clone().downcast_arc::<KaspaCli>()?;
         let ticker = ctx.ticker();
 
-        // None on a wallet that keeps notes only (FORK-PLAN P8.0b): the
+        // None on a wallet that keeps notes only (PLAN P8.0b): the
         // payment then comes from notes alone, redeemed straight to the
         // address, and there is no ledger to return change to.
         let account = match ctx.wallet().account() {

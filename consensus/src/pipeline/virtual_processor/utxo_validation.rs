@@ -85,7 +85,7 @@ pub(super) struct UtxoProcessingContext<'a> {
     pub multiset_hash: MuHash,
     pub mergeset_diff: UtxoDiff,
     /// The note pool's mergeset diff, accumulated in lockstep with `mergeset_diff` during
-    /// the same blue-topological walk (POOL-SPEC.md P5.3's composed pool view, FORK-PLAN
+    /// the same blue-topological walk (POOL-SPEC.md P5.3's composed pool view, PLAN
     /// P6.4).
     pub mergeset_pool_diff: PoolDiff,
     pub accepted_tx_ids: Vec<TransactionId>,
@@ -233,7 +233,7 @@ impl VirtualStateProcessor {
         }
         trace!("correct commitment: {}, {}", header.hash, expected_commitment);
 
-        // Verify header pool commitment (POOL-SPEC.md P5.1, FORK-PLAN P6.5)
+        // Verify header pool commitment (POOL-SPEC.md P5.1, PLAN P6.5)
         let expected_pool_commitment = self.recompute_pool_commitment(pool_state, pool_diff, &ctx.mergeset_pool_diff);
         if expected_pool_commitment != header.pool_commitment {
             return Err(BadPoolCommitment(header.hash, header.pool_commitment, expected_pool_commitment));
@@ -399,7 +399,7 @@ impl VirtualStateProcessor {
     }
 
     /// Attempts to populate the transaction with UTXO entries and performs all utxo-related tx validations,
-    /// plus full stateful note-pool op validation for pool-lane transactions (FORK-PLAN P6.4).
+    /// plus full stateful note-pool op validation for pool-lane transactions (PLAN P6.4).
     pub(super) fn validate_transaction_in_utxo_context<'a>(
         &self,
         transaction: &'a Transaction,
@@ -521,7 +521,7 @@ impl VirtualStateProcessor {
         self.populate_mempool_transaction_in_utxo_context(mutable_tx, utxo_view)?;
 
         // Note-pool ops validate against the mempool's own committed-virtual pool view
-        // (FORK-PLAN P6.7). Unlike UTXO inputs, there's no positional "entries" array to
+        // (PLAN P6.7). Unlike UTXO inputs, there's no positional "entries" array to
         // pre-populate from other still-unconfirmed mempool transactions, so a pool op
         // consuming a serial another unconfirmed mempool tx would produce is rejected here
         // rather than orphaned — a deliberate, documented MVP scope limitation (see
@@ -784,7 +784,7 @@ impl VirtualStateProcessor {
     }
 
     /// Recomputes the note-pool commitment for a block from scratch (POOL-SPEC.md P5.1,
-    /// FORK-PLAN P6.5): materializes the live pool-entry set at `selected_parent` (via
+    /// PLAN P6.5): materializes the live pool-entry set at `selected_parent` (via
     /// `pool_state`'s persisted base plus the accumulated `pool_diff`) extended by this
     /// block's own `mergeset_pool_diff`, then builds a fresh in-memory SMT over the whole
     /// set and returns its root.

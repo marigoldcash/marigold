@@ -9,7 +9,7 @@ use kaspa_consensus_core::{
 };
 
 /// Tracks which mempool transaction is consuming which note-pool serial — the serial-keyed
-/// analog of `MempoolUtxoSet`'s `outpoint_owner_id` (FORK-PLAN P6.7). Deliberately simpler
+/// analog of `MempoolUtxoSet`'s `outpoint_owner_id` (PLAN P6.7). Deliberately simpler
 /// than the outpoint side: no replace-by-fee variant (the plan specifies "first-seen holds,
 /// second rejected" unconditionally for serial conflicts, unlike the outpoint side's
 /// configurable RBF policy), and no tracking of *produced* notes — chaining an unconfirmed

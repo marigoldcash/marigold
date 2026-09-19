@@ -21,7 +21,7 @@ impl Receive {
         note.ensure_vault_interactive(&ctx, &wallet_secret).await?;
 
         // 'receive key [name]': a standing key to hand out, like a phone number
-        // (FORK-PLAN P8.0g). One for everyone, or one per person — a key given
+        // (PLAN P8.0g). One for everyone, or one per person — a key given
         // to one person names them in 'history' and cannot be compared with
         // anyone else's. 'receive keys' lists them.
         if code == "key" || code == "keys" {

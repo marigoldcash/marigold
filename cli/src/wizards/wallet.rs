@@ -112,7 +112,7 @@ pub(crate) async fn create(
         return Ok(());
     }
 
-    // Most wallets never need the ledger (FORK-PLAN P8.0b): notes are paid
+    // Most wallets never need the ledger (PLAN P8.0b): notes are paid
     // and received directly. The ledger is for mining, and for exchanges that
     // only pay to an address — and a wallet that starts without one can add
     // it later, so the question costs nothing to get wrong.

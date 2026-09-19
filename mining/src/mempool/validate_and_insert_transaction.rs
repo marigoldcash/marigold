@@ -32,7 +32,7 @@ impl Mempool {
         self.validate_transaction_limits_in_isolation(&transaction, virtual_daa_score)?;
         self.validate_transaction_std_in_isolation(&transaction, virtual_daa_score)?;
         let feerate_threshold = self.get_replace_by_fee_constraint(&transaction, rbf_policy, virtual_daa_score)?;
-        // Note-pool serial conflicts are checked unconditionally (no RBF variant — FORK-PLAN
+        // Note-pool serial conflicts are checked unconditionally (no RBF variant — PLAN
         // P6.7's "first-seen holds, second rejected"), independent of whatever `rbf_policy`
         // governs this transaction's own outpoint-side double spends.
         self.transaction_pool.check_serial_conflicts(&transaction)?;
@@ -81,7 +81,7 @@ impl Mempool {
         self.validate_transaction_std_in_context(&transaction, priority, virtual_daa_score)?;
         // Accepted under the own-wallet exemption? Then it stays here: only
         // this node's blocks may include it, so the fee comes back to this
-        // node (FORK-PLAN P8.3b).
+        // node (PLAN P8.3b).
         let withheld = priority == Priority::High && self.config.accept_own_below_floor && self.fee_is_below_relay_floor(&transaction);
         if withheld {
             self.withheld_from_relay.insert(transaction_id);

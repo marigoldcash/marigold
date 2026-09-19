@@ -1,9 +1,9 @@
 //!
-//! The wallet's note key database (FORK-PLAN P7.1, POOL-SPEC.md P5.6 "Key database
+//! The wallet's note key database (PLAN P7.1, POOL-SPEC.md P5.6 "Key database
 //! format"). Unlike the seed-derived `PrvKeyData` accounts, a note has no derivation
 //! path — the wallet is "a key-database manager, not an identity" (P5.6) holding one
 //! raw private key per note (or, under the shared-pk policy, one key shared by
-//! several). This module is serial-keyed (one row per `sn`, per FORK-PLAN P7.1's own
+//! several). This module is serial-keyed (one row per `sn`, per PLAN P7.1's own
 //! wording) rather than key-keyed (POOL-SPEC's `KeyDbEntry` sketch, which lists
 //! `known_serials` per key) — a deliberate simplification for this initial DB: the
 //! shared-pk case (POS landing pad, P7.5) tolerates the small redundancy of storing
@@ -30,7 +30,7 @@ pub enum NoteProvenance {
 
 /// Whether the wallet still believes a serial's row reflects live pool state. Flipped
 /// by [`crate::storage::NoteKeyStore::mark_status`] as `NotesChanged` notifications
-/// (FORK-PLAN P6.9) arrive for a watched serial or pk — deliberately a plaintext-only
+/// (PLAN P6.9) arrive for a watched serial or pk — deliberately a plaintext-only
 /// mutation (see [`NoteKeyInfo`]) so it never needs the wallet secret, and can be
 /// applied by a passive background listener even while the wallet is locked.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
@@ -53,7 +53,7 @@ pub enum NoteStatus {
     /// rather than deleted immediately, so a caller with the wallet secret can later
     /// reconcile (e.g. drop the row, or confirm a rotation landed under a new `sn`).
     Superseded,
-    /// Bearer-exported (FORK-PLAN P7.4, POOL-SPEC.md P5.5a): the key was handed to
+    /// Bearer-exported (PLAN P7.4, POOL-SPEC.md P5.5a): the key was handed to
     /// someone else, and the note is theirs the moment they rotate it — until then
     /// both parties can technically spend it (the defining property of a bearer
     /// instrument). Excluded from balance and from every spend/fee-source selection;
@@ -70,14 +70,14 @@ pub enum NoteStatus {
     /// Distinct from [`Self::HandedOver`], which means given away for good, and
     /// from [`Self::Active`], which means free to spend here.
     Mirrored,
-    /// Paid to someone under a lock (POOL-SPEC.md P5.9, FORK-PLAN P8.0g): the
+    /// Paid to someone under a lock (POOL-SPEC.md P5.9, PLAN P8.0g): the
     /// note is theirs to take until the lock lapses, and this row's key is the
     /// refund key that takes it back after. Not spendable here meanwhile, not
     /// counted in the balance, listed as offered with the date it comes back.
     Offered,
 }
 
-/// A standing receiving key (FORK-PLAN P8.0g): shared once with the people who
+/// A standing receiving key (PLAN P8.0g): shared once with the people who
 /// pay you, like a phone number, and never seen on-chain — every payment to it
 /// lands on a one-time key derived from it. Derived from the vault key by index,
 /// so the recovery words recover every one of them.
@@ -89,7 +89,7 @@ pub struct ShareKeyInfo {
 }
 
 /// One row of the note key database (POOL-SPEC.md P5.6's `KeyDbEntry`, flattened to
-/// per-serial per FORK-PLAN P7.1). Holds the sole copy of a note's private key —
+/// per-serial per PLAN P7.1). Holds the sole copy of a note's private key —
 /// "losing the key database is losing the notes" (P5.6) — so this is the sensitive
 /// half of the store; kept encrypted at rest (mirrors `PrvKeyData`'s handling of raw
 /// key material) and zeroized on drop.
@@ -168,7 +168,7 @@ impl crate::storage::IdT for NoteKeyInfo {
 
 pub type NoteKeyMap = HashMap<Hash, NoteKeyEntry>;
 
-/// A payment-request key (FORK-PLAN P7.3, POOL-SPEC.md P5.5b "sign-to-fresh-pk"):
+/// A payment-request key (PLAN P7.3, POOL-SPEC.md P5.5b "sign-to-fresh-pk"):
 /// a locally generated keypair whose `pk` has been handed out in a payment-request
 /// QR but which owns no serial *yet* — the spec's "unpaid-invoice semantics" ("the
 /// wallet was watching that `pk` since generating it"). Persisted the moment the

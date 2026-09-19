@@ -269,7 +269,7 @@ impl Deserializer for NewBlockTemplateScope {
     }
 }
 
-/// Watch a set of note serials and/or note owner pubkeys (FORK-PLAN P6.9). Either list
+/// Watch a set of note serials and/or note owner pubkeys (PLAN P6.9). Either list
 /// alone is a valid partial subscription (OR semantics, like [`UtxosChangedScope`]'s
 /// address list); both empty means "all notes" — the note-pool analog of the empty
 /// address list there. `pks` exists because a wallet naturally knows the keys it holds

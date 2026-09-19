@@ -73,7 +73,7 @@ pub const DENOMINATION_PETALS: [u64; 8] =
 
 /// Live pool note count per denomination, indexed by [`DenominationTag`]'s declaration
 /// order (same convention [`DENOMINATION_PETALS`] uses) — the RPC-facing "pool stats"
-/// query (FORK-PLAN P6.9). Computed by a full scan of the live pool state
+/// query (PLAN P6.9). Computed by a full scan of the live pool state
 /// (`DbNotePoolStore::iterator`), the same correctness-first, no-incremental-counter
 /// tradeoff `recompute_pool_commitment` already established for this fork's pool (P6.5).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -95,7 +95,7 @@ impl DenominationTag {
 }
 
 /// Ordinal round-trip for wire formats that carry the tag as a plain integer (P2P
-/// pool-state sync chunks, FORK-PLAN P6.8; RPC later). The ordinals are the same
+/// pool-state sync chunks, PLAN P6.8; RPC later). The ordinals are the same
 /// declaration-order values borsh assigns — one canonical numbering (see [`PoolOp`]'s
 /// doc comment for the identical principle applied to op types).
 impl TryFrom<u8> for DenominationTag {
@@ -150,7 +150,7 @@ impl MemSizeEstimator for NewNote {
     }
 }
 
-/// A lock on a note (POOL-SPEC.md P5.9, FORK-PLAN P8.0g): until `until_daa` only the
+/// A lock on a note (POOL-SPEC.md P5.9, PLAN P8.0g): until `until_daa` only the
 /// note's own `pk` may consume it; from `until_daa` on, only `refund_pk` may. The
 /// escrow a payment to someone who cannot get to their wallet today rests on: theirs
 /// to take for a while, the payer's to take back after.
