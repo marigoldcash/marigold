@@ -1,73 +1,54 @@
-# Contributing to Kaspa
+# Contributing to Marigold
 
-Thanks for your interest in contributing to Kaspa!
+Marigold is digital cash in fixed notes, built as a fork of [rusty-kaspa](https://github.com/kaspanet/rusty-kaspa). This repository holds the node, the wallet, the stratum bridge, the faucet and the trustee signer. The wallet people download lives in [marigold-wallet](https://github.com/marigoldcash/marigold-wallet), which builds from the releases made here.
 
-We welcome contributions of all sizes and there are many opportunities to contribute at any level — from clarifying documentation and fixing small bugs to implementing full features and reviewing pull requests.
+We are on a public testnet. The most useful thing you can do right now is use it and tell us what broke: a note that would not pay, a prompt that made no sense, a sync that stalled. Open an issue with what you typed, what you saw, and the version from the front note or `marigold-cli --version`.
 
-Reach out to `@Node Developers` in Discord in the [#development](https://discord.com/channels/599153230659846165/755890250643144788) channel.
+Found a way to spend a note twice, take a note that is not yours, or stop the network? That goes to security@marigold.cash, not to an issue. [SECURITY.md](SECURITY.md) says how.
 
-Follow along the R&D Telegram group [@kasparnd](https://t.me/kasparnd).
+## Where things are
 
-## Quick summary
+- `consensus/`, `consensus/core/src/notepool/`: the chain, and the note pool that makes it Marigold. The specification is [docs/marigold/POOL-SPEC.md](docs/marigold/POOL-SPEC.md).
+- `cli/`: the wallet. `wallet/core/`: what it stands on.
+- `bridge/`: the stratum bridge for miners. `faucet/`: the testnet faucet. `trustee-signer/`: the finality-anchor signer.
+- `docs/marigold/`: the plan ([FORK-PLAN.md](FORK-PLAN.md) at the root), the decisions ([DECISIONS.md](docs/marigold/DECISIONS.md)), the state of the project ([STATE.md](docs/marigold/STATE.md)) and the working notes. Read DECISIONS.md before proposing to change something it records; it says why things are the way they are.
 
-- Open a GitHub Issue or Pull Request to start any discussion. Use Issues for design or spec discussions and PRs when you have code to share.
-- Look for `good first issue` if you're getting started; these are intentionally approachable.
-- Write detailed pull requests descriptions: explain what you changed, why, design decisions, and any trade-offs.
-- **Anyone** willing to contribute is encouraged to review pull requests and ask questions. Your approval and review counts!
+## Rules that keep the fork mergeable
 
-## Reviewing Pull Requests
+These are not style. They are what lets us keep taking upstream's security fixes for years.
 
-If you can meaningfully review a pull request, please do so even if you have not contributed code to the repo. This helps in improving the quality of code and gives you a great opportunity to learn more about the codebase through the context of a change.
+1. **Do not rename `kaspa-*` crates or Rust module paths.** Rebrand user-facing strings only. Internal names stay identical to upstream so `git merge upstream/master` remains possible.
+2. **One concern per commit.** Never mix a consensus change with anything cosmetic. Small commits, each doing one thing, each with a message that says why.
+3. **Every consensus change carries its test in the same pull request.** No exceptions.
+4. **Money-guarding code soaks on testnet before it goes anywhere near mainnet.** A change to the pool, the wallet's key handling or the finality anchors is not done when it merges; it is done when it has run for weeks with real testers.
 
-- Leave review comments, ask clarifying questions, request documentation, point out potential regressions.
-- Even if you can't read the code but know how to test it, do that too! Ask for information on how to test the change if it's missing from the PR and run it.
-- Use Approve when you believe the change is correct and safe to merge.
-- Use Request Changes when you find real issues; explain the issue and prefer actionable guidance.
+## Before you open a pull request
 
-## How to get started
+Build on a machine with room; the workspace is large. Then:
 
-1. Find an issue (or open one) — good first issues are a great first step.
-2. Fork the repo (See [Installation](https://github.com/kaspanet/rusty-kaspa?tab=readme-ov-file#installation) guide) and create a feature branch with a short, descriptive name.
-3. Implement your change and include tests where appropriate.
-4. Make each commit atomic and focused. Update tests or add new ones in the same commit that changes behaviour.
-5. Push to your fork and open a Pull Request against the `master` branch (or the branch named in the issue).
+```sh
+./check
+./test
+```
 
-## Pull request guidelines
+`./check` formats the tree and runs clippy; `./test` runs the suites and needs `cargo-nextest`. CI runs clippy with warnings denied, so a warning here is a failure there. It also builds the wallet for the browser and the node with musl on every push and pull request, so a pull request that fails any of those will not be reviewed until it passes.
 
-### Before making a Pull Request:
+Write the pull request for the reviewer: what changed, why, what you considered and rejected, how you tested it, and anything a node operator or wallet user will notice. If it is large, split it.
 
-- Run `./check` (or `./check.ps1` on windows) to make sure your code adheres to coding standards
-- Run `./test` (or `cargo nextest run --release` on windows) and make sure you all tests still pass
+Commit messages: a subject line under about sixty characters, a blank line, then the reasoning. Write them for the person reading `git log` in two years. No generated attribution lines of any kind.
 
-### Please make your PRs easy to review. A helpful PR contains:
+## Reviewing
 
-- A clear, descriptive title of what the PR does.
-- A summary of what changed and the motivation.
-- Any relevant background or links to design discussions or Issues.
-- A short description of how the change was tested (unit tests, integration tests, manual steps). Reviewers will use this to test your changes.
-- Notes about backwards-compatibility, migrations, or behaviour changes.
-- If the change is large, consider splitting it into a small series of focused PRs.
+If you can read a change, review it, whether or not you have written code here. If you can only run it, run it and say what happened. Approve when you believe it is correct and safe; request changes when you find a real problem, and say what would fix it.
 
-### Commit message tips:
+## Discussion
 
-- Start with a short subject line (<= 50 chars), leave a blank line, then add details.
-- Try to keep your commits atomic as this makes reviewing them in the context of a PR easier, making the PR overall easier to review and eventually merge
+Use issues for anything that touches consensus, the pool specification, the wallet's key handling or the network's parameters; those want a design conversation before code. For everything else, a pull request is a fine place to start talking.
 
-## Using Issues and Pull Requests for discussion
+## Conduct
 
-- Use a GitHub Issue to propose or discuss ideas before writing code if the change affects APIs, consensus, or requires design feedback.
-- You can also contribute by participating in existing discussions.
-- When you start implementing, link the Issue in your Pull Request and mention any related discussions.
-- If a PR is experimental or a work in progress, create the Pull Request in your fork of the repository first.
+Be direct and be kind. Disagree with the idea, not the person. We are a small project and we remember how people treat each other.
 
-## Testing and CI
+## Licence
 
-Add or update tests for behavior changes. Ensure CI passes before requesting a merge. If your change requires a special test or manual validation, describe it in the PR.
-
-## Code of conduct
-
-Be respectful and constructive in discussions. We expect contributors to follow common open-source etiquette; if you're unsure about tone, err on the side of politeness.
-
-## Thank You
-
-Thanks for helping make Kaspa better. If you have questions, reach out to the channels described at the top of this document
+By contributing you agree that your contribution is licensed under the same terms as the project, in [LICENSE](LICENSE).
