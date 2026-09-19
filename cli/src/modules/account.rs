@@ -60,6 +60,36 @@ impl Account {
                     Some(name)
                 };
 
+                // A notes-only wallet has no key yet. Its ledger key is derived from
+                // the same recovery phrase as the vault, so adding a ledger later is
+                // exactly what the wizard promised — until now this fell into
+                // "no private keys found in this wallet" (founder, 2026-09-19).
+                if account_kind == kaspa_wallet_core::account::BIP32_ACCOUNT_KIND && !ctx.wallet().keys().await?.try_next().await?.is_some() {
+                    let name = match account_name {
+                        Some(name) => Some(name),
+                        None => Some(ctx.term().ask(false, "Please enter account name (optional, press <enter> to skip): ").await?.trim().to_string()),
+                    };
+                    let (wallet_secret, _) = ctx.ask_wallet_secret(None).await?;
+                    let store = ctx.wallet().store().as_note_key_store()?;
+                    let words = store.recovery_words(&wallet_secret).await?;
+                    let mnemonic = kaspa_wallet_core::storage::local::notevault::account_mnemonic_from_vault_words(&words)?;
+                    let args = kaspa_wallet_core::wallet::args::PrvKeyDataCreateArgs::new(
+                        None,
+                        None,
+                        Secret::from(mnemonic.phrase_string()),
+                        kaspa_wallet_core::storage::keydata::PrvKeyDataVariantKind::Mnemonic,
+                    );
+                    let prv_key_data_id = ctx.wallet().create_prv_key_data(&wallet_secret, args).await?;
+                    let account = ctx
+                        .wallet()
+                        .create_account_bip32(&wallet_secret, prv_key_data_id, None, kaspa_wallet_core::wallet::args::AccountCreateArgsBip32::new(name, None))
+                        .await?;
+                    tprintln!(ctx, "\naccount created: {}\n", account.get_list_string()?);
+                    tprintln!(ctx, "The ledger comes from the same recovery phrase as your notes; 'address' shows where to mine or be paid by an exchange.");
+                    ctx.wallet().select(Some(&account)).await?;
+                    return Ok(());
+                }
+
                 let prv_key_data_info = ctx.select_private_key().await?;
 
                 let account_name = account_name.as_deref();
