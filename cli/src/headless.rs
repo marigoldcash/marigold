@@ -198,7 +198,7 @@ pub async fn mine_to(args: Vec<String>) -> Result<()> {
             (Node::Remote(client), rpc)
         }
         None => {
-            let appdir = crate::embedded::default_appdir(network_id)?;
+            let appdir = crate::embedded::appdir(network_id).await?;
             let control: Arc<dyn kaspa_rpc_core::api::miner::MinerControl> = host.clone();
             let (node, rpc) = crate::embedded::EmbeddedNode::start_with(network_id, &appdir, Some(control))?;
             let port = network_id.default_borsh_rpc_port();

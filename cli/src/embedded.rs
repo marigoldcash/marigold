@@ -40,9 +40,38 @@ pub fn logs_wanted() -> bool {
 /// so a person who deletes their Marigold directory removes both and is not
 /// left with seven gigabytes they cannot account for.
 pub fn default_appdir(network_id: NetworkId) -> Result<std::path::PathBuf> {
-    let base = workflow_store::fs::resolve_path(kaspa_wallet_core::storage::local::default_storage_folder())
-        .map_err(|err| Error::custom(format!("cannot resolve the wallet folder: {err}")))?;
+    appdir_in(None, network_id)
+}
+
+/// The node's data directory under `folder`, or under `~/.marigold` when no
+/// folder is set. `~/.marigold` is the pointer: its `marigold.settings` names
+/// the real location, and everything heavy — wallets, and since 2026-09-19 the
+/// node's copy of the chain — follows it. A tester on a Mac with a small
+/// internal disk and a large external one asked for exactly this.
+pub fn appdir_in(folder: Option<&str>, network_id: NetworkId) -> Result<std::path::PathBuf> {
+    let base: String = folder
+        .map(str::trim)
+        .filter(|f| !f.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| kaspa_wallet_core::storage::local::default_storage_folder().to_string());
+    let base =
+        workflow_store::fs::resolve_path(&base).map_err(|err| Error::custom(format!("cannot resolve the wallet folder: {err}")))?;
     Ok(base.join(format!("node-{network_id}")))
+}
+
+/// The folder the settings point at, read from `~/.marigold/marigold.settings`
+/// without a wallet: a process that opens none (the headless miner, `serve`)
+/// follows the same pointer as the interactive wallet.
+pub async fn configured_folder() -> Option<String> {
+    let store =
+        SettingsStore::<WalletSettings>::new_with_storage(kaspa_wallet_core::storage::local::Storage::default_settings_store());
+    store.try_load().await.ok()?;
+    store.get::<String>(WalletSettings::Folder).map(|f| f.trim().to_string()).filter(|f| !f.is_empty())
+}
+
+/// [`appdir_in`] with the configured folder.
+pub async fn appdir(network_id: NetworkId) -> Result<std::path::PathBuf> {
+    appdir_in(configured_folder().await.as_deref(), network_id)
 }
 
 /// A running in-process node. Dropping this does NOT stop it — call
@@ -112,7 +141,11 @@ impl EmbeddedNode {
             disable_upnp: true,
             // Only the background miner listens, and only on this machine:
             // "default" is 127.0.0.1 on the network's wRPC port.
-            rpclisten_borsh: if miner.is_some() { Some("default".parse().expect("a fixed listen address")) } else { None },
+            // Always, on loopback: a second wallet on this machine connects to
+            // this one's copy of the network instead of failing to start its
+            // own beside it. The wallet used to tell it to do exactly that
+            // while listening on nothing (founder, 2026-09-19).
+            rpclisten_borsh: Some("default".parse().expect("a fixed listen address")),
             // The wallet needs the UTXO index to see ledger balance at all.
             // Everything else stays at kaspad's defaults, deliberately: this is
             // an ordinary node, not a special one, and the fewer knobs the

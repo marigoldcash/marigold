@@ -855,7 +855,7 @@ impl KaspaCli {
             return Ok(None);
         }
         let network_id = self.wallet.network_id()?;
-        let appdir = crate::embedded::default_appdir(network_id)?;
+        let appdir = crate::embedded::appdir_in(self.wallet.settings().get::<String>(WalletSettings::Folder).as_deref(), network_id)?;
 
         // Asked before the node is started rather than discovered eight hours
         // into a sync. A node that runs out of disk part way through leaves a
@@ -1150,7 +1150,9 @@ impl KaspaCli {
         // disk that cannot hold the growth is how a node ends up corrupt at
         // three in the morning.
         let network_id = self.wallet.network_id()?;
-        if let Ok(appdir) = crate::embedded::default_appdir(network_id) {
+        if let Ok(appdir) =
+            crate::embedded::appdir_in(self.wallet.settings().get::<String>(WalletSettings::Folder).as_deref(), network_id)
+        {
             if !self.disk_allows(
                 &appdir,
                 crate::space::MINING,
@@ -2792,6 +2794,16 @@ impl KaspaCli {
         } else {
             Ok(matches[0].clone())
         }
+    }
+
+    /// Recompute the figure the prompt shows and redraw it. Called after a
+    /// note changes hands: the prompt kept saying 11.05 after a receive of
+    /// 10.00 until the next 'balance' (founder's tester, 2026-09-19).
+    pub async fn refresh_prompt_total(self: &Arc<Self>) {
+        let (notes, _ledger, _) = self.total_holdings().await;
+        self.prompt_total_petals.store(notes, Ordering::SeqCst);
+        self.prompt_total_valid.store(true, Ordering::SeqCst);
+        self.term().refresh_prompt();
     }
 
     pub async fn prompt_account(&self) -> Result<Arc<dyn Account>> {

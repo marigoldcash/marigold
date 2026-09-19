@@ -73,7 +73,14 @@ pub fn report() -> String {
     #[cfg(feature = "embedded-node")]
     {
         let network = kaspa_consensus_core::network::NetworkId::with_suffix(kaspa_consensus_core::network::NetworkType::Testnet, 10);
-        match crate::embedded::default_appdir(network) {
+        // The settings file is the pointer to where the heavy data lives; read
+        // it plainly, this report has no wallet and no runtime.
+        let folder = std::fs::read_to_string(format!("{}/.marigold/marigold.settings", home().trim_end_matches('/')))
+            .ok()
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+            .and_then(|v| v.get("folder").and_then(|f| f.as_str()).map(str::to_string))
+            .filter(|f| !f.trim().is_empty());
+        match crate::embedded::appdir_in(folder.as_deref(), network) {
             Ok(dir) => {
                 let _ = writeln!(out, "sync data:     {}", dir.display());
             }
