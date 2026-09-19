@@ -411,11 +411,17 @@ impl Terminal {
         self.term().write("\n\r".to_string());
     }
 
-    /// Write a string
+    /// Write a string. Every newline goes out as a carriage return plus a
+    /// newline, whatever it arrived as: the terminal is in raw mode, where a
+    /// bare "\n" moves down without returning to the left margin, and text
+    /// with embedded newlines came out as a staircase on macOS Terminal
+    /// (founder, 2026-09-19). Linux terminals hide this; macOS does not.
     pub fn write<S>(&self, s: S)
     where
         S: ToString,
     {
+        let s = s.to_string();
+        let s = if s.contains('\n') { s.replace("\r\n", "\n").replace("\n\r", "\n").replace('\n', "\r\n") } else { s };
         self.term().write(s);
     }
 
