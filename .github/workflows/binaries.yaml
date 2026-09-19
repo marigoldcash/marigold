@@ -10,16 +10,16 @@
 # file permissions) shows up in this log rather than in a tester's hands.
 #
 # Run by hand: Actions → "Wallet binaries" → Run workflow. Give it the
-# marigold_docker release tag to attach the binaries to, or leave it empty to
+# marigold-wallet release tag to attach the binaries to, or leave it empty to
 # keep them as workflow artifacts only. Attaching needs a MARIGOLD_DOCKER_TOKEN
-# secret (a token that can write releases on marigoldcash/marigold_docker).
+# secret (a token that can write releases on marigoldcash/marigold-wallet).
 name: Wallet binaries
 
 on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "marigold_docker release tag to attach the binaries to (empty: artifacts only)"
+        description: "marigold-wallet release tag to attach the binaries to (empty: artifacts only)"
         required: false
         default: ""
 
@@ -130,7 +130,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    name: Attach to the marigold_docker release
+    name: Attach to the marigold-wallet release
     needs: [build, macos]
     if: ${{ inputs.release_tag != '' }}
     runs-on: ubuntu-latest
@@ -149,4 +149,4 @@ jobs:
             echo "MARIGOLD_DOCKER_TOKEN is not set; the binaries are in this run's artifacts only." >&2
             exit 1
           fi
-          gh release upload --repo marigoldcash/marigold_docker "${{ inputs.release_tag }}" artifacts/* --clobber
+          gh release upload --repo marigoldcash/marigold-wallet "${{ inputs.release_tag }}" artifacts/* --clobber

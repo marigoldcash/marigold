@@ -81,5 +81,5 @@ Mining without a wallet open:
   miner's copy of the network instead of syncing a second one, and
   'mine start', 'mine stop' and 'mine status' steer the miner from there.
 
-Docs and downloads: https://github.com/marigoldcash/marigold_docker
+Docs and downloads: https://github.com/marigoldcash/marigold-wallet
 ";

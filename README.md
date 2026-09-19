@@ -126,8 +126,8 @@ builds on.
 6. Clone the repo
 
     ```bash
-    git clone https://github.com/marigoldcash/marigold-node
-    cd marigold-node
+    git clone https://github.com/marigoldcash/marigold
+    cd marigold
     ```
 
 7. Build the node

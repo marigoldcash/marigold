@@ -10,7 +10,7 @@ Last updated: 2026-09-14 (a full plan/decisions reconciliation — see the 2026-
 
 ## Repo layout
 
-- Private GitHub repo **marigoldcash/marigold-node** = `origin`. Private during Phases 0–4, public at P5.9/Phase 6 (ground rule 5).
+- GitHub repo **marigoldcash/marigold** (renamed from marigold-node on 2026-09-19, public since 2026-09-19; the wallet downloads live in **marigoldcash/marigold-wallet**, renamed from marigold_docker the same day) = `origin`. Private during Phases 0–4, public at P5.9/Phase 6 (ground rule 5).
 - `master` mirrors upstream kaspanet/rusty-kaspa (remote `upstream`). Never commit fork work to it.
 - All fork work on branch **`main`** (named `x-fork` until the T8b rename, 2026-09-04; `origin`/other machines still need their local rename + default-branch flip at publication).
 - GitHub account with org access: `leancode`. Orgs: `marigoldcash` (primary so far) and `marigoldcoin` (defensive).

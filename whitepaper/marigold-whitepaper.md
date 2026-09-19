@@ -149,4 +149,4 @@ Marigold is a small idea taken seriously: that digital cash fails not for lack o
 
 ---
 
-*Specification: [POOL-SPEC.md](../docs/marigold/POOL-SPEC.md) (v1.1, externally reviewed). Source: [github.com/marigoldcash/marigold-node](https://github.com/marigoldcash/marigold-node). Contact: security@marigold.cash (security), note@marigold.cash (general).*
+*Specification: [POOL-SPEC.md](../docs/marigold/POOL-SPEC.md) (v1.1, externally reviewed). Source: [github.com/marigoldcash/marigold](https://github.com/marigoldcash/marigold). Contact: security@marigold.cash (security), note@marigold.cash (general).*

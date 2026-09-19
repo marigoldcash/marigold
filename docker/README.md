@@ -61,7 +61,7 @@ live node and reading both codebases side by side rather than assuming compatibi
    computing proof-of-work over the wrong byte sequence entirely — its own `check_pow()`
    accepted nonces the server correctly rejected, because the two sides were hashing
    different pre-images. **Fix**: insert `pool_commitment` into the hash chain at the
-   same position marigold-node's own header-hashing code uses.
+   same position marigold's own header-hashing code uses.
 
 Both fixes are single, small, well-commented commits on marigold-miner's `marigold`
 branch (`main` continues to track upstream unmodified — same split as this repo's own
