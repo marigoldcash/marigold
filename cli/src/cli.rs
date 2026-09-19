@@ -1119,6 +1119,14 @@ impl KaspaCli {
             if self.embedded_node_pending() {
                 tprintln!(self, "The sync is still catching up. Mining starts once it is ready —");
                 tprintln!(self, "'connect status' shows how far along it is.");
+            } else if self.wallet().is_connected() && !self.remote_miner_present() {
+                // Connected, but not to a node of ours and not to the background
+                // miner: another wallet on this machine holds the network, and
+                // 'connect' just finds it again. Saying "type connect" here sent
+                // the founder round in a circle (2026-09-19).
+                tprintln!(self, "Another Marigold program on this machine holds the network, and it mines to its own wallet.");
+                tprintln!(self, "To mine to this one, either stop the node there and 'connect' here, or run the miner");
+                tprintln!(self, "as a service for both:  marigold-cli mine-to <address from 'address'> 10   then 'connect'.");
             } else {
                 tprintln!(self, "Mining needs the network synced on this machine. Type 'connect' to start that.");
                 tprintln!(self, "{}", style("Asking a public computer for work would tell its operator which address").dim());

@@ -102,7 +102,11 @@ pub fn threads_for_percent(percent: u32) -> usize {
 #[cfg(target_os = "linux")]
 fn deprioritise_current_thread() {
     unsafe {
-        let param = libc::sched_param { sched_priority: 0 };
+        // Zeroed rather than a struct literal: musl's `sched_param` carries
+        // sporadic-server fields that glibc's does not, and zero is right for
+        // every one of them under SCHED_IDLE.
+        let mut param: libc::sched_param = std::mem::zeroed();
+        param.sched_priority = 0;
         // pid 0 means the calling thread.
         libc::sched_setscheduler(0, libc::SCHED_IDLE, &param);
         // Belt and braces for anything that ignores the policy.

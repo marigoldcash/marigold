@@ -65,7 +65,7 @@ impl Account {
                 // exactly what the wizard promised — until now this fell into
                 // "no private keys found in this wallet" (founder, 2026-09-19).
                 if account_kind == kaspa_wallet_core::account::BIP32_ACCOUNT_KIND
-                    && !ctx.wallet().keys().await?.try_next().await?.is_some()
+                    && ctx.wallet().keys().await?.try_next().await?.is_none()
                 {
                     let name = match account_name {
                         Some(name) => Some(name),

@@ -17,13 +17,17 @@
 //!
 //! FORMAT
 //!
-//!     [ "MGB1" 4 ][ version u8 = 1 ]
-//!     [ "MGS2" | salt 32 | nonce 24 | XChaCha20-Poly1305( deflate(body) ‖ tag ) ]
+//! ```text
+//! [ "MGB1" 4 ][ version u8 = 1 ]
+//! [ "MGS2" | salt 32 | nonce 24 | XChaCha20-Poly1305( deflate(body) ‖ tag ) ]
+//! ```
 //!
 //! and `body` is
 //!
-//!     [ entry_count u32 LE ]
-//!     entry_count × [ path_len u16 LE | path utf8 | data_len u32 LE | data ]
+//! ```text
+//! [ entry_count u32 LE ]
+//! entry_count × [ path_len u16 LE | path utf8 | data_len u32 LE | data ]
+//! ```
 //!
 //! Nothing outside the AEAD but the five header bytes: not the wallet name,
 //! not the file count, not the size of any one file. The inner container is
