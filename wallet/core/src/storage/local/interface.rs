@@ -732,7 +732,7 @@ impl Interface for LocalStore {
                 // A wallet is a directory now. The keys file inside is what
                 // distinguishes it from any other directory someone has put here.
                 let name = file_name.strip_suffix(".wallet")?.to_string();
-                folder.join(&file_name).join(super::keys_file_name(&name)).is_file().then_some(name)
+                folder.join(file_name).join(super::keys_file_name(&name)).is_file().then_some(name)
             })
             .collect::<Vec<_>>();
 
@@ -779,10 +779,10 @@ impl Interface for LocalStore {
         fs::write(&path, serialized.as_slice()).await?;
         // If this wallet is currently open, its in-memory cache would clobber
         // the file on the next full save — keep it in step.
-        if let Some(inner) = self.inner.lock().unwrap().clone() {
-            if inner.descriptor().filename == filename {
-                inner.cache.write().unwrap().client_metadata = metadata;
-            }
+        if let Some(inner) = self.inner.lock().unwrap().clone()
+            && inner.descriptor().filename == filename
+        {
+            inner.cache.write().unwrap().client_metadata = metadata;
         }
         Ok(())
     }

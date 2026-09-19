@@ -1462,17 +1462,17 @@ impl KaspaCli {
             })
             .unwrap_or((0, 0));
         let mut notes = 0u64;
-        if let Ok(store) = self.wallet.store().as_note_key_store() {
-            if let Ok(mut stream) = store.iter().await {
-                while let Ok(Some(info)) = stream.try_next().await {
-                    // Mirrored notes count: they are the user's money, merely
-                    // carried elsewhere, and this wallet still holds their keys.
-                    if matches!(
-                        info.status,
-                        kaspa_wallet_core::storage::NoteStatus::Active | kaspa_wallet_core::storage::NoteStatus::Mirrored
-                    ) {
-                        notes += kaspa_consensus_core::notepool::DENOMINATION_PETALS[info.d as usize];
-                    }
+        if let Ok(store) = self.wallet.store().as_note_key_store()
+            && let Ok(mut stream) = store.iter().await
+        {
+            while let Ok(Some(info)) = stream.try_next().await {
+                // Mirrored notes count: they are the user's money, merely
+                // carried elsewhere, and this wallet still holds their keys.
+                if matches!(
+                    info.status,
+                    kaspa_wallet_core::storage::NoteStatus::Active | kaspa_wallet_core::storage::NoteStatus::Mirrored
+                ) {
+                    notes += kaspa_consensus_core::notepool::DENOMINATION_PETALS[info.d as usize];
                 }
             }
         }
@@ -1546,16 +1546,16 @@ impl KaspaCli {
         let mut vanished: Option<(usize, u64)> = None;
         if notes > 0 && self.wallet.is_connected() {
             {
-                if let Ok(Some(result)) = kaspa_wallet_core::account::notepool::reconcile_held_notes(&self.wallet).await {
-                    if !result.moved_to_unknown.is_empty() {
-                        let value: u64 = result
-                            .moved_to_unknown
-                            .iter()
-                            .map(|i| kaspa_consensus_core::notepool::DENOMINATION_PETALS[i.d as usize])
-                            .sum();
-                        notes = notes.saturating_sub(value);
-                        vanished = Some((result.moved_to_unknown.len(), value));
-                    }
+                if let Ok(Some(result)) = kaspa_wallet_core::account::notepool::reconcile_held_notes(&self.wallet).await
+                    && !result.moved_to_unknown.is_empty()
+                {
+                    let value: u64 = result
+                        .moved_to_unknown
+                        .iter()
+                        .map(|i| kaspa_consensus_core::notepool::DENOMINATION_PETALS[i.d as usize])
+                        .sum();
+                    notes = notes.saturating_sub(value);
+                    vanished = Some((result.moved_to_unknown.len(), value));
                 }
             }
         }
@@ -1946,19 +1946,19 @@ impl KaspaCli {
                                 // spent and the notes as held, and a node restart
                                 // would lose the queue (founder, 2026-09-18). Say how
                                 // long, and to stay.
-                                if let OwnLane::Use { every } = lane {
-                                    if transactions > 1 {
-                                        // Roughly five batches fit a block.
-                                        let minutes = (transactions as u64 * every.as_secs()).div_ceil(5 * 60).max(1);
-                                        tprintln!(
-                                            self,
-                                            "{}",
-                                            crate::ui::dim(format!(
-                                                "Submitted as {transactions} transactions for your miner to land — about {}. Keep this wallet open until then; the change and the notes settle as they confirm.",
-                                                humanised_minutes(minutes)
-                                            ))
-                                        );
-                                    }
+                                if let OwnLane::Use { every } = lane
+                                    && transactions > 1
+                                {
+                                    // Roughly five batches fit a block.
+                                    let minutes = (transactions as u64 * every.as_secs()).div_ceil(5 * 60).max(1);
+                                    tprintln!(
+                                        self,
+                                        "{}",
+                                        crate::ui::dim(format!(
+                                            "Submitted as {transactions} transactions for your miner to land — about {}. Keep this wallet open until then; the change and the notes settle as they confirm.",
+                                            humanised_minutes(minutes)
+                                        ))
+                                    );
                                 }
                             }
                         }
@@ -2060,28 +2060,28 @@ impl KaspaCli {
             // Left behind by an interrupted 'account create'; they hold nothing
             // and no address can have received to them. Cleaning them up is
             // housekeeping, not a decision to put to the user.
-            if let Ok(store) = self.wallet.store().as_prv_key_data_store() {
-                if let Ok(mut stream) = store.iter().await {
-                    let mut orphans = Vec::new();
-                    let guard = self.wallet.guard();
-                    let guard = guard.lock().await;
-                    while let Ok(Some(info)) = stream.try_next().await {
-                        if let Ok(mut accounts) = self.wallet.accounts(Some(info.id), &guard).await {
-                            if accounts.try_next().await.ok().flatten().is_none() {
-                                orphans.push(info.id);
-                            }
-                        }
+            if let Ok(store) = self.wallet.store().as_prv_key_data_store()
+                && let Ok(mut stream) = store.iter().await
+            {
+                let mut orphans = Vec::new();
+                let guard = self.wallet.guard();
+                let guard = guard.lock().await;
+                while let Ok(Some(info)) = stream.try_next().await {
+                    if let Ok(mut accounts) = self.wallet.accounts(Some(info.id), &guard).await
+                        && accounts.try_next().await.ok().flatten().is_none()
+                    {
+                        orphans.push(info.id);
                     }
-                    drop(guard);
-                    if !orphans.is_empty() {
-                        let removed = orphans.len();
-                        for id in orphans {
-                            store.remove(&secret, &id).await.ok();
-                        }
-                        self.wallet.store().commit(&secret).await.ok();
-                        if loud {
-                            tprintln!(self, "Removed {removed} unused recovery key(s).");
-                        }
+                }
+                drop(guard);
+                if !orphans.is_empty() {
+                    let removed = orphans.len();
+                    for id in orphans {
+                        store.remove(&secret, &id).await.ok();
+                    }
+                    self.wallet.store().commit(&secret).await.ok();
+                    if loud {
+                        tprintln!(self, "Removed {removed} unused recovery key(s).");
                     }
                 }
             }
@@ -2103,10 +2103,10 @@ impl KaspaCli {
                 if merged > 0 && loud {
                     tprintln!(self, "Consolidated {merged} group(s) of ten notes into larger ones.");
                 }
-                if let Some(reason) = failure {
-                    if loud {
-                        tprintln!(self, "Note consolidation stopped: {reason}");
-                    }
+                if let Some(reason) = failure
+                    && loud
+                {
+                    tprintln!(self, "Note consolidation stopped: {reason}");
                 }
             }
             Err(err) => {

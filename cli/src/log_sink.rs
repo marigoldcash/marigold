@@ -93,10 +93,10 @@ fn parse_progress(line: &str) -> Option<SyncProgress> {
     // number sitting in front of "headers".
     if line.contains("pruning point chain segment") {
         let words: Vec<&str> = line.split_whitespace().collect();
-        if let Some(i) = words.iter().position(|w| *w == "headers") {
-            if let Some(headers) = i.checked_sub(1).and_then(|j| words[j].replace(',', "").parse::<u64>().ok()) {
-                return Some(SyncProgress::ChainSegment { headers });
-            }
+        if let Some(i) = words.iter().position(|w| *w == "headers")
+            && let Some(headers) = i.checked_sub(1).and_then(|j| words[j].replace(',', "").parse::<u64>().ok())
+        {
+            return Some(SyncProgress::ChainSegment { headers });
         }
     }
     if let Some(rest) = after("IBD: Processed ") {

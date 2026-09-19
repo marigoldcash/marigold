@@ -32,3 +32,6 @@ rust = { unexpected_cfgs = { level = "warn", check-cfg = ['cfg(fuzzing)'] } }
 [lints.clippy]
 empty_docs = "allow"
 uninlined_format_args = "allow"
+# This crate keeps its own tables for the fuzzing cfg, so the workspace's allow
+# for clippy 1.98's chunk lint is repeated here.
+chunks_exact_to_as_chunks = "allow"

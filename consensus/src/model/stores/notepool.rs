@@ -64,7 +64,6 @@ impl DbNotePoolStore {
                 let sn = Hash::from_slice(key.as_ref());
                 (sn, self.entry(sn, note))
             })
-            .map_err(|e| e.into())
         })
     }
 
@@ -82,7 +81,6 @@ impl DbNotePoolStore {
                 let sn = Hash::from_slice(key.as_ref());
                 (sn, self.entry(sn, note))
             })
-            .map_err(|e| e.into())
         })
     }
 

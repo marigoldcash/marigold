@@ -194,15 +194,14 @@ impl Wallet {
                     Some(name) => ctx.store().client_metadata(name).await.ok().flatten(),
                     None => None,
                 };
-                if let Some(network) = meta.as_ref().and_then(|m| m.network.clone()) {
-                    if let Ok(network_id) = NetworkId::from_str(&network) {
-                        if ctx.wallet().network_id().ok() != Some(network_id) {
-                            match ctx.wallet().set_network_id(&network_id) {
-                                Ok(_) => tprintln!(ctx, "Network set to {network_id} (remembered by this wallet)"),
-                                Err(err) => {
-                                    tprintln!(ctx, "This wallet remembers network {network}, which can't be applied now: {err}")
-                                }
-                            }
+                if let Some(network) = meta.as_ref().and_then(|m| m.network.clone())
+                    && let Ok(network_id) = NetworkId::from_str(&network)
+                    && ctx.wallet().network_id().ok() != Some(network_id)
+                {
+                    match ctx.wallet().set_network_id(&network_id) {
+                        Ok(_) => tprintln!(ctx, "Network set to {network_id} (remembered by this wallet)"),
+                        Err(err) => {
+                            tprintln!(ctx, "This wallet remembers network {network}, which can't be applied now: {err}")
                         }
                     }
                 }

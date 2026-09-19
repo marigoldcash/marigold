@@ -81,10 +81,10 @@ fn validate_locks(locks: &[ProducedLock], produced_len: usize) -> Result<(), Poo
         if l.index as usize >= produced_len {
             return Err(PoolOpValidationError::LockIndexOutOfRange(l.index, produced_len));
         }
-        if let Some(prev) = last {
-            if l.index <= prev {
-                return Err(PoolOpValidationError::LockIndicesNotAscending);
-            }
+        if let Some(prev) = last
+            && l.index <= prev
+        {
+            return Err(PoolOpValidationError::LockIndicesNotAscending);
         }
         last = Some(l.index);
     }

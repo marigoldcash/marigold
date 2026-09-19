@@ -606,7 +606,7 @@ impl Note {
             store.remove(&wallet_secret, sn).await?;
             moved += 1;
             moved_petals += DENOMINATION_PETALS[entry.d as usize];
-            if moved % 25 == 0 {
+            if moved.is_multiple_of(25) {
                 tprintln!(ctx, "  moved {moved}/{} notes...", serials.len());
             }
         }
@@ -705,7 +705,7 @@ impl Note {
         tprintln!(ctx, "then failed to land. They are not spendable and never will be.");
         tprintln!(ctx, "");
         let mut phantom = phantom;
-        phantom.sort_by(|a, b| b.d.cmp(&a.d));
+        phantom.sort_by_key(|a| std::cmp::Reverse(a.d));
         for info in phantom.iter().take(20) {
             tprintln!(ctx, "  {} - {} {ticker}", info.sn, sompi_to_kaspa_string(DENOMINATION_PETALS[info.d as usize]));
         }
@@ -782,7 +782,7 @@ impl Note {
                     tprintln!(ctx, "");
                     return Ok(());
                 }
-                mirrored.sort_by(|a, b| b.d.cmp(&a.d));
+                mirrored.sort_by_key(|a| std::cmp::Reverse(a.d));
                 tprintln!(ctx, "");
                 tprintln!(ctx, "On your phone: {} {ticker}", sompi_to_kaspa_string(total(&mirrored)));
                 for info in &mirrored {
@@ -907,7 +907,7 @@ impl Note {
                 let target = try_parse_required_nonzero_kaspa_as_sompi_u64(Some(&amount.to_string()))?;
                 // Largest first, never going over: mirroring more than asked
                 // would put more at risk than the user chose to carry.
-                spendable.sort_by(|a, b| b.d.cmp(&a.d));
+                spendable.sort_by_key(|a| std::cmp::Reverse(a.d));
                 let mut chosen = Vec::new();
                 let mut sum = 0u64;
                 for info in &spendable {

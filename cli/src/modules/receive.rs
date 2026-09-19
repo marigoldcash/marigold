@@ -17,7 +17,7 @@ impl Receive {
         };
         let wallet = ctx.wallet();
         let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(None).await?;
-        let note = crate::modules::note::Note::default();
+        let note = crate::modules::note::Note;
         note.ensure_vault_interactive(&ctx, &wallet_secret).await?;
 
         // 'receive key [name]': a standing key to hand out, like a phone number

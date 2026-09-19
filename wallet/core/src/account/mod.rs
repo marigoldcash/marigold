@@ -354,7 +354,7 @@ pub trait Account: AnySync + Send + Sync + 'static {
                 Err(err) if is_already_known(&err) => {
                     ids.push(transaction.id());
                 }
-                Err(err) => return Err(err.into()),
+                Err(err) => return Err(err),
             }
 
             if let Some(notifier) = notifier.as_ref() {

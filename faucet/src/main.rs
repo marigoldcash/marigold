@@ -218,10 +218,9 @@ struct Claimant {
 fn claimant(state: &FaucetState, headers: &HeaderMap, ip: IpAddr) -> Claimant {
     if let (Some(token), Some(init)) =
         (state.telegram_bot_token.as_deref(), headers.get("x-telegram-init-data").and_then(|v| v.to_str().ok()))
+        && let Some(user_id) = telegram_user_id(init, token)
     {
-        if let Some(user_id) = telegram_user_id(init, token) {
-            return Claimant { key: format!("tg:{user_id}"), telegram_user: Some(user_id) };
-        }
+        return Claimant { key: format!("tg:{user_id}"), telegram_user: Some(user_id) };
     }
     Claimant { key: format!("ip:{ip}"), telegram_user: None }
 }
@@ -392,10 +391,10 @@ async fn buffer_tick(state: &FaucetState) -> anyhow::Result<()> {
     let mut active: [Vec<Hash>; BUNDLE_TAGS.len()] = std::array::from_fn(|_| Vec::new());
     let mut stream = note_key_store.iter().await?;
     while let Some(info) = stream.try_next().await? {
-        if info.status == NoteStatus::Active {
-            if let Some(slot) = BUNDLE_TAGS.iter().position(|t| *t == info.d) {
-                active[slot].push(info.sn);
-            }
+        if info.status == NoteStatus::Active
+            && let Some(slot) = BUNDLE_TAGS.iter().position(|t| *t == info.d)
+        {
+            active[slot].push(info.sn);
         }
     }
 
@@ -472,12 +471,11 @@ fn client_ip(headers: &HeaderMap, connect: IpAddr) -> IpAddr {
     // Behind nginx (loopback), trust X-Real-IP; direct hits fall back to the
     // socket address. Only ever trusted from loopback by construction — the
     // service refuses to bind anything else without an explicit flag change.
-    if connect.is_loopback() {
-        if let Some(v) = headers.get("x-real-ip").and_then(|v| v.to_str().ok()) {
-            if let Ok(ip) = IpAddr::from_str(v.trim()) {
-                return ip;
-            }
-        }
+    if connect.is_loopback()
+        && let Some(v) = headers.get("x-real-ip").and_then(|v| v.to_str().ok())
+        && let Ok(ip) = IpAddr::from_str(v.trim())
+    {
+        return ip;
     }
     connect
 }

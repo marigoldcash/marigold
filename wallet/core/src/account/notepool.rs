@@ -611,7 +611,7 @@ impl Handover {
     }
 
     pub fn decode(bytes: &[u8]) -> Result<Self> {
-        if bytes.len() < 65 || (bytes.len() - 32) % 33 != 0 {
+        if bytes.len() < 65 || !(bytes.len() - 32).is_multiple_of(33) {
             return Err(Error::Custom(format!("a handover bundle is 32 bytes plus 33 per note, got {}", bytes.len())));
         }
         let sk: [u8; 32] = bytes[..32].try_into().unwrap();
@@ -824,10 +824,10 @@ pub async fn receive_handover(wallet: &Arc<Wallet>, wallet_secret: Secret, hando
     // rotation it is the smallest spare, and the rotation takes it as its fee.
     let stamp = handover.notes.iter().position(|(_, d)| *d == DenominationTag::D0_01);
     let mut to_rotate: Vec<Hash> = serials.clone();
-    if let Some(index) = stamp {
-        if to_rotate.len() > 1 {
-            to_rotate.remove(index);
-        }
+    if let Some(index) = stamp
+        && to_rotate.len() > 1
+    {
+        to_rotate.remove(index);
     }
     let rotation = rotate_notes(wallet, wallet_secret, to_rotate).await?;
     Ok(ReceiveResult { value_petals: handover.value_petals(), notes: handover.notes, rotation })
@@ -1993,10 +1993,6 @@ mod tests {
         assert!(BearerNote::decode(&bytes).is_err());
     }
 
-    fn info(byte: u8, d: DenominationTag) -> Arc<NoteKeyInfo> {
-        Arc::new(NoteKeyInfo::new(Hash::from_bytes([byte; 32]), [byte; 32], d, NoteProvenance::Cold))
-    }
-
     #[test]
     fn fee_quanta_sizing() {
         // One quantum covers any fee up to 1,000,000 sompi; never zero quanta.
@@ -2744,13 +2740,13 @@ pub async fn plan_merges(wallet: &Arc<Wallet>) -> Result<Vec<Vec<Hash>>> {
     // never merge on its own, which is how a wallet ended up holding 125 of
     // them (founder report, 2026-09-06). Once past the trigger, consolidate
     // down toward the reserve and leave the rest alone.
-    if let Some(serials) = by_denomination.get(&0) {
-        if serials.len() > STAMP_MERGE_TRIGGER {
-            let excess = &serials[STAMP_RESERVE..];
-            for group in excess.chunks(10) {
-                if group.len() == 10 {
-                    plans.push(group.to_vec());
-                }
+    if let Some(serials) = by_denomination.get(&0)
+        && serials.len() > STAMP_MERGE_TRIGGER
+    {
+        let excess = &serials[STAMP_RESERVE..];
+        for group in excess.chunks(10) {
+            if group.len() == 10 {
+                plans.push(group.to_vec());
             }
         }
     }
@@ -3054,7 +3050,7 @@ impl LockedHandover {
     }
 
     pub fn decode(bytes: &[u8]) -> Result<Self> {
-        if bytes.len() < 41 + 33 || (bytes.len() - 41) % 33 != 0 {
+        if bytes.len() < 41 + 33 || !(bytes.len() - 41).is_multiple_of(33) {
             return Err(Error::Custom(format!("a locked handover is 41 bytes plus 33 per note, got {}", bytes.len())));
         }
         let ephemeral_pk: [u8; 33] = bytes[..33].try_into().unwrap();
@@ -3238,12 +3234,10 @@ pub async fn receive_locked(wallet: &Arc<Wallet>, wallet_secret: Secret, handove
         if entry.denomination != *d as u8 {
             return Err(Error::Custom(format!("note {sn}: the code says one size, the chain another")));
         }
-        if let Some(lock) = &entry.lock {
-            if server_info.virtual_daa_score >= lock.until_daa {
-                return Err(Error::Custom(
-                    "this payment's lock has lapsed — it is the payer's again; ask them to pay afresh".to_string(),
-                ));
-            }
+        if let Some(lock) = &entry.lock
+            && server_info.virtual_daa_score >= lock.until_daa
+        {
+            return Err(Error::Custom("this payment's lock has lapsed — it is the payer's again; ask them to pay afresh".to_string()));
         }
     }
     for (sn, d) in &handover.notes {
@@ -3252,10 +3246,10 @@ pub async fn receive_locked(wallet: &Arc<Wallet>, wallet_secret: Secret, handove
     wallet.store().commit(&wallet_secret).await?;
     let stamp = handover.notes.iter().position(|(_, d)| *d == DenominationTag::D0_01);
     let mut to_rotate: Vec<Hash> = serials.clone();
-    if let Some(index) = stamp {
-        if to_rotate.len() > 1 {
-            to_rotate.remove(index);
-        }
+    if let Some(index) = stamp
+        && to_rotate.len() > 1
+    {
+        to_rotate.remove(index);
     }
     let rotation = rotate_notes(wallet, wallet_secret, to_rotate).await?;
     Ok(ReceiveResult { value_petals: handover.value_petals(), notes: handover.notes, rotation })

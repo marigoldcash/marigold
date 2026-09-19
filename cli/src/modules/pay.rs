@@ -83,13 +83,13 @@ impl Pay {
         // 'pay <amount> <key> [for <n> days|hours]': to someone's share key,
         // under a lock (FORK-PLAN P8.0g). Theirs to take until the lock lapses,
         // ours again after; the code carries no key the payer could use.
-        if let (Some(amount), Some(key)) = (argv.first(), argv.get(1)) {
-            if key.starts_with(notepool::SHARE_KEY_PREFIX) {
-                return Self::pay_locked(&ctx, amount, key, &argv[2..]).await;
-            }
+        if let (Some(amount), Some(key)) = (argv.first(), argv.get(1))
+            && key.starts_with(notepool::SHARE_KEY_PREFIX)
+        {
+            return Self::pay_locked(&ctx, amount, key, &argv[2..]).await;
         }
         let selection = match argv.first().map(|s| s.as_str()) {
-            Some(arg) if arg.starts_with("marigoldreq:") => return crate::modules::note::Note::default().pay(&ctx, argv).await,
+            Some(arg) if arg.starts_with("marigoldreq:") => return crate::modules::note::Note.pay(&ctx, argv).await,
             Some(arg) if is_serial(arg) => {
                 HandoverSelection::Serial(arg.parse::<Hash>().map_err(|_| Error::custom("that is not a note serial"))?)
             }

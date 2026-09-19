@@ -15,15 +15,13 @@ impl Network {
             ctx.wallet().settings().set(WalletSettings::Network, network_id).await?;
 
             // Keep the open wallet's own remembered network in step.
-            if ctx.wallet().is_open() {
-                if let Some(descriptor) = ctx.wallet().store().descriptor() {
-                    if let Ok(Some(mut meta)) = ctx.wallet().store().client_metadata(&descriptor.filename).await {
-                        if meta.remember {
-                            meta.network = Some(network_id.to_string());
-                            ctx.wallet().store().set_client_metadata(&descriptor.filename, Some(meta)).await.ok();
-                        }
-                    }
-                }
+            if ctx.wallet().is_open()
+                && let Some(descriptor) = ctx.wallet().store().descriptor()
+                && let Ok(Some(mut meta)) = ctx.wallet().store().client_metadata(&descriptor.filename).await
+                && meta.remember
+            {
+                meta.network = Some(network_id.to_string());
+                ctx.wallet().store().set_client_metadata(&descriptor.filename, Some(meta)).await.ok();
             }
         } else {
             match ctx.wallet().network_id() {

@@ -10,7 +10,7 @@ impl Mobile {
         if argv.first().map(|s| s.as_str()) == Some("telegram") {
             return Self::telegram(&ctx, &argv[1..]).await;
         }
-        crate::modules::note::Note::default().mirror(&ctx, argv).await
+        crate::modules::note::Note.mirror(&ctx, argv).await
     }
 }
 

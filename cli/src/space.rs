@@ -24,7 +24,7 @@ pub struct Space {
 
 impl Space {
     pub fn used_percent(&self) -> u64 {
-        if self.total == 0 { 0 } else { (self.total - self.available) * 100 / self.total }
+        ((self.total - self.available) * 100).checked_div(self.total).unwrap_or(0)
     }
 }
 

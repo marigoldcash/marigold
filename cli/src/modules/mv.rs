@@ -17,6 +17,6 @@ impl Handler for Mv {
 
     async fn handle(self: Arc<Self>, ctx: &Arc<dyn Context>, argv: Vec<String>, _cmd: &str) -> cli::Result<()> {
         let ctx = ctx.clone().downcast_arc::<KaspaCli>()?;
-        crate::modules::note::Note::default().move_notes(&ctx, argv).await.map_err(|e| e.into())
+        crate::modules::note::Note.move_notes(&ctx, argv).await.map_err(|e| e.into())
     }
 }

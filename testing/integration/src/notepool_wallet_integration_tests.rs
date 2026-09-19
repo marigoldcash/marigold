@@ -562,7 +562,7 @@ async fn wallet_notepool_spend_flows_test() {
 
     let receive_a = account_a.receive_address().expect("payer receive address");
     let throwaway = Address::new(kaspad.network.into(), Version::PubKey, &[7u8; 32]);
-    let mut mine = |n: usize, to: Address| {
+    let mine = |n: usize, to: Address| {
         let miner_client = miner_client.clone();
         async move {
             for _ in 0..n {
@@ -988,10 +988,10 @@ async fn wallet_notepool_vault_test() {
     for batch in &batches {
         let mut still_active = Vec::new();
         for sn in batch {
-            if let Some(info) = store_b.load_info(sn).await.unwrap() {
-                if info.status == NoteStatus::Active {
-                    still_active.push(*sn);
-                }
+            if let Some(info) = store_b.load_info(sn).await.unwrap()
+                && info.status == NoteStatus::Active
+            {
+                still_active.push(*sn);
             }
         }
         if still_active.is_empty() {

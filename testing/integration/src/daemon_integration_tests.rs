@@ -1365,7 +1365,7 @@ async fn daemon_ibd_pool_state_sync_test() {
         40,
         move || {
             let client = mint_check.clone();
-            Box::pin(async move { client.get_mempool_entry(mint_check_id.into(), false, false).await.is_err() })
+            Box::pin(async move { client.get_mempool_entry(mint_check_id, false, false).await.is_err() })
         },
         "mint did not clear the syncer mempool",
     )
@@ -1391,7 +1391,7 @@ async fn daemon_ibd_pool_state_sync_test() {
         40,
         move || {
             let client = rotate1_check.clone();
-            Box::pin(async move { client.get_mempool_entry(rotate1_id.into(), false, false).await.is_err() })
+            Box::pin(async move { client.get_mempool_entry(rotate1_id, false, false).await.is_err() })
         },
         "rotate did not clear the syncer mempool",
     )
@@ -1480,7 +1480,7 @@ async fn daemon_ibd_pool_state_sync_test() {
     let rotate2_id = rotate2.id();
     rpc_client2.submit_transaction((&rotate2).into(), false).await.unwrap();
     rpc_client2
-        .get_mempool_entry(rotate2_id.into(), false, false)
+        .get_mempool_entry(rotate2_id, false, false)
         .await
         .expect("syncee mempool rejected a rotate of imported notes — the imported pool state is not serving mempool validation");
 
@@ -1773,7 +1773,7 @@ async fn daemon_notepool_multi_node_agreement_test() {
             40,
             move || {
                 let client = client.clone();
-                Box::pin(async move { client.get_mempool_entry(txid.into(), false, false).await.is_err() })
+                Box::pin(async move { client.get_mempool_entry(txid, false, false).await.is_err() })
             },
             "pool-op transaction did not clear the mempool",
         )
@@ -2008,7 +2008,7 @@ async fn daemon_anchor_refuses_heavier_anchorless_chain_test() {
         200,
         move || {
             let client = check_client.clone();
-            Box::pin(async move { client.get_mempool_entry(anchor_tx_id.into(), false, false).await.is_err() })
+            Box::pin(async move { client.get_mempool_entry(anchor_tx_id, false, false).await.is_err() })
         },
         "the anchor tx did not clear node A's mempool (template inclusion failed?)",
     )

@@ -165,24 +165,24 @@ impl Balance {
                     ui::paint(ui::Ink::Moss, "the node has not answered — try 'balance' again shortly"),
                 ]),
             }
-        } else if let Some(balance) = account.as_ref().and_then(|account| account.balance()) {
-            if balance.mature > 0 || balance.pending > 0 {
-                let mut aside = format!(
-                    "{} piece{}",
-                    balance.mature_utxo_count.separated_string(),
-                    if balance.mature_utxo_count == 1 { "" } else { "s" }
-                );
-                if balance.pending > 0 {
-                    aside = format!("{} pending · {aside}", ui::ledger_amount(balance.pending));
-                }
-                rows.push(vec![String::new(); 4]);
-                rows.push(vec![
-                    ui::paint(ui::Ink::Cream, "ledger"),
-                    ui::paint(ui::Ink::Petal, ui::ledger_amount(balance.mature)),
-                    unit.clone(),
-                    ui::paint(ui::Ink::Moss, aside),
-                ]);
+        } else if let Some(balance) = account.as_ref().and_then(|account| account.balance())
+            && (balance.mature > 0 || balance.pending > 0)
+        {
+            let mut aside = format!(
+                "{} piece{}",
+                balance.mature_utxo_count.separated_string(),
+                if balance.mature_utxo_count == 1 { "" } else { "s" }
+            );
+            if balance.pending > 0 {
+                aside = format!("{} pending · {aside}", ui::ledger_amount(balance.pending));
             }
+            rows.push(vec![String::new(); 4]);
+            rows.push(vec![
+                ui::paint(ui::Ink::Cream, "ledger"),
+                ui::paint(ui::Ink::Petal, ui::ledger_amount(balance.mature)),
+                unit.clone(),
+                ui::paint(ui::Ink::Moss, aside),
+            ]);
         }
 
         ui::table(&ctx, &COLUMNS, &rows);
@@ -196,13 +196,12 @@ impl Balance {
             }
         }
 
-        if total == 0 {
-            if let Some(balance) = account.as_ref().and_then(|account| account.balance()) {
-                if balance.mature > 0 {
-                    tprintln!(ctx, "");
-                    tprintln!(ctx, "Tip: turn ledger balance into bearer notes with 'note mint <amount>' (or 'note mint all')");
-                }
-            }
+        if total == 0
+            && let Some(balance) = account.as_ref().and_then(|account| account.balance())
+            && balance.mature > 0
+        {
+            tprintln!(ctx, "");
+            tprintln!(ctx, "Tip: turn ledger balance into bearer notes with 'note mint <amount>' (or 'note mint all')");
         }
         tprintln!(ctx, "");
 

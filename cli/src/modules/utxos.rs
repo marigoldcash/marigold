@@ -16,7 +16,7 @@ impl Utxos {
         const DEFAULT_LIMIT: usize = 50;
 
         let (mut mature, pending, stasis) = account.utxo_context().utxo_entries_snapshot();
-        mature.sort_by(|a, b| b.amount().cmp(&a.amount()));
+        mature.sort_by_key(|a| std::cmp::Reverse(a.amount()));
 
         tprintln!(ctx, "");
         if mature.is_empty() && pending.is_empty() && stasis.is_empty() {

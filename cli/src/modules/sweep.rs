@@ -124,7 +124,7 @@ impl Sweep {
                     // Every 25th transaction, so a long sweep shows life
                     // without drowning the terminal.
                     let n = submitted_.fetch_add(1, Ordering::Relaxed) + 1;
-                    if n == 1 || n % 25 == 0 {
+                    if n == 1 || n.is_multiple_of(25) {
                         tprintln!(ctx_, "  submitted {n} transaction(s)... (latest {})", ptx.id());
                     }
                 })),

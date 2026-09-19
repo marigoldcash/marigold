@@ -111,6 +111,9 @@ pub struct RpcCoreService {
     utxoindex: Option<UtxoIndexProxy>,
     config: Arc<Config>,
     consensus_converter: Arc<ConsensusConverter>,
+    // Kept for parity with upstream; the paged UTXO lookup (P8.0d) no longer
+    // reads it here.
+    #[allow(dead_code)]
     index_converter: Arc<IndexConverter>,
     protocol_converter: Arc<ProtocolConverter>,
     core: Arc<Core>,
@@ -281,6 +284,7 @@ impl RpcCoreService {
         self.core_shutdown_request.listener.clone()
     }
 
+    #[allow(dead_code)]
     async fn get_utxo_set_by_script_public_key<'a>(
         &self,
         addresses: impl Iterator<Item = &'a RpcAddress>,
@@ -396,7 +400,7 @@ NOTE: This error usually indicates an RPC conversion error between the node and 
 
         // Make sure the pay address prefix matches the config network type
         if request.pay_address.prefix != self.config.prefix() {
-            return Err(kaspa_addresses::AddressError::InvalidPrefix(request.pay_address.prefix.to_string()))?;
+            Err(kaspa_addresses::AddressError::InvalidPrefix(request.pay_address.prefix.to_string()))?;
         }
 
         // Build block template
@@ -961,7 +965,7 @@ NOTE: This error usually indicates an RPC conversion error between the node and 
                     // boundary case costs the client one extra, empty page.
                     if more_in_this_address || i < last_index {
                         let last = entries.last().expect("a full page has a last entry");
-                        cursor_out = Some(RpcUtxosByAddressesCursor { address: address.clone(), outpoint: last.outpoint.clone() });
+                        cursor_out = Some(RpcUtxosByAddressesCursor { address: address.clone(), outpoint: last.outpoint });
                     }
                     break;
                 }

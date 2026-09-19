@@ -30,7 +30,7 @@ impl Auto {
         let mut meta = ctx.store().client_metadata(&descriptor.filename).await.ok().flatten().unwrap_or_default();
 
         // Anything but a bare status read counts as configuring it.
-        if argv.first().is_some() {
+        if !argv.is_empty() {
             meta.auto_configured = true;
         }
         match argv.first().map(|s| s.to_lowercase()).as_deref() {
