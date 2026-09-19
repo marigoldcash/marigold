@@ -69,6 +69,7 @@ impl Receive {
             let stamp = result.notes.iter().any(|(_, d)| *d == kaspa_consensus_core::notepool::DenominationTag::D0_01);
             let value = if stamp { result.value_petals - DENOMINATION_PETALS[0] } else { result.value_petals };
             ctx.record("received", value, 0, "locked code", result.rotation.transaction_id.to_string());
+            ctx.refresh_prompt_total().await;
             tprintln!(ctx, "");
             tprintln!(
                 ctx,
@@ -89,6 +90,7 @@ impl Receive {
             let stamp = result.notes.iter().any(|(_, d)| *d == kaspa_consensus_core::notepool::DenominationTag::D0_01);
             let value = if stamp { result.value_petals - DENOMINATION_PETALS[0] } else { result.value_petals };
             ctx.record("received", value, 0, "code", result.rotation.transaction_id.to_string());
+            ctx.refresh_prompt_total().await;
             tprintln!(ctx, "");
             tprintln!(
                 ctx,
@@ -116,6 +118,7 @@ impl Receive {
                 "note",
                 result.rotation.transaction_id.to_string(),
             );
+            ctx.refresh_prompt_total().await;
             tprintln!(ctx, "");
             tprintln!(ctx, "Received {} {ticker}.", sompi_to_kaspa_string(DENOMINATION_PETALS[bearer.d as usize]));
             tprintln!(

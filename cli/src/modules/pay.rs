@@ -115,6 +115,7 @@ impl Pay {
             "code handed over",
             result.transfer.transaction_id.to_string(),
         );
+        ctx.refresh_prompt_total().await;
 
         tprintln!(ctx, "");
         if let Some(qr) = crate::modules::note::qr_string(&text) {
