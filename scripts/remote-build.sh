@@ -36,7 +36,7 @@ BINS=("$@")
 # so bumping invalidates the whole workspace. That is the trade being made, and
 # it is why this runs on 96 cores rather than here.
 if [ -z "${NO_BUMP:-}" ]; then
-  echo "→ $(./bump-version.sh)"
+  echo "→ $(scripts/bump-version.sh)"
 fi
 
 echo "→ syncing working tree to $HOST:$REMOTE_DIR"

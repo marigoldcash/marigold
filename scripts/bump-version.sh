@@ -11,7 +11,7 @@
 # external crate that happens to share our version number is left alone.
 set -euo pipefail
 
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 current=$(awk '/^\[workspace\.package\]/{f=1} f && /^version = "/{gsub(/[":]/,"",$3); print $3; exit}' Cargo.toml)
 if [[ -z "$current" ]]; then

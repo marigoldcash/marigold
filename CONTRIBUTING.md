@@ -27,11 +27,11 @@ These are not style. They are what lets us keep taking upstream's security fixes
 Build on a machine with room; the workspace is large. Then:
 
 ```sh
-./check
-./test
+scripts/check
+scripts/test
 ```
 
-`./check` formats the tree and runs clippy; `./test` runs the suites and needs `cargo-nextest`. CI runs clippy with warnings denied, so a warning here is a failure there. It also builds the wallet for the browser and the node with musl on every push and pull request, so a pull request that fails any of those will not be reviewed until it passes.
+`scripts/check` formats the tree and runs clippy (`scripts/check.ps1` on Windows); `scripts/test` runs the suites and needs `cargo-nextest`. CI runs clippy with warnings denied, so a warning here is a failure there. It also builds the wallet for the browser and the node with musl on every push and pull request, so a pull request that fails any of those will not be reviewed until it passes.
 
 Write the pull request for the reviewer: what changed, why, what you considered and rejected, how you tested it, and anything a node operator or wallet user will notice. If it is large, split it.
 

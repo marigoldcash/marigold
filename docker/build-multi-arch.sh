@@ -1,6 +1,8 @@
 #!/bin/sh
 
 set -e
+# Run from the repository root whatever directory this is called from.
+cd "$(dirname "$0")/.."
 
 # Parse command line arguments for --tag and --repo
 ARCHES="linux/amd64 linux/arm64"
