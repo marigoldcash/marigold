@@ -144,6 +144,31 @@ impl Note {
         }
         let request = PaymentRequest::from_text(&argv[0])?;
         let amount_override = if argv.len() > 1 { Some(try_parse_required_nonzero_kaspa_as_sompi_u64(argv.get(1))?) } else { None };
+        // What the person sees is what gets signed, or nothing happens. A
+        // request code is plain bytes — key and amount, unsigned — so a
+        // swapped amount or key in a displayed QR would otherwise be paid as
+        // shown by nobody (threat pass, 2026-09-20). And a typed amount that
+        // disagrees with a pinned one is a disagreement, not a tie-break.
+        let paid = match (request.amount_petals, amount_override) {
+            (Some(pinned), Some(typed)) if pinned != typed => {
+                return Err(Error::custom(format!(
+                    "this request asks for {} {ticker} and you typed {} {ticker} — pay it as it is, or ask for a new request",
+                    sompi_to_kaspa_string(pinned),
+                    sompi_to_kaspa_string(typed)
+                )));
+            }
+            (Some(pinned), _) => pinned,
+            (None, Some(typed)) => typed,
+            (None, None) => return Err(Error::custom("this request pins no amount — say how much: 'pay <code> <amount>'")),
+        };
+        let key_hex = hex::encode(request.pk);
+        tprintln!(ctx, "");
+        tprintln!(ctx, "Paying {} {ticker} to the request key …{}.", sompi_to_kaspa_string(paid), &key_hex[key_hex.len() - 8..]);
+        let answer = ctx.term().ask(false, "Pay it? [y/N]: ").await?.trim().to_lowercase();
+        if !answer.starts_with('y') {
+            tprintln!(ctx, "Nothing paid.");
+            return Ok(());
+        }
         let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(None).await?;
 
         let paid = request.amount_petals.or(amount_override).unwrap_or(0);

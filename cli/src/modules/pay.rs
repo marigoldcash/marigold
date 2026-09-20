@@ -28,7 +28,8 @@ impl Pay {
                     "week" | "w" => 7 * 86_400,
                     other => return Err(Error::custom(format!("'{other}' — say hours, days or weeks"))),
                 };
-                let total = n * seconds;
+                let total =
+                    n.checked_mul(seconds).ok_or_else(|| Error::custom("a lock is between an hour and thirty days".to_string()))?;
                 if !(3_600..=30 * 86_400).contains(&total) {
                     return Err(Error::custom("a lock is between an hour and thirty days".to_string()));
                 }

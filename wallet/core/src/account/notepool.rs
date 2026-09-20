@@ -854,6 +854,12 @@ pub async fn receive_handover(wallet: &Arc<Wallet>, wallet_secret: Secret, hando
     let secret_key = SecretKey::from_slice(&handover.sk).map_err(|e| Error::Custom(format!("invalid handover key: {e}")))?;
     let derived_pk = Keypair::from_secret_key(SECP256K1, &secret_key).x_only_public_key().0.serialize();
     let serials: Vec<Hash> = handover.notes.iter().map(|(sn, _)| *sn).collect();
+    let note_key_store = wallet.store().as_note_key_store()?;
+    // Already in this wallet: taken before, and a second take would only
+    // send a conflicting rotation for the node to refuse.
+    if note_key_store.load_info(&serials[0]).await?.is_some() {
+        return Err(Error::Custom("you already took this payment — it is in your notes".to_string()));
+    }
     let on_chain = wallet.rpc_api().get_notes_by_serial(serials.clone()).await?;
     for (sn, d) in &handover.notes {
         let entry = on_chain.iter().find(|entry| entry.sn == *sn).ok_or_else(|| {
@@ -864,6 +870,14 @@ pub async fn receive_handover(wallet: &Arc<Wallet>, wallet_secret: Secret, hando
         }
         if entry.denomination != *d as u8 {
             return Err(Error::Custom(format!("note {sn}: the code says one size, the chain another")));
+        }
+        // A plain handover carries no deadline. A note under a lock answers
+        // to the payer's refund key once the deadline passes, so a code
+        // dressed as a handover would be money the payer can pull back.
+        if entry.lock.is_some() {
+            return Err(Error::Custom(format!(
+                "note {sn} is under a lock, and this is not a locked-payment code — ask the payer for a proper one"
+            )));
         }
     }
     let note_key_store = wallet.store().as_note_key_store()?;
