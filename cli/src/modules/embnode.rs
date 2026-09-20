@@ -118,6 +118,16 @@ impl Node {
             tprintln!(ctx, "");
             return;
         }
+        if connected && ctx.connected_to_local_node() {
+            // A marigoldd the person runs beside the wallet. It used to be
+            // reported as a public computer, privacy warning and all (founder,
+            // 2026-09-19).
+            let url = ctx.wallet().try_wrpc_client().and_then(|c| c.url()).unwrap_or_default();
+            tprintln!(ctx, "Using: {}", style(format!("a node running on this machine ({url}).")).bold());
+            tprintln!(ctx, "Its copy of the network is yours; nobody else sees your notes. 'mine start' mines through it.");
+            tprintln!(ctx, "");
+            return;
+        }
         if connected {
             tprintln!(ctx, "Using: {}", style("a public computer.").bold());
             tprintln!(ctx, "Whoever runs it can see which notes your wallet asks about.");

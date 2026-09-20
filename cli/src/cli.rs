@@ -2429,7 +2429,7 @@ impl KaspaCli {
 
                                     // No URL means the node is inside this process — there is no
                                     // address to print, and "at N/A" reads like a fault.
-                                    match url {
+                                    match &url {
                                         Some(url) => tprintln!(this, "Connected to {url}, Marigold version {server_version}"),
                                         None => tprintln!(this, "Using your own copy of the network, Marigold version {server_version}"),
                                     }
@@ -2437,12 +2437,25 @@ impl KaspaCli {
                                     let is_open = this.wallet.is_open();
 
                                     if !is_synced {
-                                        if is_open {
-                                            terrorln!(this, "Unable to update the wallet state - Marigold node is currently syncing with the network...");
-
+                                        // Not a fault, so not red: the node is catching up and the
+                                        // ledger side waits for it. The old line, in red, read as an
+                                        // error to the founder (2026-09-19).
+                                        let whose = if url.as_deref().is_some_and(|u| crate::modules::connect::is_local_target(u)) {
+                                            "Your node on this machine"
+                                        } else if url.is_none() {
+                                            "Your own copy of the network"
                                         } else {
-                                            terrorln!(this, "Marigold node is currently syncing with the network, please wait for the sync to complete...");
-                                        }
+                                            "That computer"
+                                        };
+                                        tprintln!(
+                                            this,
+                                            "{}",
+                                            style(format!(
+                                                "{whose} is still catching up with the network. Notes work now; the ledger side waits until it has caught up — 'connect status' shows progress."
+                                            ))
+                                            .yellow()
+                                        );
+                                        let _ = is_open;
                                     }
 
                                     this.term().refresh_prompt();
