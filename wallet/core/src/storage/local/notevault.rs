@@ -94,8 +94,18 @@ const SHARES_FILE: &str = "shares.tsv";
 
 /// Every status that owns a directory on disk. A rebuild walks this list, so a
 /// status missing from it is a note the recovery path would silently drop.
-const ALL_STATUSES: [NoteStatus; 5] =
-    [NoteStatus::Active, NoteStatus::HandedOver, NoteStatus::Superseded, NoteStatus::Mirrored, NoteStatus::Unknown];
+const ALL_STATUSES: [NoteStatus; 6] = [
+    NoteStatus::Active,
+    NoteStatus::HandedOver,
+    NoteStatus::Superseded,
+    NoteStatus::Mirrored,
+    NoteStatus::Unknown,
+    // Missing from this list for as long as the status existed: the vault
+    // never made an `offered/` directory, so the first time-locked payment a
+    // wallet made failed with "No such file or directory" (found by the
+    // escrow's first live run, 2026-09-20).
+    NoteStatus::Offered,
+];
 
 fn status_subdir(status: NoteStatus) -> &'static str {
     match status {
@@ -522,6 +532,8 @@ impl NoteVault {
     }
 
     async fn write_note_file(&self, file: &VaultNoteFile, status: NoteStatus, k: &[u8; 32]) -> Result<()> {
+        // Vaults made before a status existed have no directory for it.
+        fs::create_dir_all(self.subdir(status)).await?;
         let path = self.subdir(status).join(note_file_name(&file.sn, file.d));
         let plaintext = borsh::to_vec(file)?;
         let ciphertext = encrypt_xchacha20poly1305_raw_key(&plaintext, k)?;
