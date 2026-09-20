@@ -34,7 +34,16 @@ impl Settings {
         // let list = WalletSettings::list();
         let list = WalletSettings::into_iter()
             .map(|setting| {
-                let value: String = ctx.wallet().settings().get(setting.clone()).unwrap_or_else(|| "-".to_string());
+                // Settings are not all text: 'advanced' and 'historydetail'
+                // are switches stored as true/false, and reading them as text
+                // printed a parse error over the table (tester, 2026-09-20).
+                let value = match ctx.wallet().settings().get::<serde_json::Value>(setting.clone()) {
+                    Some(serde_json::Value::Bool(true)) => "on".to_string(),
+                    Some(serde_json::Value::Bool(false)) => "off".to_string(),
+                    Some(serde_json::Value::String(text)) if !text.is_empty() => text,
+                    Some(serde_json::Value::Null) | Some(serde_json::Value::String(_)) | None => "-".to_string(),
+                    Some(other) => other.to_string(),
+                };
                 let descr = setting.describe();
                 (setting.as_str().to_lowercase(), value, descr)
             })
