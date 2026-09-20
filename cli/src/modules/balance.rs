@@ -59,23 +59,38 @@ impl Balance {
         if total > 0 || mirrored > 0 {
             if ctx.wallet().is_connected() {
                 match kaspa_wallet_core::account::notepool::reconcile_held_notes(&ctx.wallet()).await {
-                    Ok(Some(result)) if !result.moved_to_unknown.is_empty() => {
-                        let mut dropped = 0u64;
-                        for info in &result.moved_to_unknown {
-                            let petals = DENOMINATION_PETALS[info.d as usize];
-                            dropped += petals;
-                            total = total.saturating_sub(petals);
-                            counts[info.d as usize] = counts[info.d as usize].saturating_sub(1);
+                    Ok(Some(result)) => {
+                        if !result.moved_to_unknown.is_empty() {
+                            let mut dropped = 0u64;
+                            for info in &result.moved_to_unknown {
+                                let petals = DENOMINATION_PETALS[info.d as usize];
+                                dropped += petals;
+                                total = total.saturating_sub(petals);
+                                counts[info.d as usize] = counts[info.d as usize].saturating_sub(1);
+                            }
+                            chain_note.push(ui::warn(format!(
+                                "{} note(s) worth {} {ticker} are not on chain and are no longer counted above.",
+                                result.moved_to_unknown.len(),
+                                sompi_to_kaspa_string(dropped)
+                            )));
+                            chain_note.push(ui::dim("Records of transactions that never landed; nobody sent or received this money."));
+                            chain_note.push(ui::dim("'note unknown' lists them."));
                         }
-                        chain_note.push(ui::warn(format!(
-                            "{} note(s) worth {} {ticker} are not on chain and are no longer counted above.",
-                            result.moved_to_unknown.len(),
-                            sompi_to_kaspa_string(dropped)
-                        )));
-                        chain_note.push(ui::dim("Most often a payment that never landed, in which case the money never"));
-                        chain_note.push(ui::dim("left your ledger balance. 'note unknown' lists them."));
+                        // Still counted above, but not found: say so beside the
+                        // figure rather than let a person add up notes that a
+                        // lost transaction never created (tester, 2026-09-20:
+                        // "what is my real balance?").
+                        if !result.pending.is_empty() {
+                            chain_note.push(ui::warn(format!(
+                                "confirmed on chain: {} {ticker} — the other {} {ticker} in {} note(s) has not been found in the pool.",
+                                sompi_to_kaspa_string(total.saturating_sub(result.pending_petals)),
+                                sompi_to_kaspa_string(result.pending_petals),
+                                result.pending.len()
+                            )));
+                            chain_note.push(ui::dim("'note verify' explains, and 'note verify clear' writes them off."));
+                        }
                     }
-                    Ok(_) => {}
+                    Ok(None) => {}
                     Err(err) => chain_note.push(ui::dim(format!("(could not check these against the chain: {err})"))),
                 }
             } else {

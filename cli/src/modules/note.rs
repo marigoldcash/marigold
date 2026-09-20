@@ -720,18 +720,37 @@ impl Note {
             tprintln!(ctx, "");
             tprintln!(
                 ctx,
-                "{} note(s) worth {} {ticker} came back: the transaction that was to spend them never landed, and the pool",
+                "{} note(s) worth {} {ticker} came back: the transaction that consumed them — a split, a merge or a payment — never",
                 revived.len(),
                 sompi_to_kaspa_string(back)
             );
-            tprintln!(ctx, "still holds them under your keys. They count again.");
-            ctx.refresh_prompt_total().await;
+            tprintln!(ctx, "landed, and the pool still holds them under your keys. They count again.");
         }
-        let (present, phantom) = notepool::verify_held_notes(&ctx.wallet()).await?;
+        // A check that counts: each run is one of the three strikes after
+        // which a note the pool has not got stops being counted.
+        let Some(result) = notepool::reconcile_held_notes(&ctx.wallet()).await? else {
+            tprintln!(ctx, "");
+            tprintln!(
+                ctx,
+                "The node is still catching up, so its answer would not mean anything yet. Try once the SYNC in the prompt has gone."
+            );
+            tprintln!(ctx, "");
+            return Ok(());
+        };
         let value = |notes: &[Arc<NoteKeyInfo>]| -> u64 { notes.iter().map(|i| DENOMINATION_PETALS[i.d as usize]).sum() };
+        let mut phantom: Vec<Arc<NoteKeyInfo>> = result.pending.iter().chain(result.moved_to_unknown.iter()).cloned().collect();
+        let (notes_total, _, _) = ctx.total_holdings().await;
+        let confirmed = notes_total.saturating_sub(value(&result.pending));
+        ctx.refresh_prompt_total().await;
 
         tprintln!(ctx, "");
-        tprintln!(ctx, "confirmed on chain:  {} {ticker} in {} note(s)", sompi_to_kaspa_string(value(&present)), present.len());
+        tprintln!(
+            ctx,
+            "confirmed on chain:     {} {ticker} in {} note(s)   {}",
+            sompi_to_kaspa_string(confirmed),
+            result.present,
+            ui::dim("← your balance")
+        );
         if phantom.is_empty() {
             tprintln!(ctx, "");
             tprintln!(ctx, "Every note you hold exists in the pool. Your balance is real.");
@@ -740,33 +759,75 @@ impl Note {
         }
 
         let lost = value(&phantom);
-        tprintln!(ctx, "not in the pool:     {} {ticker} in {} note(s)", sompi_to_kaspa_string(lost), phantom.len());
-        tprintln!(ctx, "");
-        tprintln!(ctx, "These notes are in your vault but not on chain. That happens when a");
-        tprintln!(ctx, "transaction was submitted, its notes recorded here, and the transaction");
-        tprintln!(ctx, "then failed to land. They are not spendable and never will be.");
-        tprintln!(ctx, "");
-        let mut phantom = phantom;
-        phantom.sort_by_key(|a| std::cmp::Reverse(a.d));
-        for info in phantom.iter().take(20) {
-            tprintln!(ctx, "  {} - {} {ticker}", info.sn, sompi_to_kaspa_string(DENOMINATION_PETALS[info.d as usize]));
+        let mut per_size: Vec<(u64, usize)> = Vec::new();
+        for info in &phantom {
+            let petals = DENOMINATION_PETALS[info.d as usize];
+            match per_size.iter_mut().find(|(p, _)| *p == petals) {
+                Some((_, n)) => *n += 1,
+                None => per_size.push((petals, 1)),
+            }
         }
-        if phantom.len() > 20 {
-            tprintln!(ctx, "  ... and {} more", phantom.len() - 20);
+        per_size.sort_by(|a, b| b.0.cmp(&a.0));
+        let sizes = format!(
+            "{} {ticker}",
+            per_size.iter().map(|(p, n)| format!("{n} × {}", sompi_to_kaspa_string(*p))).collect::<Vec<_>>().join(", ")
+        );
+        tprintln!(
+            ctx,
+            "not found in the pool:  {} {ticker} in {} note(s)   {}",
+            sompi_to_kaspa_string(lost),
+            phantom.len(),
+            ui::dim(sizes)
+        );
+        tprintln!(ctx, "");
+        tpara!(
+            ctx,
+            "The {} not found are records of transactions that never landed — a split, a merge or a payment, most often one sent through a node that was still catching up. They were never anyone's money: nothing was sent and nothing was received, and the notes they were to come from are back in the confirmed figure. They stop being counted after three checks — this command, 'balance' and opening the wallet all count.",
+            phantom.len()
+        );
+        if !result.moved_to_unknown.is_empty() {
+            tprintln!(ctx, "");
+            tprintln!(
+                ctx,
+                "{} of them, worth {} {ticker}, reached the third check now and no longer count.",
+                result.moved_to_unknown.len(),
+                sompi_to_kaspa_string(value(&result.moved_to_unknown))
+            );
+        }
+        if ctx.advanced() {
+            tprintln!(ctx, "");
+            phantom.sort_by_key(|a| std::cmp::Reverse(a.d));
+            for info in phantom.iter().take(20) {
+                tprintln!(ctx, "  {} - {} {ticker}", info.sn, sompi_to_kaspa_string(DENOMINATION_PETALS[info.d as usize]));
+            }
+            if phantom.len() > 20 {
+                tprintln!(ctx, "  ... and {} more", phantom.len() - 20);
+            }
         }
         tprintln!(ctx, "");
 
         // Clearing is opt-in. A note missing because the node is mid-sync, or
         // answering from a pruned view, is not a lost note — and writing off
         // real money on a bad answer is worse than leaving a wrong number up.
+        let still_counted: Vec<Arc<NoteKeyInfo>> = result.pending.clone();
+        if still_counted.is_empty() {
+            return Ok(());
+        }
         if argv.first().map(|s| s.as_str()) != Some("clear") {
-            tprintln!(ctx, "'note verify clear' writes them off, once you are sure the node is fully synced.");
+            tprintln!(ctx, "'note verify clear' writes them off now, once you are sure the node is fully synced.");
             tprintln!(ctx, "");
             return Ok(());
         }
         let answer = ctx
             .term()
-            .ask(false, &format!("Write off {} {ticker} as unrecoverable? [y/N]: ", sompi_to_kaspa_string(lost)))
+            .ask(
+                false,
+                &format!(
+                    "Write off {} {ticker} in {} note(s)? [y/N]: ",
+                    sompi_to_kaspa_string(value(&still_counted)),
+                    still_counted.len()
+                ),
+            )
             .await?
             .trim()
             .to_lowercase();
@@ -775,10 +836,11 @@ impl Note {
             return Ok(());
         }
         let store = ctx.wallet().store().as_note_key_store()?;
-        for info in &phantom {
+        for info in &still_counted {
             store.mark_status(&info.sn, NoteStatus::Superseded).await?;
         }
-        tprintln!(ctx, "Wrote off {} note(s). They are in 'history' now.", phantom.len());
+        ctx.refresh_prompt_total().await;
+        tprintln!(ctx, "Wrote off {} note(s). They are in 'history' now.", still_counted.len());
         Ok(())
     }
 

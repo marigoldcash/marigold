@@ -2733,7 +2733,7 @@ pub struct Reconciliation {
     /// Notes the pool confirms, which is the normal case.
     pub present: usize,
     /// Missing, but not yet out of strikes — still counted as money.
-    pub pending: usize,
+    pub pending: Vec<Arc<NoteKeyInfo>>,
     /// Moved to [`NoteStatus::Unknown`] by this pass.
     pub moved_to_unknown: Vec<Arc<NoteKeyInfo>>,
     /// Value of the notes still pending, in petals.
@@ -2765,7 +2765,7 @@ pub async fn reconcile_held_notes(wallet: &Arc<Wallet>) -> Result<Option<Reconci
     }
 
     let mut moved_to_unknown = Vec::new();
-    let mut pending = 0usize;
+    let mut pending = Vec::new();
     let mut pending_petals = 0u64;
     for info in &phantom {
         let strikes = note_key_store.record_missing(&info.sn).await?;
@@ -2773,8 +2773,8 @@ pub async fn reconcile_held_notes(wallet: &Arc<Wallet>) -> Result<Option<Reconci
             note_key_store.mark_status(&info.sn, NoteStatus::Unknown).await?;
             moved_to_unknown.push(info.clone());
         } else {
-            pending += 1;
             pending_petals += DENOMINATION_PETALS[info.d as usize];
+            pending.push(info.clone());
         }
     }
 

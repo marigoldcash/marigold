@@ -1832,18 +1832,17 @@ impl KaspaCli {
                 self,
                 "{}",
                 crate::ui::dim(format!(
-                    "{} note(s) worth {} {ticker} came back: the transaction that was to spend them never landed, and the pool still holds them under your keys.",
+                    "{} note(s) worth {} {ticker} came back: the transaction that consumed them — a split, a merge or a payment — never landed, and the pool still holds them under your keys. The notes it was to create are not on chain; 'note verify' shows them.",
                     revived.len(),
                     kaspa_wallet_core::utils::sompi_to_kaspa_string(value)
                 ))
             );
         }
         let mut vanished: Option<(usize, u64)> = None;
+        let mut unfound: Option<(usize, u64)> = None;
         if notes > 0 && self.wallet.is_connected() {
-            {
-                if let Ok(Some(result)) = kaspa_wallet_core::account::notepool::reconcile_held_notes(&self.wallet).await
-                    && !result.moved_to_unknown.is_empty()
-                {
+            if let Ok(Some(result)) = kaspa_wallet_core::account::notepool::reconcile_held_notes(&self.wallet).await {
+                if !result.moved_to_unknown.is_empty() {
                     let value: u64 = result
                         .moved_to_unknown
                         .iter()
@@ -1851,6 +1850,9 @@ impl KaspaCli {
                         .sum();
                     notes = notes.saturating_sub(value);
                     vanished = Some((result.moved_to_unknown.len(), value));
+                }
+                if !result.pending.is_empty() {
+                    unfound = Some((result.pending.len(), result.pending_petals));
                 }
             }
         }
@@ -1861,6 +1863,16 @@ impl KaspaCli {
         self.prompt_total_valid.store(true, Ordering::SeqCst);
         tprintln!(self, "");
         tprintln!(self, "notes:  {} {ticker}", kaspa_wallet_core::utils::sompi_to_kaspa_string(notes));
+        if let Some((count, value)) = unfound {
+            tprintln!(
+                self,
+                "{}",
+                crate::ui::warn(format!(
+                    "of which {} {ticker} in {count} note(s) has not been found in the pool — 'note verify' explains.",
+                    kaspa_wallet_core::utils::sompi_to_kaspa_string(value)
+                ))
+            );
+        }
         // Said once, on opening, so that reaching for a phone at the moment
         // of a payment is expected rather than alarming.
         if self.otp().is_some() {
@@ -2674,6 +2686,20 @@ impl KaspaCli {
                                     // Announced when the server status arrives, below — for a
                                     // first connection and for one the socket made again on
                                     // its own after the node went away.
+                                    //
+                                    // The miner asks whatever node the wallet is on for work.
+                                    // On someone else's node that hands its operator the
+                                    // payout address, which 'mine start' refuses to do — and
+                                    // 'connect public' did it anyway (tester, 2026-09-20).
+                                    #[cfg(feature = "embedded-node")]
+                                    {
+                                        let own = url.as_deref().is_none_or(crate::modules::connect::is_local_target) || this.embedded_node_in_use();
+                                        if !own && let Some(miner) = this.cpu_miner.lock().unwrap().take() {
+                                            miner.stop();
+                                            tprintln!(this, "{}", style("Mining stopped: the wallet is on a public computer now, and mining through it would tell").yellow());
+                                            tprintln!(this, "{}", style("its operator where your rewards go. 'mine start' again once you are back on your own node.").yellow());
+                                        }
+                                    }
                                 },
                                 #[allow(unused_variables)]
                                 Events::Disconnect{ url, network_id } => {
