@@ -5,13 +5,12 @@ use std::fmt::Display;
 
 pub fn try_parse_required_nonzero_kaspa_as_sompi_u64<S: ToString + Display>(kaspa_amount: Option<S>) -> Result<u64> {
     if let Some(kaspa_amount) = kaspa_amount {
-        let sompi_amount = kaspa_amount
-            .to_string()
-            .parse::<f64>()
-            .map_err(|_| Error::custom(format!("Supplied Kaspa amount is not valid: '{kaspa_amount}'")))?
-            * SOMPI_PER_KASPA as f64;
+        let sompi_amount =
+            kaspa_amount.to_string().parse::<f64>().map_err(|_| {
+                Error::custom(format!("'{kaspa_amount}' is not an amount. Amounts are plain numbers, like 10 or 2.5."))
+            })? * SOMPI_PER_KASPA as f64;
         if sompi_amount < 0.0 {
-            Err(Error::custom("Supplied Kaspa amount is not valid: '{kaspa_amount}'"))
+            Err(Error::custom("'{kaspa_amount}' is not an amount. Amounts are plain numbers, like 10 or 2.5."))
         } else {
             let sompi_amount = sompi_amount as u64;
             if sompi_amount == 0 {
@@ -27,13 +26,12 @@ pub fn try_parse_required_nonzero_kaspa_as_sompi_u64<S: ToString + Display>(kasp
 
 pub fn try_parse_required_kaspa_as_sompi_u64<S: ToString + Display>(kaspa_amount: Option<S>) -> Result<u64> {
     if let Some(kaspa_amount) = kaspa_amount {
-        let sompi_amount = kaspa_amount
-            .to_string()
-            .parse::<f64>()
-            .map_err(|_| Error::custom(format!("Supplied Kasapa amount is not valid: '{kaspa_amount}'")))?
-            * SOMPI_PER_KASPA as f64;
+        let sompi_amount =
+            kaspa_amount.to_string().parse::<f64>().map_err(|_| {
+                Error::custom(format!("'{kaspa_amount}' is not an amount. Amounts are plain numbers, like 10 or 2.5."))
+            })? * SOMPI_PER_KASPA as f64;
         if sompi_amount < 0.0 {
-            Err(Error::custom("Supplied Kaspa amount is not valid: '{kaspa_amount}'"))
+            Err(Error::custom("'{kaspa_amount}' is not an amount. Amounts are plain numbers, like 10 or 2.5."))
         } else {
             Ok(sompi_amount as u64)
         }
@@ -44,13 +42,12 @@ pub fn try_parse_required_kaspa_as_sompi_u64<S: ToString + Display>(kaspa_amount
 
 pub fn try_parse_optional_kaspa_as_sompi_i64<S: ToString + Display>(kaspa_amount: Option<S>) -> Result<Option<i64>> {
     if let Some(kaspa_amount) = kaspa_amount {
-        let sompi_amount = kaspa_amount
-            .to_string()
-            .parse::<f64>()
-            .map_err(|_e| Error::custom(format!("Supplied Kasapa amount is not valid: '{kaspa_amount}'")))?
-            * SOMPI_PER_KASPA as f64;
+        let sompi_amount =
+            kaspa_amount.to_string().parse::<f64>().map_err(|_e| {
+                Error::custom(format!("'{kaspa_amount}' is not an amount. Amounts are plain numbers, like 10 or 2.5."))
+            })? * SOMPI_PER_KASPA as f64;
         if sompi_amount < 0.0 {
-            Err(Error::custom("Supplied Kaspa amount is not valid: '{kaspa_amount}'"))
+            Err(Error::custom("'{kaspa_amount}' is not an amount. Amounts are plain numbers, like 10 or 2.5."))
         } else {
             Ok(Some(sompi_amount as i64))
         }

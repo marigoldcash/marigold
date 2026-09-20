@@ -20,7 +20,7 @@ impl Factory for Ctor {
     }
 
     fn description(&self) -> String {
-        "Kaspa Legacy Account (KDX, kaspanet.io Web Wallet)".to_string()
+        "Legacy account (imported from a Kaspa KDX or web wallet)".to_string()
     }
 
     async fn try_load(
