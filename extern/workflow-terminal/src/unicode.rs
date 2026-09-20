@@ -1,4 +1,4 @@
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct UnicodeString(pub Vec<char>);
 
 impl std::fmt::Display for UnicodeString {

@@ -876,6 +876,17 @@ impl Terminal {
                     if !buffer.is_empty() {
                         let cmd = buffer.clone();
 
+                        // One copy of each command, at its most recent position
+                        // (Marigold fix, founder 2026-09-19): twenty 'balance's
+                        // in a row made the up arrow useless. The trailing empty
+                        // slot, if any, is the line being edited and stays.
+                        let trailing_empty = length > 0 && data.history[length - 1].is_empty();
+                        let keep = if trailing_empty { length - 1 } else { length };
+                        let tail: Vec<_> = data.history.split_off(keep);
+                        data.history.retain(|h| *h != buffer);
+                        data.history.extend(tail);
+                        let length = data.history.len();
+
                         if length == 0 || !data.history[length - 1].is_empty() {
                             data.history_index = length;
                         } else {
