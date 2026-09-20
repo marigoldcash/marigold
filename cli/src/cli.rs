@@ -550,6 +550,22 @@ impl KaspaCli {
         self.remote_miner.load(Ordering::SeqCst)
     }
 
+    /// Why to mine, said once where it matters: before the wallet is armed to
+    /// tidy on its own, and after a sweep that paid the network rate. Only
+    /// when this wallet is on a node of its own that is not mining; anywhere
+    /// else the advice does not apply. (Founder, 2026-09-19.)
+    pub async fn mining_invitation(&self) -> Option<String> {
+        if !matches!(self.own_lane().await, OwnLane::NoMiner) {
+            return None;
+        }
+        Some(
+            "Tidying is priced by size, not value: a hundred coins cost about a tenth of a coin at the network rate. \
+             Mining on this node, even a little, makes it nearly free — only your own blocks carry your own tidying, \
+             at a hundredth of the network rate. 'mine start 10' uses a tenth of this machine."
+                .to_string(),
+        )
+    }
+
     /// Connected to a node on this machine's own loopback: a marigoldd the
     /// user runs beside the wallet. Its operator is the user, so mining
     /// through it gives nothing away.

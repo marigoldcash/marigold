@@ -137,6 +137,20 @@ impl Sweep {
 
         tprintln!(ctx, "  submitted {} transaction(s) in total", submitted.load(Ordering::Relaxed));
         tprintln!(ctx, "Sweep: {summary}");
+        if matches!(lane, crate::cli::OwnLane::NoMiner) && summary.aggregate_fees() > 0 {
+            // Paid at the network rate. Say what the own lane would have cost:
+            // the fee is linear in mass, so the ratio of the rates is the ratio
+            // of the fees.
+            let own = summary.aggregate_fees() / (kaspa_wallet_core::account::notepool::POOL_FEE_RATE as u64).max(1);
+            tprintln!(
+                ctx,
+                "{}",
+                ui::dim(format!(
+                    "That was the network rate. With this node mining, the same sweep would have cost about {} {ticker}.",
+                    kaspa_wallet_core::utils::sompi_to_kaspa_string(own.max(1))
+                ))
+            );
+        }
         // The consolidated coins are on the ledger line as pending until they
         // confirm; that is the whole of what happens in the background.
         tprintln!(ctx, "{}", ui::dim("The new coins show as pending on the ledger until they confirm — 'balance' shows it."));

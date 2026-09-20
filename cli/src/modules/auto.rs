@@ -106,6 +106,11 @@ impl Auto {
                             tprintln!(ctx, "{err} — nothing was turned on.");
                             return Ok(());
                         }
+                        if let Some(why) = ctx.mining_invitation().await {
+                            tprintln!(ctx, "");
+                            tpara!(ctx, "{}", crate::ui::dim(why));
+                            tprintln!(ctx, "");
+                        }
                         ctx.arm_auto_sweep(wallet_secret, payment_secret, threshold);
                         tprintln!(ctx, "auto-sweep on: coins are consolidated once this account holds more than {threshold}.");
                     }
@@ -130,6 +135,11 @@ impl Auto {
                             tprintln!(ctx, "{err} — nothing was turned on.");
                             return Ok(());
                         }
+                        if let Some(why) = ctx.mining_invitation().await {
+                            tprintln!(ctx, "");
+                            tpara!(ctx, "{}", crate::ui::dim(why));
+                            tprintln!(ctx, "");
+                        }
                         ctx.arm_auto_sweep(wallet_secret, payment_secret, threshold);
                         tprintln!(ctx, "auto-sweep on: coins are consolidated once this account holds more than {threshold}.");
                     }
@@ -147,6 +157,11 @@ impl Auto {
                 if let Err(err) = ctx.verify_wallet_secret(&wallet_secret, payment_secret.as_ref()).await {
                     tprintln!(ctx, "{err} — nothing was turned on.");
                     return Ok(());
+                }
+                if let Some(why) = ctx.mining_invitation().await {
+                    tprintln!(ctx, "");
+                    tpara!(ctx, "{}", crate::ui::dim(why));
+                    tprintln!(ctx, "");
                 }
                 ctx.arm_auto_mint(wallet_secret, payment_secret, threshold);
                 tprintln!(
@@ -172,6 +187,11 @@ impl Auto {
                     if let Err(err) = ctx.verify_wallet_secret(&wallet_secret, payment_secret.as_ref()).await {
                         tprintln!(ctx, "{err} — nothing was turned on.");
                         return Ok(());
+                    }
+                    if let Some(why) = ctx.mining_invitation().await {
+                        tprintln!(ctx, "");
+                        tpara!(ctx, "{}", crate::ui::dim(why));
+                        tprintln!(ctx, "");
                     }
                     ctx.arm_auto_mint(wallet_secret, payment_secret, threshold);
                 }
