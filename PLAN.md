@@ -266,7 +266,7 @@ Below follows a tick-offable plan for a **non-shielded, very simplistic fixed-de
 
 - [ ] **P8.6 — Upstream merge drill.** Merge current `upstream/master` into the fork branch; measure the conflict surface; document the resolution playbook in NOTES.md (this validates Ground rule 1 in practice — if conflicts are ugly, fix the fork's divergence style *now*). ✅ *Verify:* merge completed, full test suite green afterwards; playbook written.
 
-- [ ] **P8.7 — Public testnet soak.** 🧑‍⚖️ Stand up the public testnet: a few seed nodes, a faucet, invite outside testers, run for **months** (Ground rule 4). Keep an incident log; every consensus-relevant incident gets a regression test. ✅ *Verify:* testnet has run ≥ 3 months with outside participants; incident log exists; zero unexplained pool-root divergences.
+- [ ] **P8.7 — Public testnet soak.** 🧑‍⚖️ Stand up the public testnet: a few seed nodes, a faucet, invite outside testers, run for **months** (Ground rule 4). Keep an incident log; every consensus-relevant incident gets a regression test. **Running since 2026-09-07 (first outside testers); the incident log is [docs/marigold/INCIDENTS.md](docs/marigold/INCIDENTS.md), backfilled from that date on 2026-09-20.** ✅ *Verify:* testnet has run ≥ 3 months with outside participants; incident log exists; zero unexplained pool-root divergences.
 
 - [ ] **P8.8 — External code audit gate.** 🧑‍⚖️ Independent security review of the pool consensus code, finality-anchor code, and wallet crypto (complements the P5.9 spec review). Fix criticals, re-review the fixes. Do not schedule mainnet before this closes. ✅ *Verify:* audit report in `docs/marigold/reviews/`; all criticals/highs closed with linked commits.
 
