@@ -1999,6 +1999,33 @@ impl KaspaCli {
         // Offered notes (PLAN P8.0g): once a lock has lapsed, what the
         // receiver never took comes back under its refund key; what they took
         // in time is marked paid. Needs the secret the automation holds.
+        // Keys another wallet has seen do not stay as they are: an import
+        // whose own rotation failed, keys brought in by hand, a restored
+        // backup. Rotated here, a batch a tick, so no key stays shared for
+        // long and the balance means what it says (threat pass, 2026-09-20).
+        let secret_for_hot = self.auto_secret.lock().unwrap().as_mut().map(|g| g.reveal());
+        if let Some(secret) = secret_for_hot {
+            match kaspa_wallet_core::account::notepool::rotate_hot_notes(&self.wallet, secret, 50).await {
+                Ok(results) if !results.is_empty() => {
+                    let notes: usize = results.iter().map(|r| r.own_notes.len()).sum();
+                    let fee: u64 = results.iter().map(|r| r.fee_petals).sum();
+                    tprintln!(
+                        self,
+                        "{}",
+                        crate::ui::dim(format!(
+                            "{notes} note(s) on keys another wallet had seen were rotated to fresh keys of yours (fee {} {ticker}).",
+                            kaspa_wallet_core::utils::sompi_to_kaspa_string(fee)
+                        ))
+                    );
+                }
+                Ok(_) => {}
+                Err(err) => {
+                    if loud {
+                        tprintln!(self, "{}", crate::ui::dim(format!("(shared keys not rotated this time: {err})")));
+                    }
+                }
+            }
+        }
         let secret_for_offers = self.auto_secret.lock().unwrap().as_mut().map(|g| g.reveal());
         if let Some(secret) = secret_for_offers {
             match kaspa_wallet_core::account::notepool::reclaim_lapsed(&self.wallet, secret).await {

@@ -7,7 +7,25 @@ use std::str::FromStr;
 #[help("Wallet management operations")]
 pub struct Wallet;
 
+/// Written into a restored wallet's vault by 'wallet restore'; removed once
+/// the first open with a node has rotated every note.
+const ROTATE_ON_OPEN: &str = "rotate-on-open";
+
 impl Wallet {
+    /// The restore marker of the open wallet, if it has one.
+    fn rotate_on_open_marker(ctx: &Arc<KaspaCli>) -> Option<std::path::PathBuf> {
+        let descriptor = ctx.wallet().store().descriptor()?;
+        let folder: String = ctx
+            .wallet()
+            .settings()
+            .get(WalletSettings::Folder)
+            .unwrap_or_else(|| kaspa_wallet_core::storage::local::default_storage_folder().to_string());
+        let folder = workflow_store::fs::resolve_path(&folder).ok()?;
+        let marker =
+            folder.join(kaspa_wallet_core::storage::local::wallet_dir_name(&descriptor.filename)).join("notes").join(ROTATE_ON_OPEN);
+        marker.exists().then_some(marker)
+    }
+
     async fn main(self: Arc<Self>, ctx: &Arc<dyn Context>, mut argv: Vec<String>, cmd: &str) -> Result<()> {
         let ctx = ctx.clone().downcast_arc::<KaspaCli>()?;
         let ticker = ctx.ticker();
@@ -246,6 +264,41 @@ impl Wallet {
                 if auto_mint_on && !needs_passphrase {
                     let threshold = meta.as_ref().map(|m| m.auto_mint_threshold_petals).filter(|t| *t > 0).unwrap_or(100_000_000);
                     ctx.arm_auto_mint(wallet_secret.clone(), None, threshold);
+                }
+
+                // A wallet restored from a backup rotates every note to fresh
+                // keys on its first open with a node; the marker is removed
+                // once that has been done, so it asks again if it could not.
+                if let Some(marker) = Self::rotate_on_open_marker(&ctx) {
+                    if ctx.wallet().is_connected() && ctx.wallet().utxo_processor().is_synced() {
+                        tprintln!(ctx, "");
+                        tpara!(
+                            ctx,
+                            "This wallet was restored from a backup. Every note is now rotated to fresh keys, so no other copy of that backup can spend them. This costs the network fee per group of notes."
+                        );
+                        let store = ctx.wallet().store().as_note_key_store()?;
+                        let mut serials = Vec::new();
+                        let mut stream = store.iter().await?;
+                        while let Some(info) = stream.try_next().await? {
+                            if info.status == kaspa_wallet_core::storage::NoteStatus::Active {
+                                serials.push(info.sn);
+                            }
+                        }
+                        if serials.is_empty() {
+                            tprintln!(ctx, "No notes to rotate.");
+                        } else {
+                            crate::modules::note::Note.rotate_serials(&ctx, &ctx.wallet(), &wallet_secret, serials).await?;
+                        }
+                        std::fs::remove_file(&marker).ok();
+                        tprintln!(ctx, "");
+                    } else {
+                        tprintln!(ctx, "");
+                        tprintln!(
+                            ctx,
+                            "{}",
+                            style("This wallet was restored from a backup. Its notes are rotated to fresh keys the first time it opens with a synced node; until then any other copy of the backup can spend them.").yellow()
+                        );
+                    }
                 }
 
                 // Show what is held, do the ledger housekeeping out loud (the
@@ -962,9 +1015,22 @@ impl Wallet {
         let folder = workflow_store::fs::resolve_path(&folder)?;
 
         let written = archive::extract(&entries, &folder)?;
+        // A backup is a copy of the keys, and any other copy of it can spend
+        // the same notes. The first open of the restored wallet rotates every
+        // note to fresh keys (POOL-SPEC.md P5.6), which needs the wallet open
+        // and a node: this marker asks for it (threat pass, 2026-09-20).
+        let marker = folder.join(kaspa_wallet_core::storage::local::wallet_dir_name(&name)).join("notes").join(ROTATE_ON_OPEN);
+        if let Some(dir) = marker.parent() {
+            std::fs::create_dir_all(dir).ok();
+        }
+        std::fs::write(&marker, b"restored from a backup; rotate every note on the first open\n").ok();
 
         tprintln!(ctx, "");
         tprintln!(ctx, "Restored {written} files into {}", style(folder.display().to_string()).bold());
+        tprintln!(
+            ctx,
+            "When it is next opened with a node, every note is rotated to fresh keys, so no other copy of the backup can spend them."
+        );
         if name == original {
             tprintln!(ctx, "");
             tprintln!(ctx, "Open it with 'open {name}' — it wants the wallet password it had when the backup was made.");

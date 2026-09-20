@@ -422,7 +422,7 @@ impl Note {
     /// Shared batched-rotation driver (same per-batch liveness re-check as the
     /// vault-restore flow — an earlier batch's fee stamp may already have
     /// rotated a later batch's note; that's the mechanism working, not an error).
-    async fn rotate_serials(
+    pub(crate) async fn rotate_serials(
         &self,
         ctx: &Arc<KaspaCli>,
         wallet: &Arc<kaspa_wallet_core::wallet::Wallet>,

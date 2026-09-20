@@ -1,6 +1,7 @@
 use crate::imports::*;
 use crate::ui;
 use kaspa_consensus_core::notepool::DENOMINATION_PETALS;
+use kaspa_wallet_core::storage::NoteProvenance;
 use kaspa_wallet_core::storage::NoteStatus;
 use kaspa_wallet_core::utils::sompi_to_kaspa_string;
 
@@ -27,11 +28,17 @@ impl Balance {
         let mut mirrored_count = 0usize;
         let mut offered = 0u64;
         let mut offered_count = 0usize;
+        let mut hot = 0u64;
+        let mut hot_count = 0usize;
         while let Some(info) = stream.try_next().await? {
             match info.status {
                 NoteStatus::Active => {
                     counts[info.d as usize] += 1;
                     total += DENOMINATION_PETALS[info.d as usize];
+                    if info.provenance == NoteProvenance::Hot {
+                        hot += DENOMINATION_PETALS[info.d as usize];
+                        hot_count += 1;
+                    }
                 }
                 // Still yours — this wallet holds the key — but carried on the
                 // phone and untouchable here. Listing it separately rather than
@@ -56,6 +63,13 @@ impl Balance {
         // saying some of it does not exist leaves a wrong number on screen
         // and a corrected one in the prompt, which is what it did.
         let mut chain_note: Vec<String> = Vec::new();
+        if hot_count > 0 {
+            chain_note.push(ui::warn(format!(
+                "{hot_count} note(s) worth {} {ticker} sit on keys another wallet has seen; until they are rotated, that wallet can spend them too.",
+                sompi_to_kaspa_string(hot)
+            )));
+            chain_note.push(ui::dim("Housekeeping rotates them while the wallet is connected; 'note rotate all' does it now."));
+        }
         if total > 0 || mirrored > 0 {
             if ctx.wallet().is_connected() {
                 match kaspa_wallet_core::account::notepool::reconcile_held_notes(&ctx.wallet()).await {

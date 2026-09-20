@@ -2733,6 +2733,49 @@ pub async fn revive_unspent_notes(wallet: &Arc<Wallet>) -> Result<Vec<Arc<NoteKe
     }
     Ok(revived)
 }
+/// Rotate notes held on keys another wallet has seen (POOL-SPEC.md P5.6's
+/// hot-key rule) that are still active: an import whose own rotation failed
+/// (offline, no fee note), keys brought in with 'import', a wallet restored
+/// from a backup. Run by housekeeping with the session's secret, a batch at
+/// a time; notes written in the last couple of minutes are left alone, since
+/// their own rotation is in flight. Returns what was rotated.
+pub async fn rotate_hot_notes(wallet: &Arc<Wallet>, wallet_secret: Secret, max_notes: usize) -> Result<Vec<TransferResult>> {
+    if !wallet.utxo_processor().is_synced() {
+        return Ok(Vec::new());
+    }
+    let note_key_store = wallet.store().as_note_key_store()?;
+    let in_flight: HashSet<Hash> = note_key_store.recently_written(IN_FLIGHT_SECS).await?.into_iter().collect();
+    let mut hot: Vec<Hash> = Vec::new();
+    let mut stream = note_key_store.iter().await?;
+    while let Some(info) = stream.try_next().await? {
+        if info.status == NoteStatus::Active && info.provenance == NoteProvenance::Hot && !in_flight.contains(&info.sn) {
+            hot.push(info.sn);
+            if hot.len() >= max_notes {
+                break;
+            }
+        }
+    }
+    if hot.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut results = Vec::new();
+    for batch in plan_restore_rotation(hot) {
+        let mut still_active = Vec::with_capacity(batch.len());
+        for sn in &batch {
+            if let Some(info) = note_key_store.load_info(sn).await?
+                && info.status == NoteStatus::Active
+            {
+                still_active.push(*sn);
+            }
+        }
+        if still_active.is_empty() {
+            continue;
+        }
+        results.push(rotate_notes(wallet, wallet_secret.clone(), still_active).await?);
+    }
+    Ok(results)
+}
+
 
 /// Strikes before a note stops being counted as money.
 ///
