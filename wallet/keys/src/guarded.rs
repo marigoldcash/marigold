@@ -73,10 +73,10 @@ impl Guarded {
     fn rotate(&mut self) {
         let mut fresh = vec![0u8; self.mask.len()];
         rand::thread_rng().fill_bytes(&mut fresh);
-        for i in 0..self.mask.len() {
-            let byte = self.mask[i] ^ self.masked[i];
-            self.mask[i] = fresh[i];
-            self.masked[i] = byte ^ fresh[i];
+        for ((m, x), f) in self.mask.iter_mut().zip(self.masked.iter_mut()).zip(&fresh) {
+            let byte = *m ^ *x;
+            *m = *f;
+            *x = byte ^ *f;
         }
         fresh.zeroize();
     }
