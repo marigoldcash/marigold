@@ -12,6 +12,7 @@ use kaspa_wallet_core::rpc::DynRpcApi;
 #[cfg(feature = "embedded-node")]
 use kaspa_wallet_core::rpc::Rpc;
 use kaspa_wallet_core::storage::{IdT, PrvKeyDataInfo};
+use kaspa_wallet_keys::guarded::Guarded;
 use kaspa_wrpc_client::{KaspaRpcClient, Resolver};
 use std::sync::atomic::{AtomicU64, AtomicUsize};
 use workflow_core::channel::*;
@@ -71,7 +72,8 @@ pub struct KaspaCli {
     /// Auto-mint state. The secret lives in memory only while a wallet is
     /// open and auto-mint is armed (a hot-wallet posture, entered knowingly);
     /// it is never written anywhere and is dropped on close/disarm.
-    auto_secret: Mutex<Option<Secret>>,
+    /// Held for the session, as two random-looking halves; see `Guarded`.
+    auto_secret: Mutex<Option<Guarded>>,
     /// The in-process node, once started. Held here so `node stop` and wallet
     /// shutdown can reach it; `None` means we are talking to someone else's.
     #[cfg(feature = "embedded-node")]
@@ -105,7 +107,7 @@ pub struct KaspaCli {
     /// True while the UTXO set is being read in, which on a wallet that has
     /// been mined into is minutes of work with nothing to show for it.
     loading: Arc<AtomicBool>,
-    auto_payment_secret: Mutex<Option<Secret>>,
+    auto_payment_secret: Mutex<Option<Guarded>>,
     auto_threshold_petals: Arc<AtomicU64>,
     /// 0 disables auto-sweep; otherwise the UTXO count that triggers one.
     auto_sweep_utxos: Arc<AtomicU64>,
@@ -1336,8 +1338,8 @@ impl KaspaCli {
     /// Arm auto-mint for this session with the secret already in hand (the
     /// one typed at `open`) — no extra prompt, and nothing persisted.
     pub fn arm_auto_mint(&self, secret: Secret, payment_secret: Option<Secret>, threshold_petals: u64) {
-        *self.auto_secret.lock().unwrap() = Some(secret);
-        *self.auto_payment_secret.lock().unwrap() = payment_secret;
+        *self.auto_secret.lock().unwrap() = Some(Guarded::from_secret(secret));
+        *self.auto_payment_secret.lock().unwrap() = payment_secret.map(Guarded::from_secret);
         self.auto_threshold_petals.store(threshold_petals, Ordering::SeqCst);
     }
 
@@ -1374,8 +1376,8 @@ impl KaspaCli {
     pub fn arm_auto_sweep(&self, secret: Secret, payment_secret: Option<Secret>, utxo_threshold: u64) {
         let mut guard = self.auto_secret.lock().unwrap();
         if guard.is_none() {
-            *guard = Some(secret);
-            *self.auto_payment_secret.lock().unwrap() = payment_secret;
+            *guard = Some(Guarded::from_secret(secret));
+            *self.auto_payment_secret.lock().unwrap() = payment_secret.map(Guarded::from_secret);
         }
         drop(guard);
         self.auto_sweep_utxos.store(utxo_threshold, Ordering::SeqCst);
@@ -1691,7 +1693,7 @@ impl KaspaCli {
         // Offered notes (PLAN P8.0g): once a lock has lapsed, what the
         // receiver never took comes back under its refund key; what they took
         // in time is marked paid. Needs the secret the automation holds.
-        let secret_for_offers = self.auto_secret.lock().unwrap().clone();
+        let secret_for_offers = self.auto_secret.lock().unwrap().as_mut().map(|g| g.reveal());
         if let Some(secret) = secret_for_offers {
             match kaspa_wallet_core::account::notepool::reclaim_lapsed(&self.wallet, secret).await {
                 Ok(report) => {
@@ -1773,11 +1775,11 @@ impl KaspaCli {
         // None on a wallet that keeps notes only: steps 0–3 are the ledger's
         // and are skipped; the notes are still tidied.
         let account = self.wait_for_account().await;
-        let Some(secret) = self.auto_secret.lock().unwrap().clone() else {
+        let Some(secret) = self.auto_secret.lock().unwrap().as_mut().map(|g| g.reveal()) else {
             self.auto_busy.store(false, Ordering::SeqCst);
             return;
         };
-        let payment_secret = self.auto_payment_secret.lock().unwrap().clone();
+        let payment_secret = self.auto_payment_secret.lock().unwrap().as_mut().map(|g| g.reveal());
 
         if let Some(account) = account.as_ref() {
             // --- 0. is this more than an automatic process should start on its own? ---

@@ -9,6 +9,10 @@ cfg_if::cfg_if! {
             // Two flags that answer and leave, for scripts and for the first
             // run on a new platform: no terminal, no wallet.
             let args: Vec<String> = std::env::args().skip(1).collect();
+            // Before anything holds a key: no core dumps, and no other process
+            // of this user reading this one's memory (MARIGOLD_DEBUGGABLE=1
+            // to allow a debugger).
+            kaspa_wallet_keys::guarded::harden_process();
             if args.iter().any(|a| a == "--platform") {
                 print!("{}", kaspa_cli_lib::platform::report());
                 return;

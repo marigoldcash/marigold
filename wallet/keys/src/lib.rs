@@ -8,6 +8,7 @@
 pub mod derivation;
 pub mod derivation_path;
 pub mod error;
+pub mod guarded;
 mod imports;
 pub mod keypair;
 pub mod prelude;

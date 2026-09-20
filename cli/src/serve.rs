@@ -50,7 +50,8 @@ impl Shutdown for Stop {
 
 struct Options {
     wallet: String,
-    password: Secret,
+    /// Read once from the file or the environment, then held as two halves.
+    password: kaspa_wallet_keys::guarded::Guarded,
     node: Option<String>,
     mine: Option<u32>,
     network: Option<NetworkId>,
@@ -108,7 +109,7 @@ fn parse(args: &[String]) -> std::result::Result<Options, String> {
             "the wallet's password is needed: --password-file <path>, or MARIGOLD_WALLET_PASSWORD in the environment".to_string()
         );
     }
-    Ok(Options { wallet, password: Secret::from(password), node, mine, network })
+    Ok(Options { wallet, password: kaspa_wallet_keys::guarded::Guarded::from_secret(Secret::from(password)), node, mine, network })
 }
 
 /// What was paid, for the bot to say.
@@ -507,7 +508,7 @@ impl WalletService {
 }
 
 pub async fn serve(args: Vec<String>) -> Result<()> {
-    let options = match parse(&args) {
+    let mut options = match parse(&args) {
         Ok(o) => o,
         Err(message) => {
             eprintln!("{message}");
@@ -603,7 +604,7 @@ pub async fn serve(args: Vec<String>) -> Result<()> {
         }
         Node::Wrpc(_) => {}
     }
-    let descriptors = wallet.clone().wallet_open(options.password.clone(), Some(options.wallet.clone()), true, false).await?;
+    let descriptors = wallet.clone().wallet_open(options.password.reveal(), Some(options.wallet.clone()), true, false).await?;
     if let Some(descriptors) = descriptors {
         let ids: Vec<_> = descriptors.iter().map(|d| d.account_id).collect();
         if !ids.is_empty() {
@@ -626,7 +627,7 @@ pub async fn serve(args: Vec<String>) -> Result<()> {
 
     let service = WalletService::new(
         wallet.clone(),
-        options.password.clone(),
+        options.password.reveal(),
         network_id,
         &folder,
         &options.wallet,
@@ -661,7 +662,7 @@ pub async fn serve(args: Vec<String>) -> Result<()> {
             last_report = std::time::Instant::now();
             log::info!("{}", service.status_text().await.replace('\n', "; "));
             // Offers whose lock lapsed come back (P8.0g).
-            match notepool::reclaim_lapsed(&wallet, options.password.clone()).await {
+            match notepool::reclaim_lapsed(&wallet, options.password.reveal()).await {
                 Ok(report) if !report.taken_back.is_empty() || !report.taken_by_receiver.is_empty() => {
                     log::info!(
                         "offers: {} note(s) taken back after their lock lapsed, {} taken by the receiver in time",
