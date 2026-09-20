@@ -145,7 +145,14 @@ impl Node {
             // 2026-09-19).
             let url = ctx.wallet().try_wrpc_client().and_then(|c| c.url()).unwrap_or_default();
             tprintln!(ctx, "Using: {}", style(format!("a node running on this machine ({url}).")).bold());
-            tprintln!(ctx, "Its copy of the network is yours; nobody else sees your notes. 'mine start' mines through it.");
+            if ctx.wallet().utxo_processor().is_synced() {
+                tprintln!(ctx, "Its copy of the network is yours; nobody else sees your notes. 'mine start' mines through it.");
+            } else {
+                tpara!(
+                    ctx,
+                    "Its copy of the network is yours, and it is still catching up: paying, receiving and minting wait until it has, and there is no work for a miner yet. 'connect public' uses a public computer meanwhile."
+                );
+            }
             tprintln!(ctx, "");
             return;
         }
