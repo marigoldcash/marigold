@@ -149,12 +149,28 @@ impl Note {
         let paid = request.amount_petals.or(amount_override).unwrap_or(0);
         let result = notepool::pay_payment_request(&ctx.wallet(), wallet_secret, request, amount_override).await?;
         ctx.record("paid", paid, result.fee_petals, "request", result.transaction_id.to_string());
+        ctx.refresh_prompt_total().await;
         tprintln!(
             ctx,
             "paid {} note(s) (fee {} {ticker}); tx: {}",
             result.external_serials.len(),
             sompi_to_kaspa_string(result.fee_petals),
             result.transaction_id
+        );
+        // The receipt (PLAN P8.0i): a pointer to this payment for whoever asked
+        // for it, so a shop finds it in one lookup instead of polling. Nothing
+        // in it is secret and nothing in it is trusted; they check the chain.
+        let receipt = notepool::PaymentReceipt { transaction_id: result.transaction_id, request_pk: request.pk, amount_petals: paid };
+        let text = receipt.to_text();
+        tprintln!(ctx, "");
+        if let Some(qr) = qr_string(&text) {
+            tprintln!(ctx, "{}", qr);
+        }
+        tprintln!(ctx, "{text}");
+        tprintln!(ctx, "");
+        tpara!(
+            ctx,
+            "Your receipt. Give it to whoever asked for the payment — pasted or scanned, it points them straight at it. It holds nothing secret."
         );
         tprintln!(ctx, "");
         Ok(())

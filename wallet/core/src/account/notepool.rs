@@ -493,6 +493,57 @@ pub struct PaymentRequest {
 pub const PAYMENT_REQUEST_PREFIX: &str = "marigoldreq:";
 /// Text-encoding prefix for bearer-note handovers.
 pub const BEARER_NOTE_PREFIX: &str = "marigoldnote:";
+/// Text-encoding prefix for payment receipts.
+pub const PAYMENT_RECEIPT_PREFIX: &str = "marigoldreceipt:";
+
+/// What a payer hands back after paying a request (PLAN P8.0i): a pointer to the
+/// payment, not the proof of it. The proof is the transaction on the chain; the
+/// receipt tells the merchant exactly where to look, once, instead of polling.
+/// Nothing in it is trusted: a merchant fetches the transaction, checks that the
+/// notes it produced sit under keys derived from the request's key, and checks the
+/// amount.
+///
+/// Wire form: transaction id (32) ‖ request key (32) ‖ amount in petals (u64 LE).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PaymentReceipt {
+    pub transaction_id: Hash,
+    pub request_pk: [u8; 32],
+    pub amount_petals: u64,
+}
+
+impl PaymentReceipt {
+    pub fn encode(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(72);
+        bytes.extend_from_slice(&self.transaction_id.as_bytes());
+        bytes.extend_from_slice(&self.request_pk);
+        bytes.extend_from_slice(&self.amount_petals.to_le_bytes());
+        bytes
+    }
+
+    pub fn decode(bytes: &[u8]) -> Result<Self> {
+        if bytes.len() != 72 {
+            return Err(Error::Custom(format!("a payment receipt is 72 bytes, got {}", bytes.len())));
+        }
+        Ok(Self {
+            transaction_id: Hash::from_slice(&bytes[..32]),
+            request_pk: bytes[32..64].try_into().unwrap(),
+            amount_petals: u64::from_le_bytes(bytes[64..].try_into().unwrap()),
+        })
+    }
+
+    pub fn to_text(&self) -> String {
+        format!("{PAYMENT_RECEIPT_PREFIX}{}", self.encode().to_hex())
+    }
+
+    pub fn from_text(text: &str) -> Result<Self> {
+        let hex = text
+            .trim()
+            .strip_prefix(PAYMENT_RECEIPT_PREFIX)
+            .ok_or_else(|| Error::Custom(format!("a payment receipt starts with '{PAYMENT_RECEIPT_PREFIX}'")))?;
+        let bytes = Vec::<u8>::from_hex(hex).map_err(|e| Error::Custom(format!("invalid payment receipt hex: {e}")))?;
+        Self::decode(&bytes)
+    }
+}
 
 impl PaymentRequest {
     pub fn encode(&self) -> Vec<u8> {
@@ -1979,6 +2030,13 @@ mod tests {
 
         assert!(PaymentRequest::decode(&[0u8; 33]).is_err());
         assert!(PaymentRequest::from_text("marigoldnote:00").is_err());
+
+        let receipt = PaymentReceipt { transaction_id: Hash::from_bytes([7u8; 32]), request_pk: [9u8; 32], amount_petals: 1_234_567 };
+        let text = receipt.to_text();
+        assert!(text.starts_with(PAYMENT_RECEIPT_PREFIX));
+        assert_eq!(PaymentReceipt::from_text(&text).unwrap(), receipt);
+        assert!(PaymentReceipt::from_text("marigoldreceipt:00").is_err(), "a short receipt is refused");
+        assert!(PaymentReceipt::from_text(&with_amount.to_text()).is_err(), "a request is not a receipt");
     }
 
     #[test]
