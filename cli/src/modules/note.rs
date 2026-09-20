@@ -333,6 +333,7 @@ impl Note {
             ctx.attach_mint_notes(*id, &result.notes);
         }
         ctx.record("minted", amount_petals, 0, format!("{} notes, by hand", result.notes.len()), "");
+        ctx.refresh_prompt_total().await;
         tprintln!(ctx, "minted {} {ticker} into {} note(s):", sompi_to_kaspa_string(amount_petals), result.notes.len());
         for entry in &result.notes {
             tprintln!(ctx, "  {} - {}", entry.sn, sompi_to_kaspa_string(DENOMINATION_PETALS[entry.d as usize]));
