@@ -554,7 +554,16 @@ NOTE: This error usually indicates an RPC conversion error between the node and 
         request: GetNotesBySerialRequest,
     ) -> RpcResult<GetNotesBySerialResponse> {
         // A live point lookup against virtual's own pool state — no index dependency,
-        // unlike `get_utxos_by_addresses_call` above (PLAN P6.9).
+        // unlike `get_utxos_by_addresses_call` above (PLAN P6.9). Bounded: the
+        // lookup holds virtual's read lock for the whole list, and a public
+        // node answers strangers (threat pass, 2026-09-20).
+        const MAX_SERIALS_PER_CALL: usize = 1_000;
+        if request.serials.len() > MAX_SERIALS_PER_CALL {
+            return Err(RpcError::General(format!(
+                "at most {MAX_SERIALS_PER_CALL} serials per call ({} asked)",
+                request.serials.len()
+            )));
+        }
         let session = self.consensus_manager.consensus().unguarded_session();
         let notes = session.async_get_pool_notes(request.serials.clone()).await;
         let entries = request
@@ -602,9 +611,23 @@ NOTE: This error usually indicates an RPC conversion error between the node and 
         _connection: Option<&DynRpcConnection>,
         _request: GetPoolStatsRequest,
     ) -> RpcResult<GetPoolStatsResponse> {
+        // A full walk of the pool store under virtual's read lock, answered
+        // to anyone: served from a short cache so a stranger asking in a loop
+        // costs one walk every few seconds, not one per ask.
+        static CACHE: std::sync::OnceLock<std::sync::Mutex<Option<(std::time::Instant, GetPoolStatsResponse)>>> =
+            std::sync::OnceLock::new();
+        const FRESH_FOR: std::time::Duration = std::time::Duration::from_secs(5);
+        let cache = CACHE.get_or_init(|| std::sync::Mutex::new(None));
+        if let Some((at, response)) = cache.lock().unwrap().as_ref()
+            && at.elapsed() < FRESH_FOR
+        {
+            return Ok(response.clone());
+        }
         let session = self.consensus_manager.consensus().unguarded_session();
         let stats = session.async_get_pool_stats().await;
-        Ok(GetPoolStatsResponse::new(stats.counts))
+        let response = GetPoolStatsResponse::new(stats.counts);
+        *cache.lock().unwrap() = Some((std::time::Instant::now(), response.clone()));
+        Ok(response)
     }
 
     async fn get_finality_anchor_status_call(
