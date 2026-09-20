@@ -35,7 +35,7 @@ use kaspa_wallet_core::rpc::DynRpcApi;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread::JoinHandle;
-use workflow_log::log_warn;
+use workflow_log::{log_info, log_warn};
 
 /// How often to ask the node for fresh work.
 pub const TEMPLATE_REFRESH_MS: u64 = 400;
@@ -307,6 +307,9 @@ pub fn spawn_session(
     workflow_core::task::spawn(async move {
         let extra = format!("marigold-wallet/{}", env!("CARGO_PKG_VERSION")).into_bytes();
         let mut last_refresh = std::time::Instant::now() - std::time::Duration::from_secs(60);
+        // Said once per outage, not every refresh: a node that went away
+        // filled the screen with the same line twice a second.
+        let mut waiting_for_node = false;
         loop {
             if !miner.is_running() || shutdown.load(Ordering::SeqCst) {
                 break;
@@ -315,6 +318,9 @@ pub fn spawn_session(
                 last_refresh = std::time::Instant::now();
                 match rpc.get_block_template(address.clone(), extra.clone()).await {
                     Ok(response) => {
+                        if std::mem::take(&mut waiting_for_node) {
+                            log_info!("mine: the node is back, mining goes on");
+                        }
                         // Building on a chain the node has not finished
                         // reading produces blocks nobody will accept.
                         if response.is_synced {
@@ -324,10 +330,22 @@ pub fn spawn_session(
                             }
                         }
                     }
-                    Err(err) => log_warn!("mine: could not get work ({err})"),
+                    Err(err) => {
+                        if !waiting_for_node {
+                            waiting_for_node = true;
+                            log_warn!("mine: could not get work ({err}) — waiting for the node to come back");
+                        }
+                    }
                 }
             }
-            // Drain whatever the threads found since the last pass.
+            // Drain whatever the threads found since the last pass. With the
+            // node away there is nowhere to send a solution, and the template
+            // it solves is from before the outage: let them go quietly.
+            if waiting_for_node {
+                while solutions.try_recv().is_ok() {}
+                workflow_core::task::sleep(std::time::Duration::from_millis(100)).await;
+                continue;
+            }
             while let Ok(solution) = solutions.try_recv() {
                 let Some(rpc_block) = miner.block_for(&solution) else { continue };
                 match rpc.submit_block(rpc_block, false).await {
