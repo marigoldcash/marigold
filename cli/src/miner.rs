@@ -333,7 +333,11 @@ pub fn spawn_session(
                     Err(err) => {
                         if !waiting_for_node {
                             waiting_for_node = true;
-                            log_warn!("mine: could not get work ({err}) — waiting for the node to come back");
+                            if err.to_string().contains("ibd") {
+                                log_warn!("mine: no work yet — the sync is still catching up; mining begins on its own when it has");
+                            } else {
+                                log_warn!("mine: could not get work ({err}) — waiting for the node to come back");
+                            }
                         }
                     }
                 }
