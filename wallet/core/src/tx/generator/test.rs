@@ -901,3 +901,23 @@ fn test_generator_preserves_output_covenant_binding() -> Result<()> {
 
     Ok(())
 }
+
+/// The own-lane retry re-prices a pending transaction out of its change:
+/// same coins in, the change output smaller by the difference, a new id.
+#[test]
+fn a_pending_transaction_can_be_repriced_out_of_its_change() -> Result<()> {
+    let generator =
+        make_generator(test_network_id(), &[10.0, 10.0], &[], None, Fees::None, change_address, PaymentDestination::Change)?;
+    let pending = generator.generate_transaction()?.expect("two coins make one transaction");
+    let fee = pending.fees() + 12_345;
+    let bumped = pending.with_fee(fee)?.expect("ten coins of change bear a small fee");
+    assert_eq!(bumped.fees(), fee);
+    assert_ne!(bumped.id(), pending.id(), "a different fee is a different transaction");
+    assert_eq!(bumped.utxo_entries().len(), pending.utxo_entries().len(), "the same coins go in");
+    let before: u64 = pending.transaction().outputs.iter().map(|o| o.value).sum();
+    let after: u64 = bumped.transaction().outputs.iter().map(|o| o.value).sum();
+    assert_eq!(before - after, 12_345, "the difference comes out of the outputs");
+    assert!(pending.with_fee(pending.fees())?.is_none(), "nothing to add, nothing to do");
+    assert!(pending.with_fee(u64::MAX)?.is_none(), "a fee the change cannot bear is refused");
+    Ok(())
+}

@@ -54,6 +54,17 @@ pub enum OwnLane {
     NotOwnCopy,
 }
 
+/// A spend priced for a block of our own, and what to do if that block never
+/// comes: see [`KaspaCli::retry_stale_own_lane_spends`].
+pub struct OwnLaneSpend {
+    pending: kaspa_wallet_core::tx::PendingTransaction,
+    submitted: Instant,
+    every: Duration,
+    /// For a mint: the notes this transaction creates, whose serials are
+    /// derived from its id and so move with a replacement.
+    mint_notes: Vec<kaspa_wallet_core::storage::NoteKeyEntry>,
+}
+
 pub struct KaspaCli {
     term: Arc<Mutex<Option<Arc<Terminal>>>>,
     wallet: Arc<Wallet>,
@@ -108,6 +119,12 @@ pub struct KaspaCli {
     /// been mined into is minutes of work with nothing to show for it.
     loading: Arc<AtomicBool>,
     auto_payment_secret: Mutex<Option<Guarded>>,
+    /// Spends priced for our own block, watched until they land; see
+    /// `retry_stale_own_lane_spends`.
+    own_lane_spends: Mutex<Vec<OwnLaneSpend>>,
+    /// While an own-lane operation runs: the expected time to a block of ours,
+    /// so every transaction it submits is remembered with it.
+    own_lane_capture: Mutex<Option<Duration>>,
     auto_threshold_petals: Arc<AtomicU64>,
     /// 0 disables auto-sweep; otherwise the UTXO count that triggers one.
     auto_sweep_utxos: Arc<AtomicU64>,
@@ -302,6 +319,8 @@ impl KaspaCli {
             telegram_bot: Mutex::new(None),
             loading: Arc::new(AtomicBool::new(false)),
             auto_payment_secret: Mutex::new(None),
+            own_lane_spends: Mutex::new(Vec::new()),
+            own_lane_capture: Mutex::new(None),
             auto_threshold_petals: Arc::new(AtomicU64::new(0)),
             auto_sweep_utxos: Arc::new(AtomicU64::new(0)),
             auto_busy: Arc::new(AtomicBool::new(false)),
@@ -323,6 +342,14 @@ impl KaspaCli {
             }
         }
 
+        // Every transaction the wallet submits passes here; the ones sent on
+        // the own lane are kept and watched (see `retry_stale_own_lane_spends`).
+        let weak = Arc::downgrade(&kaspa_cli);
+        kaspa_cli.wallet().utxo_processor().set_submit_observer(Some(Arc::new(move |pending| {
+            if let Some(cli) = weak.upgrade() {
+                cli.note_submission(pending);
+            }
+        })));
         Ok(kaspa_cli)
     }
 
@@ -738,6 +765,130 @@ impl KaspaCli {
                 tprintln!(self, "");
                 tprintln!(self, "The background miner is not answering any more.");
                 tprintln!(self, "");
+            }
+        }
+    }
+
+    /// Remember a submitted transaction while an own-lane operation runs.
+    pub fn note_submission(&self, pending: &kaspa_wallet_core::tx::PendingTransaction) {
+        let Some(every) = *self.own_lane_capture.lock().unwrap() else { return };
+        self.own_lane_spends.lock().unwrap().push(OwnLaneSpend {
+            pending: pending.clone(),
+            submitted: Instant::now(),
+            every,
+            mint_notes: Vec::new(),
+        });
+    }
+
+    /// Start or stop remembering submissions: `Some(every)` while an operation
+    /// priced for our own block runs, `None` after.
+    pub fn own_lane_capture(&self, every: Option<Duration>) {
+        *self.own_lane_capture.lock().unwrap() = every;
+    }
+
+    /// A mint's notes take their serials from the transaction that creates
+    /// them; keep them with that transaction so a replacement can re-derive.
+    pub fn attach_mint_notes(
+        &self,
+        tx_id: kaspa_consensus_core::tx::TransactionId,
+        notes: &[kaspa_wallet_core::storage::NoteKeyEntry],
+    ) {
+        if let Some(spend) = self.own_lane_spends.lock().unwrap().iter_mut().find(|s| s.pending.id() == tx_id) {
+            spend.mint_notes = notes.to_vec();
+        }
+    }
+
+    /// The safety net under the own lane. A transaction priced for our own
+    /// block is held out of relay, so only our block can carry it: if that
+    /// block does not come — the estimate was wrong, the miner was stopped,
+    /// the network grew — it would sit in our mempool for a day and lapse.
+    /// After three expected block intervals (ten minutes at least) it is
+    /// re-sent at the network rate as a replacement spending the same coins,
+    /// which the mempool accepts because the fee is higher; the old one goes
+    /// with it. A mint's notes get their serials from the transaction id, so
+    /// they are re-derived from the replacement's.
+    pub async fn retry_stale_own_lane_spends(self: &Arc<Self>) {
+        let due: Vec<OwnLaneSpend> = {
+            let mut spends = self.own_lane_spends.lock().unwrap();
+            if spends.is_empty() {
+                return;
+            }
+            let now = Instant::now();
+            let (due, keep): (Vec<_>, Vec<_>) =
+                spends.drain(..).partition(|s| now.duration_since(s.submitted) > (s.every * 3).max(Duration::from_secs(600)));
+            *spends = keep;
+            due
+        };
+        if due.is_empty() {
+            return;
+        }
+        let Some(rpc) = self.try_rpc_api() else {
+            self.own_lane_spends.lock().unwrap().extend(due);
+            return;
+        };
+        let ticker = self.ticker();
+        for spend in due {
+            // Landed, or lapsed on its own: nothing to do.
+            if rpc.get_mempool_entry(spend.pending.id(), false, false).await.is_err() {
+                continue;
+            }
+            let waited = humanised_minutes(spend.submitted.elapsed().as_secs() / 60);
+            let fee = spend.pending.mass() * kaspa_wallet_core::account::notepool::POOL_FEE_RATE as u64;
+            let replacement = match spend.pending.with_fee(fee) {
+                Ok(Some(replacement)) => replacement,
+                Ok(None) => {
+                    tprintln!(self, "{}", style(format!("A tidying transaction has waited {waited} for a block of ours and cannot be re-priced; it lapses within a day and the coins come back to the ledger.")).yellow());
+                    continue;
+                }
+                Err(err) => {
+                    tprintln!(self, "{}", style(format!("A tidying transaction could not be re-priced: {err}")).yellow());
+                    continue;
+                }
+            };
+            if let Err(err) = replacement.try_sign() {
+                tprintln!(self, "{}", style(format!("A tidying transaction could not be re-signed: {err}")).yellow());
+                continue;
+            }
+            if let Err(err) = spend.pending.withdraw().await {
+                tprintln!(self, "{}", style(format!("A tidying transaction could not be withdrawn: {err}")).yellow());
+                continue;
+            }
+            match replacement.try_submit_replacement(&rpc).await {
+                Ok(id) => {
+                    if !spend.mint_notes.is_empty() {
+                        let secret = self.auto_secret.lock().unwrap().as_mut().map(|g| g.reveal());
+                        match (secret, self.wallet.store().as_note_key_store()) {
+                            (Some(secret), Ok(store)) => {
+                                for (index, entry) in spend.mint_notes.iter().enumerate() {
+                                    let sn = kaspa_consensus_core::notepool::hashing::serial_hash(&id, index as u32);
+                                    let fresh = kaspa_wallet_core::storage::NoteKeyEntry::new(sn, entry.sk, entry.d, entry.provenance);
+                                    if let Err(err) = store.store(&secret, fresh).await {
+                                        tprintln!(self, "{}", style(format!("could not record a re-derived note: {err}")).yellow());
+                                    }
+                                    let _ = store.remove(&secret, &entry.sn).await;
+                                }
+                            }
+                            _ => tprintln!(
+                                self,
+                                "{}",
+                                style("The replacement mint's notes could not be re-derived: no session secret.").yellow()
+                            ),
+                        }
+                    }
+                    self.record("re-sent", 0, fee, format!("waited {waited} for a block of ours"), id.to_string());
+                    tprintln!(
+                        self,
+                        "{}",
+                        style(format!(
+                            "A tidying transaction waited {waited} for a block of ours; re-sent at the network rate (fee {} {ticker}).",
+                            kaspa_wallet_core::utils::sompi_to_kaspa_string(fee)
+                        ))
+                        .yellow()
+                    );
+                }
+                Err(err) => {
+                    tprintln!(self, "{}", style(format!("A tidying transaction waited {waited} for a block of ours and the network would not take a replacement ({err}); it lapses within a day and the coins come back.")).yellow());
+                }
             }
         }
     }
@@ -1702,6 +1853,7 @@ impl KaspaCli {
                         crate::ui::dim("(still reading the ledger from the node — nothing is being minted meanwhile)")
                     );
                 }
+                self.own_lane_capture(None);
                 self.auto_busy.store(false, Ordering::SeqCst);
                 return;
             }
@@ -1792,6 +1944,7 @@ impl KaspaCli {
         // and are skipped; the notes are still tidied.
         let account = self.wait_for_account().await;
         let Some(secret) = self.auto_secret.lock().unwrap().as_mut().map(|g| g.reveal()) else {
+            self.own_lane_capture(None);
             self.auto_busy.store(false, Ordering::SeqCst);
             return;
         };
@@ -1854,6 +2007,7 @@ impl KaspaCli {
                     }
                     tprintln!(self, "");
                 }
+                self.own_lane_capture(None);
                 self.auto_busy.store(false, Ordering::SeqCst);
                 return;
             }
@@ -1861,6 +2015,10 @@ impl KaspaCli {
             // Whether our own miner will mine what follows (PLAN P8.3b):
             // decided once for the pass, used by the mint and the sweep alike.
             let lane = self.own_lane().await;
+            self.own_lane_capture(match lane {
+                OwnLane::Use { every } => Some(every),
+                _ => None,
+            });
             let lane_fee_rate = match lane {
                 OwnLane::Use { .. } => Some(OWN_LANE_FEE_RATE),
                 _ => None,
@@ -1961,6 +2119,11 @@ impl KaspaCli {
                             None,
                         )
                         .await?;
+                        if let Some((_, result)) = &result
+                            && let Some(id) = result.transaction_ids.last()
+                        {
+                            self.attach_mint_notes(*id, &result.notes);
+                        }
                         Ok::<_, kaspa_wallet_core::error::Error>(
                             result.map(|(amount, result)| (amount, result.notes.len(), result.fees, result.transaction_ids.len())),
                         )
@@ -2154,6 +2317,7 @@ impl KaspaCli {
             }
         }
 
+        self.own_lane_capture(None);
         self.auto_busy.store(false, Ordering::SeqCst);
     }
 
@@ -2178,6 +2342,7 @@ impl KaspaCli {
                 let (notes, _ledger, _) = this.total_holdings().await;
                 this.prompt_total_petals.store(notes, Ordering::SeqCst);
                 this.prompt_total_valid.store(true, Ordering::SeqCst);
+                this.retry_stale_own_lane_spends().await;
 
                 // The periodic run is NOT conditional on the opening sequence
                 // having happened. It used to be, via a `first_run_done` flag

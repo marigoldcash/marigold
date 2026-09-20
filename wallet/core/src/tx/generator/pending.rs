@@ -200,6 +200,77 @@ impl PendingTransaction {
         self.inner.signable_tx.lock().unwrap().tx.as_ref().into()
     }
 
+    /// The same spend at `fee`, paid out of the change output: for a
+    /// transaction that went on the own lane (a fee only our own block would
+    /// carry) and needs the network rate after all. `None` when there is no
+    /// change output or it cannot bear the difference. The result is unsigned
+    /// and unsubmitted; sign it and send it with [`Self::try_submit_replacement`].
+    pub fn with_fee(&self, fee: u64) -> Result<Option<PendingTransaction>> {
+        let inner = &*self.inner;
+        let Some(change_index) = inner.change_output_index else { return Ok(None) };
+        let extra = fee.saturating_sub(inner.fees);
+        if extra == 0 || inner.change_output_value <= extra {
+            return Ok(None);
+        }
+        let mut tx: Transaction = inner.signable_tx.lock()?.tx.clone();
+        let Some(change) = tx.outputs.get_mut(change_index) else { return Ok(None) };
+        change.value -= extra;
+        tx.finalize();
+        let utxo_entries: Vec<UtxoEntryReference> = inner.utxo_entries.values().cloned().collect();
+        Ok(Some(PendingTransaction::try_new(
+            &inner.generator,
+            tx,
+            utxo_entries,
+            inner.addresses.clone(),
+            inner.payment_value,
+            inner.change_output_index,
+            inner.change_output_value - extra,
+            inner.aggregate_input_value,
+            inner.aggregate_output_value - extra,
+            inner.minimum_signatures,
+            inner.mass,
+            fee,
+            inner.kind,
+        )?))
+    }
+
+    /// Give this transaction's coins back to the wallet's spendable set
+    /// without submitting anything: the mempool still holds the transaction,
+    /// a replacement is about to take its place.
+    pub async fn withdraw(&self) -> Result<()> {
+        if let Some(utxo_context) = self.inner.generator.source_utxo_context() {
+            let _lock = utxo_context.processor().notification_lock().await;
+            utxo_context.cancel_outgoing_transaction(self).await?;
+        }
+        Ok(())
+    }
+
+    /// Submit as a replacement for a transaction already in the node's
+    /// mempool that spends the same coins (the own-lane retry).
+    pub async fn try_submit_replacement(&self, rpc: &Arc<DynRpcApi>) -> Result<RpcTransactionId> {
+        self.inner.is_submitted.load(Ordering::SeqCst).then(|| {
+            panic!("PendingTransaction::try_submit_replacement() called multiple times");
+        });
+        self.inner.is_submitted.store(true, Ordering::SeqCst);
+        let rpc_transaction: RpcTransaction = self.rpc_transaction();
+        if let Some(utxo_context) = self.inner.generator.source_utxo_context() {
+            let _lock = utxo_context.processor().notification_lock().await;
+            utxo_context.register_outgoing_transaction(self).await?;
+            match rpc.submit_transaction_replacement(rpc_transaction).await {
+                Ok(response) => {
+                    utxo_context.notify_outgoing_transaction(self).await?;
+                    Ok(response.transaction_id)
+                }
+                Err(error) => {
+                    utxo_context.cancel_outgoing_transaction(self).await?;
+                    Err(error.into())
+                }
+            }
+        } else {
+            Ok(rpc.submit_transaction_replacement(rpc_transaction).await?.transaction_id)
+        }
+    }
+
     /// Submit the transaction on the supplied rpc
     pub async fn try_submit(&self, rpc: &Arc<DynRpcApi>) -> Result<RpcTransactionId> {
         // sanity check to prevent multiple invocations (for API use)
@@ -223,6 +294,11 @@ impl PendingTransaction {
                 Ok(id) => {
                     // on successful submit, create a notification
                     utxo_context.notify_outgoing_transaction(self).await?;
+                    // Whoever asked to be told about submissions (the wallet's
+                    // own-lane retry keeps the ones only its own block will mine).
+                    if let Some(observer) = utxo_context.processor().submit_observer() {
+                        observer(self);
+                    }
                     Ok(id)
                 }
                 Err(error) => {

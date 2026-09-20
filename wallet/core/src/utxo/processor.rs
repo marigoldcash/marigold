@@ -6,6 +6,7 @@
 //!
 
 use crate::imports::*;
+use crate::tx::PendingTransaction;
 // use futures::pin_mut;
 use kaspa_notify::{
     listener::ListenerId,
@@ -33,6 +34,9 @@ use kaspa_rpc_core::{
     notify::connection::{ChannelConnection, ChannelType},
 };
 
+/// Called with every transaction the wallet submits, after the node took it.
+pub type SubmitObserver = Arc<dyn Fn(&PendingTransaction) + Send + Sync>;
+
 pub struct Inner {
     /// Coinbase UTXOs in stasis
     stasis: DashMap<UtxoEntryId, PendingUtxoEntryReference>,
@@ -40,6 +44,9 @@ pub struct Inner {
     pending: DashMap<UtxoEntryId, PendingUtxoEntryReference>,
     /// Outgoing Transactions
     outgoing: DashMap<TransactionId, OutgoingTransaction>,
+    /// Told of every submitted transaction; the wallet's own-lane retry
+    /// listens here.
+    submit_observer: Mutex<Option<SubmitObserver>>,
     /// Address to UtxoContext map (maps all addresses used by
     /// all UtxoContexts to their respective UtxoContexts)
     address_to_utxo_context_map: DashMap<Arc<Address>, UtxoContext>,
@@ -75,6 +82,7 @@ impl Inner {
             stasis: DashMap::new(),
             pending: DashMap::new(),
             outgoing: DashMap::new(),
+            submit_observer: Mutex::new(None),
             address_to_utxo_context_map: DashMap::new(),
             current_daa_score: Arc::new(AtomicU64::new(0)),
             network_id: Arc::new(Mutex::new(network_id)),
@@ -191,6 +199,14 @@ impl UtxoProcessor {
 
     pub fn pending(&self) -> &DashMap<UtxoEntryId, PendingUtxoEntryReference> {
         &self.inner.pending
+    }
+
+    pub fn set_submit_observer(&self, observer: Option<SubmitObserver>) {
+        *self.inner.submit_observer.lock().unwrap() = observer;
+    }
+
+    pub fn submit_observer(&self) -> Option<SubmitObserver> {
+        self.inner.submit_observer.lock().unwrap().clone()
     }
 
     pub fn outgoing(&self) -> &DashMap<TransactionId, OutgoingTransaction> {

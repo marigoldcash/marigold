@@ -277,6 +277,10 @@ impl Note {
         // reserve when the transaction comes out too heavy — the estimate is
         // shaped differently from the real mint and cannot be made exact. An
         // explicit amount is taken literally: the user asked for a number.
+        ctx.own_lane_capture(match ctx.own_lane().await {
+            crate::cli::OwnLane::Use { every } => Some(every),
+            _ => None,
+        });
         let (amount_petals, result) = if all.is_some() {
             match notepool::mint_max(
                 account.clone(),
@@ -308,6 +312,10 @@ impl Note {
             (amount_petals, result)
         };
 
+        ctx.own_lane_capture(None);
+        if let Some(id) = result.transaction_ids.last() {
+            ctx.attach_mint_notes(*id, &result.notes);
+        }
         ctx.record("minted", amount_petals, 0, format!("{} notes, by hand", result.notes.len()), "");
         tprintln!(ctx, "minted {} {ticker} into {} note(s):", sompi_to_kaspa_string(amount_petals), result.notes.len());
         for entry in &result.notes {

@@ -114,6 +114,10 @@ impl Sweep {
         let submitted = Arc::new(AtomicU64::new(0));
         let submitted_ = submitted.clone();
 
+        ctx.own_lane_capture(match lane {
+            crate::cli::OwnLane::Use { every } => Some(every),
+            _ => None,
+        });
         let (summary, _ids) = account
             .sweep(
                 wallet_secret,
@@ -135,6 +139,7 @@ impl Sweep {
             )
             .await?;
 
+        ctx.own_lane_capture(None);
         tprintln!(ctx, "  submitted {} transaction(s) in total", submitted.load(Ordering::Relaxed));
         tprintln!(ctx, "Sweep: {summary}");
         if matches!(lane, crate::cli::OwnLane::NoMiner) && summary.aggregate_fees() > 0 {
