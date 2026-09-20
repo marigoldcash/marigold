@@ -3262,9 +3262,22 @@ pub async fn hand_over_locked(
 pub async fn receive_locked(wallet: &Arc<Wallet>, wallet_secret: Secret, handover: LockedHandover) -> Result<ReceiveResult> {
     let note_key_store = wallet.store().as_note_key_store()?;
     let serials: Vec<Hash> = handover.notes.iter().map(|(sn, _)| *sn).collect();
+    // This wallet may already know the note: as the payer's own offer, or as
+    // a payment it took before. Say which, before asking the pool anything.
+    if let Some(known) = note_key_store.load_info(&serials[0]).await? {
+        return Err(Error::Custom(match known.status {
+            NoteStatus::Offered => {
+                "this is your own offer — only the receiver's key can take it, and if they have not by the time the lock lapses it comes back to you on its own".to_string()
+            }
+            _ => "you already took this payment — it is in your notes".to_string(),
+        }));
+    }
     let on_chain = wallet.rpc_api().get_notes_by_serial(serials.clone()).await?;
     let first = on_chain.iter().find(|entry| entry.sn == serials[0]).ok_or_else(|| {
-        Error::Custom(format!("note {} is not in the pool yet — if it was just paid, try again in a moment", serials[0]))
+        Error::Custom(format!(
+            "note {} is not in the pool — if it was just paid, try again in a moment; if the lock has lapsed, it went back to the payer",
+            serials[0]
+        ))
     })?;
     // Which of our share keys was this paid to? Try each until the derived
     // one-time key matches what the chain holds.
