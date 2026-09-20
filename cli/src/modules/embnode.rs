@@ -28,6 +28,24 @@ impl Node {
     /// to know how many more times it fills.
     fn sync_step(ctx: &Arc<KaspaCli>) -> String {
         use crate::log_sink::SyncProgress;
+        // A later pass counts what arrived during the one before, from zero
+        // again. Named as a pass, the figure is the node's own and still
+        // reads as progress; shown as steps it read as the sync going
+        // backwards (tester, 2026-09-20).
+        let pass = crate::log_sink::sync_pass();
+        if pass > 0 {
+            let which = match pass {
+                1 => "second".to_string(),
+                2 => "third".to_string(),
+                n => format!("{}th", n + 1),
+            };
+            return match crate::log_sink::sync_progress() {
+                Some(SyncProgress::Blocks { percent, .. }) => {
+                    format!("Step 3 of 3, {which} pass over what arrived meanwhile, {}% done", percent.min(99))
+                }
+                _ => format!("Step 3 of 3, {which} pass over what arrived meanwhile, fetching headers"),
+            };
+        }
         let (step, percent) = match crate::log_sink::sync_progress() {
             // Levels count DOWN from 250, so progress is how far it has come.
             Some(SyncProgress::VerifyingProof { level }) => (1, 250u32.saturating_sub(level) * 100 / 250),

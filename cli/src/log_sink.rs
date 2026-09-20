@@ -50,6 +50,38 @@ static SUPPRESSED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsi
 /// Unix seconds when the sync last moved. Zero means it never has.
 static LAST_PROGRESS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+/// The node has reported block bodies at least once.
+static BLOCKS_SEEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Which pass of the sync the node is on, counting from zero.
+///
+/// A first sync runs in passes — headers, then blocks, then whatever arrived
+/// meanwhile, headers first again — and each pass reports its own
+/// percentage from zero. Shown as they come, the steps went 3 → 2 → 3 and
+/// the figure fell from 77% to 99% to 76% (tester, 2026-09-20). Headers
+/// after blocks is a new pass; the status names it rather than counting
+/// backwards.
+static PASS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// The sync pass the node is on: 0 for the first, 1 for the second, and so on.
+pub fn sync_pass() -> u32 {
+    PASS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Store a parsed progress line and keep track of which pass it belongs to.
+fn record_progress(progress: SyncProgress) {
+    use std::sync::atomic::Ordering::Relaxed;
+    match progress {
+        SyncProgress::Blocks { .. } => BLOCKS_SEEN.store(true, Relaxed),
+        SyncProgress::Headers { .. } | SyncProgress::ChainSegment { .. } => {
+            if BLOCKS_SEEN.swap(false, Relaxed) {
+                PASS.fetch_add(1, Relaxed);
+            }
+        }
+        SyncProgress::VerifyingProof { .. } => {}
+    }
+    *progress_slot().write().unwrap() = Some(progress);
+}
+
 /// How many node warnings have been kept off the screen.
 pub fn suppressed_count() -> usize {
     SUPPRESSED.load(std::sync::atomic::Ordering::Relaxed)
@@ -75,6 +107,8 @@ pub fn sync_progress() -> Option<SyncProgress> {
 
 pub fn clear_sync_progress() {
     *progress_slot().write().unwrap() = None;
+    BLOCKS_SEEN.store(false, std::sync::atomic::Ordering::Relaxed);
+    PASS.store(0, std::sync::atomic::Ordering::Relaxed);
     LAST_PROGRESS.store(0, std::sync::atomic::Ordering::Relaxed);
     SUPPRESSED.store(0, std::sync::atomic::Ordering::Relaxed);
 }
@@ -141,7 +175,7 @@ impl log::Log for TerminalLogger {
         // progress?" — a stream of messages with no clock cannot. Short form:
         // this is a wallet, not a server log.
         if let Some(progress) = parse_progress(&record.args().to_string()) {
-            *progress_slot().write().unwrap() = Some(progress);
+            record_progress(progress);
             if let Ok(now) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
                 LAST_PROGRESS.store(now.as_secs(), std::sync::atomic::Ordering::Relaxed);
             }
@@ -223,6 +257,33 @@ mod tests {
             other => panic!("block progress not parsed: {other:?}"),
         }
         // Ordinary chatter must not be mistaken for progress.
+    }
+
+    /// Headers after blocks means a new pass; the pass survives the blocks
+    /// that follow it, a third set of headers is a third pass, and a fresh
+    /// sync starts over.
+    #[test]
+    fn headers_after_blocks_start_a_new_pass() {
+        clear_sync_progress();
+        let headers = "IBD: Processed 100 block headers (9%) last block timestamp: 2026-09-20 10:00:00.000:-0300";
+        record_progress(parse_progress(headers).unwrap());
+        assert_eq!(sync_pass(), 0);
+        record_progress(parse_progress("IBD: Processed 5000 blocks (77%)").unwrap());
+        assert_eq!(sync_pass(), 0, "the first pass over the blocks is still the first pass");
+        record_progress(parse_progress(headers).unwrap());
+        assert_eq!(sync_pass(), 1);
+        record_progress(parse_progress(headers).unwrap());
+        assert_eq!(sync_pass(), 1, "more headers in the same pass do not count again");
+        record_progress(parse_progress("IBD: Processed 30 blocks (10%)").unwrap());
+        assert_eq!(sync_pass(), 1);
+        record_progress(parse_progress(headers).unwrap());
+        assert_eq!(sync_pass(), 2);
+        clear_sync_progress();
+        assert_eq!(sync_pass(), 0);
+    }
+
+    #[test]
+    fn ordinary_chatter_is_not_progress() {
         assert!(parse_progress("P2P Server starting on: 0.0.0.0:26211").is_none());
         assert!(parse_progress("Querying 3 DNS seeders").is_none());
     }
