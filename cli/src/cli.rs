@@ -1567,7 +1567,27 @@ impl KaspaCli {
     /// came from after accepting the connect offer, and the doubled "$ $"
     /// after `close` (founder report, 2026-09-07).
     pub async fn exec_within(self: &Arc<Self>, cmd: &str) -> Result<()> {
-        self.handlers.execute(self, cmd).await?;
+        if let Err(err) = self.handlers.execute(self, cmd).await {
+            // The own lane was tried and the node would not take the fee:
+            // since 2.47 a node carries its owner's tidying below the floor
+            // only when started with --accept-own-below-floor. Say so once,
+            // beside the node's own words, rather than leave a fee error to
+            // be puzzled over.
+            let tried_own_lane = self.own_lane_capture.lock().unwrap().is_some();
+            let text = err.to_string().to_lowercase();
+            if tried_own_lane && text.contains("fee") && (text.contains("minimum") || text.contains("below") || text.contains("floor"))
+            {
+                tprintln!(
+                    self,
+                    "{}",
+                    style(
+                        "Your node did not take the own-lane fee. A node started with --accept-own-below-floor does (only for a node nobody else can reach); otherwise this pays the network rate through another node."
+                    )
+                    .yellow()
+                );
+            }
+            return Err(err.into());
+        }
         Ok(())
     }
 

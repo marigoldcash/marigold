@@ -25,7 +25,8 @@ pub const USAGE: &str = "usage: marigold-cli mine-to <address> [<percent>] [--ne
   <percent>        share of this machine to use, 1-100 (default 50); '--cpu 50' means the same
   --network <id>   mainnet, testnet-10, ... (default: the one the address belongs to)
   --listen <addr>  let wallets on other machines connect to this miner, e.g. --listen 192.168.1.20:27210
-                   (default: this machine only, 127.0.0.1)
+                   (default: this machine only, 127.0.0.1). Your own network only: anyone who can
+                   reach that address can start or stop the miner and read the payout address.
   --node <url>     mine against a node already running instead of syncing one here:
                    ws://127.0.0.1:27210 (wRPC) or grpc://127.0.0.1:26210 (gRPC, what a
                    marigoldd has on by default). No wallet can steer the miner then.

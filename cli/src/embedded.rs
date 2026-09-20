@@ -126,9 +126,19 @@ impl EmbeddedNode {
         }
 
         // Our own wallet's transactions may sit below the relay floor: only
-        // our blocks will mine them, and the fee comes back to us.
+        // our blocks will mine them, and the fee comes back to us. Only while
+        // nobody else can reach the node: a listener on another address is
+        // for wallets on other machines, and anyone who reaches it would get
+        // the same exemption (threat pass, 2026-09-20).
+        let own_lane = match rpclisten {
+            None => true,
+            Some(address) => address
+                .parse::<kaspa_utils::networking::ContextualNetAddress>()
+                .map(|address| address.normalize(0).ip.is_loopback())
+                .unwrap_or(false),
+        };
         let mut args = Args {
-            accept_own_below_floor: true,
+            accept_own_below_floor: own_lane,
             appdir: Some(appdir.to_string_lossy().to_string()),
             utxoindex: true,
             // The node writes no log files of its own: without its logger

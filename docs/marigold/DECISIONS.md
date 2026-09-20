@@ -333,7 +333,7 @@ is priced like plumbing; notes are money and cost a penny to move.
 
 ## The miner as a service (2026-09-16)
 
-**Decision.** The CPU miner ships as a mode of the one binary, `marigold-cli mine-to <address> <percent>`, not as a second program. It runs a node and a miner with no terminal and no wallet, stays in the foreground, logs to stdout, and stops on SIGTERM; systemd or Docker keep it running. Its node listens on 127.0.0.1 only. A wallet on the same machine joins that node rather than syncing a second copy, and steers the miner through two RPC calls added for it, `GetMinerStatus` and `ControlMiner`.
+**Decision.** The CPU miner ships as a mode of the one binary, `marigold-cli mine-to <address> <percent>`, not as a second program. It runs a node and a miner with no terminal and no wallet, stays in the foreground, logs to stdout, and stops on SIGTERM; systemd or Docker keep it running. Its node listens on 127.0.0.1 unless `--listen` says otherwise, and then for the owner's own network only. A wallet on the same machine joins that node rather than syncing a second copy, and steers the miner through two RPC calls added for it, `GetMinerStatus` and `ControlMiner`.
 
 **Why one binary.** A miner is the wallet's node plus the wallet's miner minus the wallet. Cutting a separate program would have meant a second release artefact, a second version to trace, and a second copy of the mining loop to keep in step; instead the loop moved into `miner::spawn_session` and both call it. The founder's phrasing of the ask was exactly this — the CLI, given an address and a percentage.
 

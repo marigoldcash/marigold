@@ -290,7 +290,7 @@ pub fn cli() -> Command {
                 .num_args(0..=1)
                 .default_missing_value("true")
                 .value_parser(clap::value_parser!(bool))
-                .help("Take this node's own wallet's tidying transactions below the relay fee floor, unrelayed, for this node's own blocks (default: on when RPC listens on loopback only)"),
+                .help("Take this node's own wallet's tidying transactions below the relay fee floor, unrelayed, for this node's own blocks. Off unless given: a node reached through a reverse proxy, a port forward or a container publish cannot tell its owner's wallet from the internet"),
         )
         .arg(arg!(--unsaferpc "Enable RPC commands which affect the state of the node").env("KASPAD_UNSAFERPC"))
         .arg(
@@ -569,24 +569,13 @@ impl Args {
             rocksdb_cache_size: m.get_one::<usize>("rocksdb-cache-size").cloned().or(defaults.rocksdb_cache_size),
         };
 
-        // A node whose RPC listens on loopback only serves the person who runs
-        // it, so it takes that person's wallet's tidying at the own-lane fee,
-        // the way the node inside the wallet does. Given explicitly, the flag
-        // decides either way (Marigold, 2026-09-20).
-        let loopback_only = {
-            let wrpc_is_loopback = |w: &Option<WrpcNetAddress>| match w {
-                None | Some(WrpcNetAddress::Default) => true,
-                Some(WrpcNetAddress::Public) => false,
-                Some(WrpcNetAddress::Custom(address)) => address.normalize(0).ip.is_loopback(),
-            };
-            args.rpclisten.as_ref().is_none_or(|address| address.normalize(0).ip.is_loopback())
-                && wrpc_is_loopback(&args.rpclisten_borsh)
-                && wrpc_is_loopback(&args.rpclisten_json)
-        };
-        args.accept_own_below_floor = match m.get_one::<bool>("accept-own-below-floor") {
-            Some(explicit) => *explicit,
-            None => loopback_only,
-        };
+        // Opt-in only. It defaulted to on for a node whose RPC listens on
+        // loopback, on the reasoning that such a node serves only its owner —
+        // and the public node did exactly that behind nginx, which proxies
+        // the internet onto 127.0.0.1: every wRPC client could submit at any
+        // fee (threat pass, 2026-09-20). A bind address says nothing about
+        // who is on the other end, so the operator says it, or it is off.
+        args.accept_own_below_floor = m.get_one::<bool>("accept-own-below-floor").copied().unwrap_or(false);
 
         if arg_match_unwrap_or::<bool>(&m, "enable-mainnet-mining", false) {
             println!("\nNOTE: The flag --enable-mainnet-mining is deprecated and defaults to true also w/o explicit setting\n")
