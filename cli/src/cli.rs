@@ -260,6 +260,7 @@ pub(crate) fn humanised_minutes(minutes: u64) -> String {
 
 /// "20 minutes", "3 hours", "4 days": how long a wait is, in the unit a
 /// person would pick.
+#[cfg(feature = "embedded-node")]
 pub(crate) fn humanised_wait(seconds: f64) -> String {
     if seconds < 90.0 {
         return format!("{} seconds", (seconds.round() as u64).max(1));
@@ -1433,6 +1434,7 @@ impl KaspaCli {
     /// What this speed buys against the whole network: how long, on average,
     /// between blocks of ours. The question every new miner asks after ten
     /// minutes of nothing (tester, 2026-09-20).
+    #[cfg(feature = "embedded-node")]
     async fn expected_block_cadence(&self, own_hashrate: f64) -> Option<String> {
         if own_hashrate <= 0.0 || !self.wallet.is_connected() {
             return None;

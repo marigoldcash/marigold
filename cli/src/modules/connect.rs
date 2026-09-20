@@ -399,7 +399,6 @@ pub(crate) async fn dial(client: &kaspa_wrpc_client::KaspaRpcClient, url: String
         url: Some(url.clone()),
         connect_timeout: Some(DIAL_TIMEOUT),
         retry_interval: Some(std::time::Duration::from_secs(3)),
-        ..Default::default()
     };
     client.connect(Some(options)).await.map_err(|err| err.to_string())?;
     let started = std::time::Instant::now();
