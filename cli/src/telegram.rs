@@ -22,6 +22,39 @@ pub struct TelegramConfig {
     pub pin_salt: String,
     pub pin_hash: String,
     pub daily_limit_petals: u64,
+    /// The chat the pairing happened in; the bot answers no other, so a
+    /// command typed in a group cannot post a bearer code there.
+    #[serde(default)]
+    pub chat_id: Option<i64>,
+    /// "argon2" for a PIN hashed with Argon2id; absent for the first
+    /// wallets' plain SHA-256, kept verifiable until the PIN is set again.
+    #[serde(default)]
+    pub pin_kdf: Option<String>,
+    /// Unix seconds the pairing code was made; a code older than
+    /// [`PAIRING_CODE_LIFETIME`] is dead.
+    #[serde(default)]
+    pub pairing_made: u64,
+    /// Wrong pairing codes seen; five of them kill the code.
+    #[serde(default)]
+    pub pairing_failures: u32,
+    /// Three wrong PINs. Kept on disk, so a restart does not unlock.
+    #[serde(default)]
+    pub locked: bool,
+    /// The day (UTC) and the petals spent in it, kept on disk so a restart
+    /// does not reset the daily limit.
+    #[serde(default)]
+    pub spent_day: u64,
+    #[serde(default)]
+    pub spent_petals: u64,
+}
+
+/// How long a pairing code stays valid.
+pub const PAIRING_CODE_LIFETIME: Duration = Duration::from_secs(15 * 60);
+/// Wrong pairing codes tolerated before the code is thrown away.
+pub const PAIRING_FAILURES_ALLOWED: u32 = 5;
+
+fn now_unix() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
 pub const DEFAULT_DAILY_LIMIT_PETALS: u64 = 100 * 100_000_000;
@@ -42,31 +75,79 @@ impl TelegramConfig {
             std::fs::create_dir_all(dir)?;
         }
         let text = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
-        std::fs::write(path, text)?;
-        #[cfg(unix)]
+        // Created owner-only from the first byte, beside the real file and
+        // moved into place: no moment at the process umask, no half a file.
+        let tmp = path.with_extension("json.tmp");
         {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+            use std::io::Write;
+            let mut options = std::fs::OpenOptions::new();
+            options.write(true).create(true).truncate(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            options.open(&tmp)?.write_all(text.as_bytes())?;
         }
+        std::fs::rename(&tmp, path)?;
         Ok(())
     }
 
     pub fn new(token: String, pin: &str, daily_limit_petals: u64) -> Self {
         let salt: [u8; 16] = rand::random();
-        let code: u32 = rand::random::<u32>() % 1_000_000;
         let mut cfg = Self {
             token,
             user_id: None,
-            pairing_code: Some(format!("{code:06}")),
+            pairing_code: None,
             pin_salt: hex::encode(salt),
             pin_hash: String::new(),
             daily_limit_petals,
+            chat_id: None,
+            pin_kdf: Some("argon2".to_string()),
+            pairing_made: 0,
+            pairing_failures: 0,
+            locked: false,
+            spent_day: 0,
+            spent_petals: 0,
         };
         cfg.pin_hash = cfg.hash_pin(pin);
+        cfg.new_pairing_code();
         cfg
     }
 
+    /// A fresh six-digit pairing code, drawn uniformly, dated.
+    pub fn new_pairing_code(&mut self) {
+        use rand::Rng;
+        let code: u32 = rand::thread_rng().gen_range(0..1_000_000);
+        self.pairing_code = Some(format!("{code:06}"));
+        self.pairing_made = now_unix();
+        self.pairing_failures = 0;
+    }
+
+    /// Whether the pairing code can still be used.
+    pub fn pairing_code_live(&self) -> bool {
+        self.pairing_code.is_some() && now_unix().saturating_sub(self.pairing_made) < PAIRING_CODE_LIFETIME.as_secs()
+    }
+
+    /// Set (or reset) the PIN, hashed with Argon2id under a fresh salt.
+    pub fn set_pin(&mut self, pin: &str) {
+        let salt: [u8; 16] = rand::random();
+        self.pin_salt = hex::encode(salt);
+        self.pin_kdf = Some("argon2".to_string());
+        self.pin_hash = self.hash_pin(pin);
+    }
+
+    /// The PIN's hash. Argon2id (memory-hard, so a four-digit PIN behind a
+    /// leaked file is not instant) for every PIN set since 2026-09-20; the
+    /// plain salted SHA-256 the first wallets used stays verifiable so
+    /// nobody is locked out by the upgrade.
     fn hash_pin(&self, pin: &str) -> String {
+        if self.pin_kdf.as_deref() == Some("argon2") {
+            let salt = hex::decode(&self.pin_salt).unwrap_or_default();
+            return kaspa_wallet_core::encryption::argon2_hash_with_salt(pin.trim().as_bytes(), &salt, 32)
+                .map(|key| hex::encode(key.as_ref()))
+                .unwrap_or_default();
+        }
         use sha2::{Digest, Sha256};
         let mut h = Sha256::new();
         h.update(self.pin_salt.as_bytes());
@@ -104,7 +185,10 @@ fn html_escape(s: &str) -> String {
 async fn call(token: &str, method: &str, params: &[(&str, String)]) -> Result<serde_json::Value, String> {
     let query = params.iter().map(|(k, v)| format!("{k}={}", url_encode(v))).collect::<Vec<_>>().join("&");
     let url = format!("https://api.telegram.org/bot{token}/{method}?{query}");
-    let value: serde_json::Value = workflow_http::get_json(url).await.map_err(|e| format!("{method}: {e}"))?;
+    // The token is in the URL, and a transport error may quote the URL:
+    // it must not reach the log.
+    let value: serde_json::Value =
+        workflow_http::get_json(url).await.map_err(|e| format!("{method}: {}", e.to_string().replace(token, "<token>")))?;
     if value.get("ok").and_then(|v| v.as_bool()) != Some(true) {
         return Err(format!("{method}: {}", value.get("description").and_then(|d| d.as_str()).unwrap_or("not ok")));
     }
@@ -314,7 +398,8 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
     let mut offset: i64 = 0;
     let mut pending = Pending::Nothing;
     let mut pin_failures = 0u32;
-    let mut locked = false;
+    let mut locked = cfg.locked;
+    service.seed_spent(cfg.spent_day, cfg.spent_petals);
     log::info!(
         "telegram: bot running; {}",
         match cfg.user_id {
@@ -362,7 +447,7 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
                 let chat_id = msg.get("chat").and_then(|c| c.get("id")).and_then(|v| v.as_i64()).unwrap_or(0);
                 let message_id = msg.get("message_id").and_then(|v| v.as_i64()).unwrap_or(0);
                 let key = cb.get("data").and_then(|d| d.as_str()).and_then(|d| d.strip_prefix("k:")).unwrap_or("").to_string();
-                if cfg.user_id != Some(from) || locked {
+                if cfg.user_id != Some(from) || locked || cfg.chat_id.is_some_and(|paired| paired != chat_id) {
                     continue;
                 }
                 match &mut pending {
@@ -455,12 +540,16 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
                                     pin_failures += 1;
                                     if pin_failures >= 3 {
                                         locked = true;
+                                        cfg.locked = true;
+                                        if let Err(e) = cfg.save(&cfg_path) {
+                                            log::error!("telegram: could not save the lock: {e}");
+                                        }
                                         log::warn!("telegram: locked after three wrong PINs");
                                         edit(
                                             &token,
                                             chat_id,
                                             message_id,
-                                            "Wrong PIN, three times. Locked until the wallet is reopened.",
+                                            "Wrong PIN, three times. Locked; 'mobile telegram unlock' in the wallet clears it.",
                                             None,
                                         )
                                         .await;
@@ -478,6 +567,14 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
                                 match outcome {
                                     Ok(paid) if share_key.is_some() => {
                                         service.note_spent(petals);
+                                        {
+                                            let (day, spent) = service.spent_today();
+                                            cfg.spent_day = day;
+                                            cfg.spent_petals = spent;
+                                            if let Err(e) = cfg.save(&cfg_path) {
+                                                log::error!("telegram: could not save the day's total: {e}");
+                                            }
+                                        }
                                         service.say(format!(
                                             "telegram: offered {} {ticker} to a key, locked three days",
                                             sompi_to_kaspa_string(paid.value_petals)
@@ -499,6 +596,14 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
                                     }
                                     Ok(paid) => {
                                         service.note_spent(petals);
+                                        {
+                                            let (day, spent) = service.spent_today();
+                                            cfg.spent_day = day;
+                                            cfg.spent_petals = spent;
+                                            if let Err(e) = cfg.save(&cfg_path) {
+                                                log::error!("telegram: could not save the day's total: {e}");
+                                            }
+                                        }
                                         service.say(format!(
                                             "telegram: paid {} {ticker} as a code",
                                             sompi_to_kaspa_string(paid.value_petals)
@@ -567,11 +672,15 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
             let text =
                 scanned.clone().unwrap_or_else(|| message.get("text").and_then(|t| t.as_str()).unwrap_or("").trim().to_string());
 
-            // Pairing: the one moment an unpaired user is listened to.
+            // Pairing: the one moment an unpaired user is listened to. Six
+            // digits are guessable by anyone who finds the bot, so the code
+            // lives fifteen minutes, dies after five wrong tries, and a miss
+            // is answered the same way as anything else.
             if cfg.user_id.is_none() {
                 let code = text.strip_prefix("/start").map(str::trim).unwrap_or("");
-                if !code.is_empty() && cfg.pairing_code.as_deref() == Some(code) {
+                if !code.is_empty() && cfg.pairing_code_live() && cfg.pairing_code.as_deref() == Some(code) {
                     cfg.user_id = Some(from);
+                    cfg.chat_id = Some(chat_id);
                     cfg.pairing_code = None;
                     if let Err(e) = cfg.save(&cfg_path) {
                         log::error!("telegram: could not save the pairing: {e}");
@@ -585,12 +694,17 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
                     )
                     .await;
                 } else {
-                    send(
-                        &token,
-                        chat_id,
-                        "Not paired. In your wallet, 'mobile telegram' shows a code; send it here as /start &lt;code&gt;.",
-                    )
-                    .await;
+                    if !code.is_empty() && cfg.pairing_code.is_some() {
+                        cfg.pairing_failures += 1;
+                        if cfg.pairing_failures >= PAIRING_FAILURES_ALLOWED {
+                            cfg.pairing_code = None;
+                            service.say("telegram: five wrong pairing codes — the code is dead; 'mobile telegram' in the wallet makes a new one".to_string());
+                        }
+                        if let Err(e) = cfg.save(&cfg_path) {
+                            log::error!("telegram: could not save: {e}");
+                        }
+                    }
+                    send(&token, chat_id, "This bot answers its owner. If that is you: in your wallet, 'mobile telegram' shows a code; send it here as /start &lt;code&gt;.").await;
                 }
                 continue;
             }
@@ -598,8 +712,12 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
                 log::warn!("telegram: ignored a message from user {from}, not the paired one");
                 continue;
             }
+            if cfg.chat_id.is_some_and(|paired| paired != chat_id) {
+                log::warn!("telegram: ignored a message from chat {chat_id}, not the paired chat");
+                continue;
+            }
             if locked {
-                send(&token, chat_id, "Locked after three wrong PINs. Close and reopen the wallet to unlock.").await;
+                send(&token, chat_id, "Locked after three wrong PINs. In your wallet, 'mobile telegram unlock' clears it.").await;
                 continue;
             }
 
@@ -757,5 +875,35 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A new configuration hashes its PIN with Argon2id; one from before
+    /// still verifies with its plain salted SHA-256; a reset moves it on.
+    #[test]
+    fn pins_verify_under_both_hashes() {
+        let cfg = TelegramConfig::new("token".into(), "4321", DEFAULT_DAILY_LIMIT_PETALS);
+        assert_eq!(cfg.pin_kdf.as_deref(), Some("argon2"));
+        assert!(cfg.pin_matches("4321"));
+        assert!(cfg.pin_matches(" 4321 "), "surrounding spaces are not part of a PIN");
+        assert!(!cfg.pin_matches("1234"));
+        assert!(cfg.pairing_code_live());
+        assert_eq!(cfg.pairing_code.as_ref().map(|c| c.len()), Some(6));
+
+        let mut old = cfg.clone();
+        old.pin_kdf = None;
+        old.pin_salt = "abcd".into();
+        old.pin_hash = String::new();
+        old.pin_hash = old.hash_pin("2468");
+        assert!(old.pin_matches("2468"));
+        assert!(!old.pin_matches("4321"));
+        old.set_pin("1357");
+        assert_eq!(old.pin_kdf.as_deref(), Some("argon2"));
+        assert!(old.pin_matches("1357"));
+        assert!(!old.pin_matches("2468"));
     }
 }

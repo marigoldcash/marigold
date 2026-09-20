@@ -44,16 +44,47 @@ impl Mobile {
                         );
                     }
                     Some(cfg) => {
-                        match (cfg.user_id, cfg.pairing_code) {
-                            (Some(id), _) => tprintln!(ctx, "Paired with Telegram user {id}."),
-                            (None, Some(code)) => tprintln!(ctx, "Not paired yet. Send your bot:  /start {code}"),
-                            (None, None) => tprintln!(ctx, "Not paired."),
+                        let mut cfg = cfg;
+                        match (cfg.user_id, cfg.pairing_code_live()) {
+                            (Some(id), _) => {
+                                tprintln!(ctx, "Paired with Telegram user {id}.");
+                                if cfg.locked {
+                                    tprintln!(
+                                        ctx,
+                                        "{}",
+                                        style("Locked after three wrong PINs — 'mobile telegram unlock' clears it.").yellow()
+                                    );
+                                }
+                            }
+                            (None, true) => {
+                                tprintln!(ctx, "Not paired yet. Send your bot:  /start {}", cfg.pairing_code.as_deref().unwrap_or(""))
+                            }
+                            (None, false) => {
+                                // No live code: the last one lapsed, or died
+                                // of wrong guesses. Make one now.
+                                cfg.new_pairing_code();
+                                cfg.save(&path).map_err(|e| Error::custom(e.to_string()))?;
+                                tprintln!(
+                                    ctx,
+                                    "Not paired yet. A fresh code, good for fifteen minutes — send your bot:  /start {}",
+                                    cfg.pairing_code.as_deref().unwrap_or("")
+                                );
+                            }
                         }
                         tprintln!(ctx, "Daily limit: {} {}", sompi_to_kaspa_string(cfg.daily_limit_petals), ctx.ticker());
                         tprintln!(ctx, "The bot answers while 'marigold-cli serve {}' runs.", descriptor.filename);
                     }
                 }
                 tprintln!(ctx, "");
+            }
+            Some("unlock") => {
+                let Some(mut cfg) = existing else {
+                    tprintln!(ctx, "No bot yet — 'mobile telegram <token>' first.");
+                    return Ok(());
+                };
+                cfg.locked = false;
+                cfg.save(&path).map_err(|e| Error::custom(e.to_string()))?;
+                tprintln!(ctx, "Unlocked. The bot answers the PIN again once 'serve' is restarted.");
             }
             Some("off") => {
                 if path.exists() {
@@ -103,7 +134,7 @@ impl Mobile {
                     "Start the service:   marigold-cli serve {} --password-file <file with the wallet password>",
                     descriptor.filename
                 );
-                tprintln!(ctx, "Then send your bot:  /start {}", cfg.pairing_code.as_deref().unwrap_or(""));
+                tprintln!(ctx, "Then send your bot, within fifteen minutes:  /start {}", cfg.pairing_code.as_deref().unwrap_or(""));
                 tprintln!(
                     ctx,
                     "Daily limit {} {}; 'mobile telegram limit <amount>' changes it.",

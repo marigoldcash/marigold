@@ -237,6 +237,20 @@ impl WalletService {
         Ok(())
     }
 
+    /// What the day's total was when the service last ran, from the bot's
+    /// file, so a restart does not start the day over.
+    pub fn seed_spent(&self, day: u64, petals: u64) {
+        if day == utc_day() && petals > 0 {
+            *self.spent.lock().unwrap() = (day, petals);
+        }
+    }
+
+    /// The day and what has been spent in it, for the bot to keep on disk.
+    pub fn spent_today(&self) -> (u64, u64) {
+        let (day, spent) = *self.spent.lock().unwrap();
+        if day == utc_day() { (day, spent) } else { (utc_day(), 0) }
+    }
+
     pub fn note_spent(&self, petals: u64) {
         let mut guard = self.spent.lock().unwrap();
         let today = utc_day();
@@ -369,6 +383,7 @@ impl WalletService {
             let result = notepool::bearer_import(&self.wallet, self.secret.clone(), bearer).await.map_err(|e| e.to_string())?;
             let value = DENOMINATION_PETALS[bearer.d as usize];
             self.record("received", value, result.rotation.fee_petals, "note (telegram)", &result.rotation.transaction_id.to_string());
+            self.note_spent(result.rotation.fee_petals);
             Ok(format!(
                 "Received {} {} (fee {}).",
                 sompi_to_kaspa_string(value),
