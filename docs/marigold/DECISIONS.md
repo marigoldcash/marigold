@@ -374,3 +374,12 @@ is priced like plumbing; notes are money and cost a penny to move.
 **What it asks of the person.** A bot of their own, a machine that stays on, a PIN, a daily limit, and 2FA on the Telegram account: the account now moves money, and Telegram accounts recover by SMS unless that is on. The bot says so at `/start`.
 
 **What it supersedes.** From "Mobile custody: mirror plus rotation" (2026-09-07): the Telegram CloudStorage backup, the passphrase, and rotation as a republish are no longer needed for launch, since nothing is mirrored. The mirror commands stay in the CLI for whoever wants a paper or phone copy; they are no longer the mobile path. The revocation argument that decision made still holds for those copies.
+
+## One number for a release and its binaries (2026-09-20)
+
+**Decision.** The workspace version reads `major.release.build`, and a release is tagged with the binary's own version in both repositories: `v2.45.208` is the tag on marigoldcash/marigold at the commit it was built from, the tag of the release on marigoldcash/marigold-wallet, the `ARG VERSION` the Dockerfile pulls, what the front note shows and what `marigold-cli --version` prints. The first figure is the era: 2 for testnet, 3 from mainnet. The second counts releases (`scripts/bump-version.sh release`). The third counts builds, moves on every build (the remote build script does it) and never resets, so any binary still traces to its "build: version" commit.
+
+**Why.** Releases were numbered v0.2.N and binaries 2.0.M, two counters with nothing in common. A tester running 2.0.202 could not tell from the release page whether v0.2.42 was what they had, and asked for the two to be one number (2026-09-20). Putting the wallet version in the release title was the stopgap; one number is the answer.
+
+**What it costs.** Nothing at runtime: the one place that compares versions (a loopback node carrying the own lane from build 2.0.195) compares the three figures as numbers, and 2.45.x is above 2.0.195. The release counter will reach a few hundred before mainnet at the current pace; it restarts at the era change.
+

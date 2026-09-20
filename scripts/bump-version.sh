@@ -1,8 +1,17 @@
 #!/usr/bin/env bash
-# Raise the workspace version by one patch, or set it to an argument.
+# Raise the workspace version by one build, cut a release, or set it outright.
 #
-#   ./bump-version.sh          2.0.1 -> 2.0.2
-#   ./bump-version.sh 2.1.0    straight to 2.1.0
+#   ./bump-version.sh            2.45.208 -> 2.45.209   (every build)
+#   ./bump-version.sh release    2.45.209 -> 2.46.210   (a release is a build too)
+#   ./bump-version.sh 2.45.208   straight to 2.45.208
+#
+# The number reads major.release.build (founder, 2026-09-20): the first
+# figure is the era — 2 for testnet, 3 from mainnet — the second counts
+# releases, the third counts builds and never resets, so any binary still
+# traces to its "build: version" commit. A release is tagged with the
+# binary's own version, v2.46.210, in both repositories, so the front note,
+# `marigold-cli --version`, the release page and the Dockerfile all read the
+# same thing.
 #
 # The version lives in sixty-four places: once under [workspace.package], and
 # again in every internal `{ version = "...", path = "..." }` entry, which cargo
@@ -19,14 +28,16 @@ if [[ -z "$current" ]]; then
     exit 1
 fi
 
-if [[ $# -ge 1 ]]; then
+IFS=. read -r major minor patch <<<"$current"
+if [[ -z "${patch:-}" ]]; then
+    echo "workspace version '$current' is not major.release.build" >&2
+    exit 1
+fi
+if [[ $# -ge 1 && "$1" == "release" ]]; then
+    next="$major.$((minor + 1)).$((patch + 1))"
+elif [[ $# -ge 1 ]]; then
     next="$1"
 else
-    IFS=. read -r major minor patch <<<"$current"
-    if [[ -z "${patch:-}" ]]; then
-        echo "workspace version '$current' is not major.minor.patch" >&2
-        exit 1
-    fi
     next="$major.$minor.$((patch + 1))"
 fi
 
