@@ -79,7 +79,28 @@ impl Node {
 
         tprintln!(ctx, "");
         if mine {
-            tprintln!(ctx, "Using: {}", style("your own copy of the network, all in sync.").bold());
+            // "All in sync" was said whenever the wallet was on its own node,
+            // syncing or not — beside a prompt that said SYNC (tester,
+            // 2026-09-20). The node's progress decides the sentence.
+            if ctx.wallet().utxo_processor().is_synced() {
+                tprintln!(ctx, "Using: {}", style("your own copy of the network, all in sync.").bold());
+            } else {
+                tprintln!(
+                    ctx,
+                    "Using: {} Its sync: {}.",
+                    style("your own copy of the network, still catching up.").bold(),
+                    Self::sync_step(ctx)
+                );
+                tpara!(
+                    ctx,
+                    "A copy that is behind holds only part of the pool, so paying, receiving and minting wait until it has caught up. 'connect public' uses a public computer meanwhile."
+                );
+                if let Some(stalled) = Self::stalled_for(ctx) {
+                    tprintln!(ctx, "");
+                    tprintln!(ctx, "{}", style(format!("It has not moved for {stalled}. That is longer than expected.")).yellow());
+                    tprintln!(ctx, "{}", style("Leaving it running usually recovers; 'connect logs' shows what it is doing.").dim());
+                }
+            }
             tprintln!(ctx, "Your wallet notes are not announced to anyone.");
             tprintln!(ctx, "");
             return;

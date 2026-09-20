@@ -76,6 +76,7 @@ impl Pay {
 
     async fn main(self: Arc<Self>, ctx: &Arc<dyn Context>, argv: Vec<String>, _cmd: &str) -> Result<()> {
         let ctx = ctx.clone().downcast_arc::<KaspaCli>()?;
+        ctx.node_ready_for_notes()?;
         // One verb, told apart by what follows it (founder, 2026-09-15): a
         // request code pays that request with nothing to hand over; an
         // amount or a serial becomes one code the receiver types into
@@ -137,6 +138,11 @@ impl Pay {
             crate::ui::warn(
                 "Anyone who sees this code can take the money. Give it to the receiver now; they type 'receive' and the code."
             )
+        );
+        tprintln!(
+            ctx,
+            "{}",
+            crate::ui::dim("Changed your mind? 'receive' with this code takes it back yourself, as long as nobody else has.")
         );
 
         // The receiver can only take it once the transfer has landed; say

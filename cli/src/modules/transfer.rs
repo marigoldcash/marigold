@@ -7,6 +7,7 @@ pub struct Transfer;
 impl Transfer {
     async fn main(self: Arc<Self>, ctx: &Arc<dyn Context>, argv: Vec<String>, _cmd: &str) -> Result<()> {
         let ctx = ctx.clone().downcast_arc::<KaspaCli>()?;
+        ctx.node_ready_for_notes()?;
 
         let account = ctx.ledger_account().await?;
 
