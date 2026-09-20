@@ -2458,7 +2458,7 @@ impl KaspaCli {
                                         // Not a fault, so not red: the node is catching up and the
                                         // ledger side waits for it. The old line, in red, read as an
                                         // error to the founder (2026-09-19).
-                                        let whose = if url.as_deref().is_some_and(|u| crate::modules::connect::is_local_target(u)) {
+                                        let whose = if url.as_deref().is_some_and(crate::modules::connect::is_local_target) {
                                             "Your node on this machine"
                                         } else if url.is_none() {
                                             "Your own copy of the network"
