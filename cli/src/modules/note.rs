@@ -1444,7 +1444,8 @@ impl Note {
         for (i, page) in pages.iter().enumerate() {
             let path = dir.join(format!("page-{i}.txt"));
             let hex_text = page.to_hex();
-            std::fs::write(&path, &hex_text).map_err(|e| Error::Custom(format!("could not write {}: {e}", path.display())))?;
+            crate::backup::write_owner_only(&path, hex_text.as_bytes())
+                .map_err(|e| Error::Custom(format!("could not write {}: {e}", path.display())))?;
             if let Some(qr) = qr_string(&hex_text) {
                 tprintln!(ctx, "page {}/{}:", i + 1, pages.len());
                 tprintln!(ctx, "{}", qr);

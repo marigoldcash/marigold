@@ -134,6 +134,40 @@ fn status_from_str(s: &str) -> Option<NoteStatus> {
     }
 }
 
+/// Write a file that only its owner may read. The vault's files are the
+/// wallet: the wrapped vault key is an offline password attack, the manifest
+/// is the balance in plain text, and a note file is money once the key is
+/// known. They were written at the process umask, world-readable on most
+/// machines (threat pass, 2026-09-20). Native only; the browser has no modes.
+async fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
+    #[cfg(all(unix, not(target_arch = "wasm32")))]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        let mut file = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(path)?;
+        file.write_all(bytes)?;
+        // A file that already existed keeps the mode it had; say it again.
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+        return Ok(());
+    }
+    #[allow(unreachable_code)]
+    {
+        fs::write(path, bytes).await?;
+        Ok(())
+    }
+}
+
+/// Make a directory the owner alone may enter.
+async fn create_private_dir(path: &Path) -> Result<()> {
+    fs::create_dir_all(path).await?;
+    #[cfg(all(unix, not(target_arch = "wasm32")))]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))?;
+    }
+    Ok(())
+}
+
 fn provenance_to_str(p: NoteProvenance) -> &'static str {
     match p {
         NoteProvenance::Cold => "cold",
@@ -343,9 +377,9 @@ impl NoteVault {
     }
 
     async fn ensure_dirs(&self) -> Result<()> {
-        fs::create_dir_all(&self.folder).await?;
+        create_private_dir(&self.folder).await?;
         for status in ALL_STATUSES {
-            fs::create_dir_all(self.subdir(status)).await?;
+            create_private_dir(&self.subdir(status)).await?;
         }
         Ok(())
     }
@@ -365,10 +399,10 @@ impl NoteVault {
         let mnemonic = Mnemonic::from_entropy(k.to_vec(), Language::English)?;
         let words = mnemonic.phrase_string();
         let wrapped = wrap_vault_key(&k, wallet_secret)?;
-        fs::write(&key_path, &wrapped).await?;
+        write_private(&key_path, &wrapped).await?;
         self.key.write().await.replace(k);
         if !fs::exists(&self.folder.join(MANIFEST_FILE)).await? {
-            fs::write(&self.folder.join(MANIFEST_FILE), b"").await?;
+            write_private(&self.folder.join(MANIFEST_FILE), b"").await?;
         }
         Ok(words)
     }
@@ -444,7 +478,7 @@ impl NoteVault {
             match unwrap_vault_key(&upgraded, wallet_secret) {
                 Ok((check, false)) if check == k => {
                     let tmp = key_path.with_extension("key.new");
-                    fs::write(&tmp, &upgraded).await?;
+                    write_private(&tmp, &upgraded).await?;
                     fs::rename(&tmp, &key_path).await?;
                     log_info!("note vault: vault.key upgraded to a random per-vault salt");
                 }
@@ -480,7 +514,7 @@ impl NoteVault {
             .map_err(|_| Error::Custom("recovery words must encode a 32-byte key (24 words)".to_string()))?;
         self.ensure_dirs().await?;
         let wrapped = wrap_vault_key(&k, wallet_secret)?;
-        fs::write(&self.folder.join(VAULT_KEY_FILE), &wrapped).await?;
+        write_private(&self.folder.join(VAULT_KEY_FILE), &wrapped).await?;
         self.key.write().await.replace(k);
         *self.loaded.lock().await = false;
         Ok(())
@@ -525,6 +559,27 @@ impl NoteVault {
         }
         *self.index.write().await = rows;
         *self.loaded.lock().await = true;
+        // Vaults written before 2.47 sit at the umask's modes; owner-only
+        // from the first load onwards. Best effort: a read-only folder still
+        // opens.
+        #[cfg(all(unix, not(target_arch = "wasm32")))]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&self.folder, std::fs::Permissions::from_mode(0o700));
+            if let Ok(entries) = std::fs::read_dir(&self.folder) {
+                for entry in entries.flatten() {
+                    let mode = if entry.path().is_dir() { 0o700 } else { 0o600 };
+                    let _ = std::fs::set_permissions(entry.path(), std::fs::Permissions::from_mode(mode));
+                    if entry.path().is_dir()
+                        && let Ok(files) = std::fs::read_dir(entry.path())
+                    {
+                        for file in files.flatten() {
+                            let _ = std::fs::set_permissions(file.path(), std::fs::Permissions::from_mode(0o600));
+                        }
+                    }
+                }
+            }
+        }
         Ok(())
     }
 
@@ -533,7 +588,12 @@ impl NoteVault {
         let mut lines: Vec<(Hash, String)> = index.iter().map(|(sn, row)| (*sn, manifest_line(row))).collect();
         lines.sort_by_key(|(sn, _)| sn.as_bytes());
         let text = lines.into_iter().map(|(_, line)| line).collect::<Vec<_>>().join("\n");
-        fs::write(&self.folder.join(MANIFEST_FILE), text.as_bytes()).await?;
+        // Whole-file rewrite, so a crash between truncate and write used to
+        // leave an empty manifest; written beside and moved into place.
+        let path = self.folder.join(MANIFEST_FILE);
+        let tmp = self.folder.join(format!("{MANIFEST_FILE}.tmp"));
+        write_private(&tmp, text.as_bytes()).await?;
+        fs::rename(&tmp, &path).await?;
         Ok(())
     }
 
@@ -547,11 +607,11 @@ impl NoteVault {
 
     async fn write_note_file(&self, file: &VaultNoteFile, status: NoteStatus, k: &[u8; 32]) -> Result<()> {
         // Vaults made before a status existed have no directory for it.
-        fs::create_dir_all(self.subdir(status)).await?;
+        create_private_dir(&self.subdir(status)).await?;
         let path = self.subdir(status).join(note_file_name(&file.sn, file.d));
         let plaintext = borsh::to_vec(file)?;
         let ciphertext = encrypt_xchacha20poly1305_raw_key(&plaintext, k)?;
-        fs::write(&path, &ciphertext).await?;
+        write_private(&path, &ciphertext).await?;
         Ok(())
     }
 
@@ -805,7 +865,7 @@ impl NoteVault {
         for s in existing.iter().chain(std::iter::once(&info)) {
             text.push_str(&format!("{}\t{}\t{}\n", s.index, s.label, s.pk.as_slice().to_hex()));
         }
-        fs::write(&self.shares_path(), text.as_bytes()).await?;
+        write_private(&self.shares_path(), text.as_bytes()).await?;
         Ok(info)
     }
 

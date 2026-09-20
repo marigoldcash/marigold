@@ -59,7 +59,16 @@ impl Journal {
         if let Some(parent) = self.path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let mut file = OpenOptions::new().create(true).append(true).open(&self.path)?;
+        let mut options = OpenOptions::new();
+        options.create(true).append(true);
+        // Amounts and dates are not secrets, but they are nobody else's
+        // business on a shared machine either.
+        #[cfg(all(unix, not(target_arch = "wasm32")))]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&self.path)?;
         writeln!(
             file,
             "{}\t{}\t{}\t{}\t{}\t{}",
