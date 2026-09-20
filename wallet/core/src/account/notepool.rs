@@ -880,7 +880,6 @@ pub async fn receive_handover(wallet: &Arc<Wallet>, wallet_secret: Secret, hando
             )));
         }
     }
-    let note_key_store = wallet.store().as_note_key_store()?;
     for (sn, d) in &handover.notes {
         note_key_store.import_bearer_key(&wallet_secret, *sn, handover.sk, *d).await?;
     }
@@ -2733,6 +2732,7 @@ pub async fn revive_unspent_notes(wallet: &Arc<Wallet>) -> Result<Vec<Arc<NoteKe
     }
     Ok(revived)
 }
+
 /// Rotate notes held on keys another wallet has seen (POOL-SPEC.md P5.6's
 /// hot-key rule) that are still active: an import whose own rotation failed
 /// (offline, no fee note), keys brought in with 'import', a wallet restored
@@ -2775,7 +2775,6 @@ pub async fn rotate_hot_notes(wallet: &Arc<Wallet>, wallet_secret: Secret, max_n
     }
     Ok(results)
 }
-
 
 /// Strikes before a note stops being counted as money.
 ///

@@ -171,7 +171,6 @@ impl Note {
         }
         let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(None).await?;
 
-        let paid = request.amount_petals.or(amount_override).unwrap_or(0);
         let result = notepool::pay_payment_request(&ctx.wallet(), wallet_secret, request, amount_override).await?;
         ctx.record("paid", paid, result.fee_petals, "request", result.transaction_id.to_string());
         ctx.refresh_prompt_total().await;
