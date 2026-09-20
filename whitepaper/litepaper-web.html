@@ -375,7 +375,9 @@
   <li><strong>The recipient immediately swaps the lock</strong> — they record a transaction that replaces your key with a brand-new key that only they know. This is confirmed in under a second.</li>
 </ol>
 <p>Once that swap is confirmed, the note is irrevocably theirs. You no longer hold a key that works. Settlement is done.</p>
-<p>Alternatively, if the recipient can send you their new key ahead of time (say, via a payment request), you can swap the lock directly to their key. Your key never travels anywhere. Both methods produce the same result: the note moves from one key to another.</p>
+<p>Alternatively, if the recipient can send you their new key ahead of time (say, via a payment request), you can swap the lock directly to their key. Your key never travels anywhere.</p>
+<p>The third way is for paying someone who is not there. You swap the lock to a key only they hold and put a deadline on it. Until the deadline, only they can take the note; from the deadline on, only you can take it back. They collect when they like; if they never do, the money is yours again by itself. The deadline is enforced by the network, not by anyone’s wallet.</p>
+<p>All three end the same way: the note sits under a key that only the recipient knows.</p>
 
 <h3>Splitting and Merging</h3>
 <p>Notes come in fixed values, just like physical currency. If you need to pay 30 MAGLD and you hold a 100-MAGLD note, you <strong>split</strong> it into ten 10-MAGLD notes. You hand over three of them. You keep seven. Making change — same as cash.</p>
@@ -383,7 +385,7 @@
 
 <h3>What the System Records</h3>
 <p>Every operation — creating, swapping locks, splitting, merging, redeeming — is public and in plain view. What no one can see is <strong>who</strong> did it, because the system has no concept of "who." There is no sender field. No receiver field. No address book. No account.</p>
-<p>The system records that a note changed hands. It does not record whose hands.</p>
+<p>The system records that a note changed hands. It does not record whose hands. A note under a deadline also shows its terms — the deadline, and the key it goes back to — for as long as the deadline stands.</p>
 
 <hr>
 
@@ -403,6 +405,8 @@
 <h3>Pay at a Market Stall</h3>
 <p>You are buying tomatoes. The vendor displays a QR code — their payment request. You scan it with your wallet app, select the note you want to pay with, and your phone swaps the lock directly to the vendor’s key. Under one second later, the note is theirs. You pocket your tomatoes. The vendor never saw your name, your address, or your account. You never saw theirs. The transaction is settled, final, and forgettable — just like cash.</p>
 
+<h3>Be Paid While You Are Away</h3>
+<p>Publish one key — on your business card, in your shop window, in your profile — and anyone can pay you at any hour. Each payment lands under a fresh key that only your wallet can work out from the one you published, so the chain never shows two payments arriving at the same place. A payment to it can carry a deadline, so the sender knows the money comes back to them if you never collect. Your wallet collects whatever is waiting the next time it is running.</p>
 <h3>Store It Cold</h3>
 <p>Worried about hackers? Print your notes as QR codes, put them in a fireproof box, and delete the app. The notes exist on the blockchain. The keys exist on paper. No internet-connected device holds them. When you want to spend, scan the QR code back into a wallet app, swap the lock immediately (in case someone copied the paper while it was stored), and transact normally.</p>
 
@@ -465,6 +469,7 @@
 <p>A new proof-of-work chain has low mining power, and low mining power invites attacks. Marigold launches with a temporary, fully disclosed safeguard called <strong>finality anchors</strong>: five publicly identified trustees periodically co-sign (requiring at least 3 of 5) a recent block, making it permanent and irreversible. No one can undo an anchored block.</p>
 <p>The trustees cannot censor transactions, create coins, move anyone’s funds, or produce blocks. Their only power is to prevent undoing completed transactions. If they go silent, the chain continues normally as a standard proof-of-work network — somewhat less protected, but fully operational.</p>
 <p>The safeguard is designed to retire. Once the network’s mining power grows strong enough that attacks are prohibitively expensive, anchors step down from mandatory to advisory to fully expired. Before that happens, the selection of successor trustees is intended to pass to note-holder governance — so even the training wheels' remnant transfers from founders to the community before they are removed entirely.</p>
+<p>On the public testnet the safeguard is running now: five trustee keys, an anchor roughly every thirty seconds, every node enforcing. The testnet trustees are throwaway keys made for the rehearsal; the real set is chosen at launch.</p>
 
 <hr>
 
@@ -521,7 +526,9 @@
   <li><strong>El destinatario cambia la cerradura de inmediato</strong> — registra una transacción que sustituye tu llave por una llave nueva que solo él conoce. Se confirma en menos de un segundo.</li>
 </ol>
 <p>Una vez confirmado ese cambio, el billete es suyo de forma irrevocable. Tú ya no tienes una llave que funcione. La liquidación está hecha.</p>
-<p>Como alternativa, si el destinatario puede enviarte por adelantado su llave nueva (por ejemplo, con una solicitud de pago), puedes cambiar la cerradura directamente a su llave. Tu llave no viaja a ninguna parte. Los dos métodos producen el mismo resultado: el billete pasa de una llave a otra.</p>
+<p>Como alternativa, si el destinatario puede enviarte por adelantado su llave nueva (por ejemplo, con una solicitud de pago), puedes cambiar la cerradura directamente a su llave. Tu llave no viaja a ninguna parte.</p>
+<p>La tercera forma sirve para pagar a alguien que no está. Cambias la cerradura a una llave que solo esa persona tiene y le pones un plazo. Hasta el plazo, solo ella puede tomar el billete; desde el plazo, solo tú puedes recuperarlo. Lo cobra cuando quiere; si nunca lo hace, el dinero vuelve a ser tuyo por sí solo. El plazo lo hace cumplir la red, no el monedero de nadie.</p>
+<p>Las tres formas terminan igual: el billete queda bajo una llave que solo el destinatario conoce.</p>
 
 <h3>Dividir y unir</h3>
 <p>Los billetes vienen en valores fijos, igual que el dinero de papel. Si necesitas pagar 30 MAGLD y tienes un billete de 100 MAGLD, lo <strong>divides</strong> en diez billetes de 10 MAGLD. Entregas tres. Te quedas siete. Dar cambio, igual que con el efectivo.</p>
@@ -529,7 +536,7 @@
 
 <h3>Qué registra el sistema</h3>
 <p>Cada operación — crear, cambiar cerraduras, dividir, unir, canjear — es pública y está a plena vista. Lo que nadie puede ver es <strong>quién</strong> la hizo, porque el sistema no tiene ningún concepto de «quién». No hay campo de remitente. Ni campo de destinatario. Ni agenda de direcciones. Ni cuenta.</p>
-<p>El sistema registra que un billete cambió de manos. No registra de qué manos.</p>
+<p>El sistema registra que un billete cambió de manos. No registra de qué manos. Un billete con plazo muestra además sus condiciones — el plazo y la llave a la que vuelve — mientras el plazo esté en vigor.</p>
 
 <hr>
 
@@ -549,6 +556,8 @@
 <h3>Paga en un puesto del mercado</h3>
 <p>Estás comprando tomates. El vendedor muestra un código QR: su solicitud de pago. Lo escaneas con tu aplicación de monedero, eliges el billete con el que quieres pagar y tu teléfono cambia la cerradura directamente a la llave del vendedor. Menos de un segundo después, el billete es suyo. Te guardas los tomates. El vendedor nunca vio tu nombre, ni tu dirección, ni tu cuenta. Tú tampoco viste los suyos. La transacción queda liquidada, es definitiva y se puede olvidar, igual que el efectivo.</p>
 
+<h3>Cobra mientras no estás</h3>
+<p>Publica una sola llave — en tu tarjeta, en el escaparate, en tu perfil — y cualquiera puede pagarte a cualquier hora. Cada pago cae bajo una llave nueva que solo tu monedero sabe derivar de la que publicaste, así que la cadena nunca muestra dos pagos llegando al mismo sitio. Un pago a esa llave puede llevar un plazo, de modo que quien envía sabe que el dinero le vuelve si nunca lo cobras. Tu monedero cobra lo que esté esperando la próxima vez que esté en marcha.</p>
 <h3>Guárdalo en frío</h3>
 <p>¿Te preocupan los hackers? Imprime tus billetes como códigos QR, mételos en una caja ignífuga y borra la aplicación. Los billetes existen en la blockchain. Las llaves existen en papel. Ningún aparato conectado a internet las guarda. Cuando quieras gastar, escanea el código QR para devolverlo a una aplicación de monedero, cambia la cerradura de inmediato (por si alguien copió el papel mientras estaba guardado) y opera con normalidad.</p>
 
@@ -611,6 +620,7 @@
 <p>Una cadena de prueba de trabajo recién nacida tiene poca potencia de minería, y la poca potencia de minería invita a los ataques. Marigold se lanza con una salvaguarda temporal y enteramente pública llamada <strong>anclas de finalidad</strong>: cinco garantes identificados públicamente co-firman cada cierto tiempo (hacen falta al menos 3 de 5) un bloque reciente y lo vuelven permanente e irreversible. Nadie puede deshacer un bloque anclado.</p>
 <p>Los garantes no pueden censurar transacciones, ni crear monedas, ni mover los fondos de nadie, ni producir bloques. Su único poder es impedir que se deshagan transacciones ya completadas. Si se quedan en silencio, la cadena sigue funcionando con normalidad como una red de prueba de trabajo corriente: algo menos protegida, pero plenamente operativa.</p>
 <p>La salvaguarda está diseñada para retirarse. Cuando la potencia de minería de la red crezca lo bastante como para que atacarla salga prohibitivamente caro, las anclas pasarán de obligatorias a consultivas y de ahí a caducadas del todo. Antes de que eso ocurra, la elección de los garantes sucesores está pensada para pasar a la gobernanza de quienes tienen billetes — de modo que incluso lo que quede de las ruedas de apoyo pase de los fundadores a la comunidad antes de que se retiren por completo.</p>
+<p>En la red de pruebas pública la salvaguarda ya está funcionando: cinco llaves de fideicomisarios, un ancla cada treinta segundos aproximadamente, todos los nodos haciéndola cumplir. Los fideicomisarios de la red de pruebas son llaves desechables hechas para el ensayo; los de verdad se eligen en el lanzamiento.</p>
 
 <hr>
 
@@ -666,7 +676,9 @@
   <li><strong>Der Empfänger tauscht sofort das Schloss aus</strong> — er schreibt eine Transaktion, die deinen Schlüssel durch einen ganz neuen ersetzt, den nur er kennt. Das ist in unter einer Sekunde bestätigt.</li>
 </ol>
 <p>Sobald der Tausch bestätigt ist, gehört der Schein unwiderruflich ihm. Dein Schlüssel passt nicht mehr. Die Zahlung ist abgeschlossen.</p>
-<p>Umgekehrt geht es auch: Wenn der Empfänger dir seinen neuen Schlüssel vorab schicken kann, etwa mit einer Zahlungsaufforderung, tauschst du das Schloss gleich gegen seinen Schlüssel aus. Dein Schlüssel verlässt dein Gerät dann nie. Beide Wege führen zum selben Ergebnis: Der Schein wandert von einem Schlüssel zum nächsten.</p>
+<p>Umgekehrt geht es auch: Wenn der Empfänger dir seinen neuen Schlüssel vorab schicken kann, etwa mit einer Zahlungsaufforderung, tauschst du das Schloss gleich gegen seinen Schlüssel aus. Dein Schlüssel verlässt dein Gerät dann nie.</p>
+<p>Der dritte Weg ist für den Fall, dass der Empfänger gerade nicht da ist. Du tauschst das Schloss gegen einen Schlüssel aus, den nur er besitzt, und setzt eine Frist. Bis zur Frist kann nur er den Schein an sich nehmen; ab der Frist kannst nur noch du ihn zurückholen. Er holt ihn ab, wann er will; tut er es nie, gehört das Geld von selbst wieder dir. Die Frist setzt das Netzwerk durch, nicht irgendeine Wallet.</p>
+<p>Alle drei Wege enden gleich: Der Schein liegt unter einem Schlüssel, den nur der Empfänger kennt.</p>
 
 <h3>Teilen und Zusammenlegen</h3>
 <p>Scheine gibt es in festen Werten, genau wie beim Bargeld. Wenn du 30 MAGLD zahlen willst und einen 100-MAGLD-Schein hast, <strong>teilst</strong> du ihn in zehn 10-MAGLD-Scheine. Drei davon gibst du weiter. Sieben behältst du. Wechselgeld — wie beim Bargeld.</p>
@@ -674,7 +686,7 @@
 
 <h3>Was das System aufzeichnet</h3>
 <p>Jede Operation — erzeugen, Schloss austauschen, teilen, zusammenlegen, einlösen — ist öffentlich und offen sichtbar. Was niemand sieht, ist, <strong>wer</strong> es war, denn das System kennt kein „Wer“. Es gibt kein Absenderfeld. Kein Empfängerfeld. Kein Adressbuch. Kein Konto.</p>
-<p>Das System hält fest, dass ein Schein den Besitzer gewechselt hat. Wer die Besitzer sind, hält es nicht fest.</p>
+<p>Das System hält fest, dass ein Schein den Besitzer gewechselt hat. Wer die Besitzer sind, hält es nicht fest. Ein Schein mit Frist zeigt außerdem seine Bedingungen — die Frist und den Schlüssel, zu dem er zurückgeht — solange die Frist läuft.</p>
 
 <hr>
 
@@ -694,6 +706,8 @@
 <h3>Am Marktstand bezahlen</h3>
 <p>Du kaufst Tomaten. Der Händler zeigt einen QR-Code — seine Zahlungsaufforderung. Du scannst ihn mit deiner Wallet-App, wählst den Schein aus, mit dem du zahlen willst, und dein Handy tauscht das Schloss direkt gegen den Schlüssel des Händlers aus. Keine Sekunde später gehört der Schein ihm. Du steckst die Tomaten ein. Der Händler hat deinen Namen nie gesehen, deine Adresse nicht und dein Konto auch nicht. Du hast von ihm genauso wenig gesehen. Die Zahlung ist erledigt, endgültig und vergessen — wie beim Bargeld.</p>
 
+<h3>Bezahlt werden, während du weg bist</h3>
+<p>Veröffentliche einen einzigen Schlüssel — auf deiner Visitenkarte, im Schaufenster, in deinem Profil — und jeder kann dich zu jeder Stunde bezahlen. Jede Zahlung landet unter einem frischen Schlüssel, den nur deine Wallet aus dem veröffentlichten ableiten kann; die Kette zeigt also nie zwei Zahlungen, die am selben Ort ankommen. Eine Zahlung dorthin kann eine Frist tragen, sodass der Absender weiß, dass das Geld zu ihm zurückkommt, falls du es nie abholst. Deine Wallet holt ab, was wartet, sobald sie das nächste Mal läuft.</p>
 <h3>Kalt lagern</h3>
 <p>Angst vor Hackern? Druck deine Scheine als QR-Codes aus, leg sie in eine feuerfeste Kassette und lösch die App. Die Scheine liegen in der Blockchain. Die Schlüssel liegen auf Papier. Kein Gerät mit Internetanschluss hat sie. Wenn du zahlen willst, scannst du den QR-Code zurück in eine Wallet-App, tauschst sofort das Schloss aus (falls jemand das Papier während der Lagerung abfotografiert hat) und zahlst ganz normal.</p>
 
@@ -756,6 +770,7 @@
 <p>Eine neue Proof-of-Work-Chain hat wenig Rechenleistung hinter sich, und wenig Rechenleistung lädt zu Angriffen ein. Marigold startet mit einer befristeten, vollständig offengelegten Absicherung namens <strong>Finalitätsanker</strong>: Fünf öffentlich benannte Treuhänder unterschreiben in regelmäßigen Abständen gemeinsam einen jungen Block — mindestens 3 von 5 müssen mitmachen — und machen ihn damit endgültig und unumkehrbar. Einen verankerten Block kann niemand mehr rückgängig machen.</p>
 <p>Die Treuhänder können keine Transaktionen zensieren, keine Coins erzeugen, niemandes Geld bewegen und keine Blöcke produzieren. Ihre einzige Macht ist, das Rückgängigmachen abgeschlossener Transaktionen zu verhindern. Wenn sie verstummen, läuft die Chain ganz normal als gewöhnliches Proof-of-Work-Netzwerk weiter — etwas weniger geschützt, aber voll funktionsfähig.</p>
 <p>Die Absicherung ist darauf angelegt, wieder zu verschwinden. Sobald die Rechenleistung im Netzwerk stark genug ist, dass Angriffe unbezahlbar werden, werden die Anker von verbindlich zu empfehlend und treten am Ende ganz außer Kraft. Vorher soll die Auswahl der nachfolgenden Treuhänder an die Mitbestimmung der Scheininhaber übergehen — selbst der Rest der Stützräder wechselt also von den Gründern zur Gemeinschaft, bevor sie ganz abgenommen werden.</p>
+<p>Im öffentlichen Testnetz läuft die Absicherung jetzt: fünf Treuhänder-Schlüssel, etwa alle dreißig Sekunden ein Anker, jeder Knoten setzt ihn durch. Die Testnetz-Treuhänder sind Wegwerfschlüssel für die Probe; die echten werden zum Start bestimmt.</p>
 
 <hr>
 
@@ -811,7 +826,9 @@
   <li><strong>Le destinataire change aussitôt la serrure</strong> — il inscrit une transaction qui remplace votre clé par une clé toute neuve que lui seul connaît. C’est confirmé en moins d’une seconde.</li>
 </ol>
 <p>Une fois ce changement confirmé, le billet lui appartient irrévocablement. Vous ne détenez plus de clé qui fonctionne. Le règlement est terminé.</p>
-<p>Autre possibilité : si le destinataire peut vous transmettre sa nouvelle clé à l’avance (par une demande de paiement, par exemple), vous changez la serrure directement pour la sienne. Votre clé ne circule nulle part. Les deux méthodes donnent le même résultat : le billet passe d’une clé à une autre.</p>
+<p>Autre possibilité : si le destinataire peut vous transmettre sa nouvelle clé à l’avance (par une demande de paiement, par exemple), vous changez la serrure directement pour la sienne. Votre clé ne circule nulle part.</p>
+<p>La troisième manière sert à payer quelqu’un qui n’est pas là. Vous changez la serrure pour une clé que lui seul détient, et vous y mettez une échéance. Jusqu’à l’échéance, lui seul peut prendre le billet ; à partir de l’échéance, vous seul pouvez le reprendre. Il l’encaisse quand il veut ; s’il ne le fait jamais, l’argent redevient le vôtre de lui-même. L’échéance est imposée par le réseau, pas par le portefeuille de qui que ce soit.</p>
+<p>Les trois manières finissent de la même façon : le billet est sous une clé que seul le destinataire connaît.</p>
 
 <h3>Diviser et fusionner</h3>
 <p>Les billets existent en valeurs fixes, exactement comme les espèces. Si vous devez payer 30 MAGLD et que vous détenez un billet de 100 MAGLD, vous le <strong>divisez</strong> en dix billets de 10 MAGLD. Vous en tendez trois. Vous en gardez sept. Faire la monnaie — comme avec l’argent liquide.</p>
@@ -819,7 +836,7 @@
 
 <h3>Ce que le système enregistre</h3>
 <p>Toute opération — créer un billet, changer une serrure, diviser, fusionner, encaisser — est publique et visible de tous. Ce que personne ne peut voir, c’est <strong>qui</strong> l’a faite, parce que le système n’a aucune notion de « qui ». Pas de champ expéditeur. Pas de champ destinataire. Pas de carnet d’adresses. Pas de compte.</p>
-<p>Le système enregistre qu’un billet a changé de mains. Il n’enregistre pas de quelles mains.</p>
+<p>Le système enregistre qu’un billet a changé de mains. Il n’enregistre pas de quelles mains. Un billet sous échéance montre aussi ses conditions — l’échéance, et la clé vers laquelle il revient — tant que l’échéance court.</p>
 
 <hr>
 
@@ -839,6 +856,8 @@
 <h3>Payez sur un marché</h3>
 <p>Vous achetez des tomates. Le marchand affiche un QR code : sa demande de paiement. Vous le scannez avec votre application de portefeuille, vous choisissez le billet avec lequel vous voulez payer, et votre téléphone change la serrure directement pour la clé du marchand. Moins d’une seconde plus tard, le billet est à lui. Vous empochez vos tomates. Le marchand n’a jamais vu votre nom, votre adresse ni votre compte. Vous n’avez jamais vu les siens. La transaction est réglée, définitive et oubliable — comme avec de l’argent liquide.</p>
 
+<h3>Être payé en votre absence</h3>
+<p>Publiez une seule clé — sur votre carte de visite, dans votre vitrine, sur votre profil — et n’importe qui peut vous payer à toute heure. Chaque paiement arrive sous une clé neuve que seul votre portefeuille sait déduire de celle que vous avez publiée ; la chaîne ne montre donc jamais deux paiements arrivant au même endroit. Un paiement vers cette clé peut porter une échéance, de sorte que l’expéditeur sait que l’argent lui revient si vous ne l’encaissez jamais. Votre portefeuille encaisse ce qui l’attend la prochaine fois qu’il tourne.</p>
 <h3>Rangez-le hors ligne</h3>
 <p>Les pirates vous inquiètent ? Imprimez vos billets sous forme de QR codes, rangez-les dans une boîte ignifugée et supprimez l’application. Les billets existent sur la blockchain. Les clés existent sur papier. Aucun appareil connecté à Internet ne les détient. Le jour où vous voulez dépenser, rescannez le QR code dans une application de portefeuille, changez aussitôt la serrure (au cas où quelqu’un aurait copié le papier pendant qu’il dormait là) et payez normalement.</p>
 
@@ -901,6 +920,7 @@
 <p>Une nouvelle chaîne à preuve de travail dispose de peu de puissance de minage, et une faible puissance de minage attire les attaques. Marigold démarre avec une protection temporaire et entièrement divulguée, appelée <strong>ancres de finalité</strong> : cinq garants publiquement identifiés co-signent périodiquement un bloc récent (il en faut au moins 3 sur 5), ce qui le rend permanent et irréversible. Personne ne peut défaire un bloc ancré.</p>
 <p>Les garants ne peuvent pas censurer de transactions, créer des pièces, déplacer les fonds de qui que ce soit, ni produire des blocs. Leur seul pouvoir est d’empêcher qu’une transaction déjà faite soit défaite. S’ils se taisent, la chaîne continue normalement, comme un réseau à preuve de travail ordinaire — un peu moins protégée, mais pleinement opérationnelle.</p>
 <p>Cette protection est conçue pour disparaître. Dès que la puissance de minage du réseau devient assez forte pour rendre une attaque hors de prix, les ancres passent d’obligatoires à consultatives, puis expirent tout à fait. Avant cela, le choix des garants suivants doit revenir à une gouvernance des détenteurs de billets — de sorte que même ce qui reste des petites roues passe des fondateurs à la communauté avant d’être retiré pour de bon.</p>
+<p>Sur le réseau de test public, la protection tourne dès maintenant : cinq clés de garants, une ancre toutes les trente secondes environ, chaque nœud qui l’applique. Les garants du réseau de test sont des clés jetables faites pour la répétition ; les vrais sont choisis au lancement.</p>
 
 <hr>
 
@@ -956,7 +976,9 @@
   <li><strong>Il destinatario cambia subito la serratura</strong> — registra una transazione che sostituisce la tua chiave con una chiave nuova di zecca che conosce solo lui. La conferma arriva in meno di un secondo.</li>
 </ol>
 <p>Una volta confermato il cambio, la banconota è sua in modo irrevocabile. Tu non hai più una chiave che funziona. Il pagamento è chiuso.</p>
-<p>In alternativa, se il destinatario può mandarti in anticipo la sua nuova chiave (per esempio con una richiesta di pagamento), puoi cambiare la serratura mettendo direttamente la sua. La tua chiave non viaggia da nessuna parte. I due modi danno lo stesso risultato: la banconota passa da una chiave a un’altra.</p>
+<p>In alternativa, se il destinatario può mandarti in anticipo la sua nuova chiave (per esempio con una richiesta di pagamento), puoi cambiare la serratura mettendo direttamente la sua. La tua chiave non viaggia da nessuna parte.</p>
+<p>La terza via serve a pagare qualcuno che non c’è. Cambi la serratura mettendo una chiave che solo lui possiede e le dai una scadenza. Fino alla scadenza solo lui può prendere la banconota; dalla scadenza in poi solo tu puoi riprendertela. La incassa quando vuole; se non lo fa mai, il denaro torna tuo da solo. La scadenza la fa rispettare la rete, non il portafoglio di nessuno.</p>
+<p>Tutte e tre finiscono allo stesso modo: la banconota sta sotto una chiave che solo il destinatario conosce.</p>
 
 <h3>Dividere e unire</h3>
 <p>Le banconote hanno tagli fissi, esattamente come i soldi di carta. Se devi pagare 30 MAGLD e hai una banconota da 100 MAGLD, la <strong>dividi</strong> in dieci banconote da 10 MAGLD. Ne passi tre. Ne tieni sette. Dare il resto — come con il contante.</p>
@@ -964,7 +986,7 @@
 
 <h3>Che cosa registra il sistema</h3>
 <p>Ogni operazione — creare, cambiare la serratura, dividere, unire, riscattare — è pubblica e in piena vista. Quello che nessuno può vedere è <strong>chi</strong> l’ha fatta, perché il sistema non ha nessuna nozione di «chi». Non c’è un campo mittente. Non c’è un campo destinatario. Non c’è una rubrica. Non c’è un conto.</p>
-<p>Il sistema registra che una banconota ha cambiato mano. Non registra di chi fosse la mano.</p>
+<p>Il sistema registra che una banconota ha cambiato mano. Non registra di chi fosse la mano. Una banconota con scadenza mostra anche le sue condizioni — la scadenza e la chiave a cui torna — finché la scadenza dura.</p>
 
 <hr>
 
@@ -984,6 +1006,8 @@
 <h3>Paga alla bancarella</h3>
 <p>Stai comprando i pomodori. Il venditore mostra un codice QR: la sua richiesta di pagamento. Lo scansioni con l’app del portafoglio, scegli la banconota con cui vuoi pagare e il telefono cambia la serratura mettendo direttamente quella del venditore. Meno di un secondo dopo, la banconota è sua. Tu ti prendi i pomodori. Il venditore non ha visto il tuo nome, il tuo indirizzo o il tuo conto. Tu non hai visto i suoi. Il pagamento è chiuso, definitivo e dimenticabile — proprio come con il contante.</p>
 
+<h3>Farsi pagare mentre non ci sei</h3>
+<p>Pubblica una sola chiave — sul biglietto da visita, in vetrina, nel tuo profilo — e chiunque può pagarti a qualsiasi ora. Ogni pagamento arriva sotto una chiave nuova che solo il tuo portafoglio sa ricavare da quella pubblicata, così la catena non mostra mai due pagamenti che arrivano nello stesso posto. Un pagamento a quella chiave può avere una scadenza, così chi manda sa che il denaro gli torna se non incassi mai. Il tuo portafoglio incassa ciò che aspetta la prossima volta che è acceso.</p>
 <h3>Mettila in cassaforte</h3>
 <p>Hai paura degli hacker? Stampa le tue banconote come codici QR, mettile in una cassetta ignifuga e cancella l’app. Le banconote esistono sulla blockchain. Le chiavi esistono sulla carta. Non le tiene nessun dispositivo collegato a internet. Quando vuoi spendere, riporti il codice QR dentro un’app del portafoglio con una scansione, cambi subito la serratura (nel caso qualcuno abbia copiato il foglio mentre era custodito) e paghi normalmente.</p>
 
@@ -1046,6 +1070,7 @@
 <p>Una catena proof-of-work nuova ha poca potenza di mining, e poca potenza di mining invita gli attacchi. Marigold parte con una protezione temporanea e dichiarata per intero, chiamata <strong>ancore di irreversibilità</strong>: cinque garanti identificati pubblicamente firmano insieme, a intervalli regolari (ne bastano almeno 3 su 5), un blocco recente, e lo rendono permanente e irreversibile. Un blocco ancorato non lo può annullare nessuno.</p>
 <p>I garanti non possono censurare transazioni, creare monete, spostare i fondi di qualcuno o produrre blocchi. Il loro unico potere è impedire che si annullino transazioni già concluse. Se tacciono, la catena va avanti normalmente come una rete proof-of-work qualsiasi — un po' meno protetta, ma perfettamente funzionante.</p>
 <p>La protezione è fatta per andare in pensione. Quando la potenza di mining della rete sarà cresciuta abbastanza da rendere un attacco proibitivamente caro, le ancore passeranno da obbligatorie a consultive, e poi scadranno del tutto. Prima che accada, la scelta dei garanti successivi dovrebbe passare al voto di chi detiene le banconote — così anche quel che resta delle rotelle passa dai fondatori alla comunità, prima di essere tolto del tutto.</p>
+<p>Sulla rete di prova pubblica la protezione è in funzione adesso: cinque chiavi di fiduciari, un’ancora ogni trenta secondi circa, ogni nodo che la fa rispettare. I fiduciari della rete di prova sono chiavi usa e getta fatte per la prova generale; quelli veri si scelgono al lancio.</p>
 
 <hr>
 
@@ -1101,7 +1126,9 @@
   <li><strong>Quem recebe troca a fechadura na hora</strong> — registra uma transação que substitui a sua chave por uma chave novinha que só essa pessoa conhece. Isso é confirmado em menos de um segundo.</li>
 </ol>
 <p>Confirmada a troca, a cédula é irrevogavelmente de quem recebeu. A sua chave não abre mais nada. A liquidação está feita.</p>
-<p>Se quem recebe conseguir mandar a chave nova para você antes (numa cobrança, por exemplo), dá para fazer diferente: você troca a fechadura direto para a chave dessa pessoa. A sua chave não viaja para lugar nenhum. Os dois caminhos dão no mesmo: a cédula passa de uma chave para outra.</p>
+<p>Se quem recebe conseguir mandar a chave nova para você antes (numa cobrança, por exemplo), dá para fazer diferente: você troca a fechadura direto para a chave dessa pessoa. A sua chave não viaja para lugar nenhum.</p>
+<p>O terceiro jeito é para pagar alguém que não está ali. Você troca a fechadura por uma chave que só essa pessoa tem e coloca um prazo. Até o prazo, só ela pode pegar a cédula; a partir do prazo, só você pode pegá-la de volta. Ela recebe quando quiser; se nunca receber, o dinheiro volta a ser seu sozinho. Quem faz valer o prazo é a rede, não a carteira de ninguém.</p>
+<p>Os três caminhos terminam do mesmo jeito: a cédula fica sob uma chave que só quem recebe conhece.</p>
 
 <h3>Dividir e juntar</h3>
 <p>As cédulas vêm em valores fixos, igual ao dinheiro de papel. Se você precisa pagar 30 MAGLD e tem uma cédula de 100 MAGLD, você a <strong>divide</strong> em dez cédulas de 10 MAGLD. Entrega três. Fica com sete. Troco — igual ao dinheiro vivo.</p>
@@ -1109,7 +1136,7 @@
 
 <h3>O que o sistema registra</h3>
 <p>Toda operação — criar, trocar fechadura, dividir, juntar, resgatar — é pública e está à vista. O que ninguém consegue ver é <strong>quem</strong> fez, porque o sistema não tem a noção de "quem". Não existe campo de remetente. Nem campo de destinatário. Nem agenda de endereços. Nem conta.</p>
-<p>O sistema registra que uma cédula mudou de mãos. Não registra de quem eram as mãos.</p>
+<p>O sistema registra que uma cédula mudou de mãos. Não registra de quem eram as mãos. Uma cédula com prazo mostra também as suas condições — o prazo e a chave para a qual ela volta — enquanto o prazo durar.</p>
 
 <hr>
 
@@ -1129,6 +1156,8 @@
 <h3>Pague na feira</h3>
 <p>Você está comprando tomate. O vendedor mostra um QR code — a cobrança dele. Você escaneia com o aplicativo de carteira, escolhe a cédula com que quer pagar, e o seu celular troca a fechadura direto para a chave do vendedor. Menos de um segundo depois, a cédula é dele. Você guarda os tomates. O vendedor nunca viu o seu nome, o seu endereço nem a sua conta. Você nunca viu os dele. A transação está liquidada, é final e pode ser esquecida — igual ao dinheiro vivo.</p>
 
+<h3>Receba enquanto estiver fora</h3>
+<p>Publique uma única chave — no cartão de visita, na vitrine, no seu perfil — e qualquer pessoa pode pagar você a qualquer hora. Cada pagamento cai sob uma chave nova que só a sua carteira sabe derivar da que você publicou, então a cadeia nunca mostra dois pagamentos chegando ao mesmo lugar. Um pagamento para essa chave pode ter prazo, e assim quem manda sabe que o dinheiro volta se você nunca receber. A sua carteira recebe o que estiver esperando na próxima vez que estiver ligada.</p>
 <h3>Guarde a frio</h3>
 <p>Preocupado com hackers? Imprima as suas cédulas como QR codes, guarde numa caixa à prova de fogo e apague o aplicativo. As cédulas existem no blockchain. As chaves existem no papel. Nenhum aparelho conectado à internet está com elas. Quando quiser gastar, escaneie o QR code de volta para um aplicativo de carteira, troque a fechadura na hora (vai que alguém copiou o papel enquanto ele estava guardado) e transacione normalmente.</p>
 
@@ -1191,6 +1220,7 @@
 <p>Um blockchain de prova de trabalho novo tem pouco poder de mineração, e pouco poder de mineração é convite para ataque. Marigold é lançado com uma proteção temporária e totalmente divulgada, chamada <strong>âncoras de finalidade</strong>: cinco curadores publicamente identificados assinam em conjunto, de tempos em tempos (com no mínimo 3 de 5), um bloco recente, tornando-o permanente e irreversível. Ninguém consegue desfazer um bloco ancorado.</p>
 <p>Os curadores não podem censurar transações, criar moedas, mover o dinheiro de ninguém nem produzir blocos. O único poder deles é impedir que transações concluídas sejam desfeitas. Se ficarem em silêncio, o blockchain segue normalmente como uma rede comum de prova de trabalho — um pouco menos protegida, mas plenamente operacional.</p>
 <p>A proteção foi feita para se aposentar. Quando o poder de mineração da rede crescer a ponto de tornar os ataques proibitivamente caros, as âncoras deixam de ser obrigatórias, passam a ser apenas consultivas e depois expiram de vez. Antes disso, a escolha dos curadores sucessores deve passar para a governança de quem tem cédulas — de modo que até o que resta das rodinhas sai das mãos dos fundadores para as da comunidade antes de ser retirado por completo.</p>
+<p>Na rede de testes pública a proteção já está funcionando: cinco chaves de curadores, uma âncora a cada trinta segundos mais ou menos, todos os nós fazendo valer. Os curadores da rede de testes são chaves descartáveis feitas para o ensaio; os de verdade são escolhidos no lançamento.</p>
 
 <hr>
 
@@ -1246,7 +1276,9 @@
   <li><strong>Получатель тут же меняет замок</strong> — он записывает транзакцию, которая заменяет ваш ключ совершенно новым, известным только ему. Подтверждение занимает меньше секунды.</li>
 </ol>
 <p>Как только смена замка подтверждена, купюра принадлежит получателю бесповоротно. Ваш ключ больше не работает. Расчёт завершён.</p>
-<p>Можно и наоборот: если получатель заранее пришлёт вам свой новый ключ (скажем, в запросе на оплату), вы смените замок сразу на его ключ. Тогда ваш ключ никуда не уходит. Результат в обоих случаях один: купюра переходит от одного ключа к другому.</p>
+<p>Можно и наоборот: если получатель заранее пришлёт вам свой новый ключ (скажем, в запросе на оплату), вы смените замок сразу на его ключ. Тогда ваш ключ никуда не уходит.</p>
+<p>Третий способ — для оплаты тому, кого сейчас нет рядом. Вы меняете замок на ключ, который есть только у него, и ставите срок. До срока забрать купюру может только он; начиная со срока вернуть её можете только вы. Он забирает, когда захочет; если так и не заберёт, деньги сами снова становятся вашими. Срок соблюдает сеть, а не чей-либо кошелёк.</p>
+<p>Все три способа заканчиваются одинаково: купюра лежит под ключом, который знает только получатель.</p>
 
 <h3>Размен и объединение</h3>
 <p>Купюры бывают только фиксированных номиналов — как и бумажные деньги. Если нужно заплатить 30 MAGLD, а у вас купюра в 100 MAGLD, вы <strong>разменяете</strong> её на десять купюр по 10 MAGLD. Три отдадите, семь оставите себе. Сдача — ровно как с наличными.</p>
@@ -1254,7 +1286,7 @@
 
 <h3>Что записывает система</h3>
 <p>Каждая операция — создание, смена замка, размен, объединение, погашение — публична и у всех на виду. Чего не видит никто, так это <strong>кто</strong> её совершил: у системы просто нет понятия «кто». Нет поля отправителя. Нет поля получателя. Нет адресной книги. Нет счёта.</p>
-<p>Система записывает, что купюра сменила руки. Чьи это были руки, она не записывает.</p>
+<p>Система записывает, что купюра сменила руки. Чьи это были руки, она не записывает. Купюра со сроком показывает и свои условия — срок и ключ, к которому она возвращается, — пока срок действует.</p>
 
 <hr>
 
@@ -1274,6 +1306,8 @@
 <h3>Заплатите на рынке</h3>
 <p>Вы покупаете помидоры. Продавец показывает QR-код — свой запрос на оплату. Вы сканируете его приложением-кошельком, выбираете купюру, которой хотите заплатить, и телефон меняет замок сразу на ключ продавца. Меньше чем через секунду купюра принадлежит ему. Вы забираете помидоры. Продавец не увидел ни вашего имени, ни адреса, ни счёта. Вы не увидели его. Платёж завершён, окончателен и забыт — совсем как наличными.</p>
 
+<h3>Получайте деньги, пока вас нет</h3>
+<p>Опубликуйте один ключ — на визитке, в витрине, в профиле — и любой сможет заплатить вам в любой час. Каждый платёж ложится под новый ключ, который только ваш кошелёк умеет вывести из опубликованного, так что цепочка никогда не показывает два платежа, пришедших в одно место. Платёж на такой ключ может иметь срок, и тогда отправитель знает: если вы так и не заберёте деньги, они вернутся к нему. Ваш кошелёк забирает всё, что ждёт, когда в следующий раз работает.</p>
 <h3>Храните офлайн</h3>
 <p>Боитесь взлома? Распечатайте купюры в виде QR-кодов, уберите в несгораемый ящик и удалите приложение. Сами купюры остаются в блокчейне. Ключи остаются на бумаге. Ни на одном устройстве с выходом в сеть их нет. Когда захотите потратить — отсканируйте QR-код обратно в кошелёк, сразу смените замок (вдруг кто-то переснял бумагу, пока она лежала) и платите как обычно.</p>
 
@@ -1336,6 +1370,7 @@
 <p>У нового блокчейна на proof-of-work мало вычислительной мощности, а малая мощность притягивает атаки. Marigold запускается с временной и полностью открытой страховкой — <strong>якорями финальности</strong>: пять публично названных доверенных лиц время от времени совместно подписывают (нужны минимум трое из пяти) один из недавних блоков, делая его постоянным и необратимым. Отменить заякоренный блок не может никто.</p>
 <p>Доверенные лица не могут ни цензурировать транзакции, ни создавать монеты, ни двигать чужие деньги, ни производить блоки. Вся их власть — не дать отменить уже состоявшиеся платежи. Если они замолчат, блокчейн продолжит работать как обычная сеть на proof-of-work — чуть менее защищённая, но полностью работоспособная.</p>
 <p>Эта страховка задумана так, чтобы однажды исчезнуть. Как только мощность сети вырастет настолько, что атака станет непозволительно дорогой, якоря перестанут быть обязательными, потом станут просто рекомендательными, а потом отключатся совсем. Ещё раньше выбор новых доверенных лиц должен перейти к голосованию держателей купюр — так что даже остаток страховочных колёс переходит от основателей к сообществу до того, как их снимут окончательно.</p>
+<p>В публичной тестовой сети эта страховка работает уже сейчас: пять ключей доверенных лиц, якорь примерно каждые тридцать секунд, каждый узел его соблюдает. Доверенные лица тестовой сети — одноразовые ключи, сделанные для репетиции; настоящие выберут при запуске.</p>
 
 <hr>
 
@@ -1391,7 +1426,9 @@
   <li><strong>对方立刻换锁</strong>——他们记一笔交易，把你的钥匙换成一把只有他们知道的全新钥匙。这在一秒之内就会确认。</li>
 </ol>
 <p>换锁一经确认，这张纸币就不可撤销地属于他们了。你手上那把钥匙不再管用。结算完成。</p>
-<p>另一种做法是：如果对方能提前把新钥匙给你（比如通过一张收款请求），你可以直接把锁换成他们的钥匙。你的钥匙哪儿也不用去。两种做法结果一样：纸币从一把钥匙转到另一把钥匙。</p>
+<p>另一种做法是：如果对方能提前把新钥匙给你（比如通过一张收款请求），你可以直接把锁换成他们的钥匙。你的钥匙哪儿也不用去。</p>
+<p>第三种做法用于付钱给不在场的人。你把锁换成只有对方持有的钥匙，并设一个期限。期限之前，只有对方能取走这张纸币；期限一到，只有你能把它收回。对方想什么时候收就什么时候收；若一直不收，这笔钱会自动重新归你。期限由网络执行，而不是由任何人的钱包执行。</p>
+<p>三种做法的结局相同：纸币落在一把只有收款人知道的钥匙之下。</p>
 
 <h3>拆分与合并</h3>
 <p>纸币只有固定的几种面额，和现钞一样。如果你要付 30 MAGLD，手上却是一张 100 MAGLD 的纸币，你就把它<strong>拆分</strong>成十张 10 MAGLD 的纸币，递出去三张，留下七张。找零——和现金一模一样。</p>
@@ -1399,7 +1436,7 @@
 
 <h3>系统记录了什么</h3>
 <p>每一次操作——创建、换锁、拆分、合并、赎回——都是公开的，明明白白摆在那里。没人能看到的是<strong>谁</strong>做的，因为系统里根本没有「谁」这个概念。没有付款方字段，没有收款方字段，没有通讯录，没有账户。</p>
-<p>系统记下的是一张纸币易了手，而不是易到了谁手上。</p>
+<p>系统记下的是一张纸币易了手，而不是易到了谁手上。带期限的纸币还会显示它的条件——期限，以及到期后回到哪把钥匙——直到期限结束。</p>
 
 <hr>
 
@@ -1419,6 +1456,8 @@
 <h3>在菜市场摊位付款</h3>
 <p>你在买西红柿。摊主亮出一个 QR 码——那是他的收款请求。你用钱包应用扫一下，挑一张要付的纸币，手机就直接把锁换成摊主的钥匙。不到一秒，纸币归他了。你拎起西红柿走人。摊主从头到尾没看见你的名字、住址或账户，你也没看见他的。这笔交易结清了，是终局，转头就能忘掉——和现金一样。</p>
 
+<h3>人不在也能收款</h3>
+<p>公开一把钥匙——印在名片上、贴在橱窗里、放在个人资料中——任何人都可以在任何时候付钱给你。每一笔付款都落在一把新钥匙之下，这把钥匙只有你的钱包能从你公开的那把推算出来，所以链上永远不会显示有两笔付款到达同一个地方。付到这把钥匙的款项可以带期限，付款人因此知道：如果你一直不收，钱会回到他那里。你的钱包下次运行时，会把等着的款项一并收下。</p>
 <h3>离线冷存</h3>
 <p>担心黑客？把纸币打印成 QR 码，放进防火盒，然后把应用删掉。纸币存在于区块链上，钥匙存在于纸上，没有任何联网设备碰得到它们。想花的时候，把 QR 码扫回钱包应用，立刻换一次锁（万一存放期间有人复印过那张纸），然后照常交易。</p>
 
@@ -1481,6 +1520,7 @@
 <p>一条新的工作量证明链算力低，而算力低会招来攻击。Marigold 启动时带了一项临时的、完全公开的保护措施，叫做<strong>终局锚点</strong>：五位公开身份的受托人定期共同签名（至少要五分之三），把某个近期区块钉死，使它永久且不可逆转。被锚定的区块，谁也推翻不了。</p>
 <p>受托人不能审查交易，不能凭空造币，不能动任何人的资金，也不能生产区块。他们唯一的权力，是阻止已完成的交易被推翻。如果他们集体沉默，这条链会作为一条普通的工作量证明网络照常运行——保护弱一些，但功能完好。</p>
 <p>这项保护措施从设计之初就是要退场的。等网络算力壮大到攻击的代价高得不划算，锚点就从「强制」降为「参考」，再到彻底失效。在那之前，后继受托人的推选权计划移交给纸币持有人治理——也就是说，辅助轮在被彻底拆掉之前，连它最后残留的那点作用，也已经从创始团队转到了社区手里。</p>
+<p>在公开测试网上，这项保护措施现在就在运行：五把受托人钥匙，大约每三十秒一个锚点，每个节点都在执行。测试网上的受托人是为演练准备的一次性钥匙；正式的一组在上线时选定。</p>
 
 <hr>
 

@@ -51,7 +51,11 @@ Pagar a alguien es como entregar un billete, con un paso más:
 
 Una vez confirmado ese cambio, el billete es suyo de forma irrevocable. Tú ya no tienes una llave que funcione. La liquidación está hecha.
 
-Como alternativa, si el destinatario puede enviarte por adelantado su llave nueva (por ejemplo, con una solicitud de pago), puedes cambiar la cerradura directamente a su llave. Tu llave no viaja a ninguna parte. Los dos métodos producen el mismo resultado: el billete pasa de una llave a otra.
+Como alternativa, si el destinatario puede enviarte por adelantado su llave nueva (por ejemplo, con una solicitud de pago), puedes cambiar la cerradura directamente a su llave. Tu llave no viaja a ninguna parte.
+
+La tercera forma sirve para pagar a alguien que no está. Cambias la cerradura a una llave que solo esa persona tiene y le pones un plazo. Hasta el plazo, solo ella puede tomar el billete; desde el plazo, solo tú puedes recuperarlo. Lo cobra cuando quiere; si nunca lo hace, el dinero vuelve a ser tuyo por sí solo. El plazo lo hace cumplir la red, no el monedero de nadie.
+
+Las tres formas terminan igual: el billete queda bajo una llave que solo el destinatario conoce.
 
 ### Dividir y unir
 
@@ -63,7 +67,7 @@ En sentido contrario, diez billetes de 10 MAGLD pueden **unirse** en uno solo de
 
 Cada operación — crear, cambiar cerraduras, dividir, unir, canjear — es pública y está a plena vista. Lo que nadie puede ver es **quién** la hizo, porque el sistema no tiene ningún concepto de «quién». No hay campo de remitente. Ni campo de destinatario. Ni agenda de direcciones. Ni cuenta.
 
-El sistema registra que un billete cambió de manos. No registra de qué manos.
+El sistema registra que un billete cambió de manos. No registra de qué manos. Un billete con plazo muestra además sus condiciones — el plazo y la llave a la que vuelve — mientras el plazo esté en vigor.
 
 ---
 
@@ -88,6 +92,10 @@ Un sobre cerrado en una caja de seguridad, con los códigos QR impresos de vario
 ### Paga en un puesto del mercado
 
 Estás comprando tomates. El vendedor muestra un código QR: su solicitud de pago. Lo escaneas con tu aplicación de monedero, eliges el billete con el que quieres pagar y tu teléfono cambia la cerradura directamente a la llave del vendedor. Menos de un segundo después, el billete es suyo. Te guardas los tomates. El vendedor nunca vio tu nombre, ni tu dirección, ni tu cuenta. Tú tampoco viste los suyos. La transacción queda liquidada, es definitiva y se puede olvidar, igual que el efectivo.
+
+### Cobra mientras no estás
+
+Publica una sola llave — en tu tarjeta, en el escaparate, en tu perfil — y cualquiera puede pagarte a cualquier hora. Cada pago cae bajo una llave nueva que solo tu monedero sabe derivar de la que publicaste, así que la cadena nunca muestra dos pagos llegando al mismo sitio. Un pago a esa llave puede llevar un plazo, de modo que quien envía sabe que el dinero le vuelve si nunca lo cobras. Tu monedero cobra lo que esté esperando la próxima vez que esté en marcha.
 
 ### Guárdalo en frío
 
@@ -171,6 +179,8 @@ Una cadena de prueba de trabajo recién nacida tiene poca potencia de minería, 
 Los garantes no pueden censurar transacciones, ni crear monedas, ni mover los fondos de nadie, ni producir bloques. Su único poder es impedir que se deshagan transacciones ya completadas. Si se quedan en silencio, la cadena sigue funcionando con normalidad como una red de prueba de trabajo corriente: algo menos protegida, pero plenamente operativa.
 
 La salvaguarda está diseñada para retirarse. Cuando la potencia de minería de la red crezca lo bastante como para que atacarla salga prohibitivamente caro, las anclas pasarán de obligatorias a consultivas y de ahí a caducadas del todo. Antes de que eso ocurra, la elección de los garantes sucesores está pensada para pasar a la gobernanza de quienes tienen billetes — de modo que incluso lo que quede de las ruedas de apoyo pase de los fundadores a la comunidad antes de que se retiren por completo.
+
+En la red de pruebas pública la salvaguarda ya está funcionando: cinco llaves de fideicomisarios, un ancla cada treinta segundos aproximadamente, todos los nodos haciéndola cumplir. Los fideicomisarios de la red de pruebas son llaves desechables hechas para el ensayo; los de verdad se eligen en el lanzamiento.
 
 ---
 

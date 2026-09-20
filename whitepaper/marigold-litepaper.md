@@ -51,7 +51,11 @@ Paying someone is like handing over a bill, with one extra step:
 
 Once that swap is confirmed, the note is irrevocably theirs. You no longer hold a key that works. Settlement is done.
 
-Alternatively, if the recipient can send you their new key ahead of time (say, via a payment request), you can swap the lock directly to their key. Your key never travels anywhere. Both methods produce the same result: the note moves from one key to another.
+Alternatively, if the recipient can send you their new key ahead of time (say, via a payment request), you can swap the lock directly to their key. Your key never travels anywhere.
+
+The third way is for paying someone who is not there. You swap the lock to a key only they hold and put a deadline on it. Until the deadline, only they can take the note; from the deadline on, only you can take it back. They collect when they like; if they never do, the money is yours again by itself. The deadline is enforced by the network, not by anyone's wallet.
+
+All three end the same way: the note sits under a key that only the recipient knows.
 
 ### Splitting and Merging
 
@@ -63,7 +67,7 @@ Going the other way, ten 10-MAGLD notes can be **merged** into one 100-MAGLD not
 
 Every operation — creating, swapping locks, splitting, merging, redeeming — is public and in plain view. What no one can see is **who** did it, because the system has no concept of "who." There is no sender field. No receiver field. No address book. No account.
 
-The system records that a note changed hands. It does not record whose hands.
+The system records that a note changed hands. It does not record whose hands. A note under a deadline also shows its terms — the deadline, and the key it goes back to — for as long as the deadline stands.
 
 ---
 
@@ -88,6 +92,10 @@ A sealed envelope in a safe deposit box, containing printed QR codes for several
 ### Pay at a Market Stall
 
 You are buying tomatoes. The vendor displays a QR code — their payment request. You scan it with your wallet app, select the note you want to pay with, and your phone swaps the lock directly to the vendor's key. Under one second later, the note is theirs. You pocket your tomatoes. The vendor never saw your name, your address, or your account. You never saw theirs. The transaction is settled, final, and forgettable — just like cash.
+
+### Be Paid While You Are Away
+
+Publish one key — on your business card, in your shop window, in your profile — and anyone can pay you at any hour. Each payment lands under a fresh key that only your wallet can work out from the one you published, so the chain never shows two payments arriving at the same place. A payment to it can carry a deadline, so the sender knows the money comes back to them if you never collect. Your wallet collects whatever is waiting the next time it is running.
 
 ### Store It Cold
 
@@ -171,6 +179,8 @@ A new proof-of-work chain has low mining power, and low mining power invites att
 The trustees cannot censor transactions, create coins, move anyone's funds, or produce blocks. Their only power is to prevent undoing completed transactions. If they go silent, the chain continues normally as a standard proof-of-work network — somewhat less protected, but fully operational.
 
 The safeguard is designed to retire. Once the network's mining power grows strong enough that attacks are prohibitively expensive, anchors step down from mandatory to advisory to fully expired. Before that happens, the selection of successor trustees is intended to pass to note-holder governance — so even the training wheels' remnant transfers from founders to the community before they are removed entirely.
+
+On the public testnet the safeguard is running now: five trustee keys, an anchor roughly every thirty seconds, every node enforcing. The testnet trustees are throwaway keys made for the rehearsal; the real set is chosen at launch.
 
 ---
 

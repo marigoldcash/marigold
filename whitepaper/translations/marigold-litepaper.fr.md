@@ -51,7 +51,11 @@ Payer quelqu'un, c'est comme tendre un billet, avec une étape en plus :
 
 Une fois ce changement confirmé, le billet lui appartient irrévocablement. Vous ne détenez plus de clé qui fonctionne. Le règlement est terminé.
 
-Autre possibilité : si le destinataire peut vous transmettre sa nouvelle clé à l'avance (par une demande de paiement, par exemple), vous changez la serrure directement pour la sienne. Votre clé ne circule nulle part. Les deux méthodes donnent le même résultat : le billet passe d'une clé à une autre.
+Autre possibilité : si le destinataire peut vous transmettre sa nouvelle clé à l'avance (par une demande de paiement, par exemple), vous changez la serrure directement pour la sienne. Votre clé ne circule nulle part.
+
+La troisième manière sert à payer quelqu'un qui n'est pas là. Vous changez la serrure pour une clé que lui seul détient, et vous y mettez une échéance. Jusqu'à l'échéance, lui seul peut prendre le billet ; à partir de l'échéance, vous seul pouvez le reprendre. Il l'encaisse quand il veut ; s'il ne le fait jamais, l'argent redevient le vôtre de lui-même. L'échéance est imposée par le réseau, pas par le portefeuille de qui que ce soit.
+
+Les trois manières finissent de la même façon : le billet est sous une clé que seul le destinataire connaît.
 
 ### Diviser et fusionner
 
@@ -63,7 +67,7 @@ Dans l'autre sens, dix billets de 10 MAGLD peuvent être **fusionnés** en un se
 
 Toute opération — créer un billet, changer une serrure, diviser, fusionner, encaisser — est publique et visible de tous. Ce que personne ne peut voir, c'est **qui** l'a faite, parce que le système n'a aucune notion de « qui ». Pas de champ expéditeur. Pas de champ destinataire. Pas de carnet d'adresses. Pas de compte.
 
-Le système enregistre qu'un billet a changé de mains. Il n'enregistre pas de quelles mains.
+Le système enregistre qu'un billet a changé de mains. Il n'enregistre pas de quelles mains. Un billet sous échéance montre aussi ses conditions — l'échéance, et la clé vers laquelle il revient — tant que l'échéance court.
 
 ---
 
@@ -88,6 +92,10 @@ Une enveloppe scellée dans un coffre, contenant les QR codes imprimés de plusi
 ### Payez sur un marché
 
 Vous achetez des tomates. Le marchand affiche un QR code : sa demande de paiement. Vous le scannez avec votre application de portefeuille, vous choisissez le billet avec lequel vous voulez payer, et votre téléphone change la serrure directement pour la clé du marchand. Moins d'une seconde plus tard, le billet est à lui. Vous empochez vos tomates. Le marchand n'a jamais vu votre nom, votre adresse ni votre compte. Vous n'avez jamais vu les siens. La transaction est réglée, définitive et oubliable — comme avec de l'argent liquide.
+
+### Être payé en votre absence
+
+Publiez une seule clé — sur votre carte de visite, dans votre vitrine, sur votre profil — et n'importe qui peut vous payer à toute heure. Chaque paiement arrive sous une clé neuve que seul votre portefeuille sait déduire de celle que vous avez publiée ; la chaîne ne montre donc jamais deux paiements arrivant au même endroit. Un paiement vers cette clé peut porter une échéance, de sorte que l'expéditeur sait que l'argent lui revient si vous ne l'encaissez jamais. Votre portefeuille encaisse ce qui l'attend la prochaine fois qu'il tourne.
 
 ### Rangez-le hors ligne
 
@@ -171,6 +179,8 @@ Une nouvelle chaîne à preuve de travail dispose de peu de puissance de minage,
 Les garants ne peuvent pas censurer de transactions, créer des pièces, déplacer les fonds de qui que ce soit, ni produire des blocs. Leur seul pouvoir est d'empêcher qu'une transaction déjà faite soit défaite. S'ils se taisent, la chaîne continue normalement, comme un réseau à preuve de travail ordinaire — un peu moins protégée, mais pleinement opérationnelle.
 
 Cette protection est conçue pour disparaître. Dès que la puissance de minage du réseau devient assez forte pour rendre une attaque hors de prix, les ancres passent d'obligatoires à consultatives, puis expirent tout à fait. Avant cela, le choix des garants suivants doit revenir à une gouvernance des détenteurs de billets — de sorte que même ce qui reste des petites roues passe des fondateurs à la communauté avant d'être retiré pour de bon.
+
+Sur le réseau de test public, la protection tourne dès maintenant : cinq clés de garants, une ancre toutes les trente secondes environ, chaque nœud qui l'applique. Les garants du réseau de test sont des clés jetables faites pour la répétition ; les vrais sont choisis au lancement.
 
 ---
 

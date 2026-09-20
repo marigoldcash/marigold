@@ -228,7 +228,9 @@
       <li><strong>The recipient immediately swaps the lock</strong> — they record a transaction that replaces your key with a brand-new key that only they know. This is confirmed in under a second.</li>
     </ol>
     <p>Once that swap is confirmed, the note is irrevocably theirs. You no longer hold a key that works. Settlement is done.</p>
-    <p>Alternatively, if the recipient can send you their new key ahead of time (say, via a payment request), you can swap the lock directly to their key. Your key never travels anywhere. Both methods produce the same result: the note moves from one key to another.</p>
+    <p>Alternatively, if the recipient can send you their new key ahead of time (say, via a payment request), you can swap the lock directly to their key. Your key never travels anywhere.</p>
+    <p>The third way is for paying someone who is not there. You swap the lock to a key only they hold and put a deadline on it. Until the deadline, only they can take the note; from the deadline on, only you can take it back. They collect when they like; if they never do, the money is yours again by itself. The deadline is enforced by the network, not by anyone's wallet.</p>
+    <p>All three end the same way: the note sits under a key that only the recipient knows.</p>
 
     <div class="kicker" style="margin-top:6mm">Splitting and Merging</div>
     <p>Notes come in fixed values, just like physical currency. If you need to pay 30 MAGLD and you hold a 100-MAGLD note, you <strong>split</strong> it into ten 10-MAGLD notes. You hand over three of them. You keep seven. Making change — same as cash.</p>
@@ -237,6 +239,7 @@
     <div class="kicker" style="margin-top:6mm">What the System Records</div>
     <p>Every operation — creating, swapping locks, splitting, merging, redeeming — is public and in plain view. What no one can see is <strong>who</strong> did it, because the system has no concept of "who." There is no sender field. No receiver field. No address book. No account.</p>
     <div class="plate"><p>The system records that a note changed hands.<br><span class="gold">It does not record whose hands.</span></p></div>
+    <p>A note under a deadline also shows its terms — the deadline, and the key it goes back to — for as long as the deadline stands.</p>
   </section>
 
   <section>
@@ -254,6 +257,8 @@
         <p>A sealed envelope in a safe deposit box, containing printed QR codes for several notes, functions exactly like an envelope of cash. Whoever opens it holds the keys. Whoever holds the keys holds the notes. No executor, no probate court, no third-party permission is needed for the value to transfer — though, as with physical cash, the <em>legal</em> arrangements around inheritance are a separate matter the system does not and cannot address. The system guarantees only that possession of the key is possession of the note.</p></div>
       <div class="card"><h3>Pay at a Market Stall</h3>
         <p>You are buying tomatoes. The vendor displays a QR code — their payment request. You scan it with your wallet app, select the note you want to pay with, and your phone swaps the lock directly to the vendor's key. Under one second later, the note is theirs. You pocket your tomatoes. The vendor never saw your name, your address, or your account. You never saw theirs. The transaction is settled, final, and forgettable — just like cash.</p></div>
+      <div class="card"><h3>Be Paid While You Are Away</h3>
+        <p>Publish one key — on your business card, in your shop window, in your profile — and anyone can pay you at any hour. Each payment lands under a fresh key that only your wallet can work out from the one you published, so the chain never shows two payments arriving at the same place. A payment to it can carry a deadline, so the sender knows the money comes back to them if you never collect. Your wallet collects whatever is waiting the next time it is running.</p></div>
       <div class="card"><h3>Store It Cold</h3>
         <p>Worried about hackers? Print your notes as QR codes, put them in a fireproof box, and delete the app. The notes exist on the blockchain. The keys exist on paper. No internet-connected device holds them. When you want to spend, scan the QR code back into a wallet app, swap the lock immediately (in case someone copied the paper while it was stored), and transact normally.</p></div>
       <div class="card"><h3>Move Between Wallets</h3>
@@ -333,6 +338,7 @@
     <p>A new proof-of-work chain has low mining power, and low mining power invites attacks. Marigold launches with a temporary, fully disclosed safeguard called <strong>finality anchors</strong>: five publicly identified trustees periodically co-sign (requiring at least 3 of 5) a recent block, making it permanent and irreversible. No one can undo an anchored block.</p>
     <p>The trustees cannot censor transactions, create coins, move anyone's funds, or produce blocks. Their only power is to prevent undoing completed transactions. If they go silent, the chain continues normally as a standard proof-of-work network — somewhat less protected, but fully operational.</p>
     <p>The safeguard is designed to retire. Once the network's mining power grows strong enough that attacks are prohibitively expensive, anchors step down from mandatory to advisory to fully expired. Before that happens, the selection of successor trustees is intended to pass to note-holder governance — so even the training wheels' remnant transfers from founders to the community before they are removed entirely.</p>
+    <p>On the public testnet the safeguard is running now: five trustee keys, an anchor roughly every thirty seconds, every node enforcing. The testnet trustees are throwaway keys made for the rehearsal; the real set is chosen at launch.</p>
   </section>
 </div>
 

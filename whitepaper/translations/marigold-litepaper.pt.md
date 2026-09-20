@@ -51,7 +51,11 @@ Pagar alguém é como entregar uma cédula, com um passo a mais:
 
 Confirmada a troca, a cédula é irrevogavelmente de quem recebeu. A sua chave não abre mais nada. A liquidação está feita.
 
-Se quem recebe conseguir mandar a chave nova para você antes (numa cobrança, por exemplo), dá para fazer diferente: você troca a fechadura direto para a chave dessa pessoa. A sua chave não viaja para lugar nenhum. Os dois caminhos dão no mesmo: a cédula passa de uma chave para outra.
+Se quem recebe conseguir mandar a chave nova para você antes (numa cobrança, por exemplo), dá para fazer diferente: você troca a fechadura direto para a chave dessa pessoa. A sua chave não viaja para lugar nenhum.
+
+O terceiro jeito é para pagar alguém que não está ali. Você troca a fechadura por uma chave que só essa pessoa tem e coloca um prazo. Até o prazo, só ela pode pegar a cédula; a partir do prazo, só você pode pegá-la de volta. Ela recebe quando quiser; se nunca receber, o dinheiro volta a ser seu sozinho. Quem faz valer o prazo é a rede, não a carteira de ninguém.
+
+Os três caminhos terminam do mesmo jeito: a cédula fica sob uma chave que só quem recebe conhece.
 
 ### Dividir e juntar
 
@@ -63,7 +67,7 @@ No sentido contrário, dez cédulas de 10 MAGLD podem ser **juntadas** em uma c�
 
 Toda operação — criar, trocar fechadura, dividir, juntar, resgatar — é pública e está à vista. O que ninguém consegue ver é **quem** fez, porque o sistema não tem a noção de "quem". Não existe campo de remetente. Nem campo de destinatário. Nem agenda de endereços. Nem conta.
 
-O sistema registra que uma cédula mudou de mãos. Não registra de quem eram as mãos.
+O sistema registra que uma cédula mudou de mãos. Não registra de quem eram as mãos. Uma cédula com prazo mostra também as suas condições — o prazo e a chave para a qual ela volta — enquanto o prazo durar.
 
 ---
 
@@ -88,6 +92,10 @@ Um envelope lacrado no cofre do banco, com os QR codes impressos de várias céd
 ### Pague na feira
 
 Você está comprando tomate. O vendedor mostra um QR code — a cobrança dele. Você escaneia com o aplicativo de carteira, escolhe a cédula com que quer pagar, e o seu celular troca a fechadura direto para a chave do vendedor. Menos de um segundo depois, a cédula é dele. Você guarda os tomates. O vendedor nunca viu o seu nome, o seu endereço nem a sua conta. Você nunca viu os dele. A transação está liquidada, é final e pode ser esquecida — igual ao dinheiro vivo.
+
+### Receba enquanto estiver fora
+
+Publique uma única chave — no cartão de visita, na vitrine, no seu perfil — e qualquer pessoa pode pagar você a qualquer hora. Cada pagamento cai sob uma chave nova que só a sua carteira sabe derivar da que você publicou, então a cadeia nunca mostra dois pagamentos chegando ao mesmo lugar. Um pagamento para essa chave pode ter prazo, e assim quem manda sabe que o dinheiro volta se você nunca receber. A sua carteira recebe o que estiver esperando na próxima vez que estiver ligada.
 
 ### Guarde a frio
 
@@ -171,6 +179,8 @@ Um blockchain de prova de trabalho novo tem pouco poder de mineração, e pouco 
 Os curadores não podem censurar transações, criar moedas, mover o dinheiro de ninguém nem produzir blocos. O único poder deles é impedir que transações concluídas sejam desfeitas. Se ficarem em silêncio, o blockchain segue normalmente como uma rede comum de prova de trabalho — um pouco menos protegida, mas plenamente operacional.
 
 A proteção foi feita para se aposentar. Quando o poder de mineração da rede crescer a ponto de tornar os ataques proibitivamente caros, as âncoras deixam de ser obrigatórias, passam a ser apenas consultivas e depois expiram de vez. Antes disso, a escolha dos curadores sucessores deve passar para a governança de quem tem cédulas — de modo que até o que resta das rodinhas sai das mãos dos fundadores para as da comunidade antes de ser retirado por completo.
+
+Na rede de testes pública a proteção já está funcionando: cinco chaves de curadores, uma âncora a cada trinta segundos mais ou menos, todos os nós fazendo valer. Os curadores da rede de testes são chaves descartáveis feitas para o ensaio; os de verdade são escolhidos no lançamento.
 
 ---
 

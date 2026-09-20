@@ -51,7 +51,11 @@ Pagare qualcuno è come passargli una banconota, con un passaggio in più:
 
 Una volta confermato il cambio, la banconota è sua in modo irrevocabile. Tu non hai più una chiave che funziona. Il pagamento è chiuso.
 
-In alternativa, se il destinatario può mandarti in anticipo la sua nuova chiave (per esempio con una richiesta di pagamento), puoi cambiare la serratura mettendo direttamente la sua. La tua chiave non viaggia da nessuna parte. I due modi danno lo stesso risultato: la banconota passa da una chiave a un'altra.
+In alternativa, se il destinatario può mandarti in anticipo la sua nuova chiave (per esempio con una richiesta di pagamento), puoi cambiare la serratura mettendo direttamente la sua. La tua chiave non viaggia da nessuna parte.
+
+La terza via serve a pagare qualcuno che non c'è. Cambi la serratura mettendo una chiave che solo lui possiede e le dai una scadenza. Fino alla scadenza solo lui può prendere la banconota; dalla scadenza in poi solo tu puoi riprendertela. La incassa quando vuole; se non lo fa mai, il denaro torna tuo da solo. La scadenza la fa rispettare la rete, non il portafoglio di nessuno.
+
+Tutte e tre finiscono allo stesso modo: la banconota sta sotto una chiave che solo il destinatario conosce.
 
 ### Dividere e unire
 
@@ -63,7 +67,7 @@ Nel senso opposto, dieci banconote da 10 MAGLD si possono **unire** in una sola 
 
 Ogni operazione — creare, cambiare la serratura, dividere, unire, riscattare — è pubblica e in piena vista. Quello che nessuno può vedere è **chi** l'ha fatta, perché il sistema non ha nessuna nozione di «chi». Non c'è un campo mittente. Non c'è un campo destinatario. Non c'è una rubrica. Non c'è un conto.
 
-Il sistema registra che una banconota ha cambiato mano. Non registra di chi fosse la mano.
+Il sistema registra che una banconota ha cambiato mano. Non registra di chi fosse la mano. Una banconota con scadenza mostra anche le sue condizioni — la scadenza e la chiave a cui torna — finché la scadenza dura.
 
 ---
 
@@ -88,6 +92,10 @@ Una busta sigillata in una cassetta di sicurezza, con dentro i codici QR stampat
 ### Paga alla bancarella
 
 Stai comprando i pomodori. Il venditore mostra un codice QR: la sua richiesta di pagamento. Lo scansioni con l'app del portafoglio, scegli la banconota con cui vuoi pagare e il telefono cambia la serratura mettendo direttamente quella del venditore. Meno di un secondo dopo, la banconota è sua. Tu ti prendi i pomodori. Il venditore non ha visto il tuo nome, il tuo indirizzo o il tuo conto. Tu non hai visto i suoi. Il pagamento è chiuso, definitivo e dimenticabile — proprio come con il contante.
+
+### Farsi pagare mentre non ci sei
+
+Pubblica una sola chiave — sul biglietto da visita, in vetrina, nel tuo profilo — e chiunque può pagarti a qualsiasi ora. Ogni pagamento arriva sotto una chiave nuova che solo il tuo portafoglio sa ricavare da quella pubblicata, così la catena non mostra mai due pagamenti che arrivano nello stesso posto. Un pagamento a quella chiave può avere una scadenza, così chi manda sa che il denaro gli torna se non incassi mai. Il tuo portafoglio incassa ciò che aspetta la prossima volta che è acceso.
 
 ### Mettila in cassaforte
 
@@ -171,6 +179,8 @@ Una catena proof-of-work nuova ha poca potenza di mining, e poca potenza di mini
 I garanti non possono censurare transazioni, creare monete, spostare i fondi di qualcuno o produrre blocchi. Il loro unico potere è impedire che si annullino transazioni già concluse. Se tacciono, la catena va avanti normalmente come una rete proof-of-work qualsiasi — un po' meno protetta, ma perfettamente funzionante.
 
 La protezione è fatta per andare in pensione. Quando la potenza di mining della rete sarà cresciuta abbastanza da rendere un attacco proibitivamente caro, le ancore passeranno da obbligatorie a consultive, e poi scadranno del tutto. Prima che accada, la scelta dei garanti successivi dovrebbe passare al voto di chi detiene le banconote — così anche quel che resta delle rotelle passa dai fondatori alla comunità, prima di essere tolto del tutto.
+
+Sulla rete di prova pubblica la protezione è in funzione adesso: cinque chiavi di fiduciari, un'ancora ogni trenta secondi circa, ogni nodo che la fa rispettare. I fiduciari della rete di prova sono chiavi usa e getta fatte per la prova generale; quelli veri si scelgono al lancio.
 
 ---
 

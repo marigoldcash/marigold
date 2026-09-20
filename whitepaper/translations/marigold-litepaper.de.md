@@ -51,7 +51,11 @@ Jemanden zu bezahlen ist wie einen Schein zu übergeben, nur mit einem Schritt m
 
 Sobald der Tausch bestätigt ist, gehört der Schein unwiderruflich ihm. Dein Schlüssel passt nicht mehr. Die Zahlung ist abgeschlossen.
 
-Umgekehrt geht es auch: Wenn der Empfänger dir seinen neuen Schlüssel vorab schicken kann, etwa mit einer Zahlungsaufforderung, tauschst du das Schloss gleich gegen seinen Schlüssel aus. Dein Schlüssel verlässt dein Gerät dann nie. Beide Wege führen zum selben Ergebnis: Der Schein wandert von einem Schlüssel zum nächsten.
+Umgekehrt geht es auch: Wenn der Empfänger dir seinen neuen Schlüssel vorab schicken kann, etwa mit einer Zahlungsaufforderung, tauschst du das Schloss gleich gegen seinen Schlüssel aus. Dein Schlüssel verlässt dein Gerät dann nie.
+
+Der dritte Weg ist für den Fall, dass der Empfänger gerade nicht da ist. Du tauschst das Schloss gegen einen Schlüssel aus, den nur er besitzt, und setzt eine Frist. Bis zur Frist kann nur er den Schein an sich nehmen; ab der Frist kannst nur noch du ihn zurückholen. Er holt ihn ab, wann er will; tut er es nie, gehört das Geld von selbst wieder dir. Die Frist setzt das Netzwerk durch, nicht irgendeine Wallet.
+
+Alle drei Wege enden gleich: Der Schein liegt unter einem Schlüssel, den nur der Empfänger kennt.
 
 ### Teilen und Zusammenlegen
 
@@ -63,7 +67,7 @@ Andersherum lassen sich zehn 10-MAGLD-Scheine zu einem 100-MAGLD-Schein **zusamm
 
 Jede Operation — erzeugen, Schloss austauschen, teilen, zusammenlegen, einlösen — ist öffentlich und offen sichtbar. Was niemand sieht, ist, **wer** es war, denn das System kennt kein „Wer“. Es gibt kein Absenderfeld. Kein Empfängerfeld. Kein Adressbuch. Kein Konto.
 
-Das System hält fest, dass ein Schein den Besitzer gewechselt hat. Wer die Besitzer sind, hält es nicht fest.
+Das System hält fest, dass ein Schein den Besitzer gewechselt hat. Wer die Besitzer sind, hält es nicht fest. Ein Schein mit Frist zeigt außerdem seine Bedingungen — die Frist und den Schlüssel, zu dem er zurückgeht — solange die Frist läuft.
 
 ---
 
@@ -88,6 +92,10 @@ Ein versiegelter Umschlag im Bankschließfach, mit gedruckten QR-Codes für mehr
 ### Am Marktstand bezahlen
 
 Du kaufst Tomaten. Der Händler zeigt einen QR-Code — seine Zahlungsaufforderung. Du scannst ihn mit deiner Wallet-App, wählst den Schein aus, mit dem du zahlen willst, und dein Handy tauscht das Schloss direkt gegen den Schlüssel des Händlers aus. Keine Sekunde später gehört der Schein ihm. Du steckst die Tomaten ein. Der Händler hat deinen Namen nie gesehen, deine Adresse nicht und dein Konto auch nicht. Du hast von ihm genauso wenig gesehen. Die Zahlung ist erledigt, endgültig und vergessen — wie beim Bargeld.
+
+### Bezahlt werden, während du weg bist
+
+Veröffentliche einen einzigen Schlüssel — auf deiner Visitenkarte, im Schaufenster, in deinem Profil — und jeder kann dich zu jeder Stunde bezahlen. Jede Zahlung landet unter einem frischen Schlüssel, den nur deine Wallet aus dem veröffentlichten ableiten kann; die Kette zeigt also nie zwei Zahlungen, die am selben Ort ankommen. Eine Zahlung dorthin kann eine Frist tragen, sodass der Absender weiß, dass das Geld zu ihm zurückkommt, falls du es nie abholst. Deine Wallet holt ab, was wartet, sobald sie das nächste Mal läuft.
 
 ### Kalt lagern
 
@@ -171,6 +179,8 @@ Eine neue Proof-of-Work-Chain hat wenig Rechenleistung hinter sich, und wenig Re
 Die Treuhänder können keine Transaktionen zensieren, keine Coins erzeugen, niemandes Geld bewegen und keine Blöcke produzieren. Ihre einzige Macht ist, das Rückgängigmachen abgeschlossener Transaktionen zu verhindern. Wenn sie verstummen, läuft die Chain ganz normal als gewöhnliches Proof-of-Work-Netzwerk weiter — etwas weniger geschützt, aber voll funktionsfähig.
 
 Die Absicherung ist darauf angelegt, wieder zu verschwinden. Sobald die Rechenleistung im Netzwerk stark genug ist, dass Angriffe unbezahlbar werden, werden die Anker von verbindlich zu empfehlend und treten am Ende ganz außer Kraft. Vorher soll die Auswahl der nachfolgenden Treuhänder an die Mitbestimmung der Scheininhaber übergehen — selbst der Rest der Stützräder wechselt also von den Gründern zur Gemeinschaft, bevor sie ganz abgenommen werden.
+
+Im öffentlichen Testnetz läuft die Absicherung jetzt: fünf Treuhänder-Schlüssel, etwa alle dreißig Sekunden ein Anker, jeder Knoten setzt ihn durch. Die Testnetz-Treuhänder sind Wegwerfschlüssel für die Probe; die echten werden zum Start bestimmt.
 
 ---
 
