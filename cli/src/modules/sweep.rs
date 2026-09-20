@@ -23,7 +23,7 @@ impl Sweep {
         };
 
         let account = ctx.ledger_account().await?;
-        let (wallet_secret, payment_secret) = ctx.ask_wallet_secret(Some(&account)).await?;
+        let (wallet_secret, payment_secret) = ctx.ask_wallet_secret_for_tidying(Some(&account)).await?;
 
         let utxo_count = account.utxo_context().mature_utxo_size();
         // Zero coins means one of two things, and only one of them is "nothing

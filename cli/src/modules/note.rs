@@ -279,7 +279,7 @@ impl Note {
                 petals
             }
         };
-        let (wallet_secret, payment_secret) = ctx.ask_wallet_secret(Some(&account)).await?;
+        let (wallet_secret, payment_secret) = ctx.ask_wallet_secret_for_tidying(Some(&account)).await?;
         self.ensure_vault_interactive(ctx, &wallet_secret).await?;
         let abortable = Abortable::default();
 

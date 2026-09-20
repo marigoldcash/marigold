@@ -2855,6 +2855,20 @@ impl KaspaCli {
 
     /// Asks uses for a wallet secret, checks the supplied account's private key info
     /// and if it requires a payment secret, asks for it as well.
+    /// The password for tidying — mint, sweep — which moves money between
+    /// this wallet's own pockets and nowhere else. If the session already
+    /// holds it (auto-mint or auto-sweep armed, which sign with it in the
+    /// background anyway), it is not asked for again, and no second factor
+    /// either: a spend is gated, a sweep is not (founder, 2026-09-20).
+    pub(crate) async fn ask_wallet_secret_for_tidying(&self, account: Option<&Arc<dyn Account>>) -> Result<(Secret, Option<Secret>)> {
+        let held = self.auto_secret.lock().unwrap().as_mut().map(|g| g.reveal());
+        if let Some(secret) = held {
+            let payment = self.auto_payment_secret.lock().unwrap().as_mut().map(|g| g.reveal());
+            return Ok((secret, payment));
+        }
+        self.ask_wallet_secret(account).await
+    }
+
     pub(crate) async fn ask_wallet_secret(&self, account: Option<&Arc<dyn Account>>) -> Result<(Secret, Option<Secret>)> {
         let secrets = self.ask_wallet_secret_without_otp(account).await?;
         // Every moment that stops to ask for a password is a moment worth a
