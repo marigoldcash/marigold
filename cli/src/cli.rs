@@ -125,6 +125,8 @@ pub struct KaspaCli {
     /// While an own-lane operation runs: the expected time to a block of ours,
     /// so every transaction it submits is remembered with it.
     own_lane_capture: Mutex<Option<Duration>>,
+    /// The version the node we are on reported at connect.
+    connected_server_version: Mutex<Option<String>>,
     auto_threshold_petals: Arc<AtomicU64>,
     /// 0 disables auto-sweep; otherwise the UTXO count that triggers one.
     auto_sweep_utxos: Arc<AtomicU64>,
@@ -321,6 +323,7 @@ impl KaspaCli {
             auto_payment_secret: Mutex::new(None),
             own_lane_spends: Mutex::new(Vec::new()),
             own_lane_capture: Mutex::new(None),
+            connected_server_version: Mutex::new(None),
             auto_threshold_petals: Arc::new(AtomicU64::new(0)),
             auto_sweep_utxos: Arc::new(AtomicU64::new(0)),
             auto_busy: Arc::new(AtomicBool::new(false)),
@@ -535,10 +538,24 @@ impl KaspaCli {
     /// our own is expected within the hour: a transaction below the relay
     /// floor is kept out of relay by our node, so nobody else will ever mine
     /// it, and a CPU against a network of ASICs might wait for days.
+    /// Whether a marigoldd on this machine's loopback takes our tidying at the
+    /// own-lane fee: from build 2.0.195 a node whose RPC listens on loopback
+    /// only does so by default. Older ones reject the fee, so they are treated
+    /// as any other computer.
+    pub fn local_node_carries_own_lane(&self) -> bool {
+        if !self.connected_to_local_node() {
+            return false;
+        }
+        let version = self.connected_server_version.lock().unwrap().clone().unwrap_or_default();
+        let mut parts = version.split('.').map(|p| p.parse::<u64>().unwrap_or(0));
+        let (major, minor, patch) = (parts.next().unwrap_or(0), parts.next().unwrap_or(0), parts.next().unwrap_or(0));
+        (major, minor, patch) >= (2, 0, 195)
+    }
+
     pub async fn own_lane(&self) -> OwnLane {
         #[cfg(feature = "embedded-node")]
         {
-            if !self.embedded_node_in_use() {
+            if !self.embedded_node_in_use() && !self.local_node_carries_own_lane() {
                 return self.remote_own_lane().await;
             }
             let hashrate = match self.cpu_miner.lock().unwrap().as_ref() {
@@ -2612,6 +2629,7 @@ impl KaspaCli {
 
                                     // No URL means the node is inside this process — there is no
                                     // address to print, and "at N/A" reads like a fault.
+                                    this.connected_server_version.lock().unwrap().replace(server_version.to_string());
                                     match &url {
                                         Some(url) => tprintln!(this, "Connected to {url}, Marigold version {server_version}"),
                                         None => tprintln!(this, "Using your own copy of the network, Marigold version {server_version}"),

@@ -283,6 +283,15 @@ pub fn cli() -> Command {
                 .value_parser(clap::value_parser!(WrpcNetAddress))
                 .help("Interface:port to listen for wRPC JSON connections (default port: 18110, testnet: 18210)."),
         )
+        .arg(
+            Arg::new("accept-own-below-floor")
+                .long("accept-own-below-floor")
+                .value_name("bool")
+                .num_args(0..=1)
+                .default_missing_value("true")
+                .value_parser(clap::value_parser!(bool))
+                .help("Take this node's own wallet's tidying transactions below the relay fee floor, unrelayed, for this node's own blocks (default: on when RPC listens on loopback only)"),
+        )
         .arg(arg!(--unsaferpc "Enable RPC commands which affect the state of the node").env("KASPAD_UNSAFERPC"))
         .arg(
             Arg::new("connect-peers")
@@ -505,7 +514,7 @@ impl Args {
             })?;
         }
 
-        let args = Args {
+        let mut args = Args {
             appdir: m.get_one::<String>("appdir").cloned().or(defaults.appdir),
             logdir: m.get_one::<String>("logdir").cloned().or(defaults.logdir),
             no_log_files: arg_match_unwrap_or::<bool>(&m, "nologfiles", defaults.no_log_files),
@@ -558,6 +567,25 @@ impl Args {
             rocksdb_preset: m.get_one::<String>("rocksdb-preset").cloned().or(defaults.rocksdb_preset),
             rocksdb_wal_dir: m.get_one::<String>("rocksdb-wal-dir").cloned().or(defaults.rocksdb_wal_dir),
             rocksdb_cache_size: m.get_one::<usize>("rocksdb-cache-size").cloned().or(defaults.rocksdb_cache_size),
+        };
+
+        // A node whose RPC listens on loopback only serves the person who runs
+        // it, so it takes that person's wallet's tidying at the own-lane fee,
+        // the way the node inside the wallet does. Given explicitly, the flag
+        // decides either way (Marigold, 2026-09-20).
+        let loopback_only = {
+            let wrpc_is_loopback = |w: &Option<WrpcNetAddress>| match w {
+                None | Some(WrpcNetAddress::Default) => true,
+                Some(WrpcNetAddress::Public) => false,
+                Some(WrpcNetAddress::Custom(address)) => address.normalize(0).ip.is_loopback(),
+            };
+            args.rpclisten.as_ref().is_none_or(|address| address.normalize(0).ip.is_loopback())
+                && wrpc_is_loopback(&args.rpclisten_borsh)
+                && wrpc_is_loopback(&args.rpclisten_json)
+        };
+        args.accept_own_below_floor = match m.get_one::<bool>("accept-own-below-floor") {
+            Some(explicit) => *explicit,
+            None => loopback_only,
         };
 
         if arg_match_unwrap_or::<bool>(&m, "enable-mainnet-mining", false) {
