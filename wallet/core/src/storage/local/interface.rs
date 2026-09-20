@@ -937,6 +937,10 @@ impl NoteKeyStore for LocalStoreInner {
         self.notevault.recently_written(within_secs).await
     }
 
+    async fn superseded_before(&self, older_than_secs: u64) -> Result<Vec<Arc<NoteKeyInfo>>> {
+        self.notevault.superseded_before(older_than_secs).await
+    }
+
     async fn store(&self, wallet_secret: &Secret, entry: NoteKeyEntry) -> Result<()> {
         self.ensure_note_vault(wallet_secret).await?;
         self.notevault.store(wallet_secret, entry).await?;

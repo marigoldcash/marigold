@@ -115,6 +115,8 @@ pub trait NoteKeyStore: Send + Sync {
     /// therefore in flight, not lost, and reconciliation must not call it a
     /// phantom.
     async fn recently_written(&self, within_secs: u64) -> Result<Vec<Hash>>;
+    /// Superseded rows whose status has stood for at least `older_than_secs`.
+    async fn superseded_before(&self, older_than_secs: u64) -> Result<Vec<Arc<NoteKeyInfo>>>;
 
     /// Flip a row's `status` — plaintext-only, never needs the wallet secret.
     async fn mark_status(&self, sn: &Hash, status: NoteStatus) -> Result<()>;

@@ -2688,6 +2688,38 @@ pub async fn verify_held_notes(wallet: &Arc<Wallet>) -> Result<(Vec<Arc<NoteKeyI
     Ok((present, phantom))
 }
 
+/// How long a superseded note is left alone before the pool is asked whether
+/// its consuming transaction ever landed. Longer than any transaction of ours
+/// can legitimately wait: an own-lane spend may sit in the mempool for an
+/// hour before the wallet reprices it.
+pub const REVIVE_AFTER_SECS: u64 = 2 * 3600;
+
+/// Notes this wallet wrote off as spent that the pool still holds under the
+/// same keys — a transaction that was to consume them never landed (a node
+/// still catching up took it in and lost it: tester report, 2026-09-20) —
+/// put back as active. Only against a synced node, only for rows superseded
+/// at least [`REVIVE_AFTER_SECS`] ago, and only when the pool's key matches:
+/// a note re-keyed by anyone else is spent, whatever this wallet remembers.
+pub async fn revive_unspent_notes(wallet: &Arc<Wallet>) -> Result<Vec<Arc<NoteKeyInfo>>> {
+    if !wallet.utxo_processor().is_synced() {
+        return Ok(Vec::new());
+    }
+    let note_key_store = wallet.store().as_note_key_store()?;
+    let candidates = note_key_store.superseded_before(REVIVE_AFTER_SECS).await?;
+    let mut revived = Vec::new();
+    for chunk in candidates.chunks(500) {
+        let entries = wallet.rpc_api().get_notes_by_serial(chunk.iter().map(|i| i.sn).collect()).await?;
+        for info in chunk {
+            if entries.iter().any(|entry| entry.sn == info.sn && entry.pk == info.pk) {
+                note_key_store.mark_status(&info.sn, NoteStatus::Active).await?;
+                note_key_store.clear_missing(&info.sn).await?;
+                revived.push(info.clone());
+            }
+        }
+    }
+    Ok(revived)
+}
+
 /// Strikes before a note stops being counted as money.
 ///
 /// Three, and they must be consecutive: a serial that turns up once resets to

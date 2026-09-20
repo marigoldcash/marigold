@@ -244,11 +244,16 @@ struct ManifestRow {
     missing_strikes: u32,
     /// For an offered note: the DAA score its lock lapses at; 0 otherwise.
     lock_until: u64,
+    /// When `status` last changed (unix seconds); 0 for rows from before this
+    /// was recorded. A superseded row is only revived — see
+    /// `superseded_before` — once its consuming transaction has had every
+    /// chance to land.
+    status_since: u64,
 }
 
 fn manifest_line(row: &ManifestRow) -> String {
     format!(
-        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
         row.info.sn.to_hex(),
         denomination_petals(row.info.d),
         row.info.pk.as_slice().to_hex(),
@@ -257,6 +262,7 @@ fn manifest_line(row: &ManifestRow) -> String {
         row.last_rotated_at,
         row.missing_strikes,
         row.lock_until,
+        row.status_since,
     )
 }
 
@@ -276,7 +282,15 @@ fn parse_manifest_line(line: &str) -> Option<ManifestRow> {
     let missing_strikes: u32 = fields.next().and_then(|f| f.parse().ok()).unwrap_or(0);
     // Eighth field since P8.0g; absent means no lock.
     let lock_until: u64 = fields.next().and_then(|f| f.parse().ok()).unwrap_or(0);
-    Some(ManifestRow { info: NoteKeyInfo { sn, pk, d, provenance, status }, last_rotated_at, missing_strikes, lock_until })
+    // Ninth field since 2.0.205; absent reads as "long ago".
+    let status_since: u64 = fields.next().and_then(|f| f.parse().ok()).unwrap_or(0);
+    Some(ManifestRow {
+        info: NoteKeyInfo { sn, pk, d, provenance, status },
+        last_rotated_at,
+        missing_strikes,
+        lock_until,
+        status_since,
+    })
 }
 
 pub struct NoteVault {
@@ -601,7 +615,10 @@ impl NoteVault {
                 let Ok(file) = VaultNoteFile::try_from_slice(plaintext.as_ref()) else { continue };
                 let pk = NoteKeyEntry::new(file.sn, file.sk, file.d, file.provenance).derive_pk()?;
                 let info = NoteKeyInfo { sn: file.sn, pk, d: file.d, provenance: file.provenance, status };
-                rows.insert(file.sn, ManifestRow { info, last_rotated_at: file.last_rotated_at, missing_strikes: 0, lock_until: 0 });
+                rows.insert(
+                    file.sn,
+                    ManifestRow { info, last_rotated_at: file.last_rotated_at, missing_strikes: 0, lock_until: 0, status_since: 0 },
+                );
             }
         }
         let count = rows.len();
@@ -641,6 +658,20 @@ impl NoteVault {
         Ok(index.values().filter(|row| row.last_rotated_at >= cutoff).map(|row| row.info.sn).collect())
     }
 
+    /// Superseded rows whose status has stood for at least `older_than_secs`:
+    /// the ones whose consuming transaction, if it was ever going to land,
+    /// has landed by now.
+    pub async fn superseded_before(&self, older_than_secs: u64) -> Result<Vec<Arc<NoteKeyInfo>>> {
+        self.ensure_loaded().await?;
+        let cutoff = now_unix().saturating_sub(older_than_secs);
+        let index = self.index.read().await;
+        Ok(index
+            .values()
+            .filter(|row| row.info.status == NoteStatus::Superseded && row.status_since <= cutoff)
+            .map(|row| Arc::new(row.info.clone()))
+            .collect())
+    }
+
     pub async fn load_info(&self, sn: &Hash) -> Result<Option<Arc<NoteKeyInfo>>> {
         self.ensure_loaded().await?;
         Ok(self.index.read().await.get(sn).map(|row| Arc::new(row.info.clone())))
@@ -666,7 +697,10 @@ impl NoteVault {
         self.write_note_file(&file, NoteStatus::Active, &k).await?;
         let info = NoteKeyInfo { sn: entry.sn, pk, d: entry.d, provenance: entry.provenance, status: NoteStatus::Active };
         // A freshly stored note starts with a clean slate.
-        self.index.write().await.insert(entry.sn, ManifestRow { info, last_rotated_at, missing_strikes: 0, lock_until: 0 });
+        self.index
+            .write()
+            .await
+            .insert(entry.sn, ManifestRow { info, last_rotated_at, missing_strikes: 0, lock_until: 0, status_since: now_unix() });
         self.persist_manifest().await?;
         Ok(())
     }
@@ -684,7 +718,10 @@ impl NoteVault {
         let file = VaultNoteFile { sn: entry.sn, sk: entry.sk, d: entry.d, provenance: entry.provenance, last_rotated_at };
         self.write_note_file(&file, NoteStatus::Offered, &k).await?;
         let info = NoteKeyInfo { sn: entry.sn, pk, d: entry.d, provenance: entry.provenance, status: NoteStatus::Offered };
-        self.index.write().await.insert(entry.sn, ManifestRow { info, last_rotated_at, missing_strikes: 0, lock_until });
+        self.index
+            .write()
+            .await
+            .insert(entry.sn, ManifestRow { info, last_rotated_at, missing_strikes: 0, lock_until, status_since: now_unix() });
         self.persist_manifest().await?;
         Ok(())
     }
@@ -860,6 +897,7 @@ impl NoteVault {
                         return Ok(());
                     }
                     row.info.status = status;
+                    row.status_since = now_unix();
                     Some((old_status, row.info.d))
                 }
                 None => None,
