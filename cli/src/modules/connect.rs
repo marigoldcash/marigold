@@ -9,6 +9,10 @@ pub struct Connect;
 impl Connect {
     async fn main(self: Arc<Self>, ctx: &Arc<dyn Context>, argv: Vec<String>, _cmd: &str) -> Result<()> {
         let ctx = ctx.clone().downcast_arc::<KaspaCli>()?;
+        // A connection dropped while this command runs was dropped on
+        // purpose; the "Disconnected" / "Connected again" pair is for the
+        // ones that were not.
+        let _switching = ctx.switching();
 
         // 'local' is a word this program puts in front of people — the connect
         // prompt offers it, 'node status' suggests it — so they type it at
@@ -102,13 +106,7 @@ impl Connect {
                     SyncStart::Settled => return Ok(()),
                     SyncStart::PublicOnly => {
                         let target = public.expect("offered only when there is one");
-                        let dial = ConnectOptions {
-                            block_async_connect: true,
-                            strategy: ConnectStrategy::Fallback,
-                            url: Some(target),
-                            ..Default::default()
-                        };
-                        if let Err(err) = wrpc_client.connect(Some(dial)).await {
+                        if let Err(err) = dial(wrpc_client, target).await {
                             tprintln!(ctx, "{}", style("Could not reach the public computer.").yellow());
                             if ctx.advanced() {
                                 tprintln!(ctx, "{}", style(format!("({err})")).dim());
@@ -130,13 +128,7 @@ impl Connect {
                     }
                     SyncStart::PublicMeanwhile(rpc) => {
                         let target = public.expect("offered only when there is one");
-                        let dial = ConnectOptions {
-                            block_async_connect: true,
-                            strategy: ConnectStrategy::Fallback,
-                            url: Some(target),
-                            ..Default::default()
-                        };
-                        if let Err(err) = wrpc_client.connect(Some(dial)).await {
+                        if let Err(err) = dial(wrpc_client, target).await {
                             tprintln!(ctx, "{}", style("Could not reach the public computer.").yellow());
                             if ctx.advanced() {
                                 tprintln!(ctx, "{}", style(format!("({err})")).dim());
@@ -200,13 +192,7 @@ impl Connect {
             };
 
             let url_label = url.clone();
-            let dial = |target: String| ConnectOptions {
-                block_async_connect: true,
-                strategy: ConnectStrategy::Fallback,
-                url: Some(target),
-                ..Default::default()
-            };
-            let mut outcome = wrpc_client.connect(Some(dial(url))).await;
+            let mut outcome = dial(wrpc_client, url).await;
 
             // An address on this machine that is not answering: the network
             // is not being synced here yet, so start it — same flow as bare
@@ -223,12 +209,12 @@ impl Connect {
                     SyncStart::Settled => return Ok(()),
                     SyncStart::PublicOnly => {
                         let target = public.expect("offered only when there is one");
-                        outcome = wrpc_client.connect(Some(dial(target))).await;
+                        outcome = dial(wrpc_client, target).await;
                         is_public = true;
                     }
                     SyncStart::PublicMeanwhile(rpc) => {
                         let target = public.expect("offered only when there is one");
-                        outcome = wrpc_client.connect(Some(dial(target))).await;
+                        outcome = dial(wrpc_client, target).await;
                         is_public = true;
                         own_node_started = true;
                         ctx.start_node_handover_task(rpc);
@@ -249,7 +235,7 @@ impl Connect {
                     tprintln!(ctx, "Using a public computer for now, and starting your own sync behind it.");
                     tprintln!(ctx, "");
                     if let Ok(target) = wrpc_client.parse_url_with_network_type(node, network_id.into()) {
-                        outcome = wrpc_client.connect(Some(dial(target))).await;
+                        outcome = dial(wrpc_client, target).await;
                         if outcome.is_ok() {
                             is_public = true;
                             fell_back = true;
@@ -390,6 +376,43 @@ impl Connect {
         }
         Ok(())
     }
+}
+
+/// How long a first dial waits for an answer before the wallet gives up.
+const DIAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Dial `url` for the wallet's own connection: bounded on the first attempt,
+/// and kept alive afterwards.
+///
+/// The wallet used to dial with the fallback strategy, which returns the
+/// reason when a node cannot be reached — and also gives up for good the
+/// first time a reconnect fails. A node restarted while the wallet was on it
+/// left the wallet disconnected until somebody typed 'connect', with a miner
+/// asking a dead socket for work every half second (founder, 2026-09-20).
+/// Now the socket retries on its own for as long as the wallet is on this
+/// node; a first dial that nobody answers within [`DIAL_TIMEOUT`] is stopped
+/// here and reported, so a wrong address still fails fast.
+pub(crate) async fn dial(client: &kaspa_wrpc_client::KaspaRpcClient, url: String) -> std::result::Result<(), String> {
+    let options = ConnectOptions {
+        block_async_connect: false,
+        strategy: ConnectStrategy::Retry,
+        url: Some(url.clone()),
+        connect_timeout: Some(DIAL_TIMEOUT),
+        retry_interval: Some(std::time::Duration::from_secs(3)),
+        ..Default::default()
+    };
+    client.connect(Some(options)).await.map_err(|err| err.to_string())?;
+    let started = std::time::Instant::now();
+    while started.elapsed() < DIAL_TIMEOUT {
+        if client.is_connected() {
+            return Ok(());
+        }
+        workflow_core::task::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    // Nobody answered: stop the retrying, or the wallet would sit dialling a
+    // typo forever behind whatever the person does next.
+    client.disconnect().await.ok();
+    Err(format!("no answer from {url} within {} seconds", DIAL_TIMEOUT.as_secs()))
 }
 
 /// Is a node answering on this machine's wRPC port, and does it have a miner

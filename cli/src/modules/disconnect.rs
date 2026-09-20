@@ -7,6 +7,7 @@ pub struct Disconnect;
 impl Disconnect {
     async fn main(self: Arc<Self>, ctx: &Arc<dyn Context>, _argv: Vec<String>, _cmd: &str) -> Result<()> {
         let ctx = ctx.clone().downcast_arc::<KaspaCli>()?;
+        let _switching = ctx.switching();
         // Two things this can mean, each confirmed on its own (founder,
         // 2026-09-16): stopping the sync running on this machine, and letting
         // go of a public computer. Both can be true at once while the sync is

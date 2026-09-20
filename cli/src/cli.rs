@@ -160,6 +160,9 @@ pub struct KaspaCli {
     /// Zero and "not known" are different facts and only one of them is
     /// alarming. Nothing may print a ledger figure while this is false.
     ledger_known: Arc<AtomicBool>,
+    /// A 'connect' or 'disconnect' is running: the disconnection it causes
+    /// is its own doing and is not announced as a lost link.
+    switching: Arc<AtomicBool>,
 }
 
 /// See [`KaspaCli::otp_session`].
@@ -334,6 +337,7 @@ impl KaspaCli {
             prompt_balance_width: Arc::new(AtomicUsize::new(0)),
             otp_session: Mutex::new(OtpSession::default()),
             ledger_known: Arc::new(AtomicBool::new(true)),
+            switching: Arc::new(AtomicBool::new(false)),
         });
 
         let term = Arc::new(Terminal::try_new_with_options(kaspa_cli.clone(), options.terminal)?);
@@ -2389,6 +2393,12 @@ impl KaspaCli {
         });
     }
 
+    /// Mark a deliberate change of connection for as long as the guard lives.
+    pub fn switching(&self) -> SwitchingGuard {
+        self.switching.store(true, Ordering::SeqCst);
+        SwitchingGuard(self.switching.clone())
+    }
+
     pub fn toggle_mute(&self) -> &'static str {
         helpers::toggle(&self.mute)
     }
@@ -2558,13 +2568,17 @@ impl KaspaCli {
                                 },
                                 #[allow(unused_variables)]
                                 Events::Connect{ url, network_id } => {
-                                    // log_info!("Connected to {url}");
+                                    // Announced when the server status arrives, below — for a
+                                    // first connection and for one the socket made again on
+                                    // its own after the node went away.
                                 },
                                 #[allow(unused_variables)]
                                 Events::Disconnect{ url, network_id } => {
                                     this.ledger_known.store(false, Ordering::SeqCst);
-                                    tprintln!(this, "Disconnected from {}", url.unwrap_or_else(|| "the node".to_string()));
-                                    this.term().refresh_prompt();
+                                    if !this.switching.load(Ordering::SeqCst) {
+                                        tprintln!(this, "Disconnected from {} — trying again until it is back.", url.unwrap_or_else(|| "the node".to_string()));
+                                        this.term().refresh_prompt();
+                                    }
                                 },
                                 Events::UtxoIndexNotEnabled { .. } => {
                                     tprintln!(this, "Error: Marigold node UTXO index is not enabled...")
@@ -3797,4 +3811,13 @@ fn is_technical(text: &str) -> bool {
         || [" -> ", "os error", "error(", "::", "0x", "wrpc", "rpc", "websocket", "serde", "panicked", "unwrap"]
             .iter()
             .any(|marker| lower.contains(marker))
+}
+
+/// Held by 'connect' and 'disconnect' while they run; see [`KaspaCli::switching`].
+pub struct SwitchingGuard(Arc<AtomicBool>);
+
+impl Drop for SwitchingGuard {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
 }
