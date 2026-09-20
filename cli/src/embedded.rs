@@ -96,17 +96,21 @@ impl EmbeddedNode {
     /// while. Callers run this off the terminal's task so the prompt keeps
     /// responding.
     pub fn start(network_id: NetworkId, appdir: &Path) -> Result<(Arc<Self>, Rpc)> {
-        Self::start_with(network_id, appdir, None)
+        Self::start_with(network_id, appdir, None, None)
     }
 
     /// The same node with a miner in it (PLAN P8.3c): the RPC answers
     /// `get_miner_status` and `control_miner` through `miner`, and listens on
     /// 127.0.0.1 — this machine only — so a wallet here can find it and steer
     /// it. The wallet's own node passes `None` and opens no socket at all.
+    /// `rpclisten`: where the wRPC listener binds; `None` is loopback. The
+    /// headless miner takes `--listen <ip:port>` so a wallet elsewhere in the
+    /// house can connect to it by address and get the own lane through it.
     pub fn start_with(
         network_id: NetworkId,
         appdir: &Path,
         miner: Option<Arc<dyn kaspa_rpc_core::api::miner::MinerControl>>,
+        rpclisten: Option<&str>,
     ) -> Result<(Arc<Self>, Rpc)> {
         // The p2p listener panics from inside a tokio worker if the port is
         // taken, which aborts the whole process — wallet included. Someone
@@ -145,7 +149,10 @@ impl EmbeddedNode {
             // this one's copy of the network instead of failing to start its
             // own beside it. The wallet used to tell it to do exactly that
             // while listening on nothing (founder, 2026-09-19).
-            rpclisten_borsh: Some("default".parse().expect("a fixed listen address")),
+            rpclisten_borsh: Some(match rpclisten {
+                Some(address) => address.parse().map_err(|err| Error::custom(format!("--listen {address}: {err}")))?,
+                None => "default".parse().expect("a fixed listen address"),
+            }),
             // The wallet needs the UTXO index to see ledger balance at all.
             // Everything else stays at kaspad's defaults, deliberately: this is
             // an ordinary node, not a special one, and the fewer knobs the

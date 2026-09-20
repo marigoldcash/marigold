@@ -24,6 +24,8 @@ pub const USAGE: &str = "usage: marigold-cli mine-to <address> [<percent>] [--ne
   <address>        where the rewards go — an address from 'address' in your wallet
   <percent>        share of this machine to use, 1-100 (default 50); '--cpu 50' means the same
   --network <id>   mainnet, testnet-10, ... (default: the one the address belongs to)
+  --listen <addr>  let wallets on other machines connect to this miner, e.g. --listen 192.168.1.20:27210
+                   (default: this machine only, 127.0.0.1)
   --node <url>     mine against a node already running instead of syncing one here:
                    ws://127.0.0.1:27210 (wRPC) or grpc://127.0.0.1:26210 (gRPC, what a
                    marigoldd has on by default). No wallet can steer the miner then.
@@ -44,6 +46,8 @@ struct Options {
     percent: u32,
     network_id: NetworkId,
     node: Option<String>,
+    /// Where the miner's own node listens for wallets; `None` is loopback.
+    listen: Option<String>,
 }
 
 fn parse(args: &[String]) -> std::result::Result<Options, String> {
@@ -51,6 +55,7 @@ fn parse(args: &[String]) -> std::result::Result<Options, String> {
     let mut percent = 50u32;
     let mut network = None;
     let mut node = None;
+    let mut listen: Option<String> = None;
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
         let (flag, inline) = match arg.split_once('=') {
@@ -70,6 +75,12 @@ fn parse(args: &[String]) -> std::result::Result<Options, String> {
             "--network" => {
                 let value = inline.or_else(|| iter.next().cloned()).ok_or("--network needs a network id")?;
                 network = Some(value.parse::<NetworkId>().map_err(|err| format!("'{value}' is not a network: {err}"))?);
+            }
+            "--listen" => {
+                let value = inline
+                    .or_else(|| iter.next().cloned())
+                    .ok_or("--listen needs an address, e.g. 0.0.0.0:27210 or 192.168.1.20:27210")?;
+                listen = Some(value);
             }
             "--node" => {
                 let value = inline.or_else(|| iter.next().cloned()).ok_or("--node needs a url, e.g. ws://127.0.0.1:27210")?;
@@ -109,7 +120,7 @@ fn parse(args: &[String]) -> std::result::Result<Options, String> {
             Prefix::Devnet => NetworkId::new(NetworkType::Devnet),
         },
     };
-    Ok(Options { address, percent, network_id, node })
+    Ok(Options { address, percent, network_id, node, listen })
 }
 
 /// The miner's node: one started here, or one already running elsewhere.
@@ -127,7 +138,7 @@ pub async fn mine_to(args: Vec<String>) -> Result<()> {
             std::process::exit(2);
         }
     };
-    let Options { address, percent, network_id, node: node_url } = options;
+    let Options { address, percent, network_id, node: node_url, listen } = options;
 
     // Plain lines on stdout, one per record, for journald or a log file.
     kaspa_core::log::init_logger(None, "info");
@@ -200,9 +211,14 @@ pub async fn mine_to(args: Vec<String>) -> Result<()> {
         None => {
             let appdir = crate::embedded::appdir(network_id).await?;
             let control: Arc<dyn kaspa_rpc_core::api::miner::MinerControl> = host.clone();
-            let (node, rpc) = crate::embedded::EmbeddedNode::start_with(network_id, &appdir, Some(control))?;
+            let (node, rpc) = crate::embedded::EmbeddedNode::start_with(network_id, &appdir, Some(control), listen.as_deref())?;
             let port = network_id.default_borsh_rpc_port();
-            log::info!("A wallet on this machine reaches this miner at 127.0.0.1:{port} — 'connect' finds it by itself.");
+            match &listen {
+                Some(address) => log::info!(
+                    "Wallets reach this miner at {address} — 'connect {address}' on another machine, 'connect' on this one."
+                ),
+                None => log::info!("A wallet on this machine reaches this miner at 127.0.0.1:{port} — 'connect' finds it by itself."),
+            }
             (Node::Own(node), rpc.rpc_api().clone())
         }
     };

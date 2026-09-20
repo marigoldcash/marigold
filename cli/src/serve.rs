@@ -586,7 +586,7 @@ pub async fn serve(args: Vec<String>) -> Result<()> {
         None => {
             let appdir = crate::embedded::appdir(network_id).await?;
             let control = miner_host.clone().map(|h| h as Arc<dyn kaspa_rpc_core::api::miner::MinerControl>);
-            let (node, rpc) = crate::embedded::EmbeddedNode::start_with(network_id, &appdir, control)?;
+            let (node, rpc) = crate::embedded::EmbeddedNode::start_with(network_id, &appdir, control, None)?;
             log::info!("Syncing the network here");
             (Node::Own(node), rpc.rpc_api().clone(), rpc)
         }
