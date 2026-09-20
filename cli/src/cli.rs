@@ -258,6 +258,23 @@ pub(crate) fn humanised_minutes(minutes: u64) -> String {
     }
 }
 
+/// "20 minutes", "3 hours", "4 days": how long a wait is, in the unit a
+/// person would pick.
+pub(crate) fn humanised_wait(seconds: f64) -> String {
+    if seconds < 90.0 {
+        return format!("{} seconds", (seconds.round() as u64).max(1));
+    }
+    let minutes = (seconds / 60.0).round() as u64;
+    if minutes < 90 {
+        return humanised_minutes(minutes);
+    }
+    let hours = (minutes + 30) / 60;
+    if hours < 48 {
+        return format!("{hours} hours");
+    }
+    format!("{} days", (hours + 12) / 24)
+}
+
 /// "about a block a minute", "a block about every 12 minutes": the cadence
 /// of a miner, in words that survive the one-minute case ("every a minute"
 /// did not, 2026-09-18).
@@ -1377,6 +1394,13 @@ impl KaspaCli {
         tprintln!(self, "{}", style("It yields to anything else that needs the processor.").dim());
         tprintln!(self, "Rewards are paid to this wallet and become notes on their own.");
         tprintln!(self, "'mine status' to check, 'mine stop' to stop.");
+        if !self.wallet.utxo_processor().is_synced() {
+            tprintln!(
+                self,
+                "{}",
+                style("The sync is still catching up, so there is no work yet; mining begins on its own when there is.").yellow()
+            );
+        }
         tprintln!(self, "");
 
         crate::miner::spawn_session(self.wallet.rpc_api(), address, miner, solutions, self.shutdown.clone());
@@ -1406,6 +1430,27 @@ impl KaspaCli {
         }
     }
 
+    /// What this speed buys against the whole network: how long, on average,
+    /// between blocks of ours. The question every new miner asks after ten
+    /// minutes of nothing (tester, 2026-09-20).
+    async fn expected_block_cadence(&self, own_hashrate: f64) -> Option<String> {
+        if own_hashrate <= 0.0 || !self.wallet.is_connected() {
+            return None;
+        }
+        let network_id = self.wallet.network_id().ok()?;
+        let network = self.wallet.rpc_api().estimate_network_hashes_per_second(1000, None).await.ok()?;
+        if network == 0 {
+            return None;
+        }
+        let bps = kaspa_consensus_core::config::params::Params::from(network_id).bps().max(1) as f64;
+        let seconds = network as f64 / own_hashrate / bps;
+        Some(format!(
+            "At this speed a block comes about every {} on average; the network as a whole is doing {}.",
+            humanised_wait(seconds),
+            crate::miner::format_hashrate(network as f64)
+        ))
+    }
+
     #[cfg(feature = "embedded-node")]
     pub async fn mining_status(self: &Arc<Self>) {
         if self.remote_miner_present() && self.cpu_miner.lock().unwrap().is_none() {
@@ -1423,6 +1468,15 @@ impl KaspaCli {
                     miner.percent()
                 );
                 tprintln!(self, "Speed:  {}", crate::miner::format_hashrate(miner.hashrate()));
+                if !self.wallet.utxo_processor().is_synced() {
+                    tprintln!(
+                        self,
+                        "{}",
+                        style("No work yet: the sync is still catching up. Mining begins on its own when it has.").yellow()
+                    );
+                } else if let Some(line) = self.expected_block_cadence(miner.hashrate()).await {
+                    tprintln!(self, "{}", style(line).dim());
+                }
                 let found = miner.blocks_found();
                 if found == 0 {
                     tprintln!(self, "Blocks: none yet");
@@ -1753,6 +1807,35 @@ impl KaspaCli {
         // note three separate times. A note the pool has not got is usually a
         // mint that has not landed, and saying so on every open taught people
         // to ignore a line that one day will matter.
+        // The opposite correction first: notes this wallet wrote off as spent
+        // that the pool still holds under its keys, because the transaction
+        // that was to consume them never landed. Back into the balance, and
+        // into the history, so the money is neither lost nor a mystery.
+        if self.wallet.is_connected()
+            && let Ok(revived) = kaspa_wallet_core::account::notepool::revive_unspent_notes(&self.wallet).await
+            && !revived.is_empty()
+        {
+            let value: u64 = revived.iter().map(|i| kaspa_consensus_core::notepool::DENOMINATION_PETALS[i.d as usize]).sum();
+            notes += value;
+            for info in &revived {
+                self.record(
+                    "returned",
+                    kaspa_consensus_core::notepool::DENOMINATION_PETALS[info.d as usize],
+                    0,
+                    "its transaction never landed",
+                    "",
+                );
+            }
+            tprintln!(
+                self,
+                "{}",
+                crate::ui::dim(format!(
+                    "{} note(s) worth {} {ticker} came back: the transaction that was to spend them never landed, and the pool still holds them under your keys.",
+                    revived.len(),
+                    kaspa_wallet_core::utils::sompi_to_kaspa_string(value)
+                ))
+            );
+        }
         let mut vanished: Option<(usize, u64)> = None;
         if notes > 0 && self.wallet.is_connected() {
             {
@@ -2393,6 +2476,24 @@ impl KaspaCli {
         });
     }
 
+    /// Notes move through the node the wallet is on, and a node still
+    /// catching up holds only part of the pool: a payment sent through one is
+    /// refused, or — worse — taken in and lost when the sync replaces what
+    /// it was validated against. A tester paid twice through their own
+    /// syncing node and got one of each (2026-09-20). So paying, receiving,
+    /// minting and transferring wait until the node is caught up.
+    pub fn node_ready_for_notes(&self) -> Result<()> {
+        if self.wallet.is_connected() && !self.wallet.utxo_processor().is_synced() {
+            return Err(Error::custom(
+                "The copy of the network this wallet is on is still catching up (the SYNC in the prompt). A copy that is \
+                 behind holds only part of the pool, so a payment sent through it is refused — or taken in and never \
+                 reaches anyone. Paying, receiving and minting wait until it has caught up: 'connect status' shows \
+                 progress, 'connect public' uses a public computer meanwhile.",
+            ));
+        }
+        Ok(())
+    }
+
     /// Mark a deliberate change of connection for as long as the guard lives.
     pub fn switching(&self) -> SwitchingGuard {
         self.switching.store(true, Ordering::SeqCst);
@@ -2666,7 +2767,7 @@ impl KaspaCli {
                                             this,
                                             "{}",
                                             style(format!(
-                                                "{whose} is still catching up with the network. Notes work now; the ledger side waits until it has caught up — 'connect status' shows progress."
+                                                "{whose} is still catching up with the network. Paying, receiving and minting wait until it has caught up — 'connect status' shows progress, 'connect public' uses a public computer meanwhile."
                                             ))
                                             .yellow()
                                         );

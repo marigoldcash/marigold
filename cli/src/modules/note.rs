@@ -221,6 +221,7 @@ impl Note {
 
     pub(crate) async fn mint(&self, ctx: &Arc<KaspaCli>, mut argv: Vec<String>) -> Result<()> {
         let ticker = ctx.ticker();
+        ctx.node_ready_for_notes()?;
         let account = ctx.ledger_account().await?;
 
         // 'note mint' with no amount offers to mint everything; 'note mint all'
@@ -710,6 +711,22 @@ impl Note {
         }
         tprintln!(ctx, "");
         tprintln!(ctx, "Checking your notes against the pool...");
+        let revived = notepool::revive_unspent_notes(&ctx.wallet()).await?;
+        if !revived.is_empty() {
+            let back: u64 = revived.iter().map(|i| DENOMINATION_PETALS[i.d as usize]).sum();
+            for info in &revived {
+                ctx.record("returned", DENOMINATION_PETALS[info.d as usize], 0, "its transaction never landed", "");
+            }
+            tprintln!(ctx, "");
+            tprintln!(
+                ctx,
+                "{} note(s) worth {} {ticker} came back: the transaction that was to spend them never landed, and the pool",
+                revived.len(),
+                sompi_to_kaspa_string(back)
+            );
+            tprintln!(ctx, "still holds them under your keys. They count again.");
+            ctx.refresh_prompt_total().await;
+        }
         let (present, phantom) = notepool::verify_held_notes(&ctx.wallet()).await?;
         let value = |notes: &[Arc<NoteKeyInfo>]| -> u64 { notes.iter().map(|i| DENOMINATION_PETALS[i.d as usize]).sum() };
 
@@ -761,7 +778,7 @@ impl Note {
         for info in &phantom {
             store.mark_status(&info.sn, NoteStatus::Superseded).await?;
         }
-        tprintln!(ctx, "Wrote off {} note(s). They are in 'note history' now.", phantom.len());
+        tprintln!(ctx, "Wrote off {} note(s). They are in 'history' now.", phantom.len());
         Ok(())
     }
 
@@ -1059,7 +1076,7 @@ impl Note {
 
         if retired > 0 {
             tprintln!(ctx, "");
-            tprintln!(ctx, "{}", ui::paint(ui::Ink::Moss, format!("{retired} spent note(s) — 'note history'")));
+            tprintln!(ctx, "{}", ui::paint(ui::Ink::Moss, format!("{retired} spent note(s) — 'history'")));
         }
         tprintln!(ctx, "");
 
