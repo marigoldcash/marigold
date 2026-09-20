@@ -318,6 +318,10 @@ pub fn spawn_session(
                 last_refresh = std::time::Instant::now();
                 match rpc.get_block_template(address.clone(), extra.clone()).await {
                     Ok(response) => {
+                        // Stopped while the node was away: nothing to announce.
+                        if !miner.is_running() {
+                            break;
+                        }
                         if std::mem::take(&mut waiting_for_node) {
                             log_info!("mine: the node is back, mining goes on");
                         }
