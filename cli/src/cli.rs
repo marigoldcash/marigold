@@ -2553,7 +2553,25 @@ impl KaspaCli {
         if !self.wallet.is_connected() || self.wallet.utxo_processor().is_synced() {
             return Ok(());
         }
-        Ok(())
+        tprintln!(self, "");
+        tpara!(
+            self,
+            "You need a public computer for this while your own copy of the network is still catching up (the SYNC in the prompt). A copy that is behind holds only part of the pool: a payment sent through it is refused, or taken in and never reaches anyone."
+        );
+        let answer = self
+            .term()
+            .ask(false, "Use a public computer for this, and until your own copy has caught up? [y/N]: ")
+            .await?
+            .trim()
+            .to_lowercase();
+        if !answer.starts_with('y') {
+            return Err(Error::custom("Nothing done. 'connect status' shows the sync's progress; try again once it has caught up."));
+        }
+        self.exec_within("connect public").await?;
+        if self.wallet.is_connected() && self.wallet.utxo_processor().is_synced() {
+            return Ok(());
+        }
+        Err(Error::custom("The public computer could not be reached, so nothing was done. 'connect public' tries again."))
     }
 
     /// Mark a deliberate change of connection for as long as the guard lives.
