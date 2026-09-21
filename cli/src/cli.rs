@@ -1911,6 +1911,13 @@ impl KaspaCli {
                 None => tprintln!(self, "{}", crate::ui::dim("ledger: not read yet — the node has not answered")),
             }
         } else if ledger > 0 {
+            // What a node still catching up holds is the coin set as of
+            // wherever it has got to, not today's: said beside the figure.
+            let so_far = if self.wallet.is_connected() && !self.wallet.utxo_processor().is_synced() {
+                "  (as far as the sync has got — it may change)"
+            } else {
+                ""
+            };
             tprintln!(
                 self,
                 "ledger: {} {ticker}  ({} piece{})",
@@ -1967,6 +1974,22 @@ impl KaspaCli {
         }
         let loud = announce || self.auto_verbose();
         let ticker = self.ticker();
+        // The commands wait for the sync; so does everything done on its
+        // own. A wallet opened on a node still catching up minted through
+        // it the moment it read a coin set that was days old (tester,
+        // 2026-09-21).
+        if self.wallet.is_connected() && !self.wallet.utxo_processor().is_synced() {
+            if loud {
+                tprintln!(
+                    self,
+                    "{}",
+                    crate::ui::dim("(your copy of the network is still catching up — nothing is minted or tidied until it has)")
+                );
+            }
+            self.own_lane_capture(None);
+            self.auto_busy.store(false, Ordering::SeqCst);
+            return;
+        }
         // Never decide anything from a ledger figure the wallet has not
         // actually read. An unfinished reload reads as zero, and "nothing to
         // mint, the ledger holds 0" was printed over a ledger holding
