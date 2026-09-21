@@ -15,7 +15,7 @@ impl Receive {
             tprintln!(ctx, "usage: 'receive <code>' — the code the payer gave you; 'receive key [name]' makes a key to be paid to");
             return Ok(());
         };
-        ctx.node_ready_for_notes()?;
+        ctx.node_ready_for_notes().await?;
         let wallet = ctx.wallet();
         let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(None).await?;
         let note = crate::modules::note::Note;

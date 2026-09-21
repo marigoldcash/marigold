@@ -2543,14 +2543,15 @@ impl KaspaCli {
     /// it was validated against. A tester paid twice through their own
     /// syncing node and got one of each (2026-09-20). So paying, receiving,
     /// minting and transferring wait until the node is caught up.
-    pub fn node_ready_for_notes(&self) -> Result<()> {
-        if self.wallet.is_connected() && !self.wallet.utxo_processor().is_synced() {
-            return Err(Error::custom(
-                "The copy of the network this wallet is on is still catching up (the SYNC in the prompt). A copy that is \
-                 behind holds only part of the pool, so a payment sent through it is refused — or taken in and never \
-                 reaches anyone. Paying, receiving and minting wait until it has caught up: 'connect status' shows \
-                 progress, 'connect public' uses a public computer meanwhile.",
-            ));
+    ///
+    /// Not a dead end (founder, 2026-09-20): the person is told they need a
+    /// public computer for this while their own copy catches up, and offered
+    /// one on the spot. Yes switches to it — the own copy keeps syncing and
+    /// takes over when it is caught up, as 'connect public' always did — and
+    /// the command goes on; no leaves nothing paid.
+    pub async fn node_ready_for_notes(self: &Arc<Self>) -> Result<()> {
+        if !self.wallet.is_connected() || self.wallet.utxo_processor().is_synced() {
+            return Ok(());
         }
         Ok(())
     }

@@ -245,7 +245,7 @@ impl Note {
 
     pub(crate) async fn mint(&self, ctx: &Arc<KaspaCli>, mut argv: Vec<String>) -> Result<()> {
         let ticker = ctx.ticker();
-        ctx.node_ready_for_notes()?;
+        ctx.node_ready_for_notes().await?;
         let account = ctx.ledger_account().await?;
 
         // 'note mint' with no amount offers to mint everything; 'note mint all'
