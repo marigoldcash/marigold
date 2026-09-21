@@ -2323,7 +2323,7 @@ impl KaspaCli {
                             if loud {
                                 tprintln!(
                                     self,
-                                    "Minted {} {ticker} into {notes} note(s) (fees {} {ticker}).",
+                                    "Minted {} {ticker} into {notes} note(s) (fee {} {ticker}).",
                                     kaspa_wallet_core::utils::sompi_to_kaspa_string(amount),
                                     kaspa_wallet_core::utils::sompi_to_kaspa_string(fees)
                                 );
@@ -2423,11 +2423,7 @@ impl KaspaCli {
                 {
                     Ok(summary) => {
                         if loud {
-                            tprintln!(
-                                self,
-                                "Consolidated (fees {} {ticker}).",
-                                kaspa_wallet_core::utils::sompi_to_kaspa_string(summary.0.aggregate_fees())
-                            );
+                            tprintln!(self, "Consolidated (fee {} {ticker}).", crate::ui::ledger_amount(summary.0.aggregate_fees()));
                         }
                         // No waiting here for the swept coins to confirm: that
                         // wait was racing the chain and breaking early, and there
@@ -3443,7 +3439,11 @@ impl KaspaCli {
                         (0, _) => format!("{} piece(s) pending", pending.separated_string()),
                         _ => format!("{} piece(s), {} pending", pieces.separated_string(), pending.separated_string()),
                     };
-                    tprintln!(self, "• ledger: {}   {}", account.balance_as_strings(None)?, style(info).dim());
+                    // Two decimals, like every other ledger figure; the eight
+                    // the account's own formatter prints are petals nobody
+                    // asked for (tester, 2026-09-21).
+                    let mature = account.balance().map(|b| b.mature).unwrap_or(0);
+                    tprintln!(self, "• ledger: {} {}   {}", crate::ui::ledger_amount(mature), self.ticker(), style(info).dim());
                 }
                 if self.advanced() {
                     tprintln!(self, "  {}", style(account.receive_address()?.to_string()).blue());
