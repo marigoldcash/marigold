@@ -1387,21 +1387,34 @@ impl KaspaCli {
         self.cpu_miner.lock().unwrap().replace(miner.clone());
 
         tprintln!(self, "");
-        tprintln!(
-            self,
-            "{}",
-            style(format!("Mining started — {percent}% of this machine ({} of {cores} cores).", miner.thread_count())).green()
-        );
-        tprintln!(self, "{}", style("It yields to anything else that needs the processor.").dim());
-        tprintln!(self, "Rewards are paid to this wallet and become notes on their own.");
-        tprintln!(self, "'mine status' to check, 'mine stop' to stop.");
-        if !self.wallet.utxo_processor().is_synced() {
+        // "Mining started" followed by "there is no work yet" read as a
+        // start taken back (tester, 2026-09-21). While the sync is behind,
+        // say what is true: it is set up, and begins by itself later.
+        if self.wallet.utxo_processor().is_synced() {
             tprintln!(
                 self,
                 "{}",
-                style("The sync is still catching up, so there is no work yet; mining begins on its own when there is.").yellow()
+                style(format!("Mining started — {percent}% of this machine ({} of {cores} cores).", miner.thread_count())).green()
+            );
+        } else {
+            tprintln!(
+                self,
+                "{}",
+                style(format!(
+                    "Mining is set up — {percent}% of this machine ({} of {cores} cores) — and begins on its own once the sync has caught up.",
+                    miner.thread_count()
+                ))
+                .yellow()
+            );
+            tprintln!(
+                self,
+                "{}",
+                style("Until then there is nothing to mine: a block needs a copy of the network that is up to date.").dim()
             );
         }
+        tprintln!(self, "{}", style("It yields to anything else that needs the processor.").dim());
+        tprintln!(self, "Rewards are paid to this wallet and become notes on their own.");
+        tprintln!(self, "'mine status' to check, 'mine stop' to stop.");
         tprintln!(self, "");
 
         crate::miner::spawn_session(self.wallet.rpc_api(), address, miner, solutions, self.shutdown.clone());
