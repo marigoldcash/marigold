@@ -196,7 +196,12 @@ pub async fn mint_with_progress(
         notes.push(entry);
     }
 
-    let fees = generator.summary().aggregate_fees();
+    // The generator counts every ledger value that did not come back as a
+    // ledger output as fee, and the minted value goes into the pool, not
+    // into an output — so its figure was the mint plus the fee ("fees
+    // 20.40" on a 20.12 mint; tester, 2026-09-21). The fee is what is left.
+    let minted: u64 = notes.iter().map(|entry| DENOMINATION_PETALS[entry.d as usize]).sum();
+    let fees = generator.summary().aggregate_fees().saturating_sub(minted);
     Ok(MintResult { transaction_ids, notes, fees })
 }
 
