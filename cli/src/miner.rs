@@ -68,6 +68,8 @@ pub struct Miner {
     found: Arc<AtomicU64>,
     accepted: Arc<AtomicU64>,
     rejected: Arc<AtomicU64>,
+    /// The node's words for the last block it refused, for 'mine status'.
+    last_rejection: std::sync::Mutex<Option<String>>,
     threads: std::sync::Mutex<Vec<JoinHandle<()>>>,
     thread_count: usize,
     percent: u32,
@@ -161,6 +163,7 @@ impl Miner {
             found: Arc::new(AtomicU64::new(0)),
             accepted: Arc::new(AtomicU64::new(0)),
             rejected: Arc::new(AtomicU64::new(0)),
+            last_rejection: std::sync::Mutex::new(None),
             threads: std::sync::Mutex::new(Vec::new()),
             thread_count,
             percent,
@@ -242,8 +245,14 @@ impl Miner {
         self.accepted.fetch_add(1, Ordering::Relaxed);
     }
 
-    pub fn record_rejected(&self) {
+    pub fn record_rejected(&self, reason: &str) {
         self.rejected.fetch_add(1, Ordering::Relaxed);
+        *self.last_rejection.lock().unwrap() = Some(reason.to_string());
+    }
+
+    /// Why the node refused the last block it refused, if it ever did.
+    pub fn last_rejection(&self) -> Option<String> {
+        self.last_rejection.lock().unwrap().clone()
     }
 
     pub fn stop(&self) {
@@ -365,7 +374,7 @@ pub fn spawn_session(
                         miner.record_accepted();
                     }
                     Err(err) => {
-                        miner.record_rejected();
+                        miner.record_rejected(&err.to_string());
                         log_warn!("mine: block not accepted ({err})");
                     }
                 }

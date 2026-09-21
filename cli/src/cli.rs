@@ -1552,6 +1552,9 @@ impl KaspaCli {
 
     #[cfg(feature = "embedded-node")]
     pub fn embedded_node_running(&self) -> bool {
+                    if let Some(reason) = miner.last_rejection() {
+                        tprintln!(self, "{}", style(format!("The last one the node refused: {reason}")).dim());
+                    }
         self.embedded_node.lock().unwrap().is_some()
     }
 
