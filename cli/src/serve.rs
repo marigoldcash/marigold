@@ -317,6 +317,28 @@ impl WalletService {
         })
     }
 
+    /// What a request code asks for, once it has been checked: the pinned
+    /// amount. A request without one needs the terminal, where an amount
+    /// can be typed beside it.
+    pub fn request_amount(code: &str) -> std::result::Result<u64, String> {
+        let request = notepool::PaymentRequest::from_text(code).map_err(|e| e.to_string())?;
+        request.verify().map_err(|e| e.to_string())?;
+        request.amount_petals.ok_or_else(|| "this request pins no amount; in the wallet: pay <code> <amount>".to_string())
+    }
+
+    /// Pay a request code: the receiver's key and amount, signed by them,
+    /// checked again here. `Paid::code` is the receipt to hand back.
+    pub async fn pay_request(&self, code: &str) -> std::result::Result<Paid, String> {
+        let request = notepool::PaymentRequest::from_text(code).map_err(|e| e.to_string())?;
+        let amount = Self::request_amount(code)?;
+        let result =
+            notepool::pay_payment_request(&self.wallet, self.secret.clone(), request, None).await.map_err(|e| e.to_string())?;
+        self.record("paid", amount, result.fee_petals, "request (telegram)", &result.transaction_id.to_string());
+        let receipt =
+            notepool::PaymentReceipt { transaction_id: result.transaction_id, request_pk: request.pk, amount_petals: amount };
+        Ok(Paid { code: receipt.to_text(), value_petals: amount, fee_petals: result.fee_petals, notes: result.external_serials.len() })
+    }
+
     /// 'pay' to a share key under a lock (P8.0g): the receiver's to take until
     /// `seconds` from now, ours again after.
     pub async fn pay_locked(&self, petals: u64, key: &str, seconds: u64) -> std::result::Result<Paid, String> {

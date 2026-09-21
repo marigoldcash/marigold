@@ -276,6 +276,7 @@ const HELP: &str = "<b>Your wallet</b>\n\
 Tap a button below, or type:\n\
 /balance — what you hold\n\
 /pay &lt;amount&gt; — a code to hand to someone (asks your PIN)\n\
+/pay &lt;request code&gt; — pay a request you were given; pasting or scanning it works too\n\
 /receive &lt;code&gt; — take a code you were given; pasting or scanning a code works too\n\
 /request [amount] — a code for someone to pay you\n\
 /history — the last payments\n\
@@ -378,6 +379,14 @@ fn amount_line(purpose: Purpose, buf: &str, ticker: &str) -> String {
 fn pin_line(petals: u64, buf: &str, ticker: &str) -> String {
     format!(
         "Pay {} {ticker} as a code.\nPIN: <b>{}</b>",
+        sompi_to_kaspa_string(petals),
+        if buf.is_empty() { "_".to_string() } else { "•".repeat(buf.len()) }
+    )
+}
+
+fn pin_line_request(petals: u64, buf: &str, ticker: &str) -> String {
+    format!(
+        "Pay {} {ticker} to this request.\nPIN: <b>{}</b>",
         sompi_to_kaspa_string(petals),
         if buf.is_empty() { "_".to_string() } else { "•".repeat(buf.len()) }
     )
@@ -560,11 +569,42 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
                                 }
                                 pin_failures = 0;
                                 edit(&token, chat_id, message_id, "Paying…", None).await;
+                                let is_request = share_key.as_deref().is_some_and(|k| k.starts_with("marigoldreq:"));
                                 let outcome = match &share_key {
+                                    Some(code) if is_request => service.pay_request(code).await,
                                     Some(key) => service.pay_locked(petals, key, LOCK_SECONDS).await,
                                     None => service.pay(petals).await,
                                 };
                                 match outcome {
+                                    Ok(paid) if is_request => {
+                                        service.note_spent(petals + paid.fee_petals);
+                                        {
+                                            let (day, spent) = service.spent_today();
+                                            cfg.spent_day = day;
+                                            cfg.spent_petals = spent;
+                                            if let Err(e) = cfg.save(&cfg_path) {
+                                                log::error!("telegram: could not save the day's total: {e}");
+                                            }
+                                        }
+                                        service.say(format!(
+                                            "telegram: paid a request of {} {ticker}",
+                                            sompi_to_kaspa_string(paid.value_petals)
+                                        ));
+                                        edit(
+                                            &token,
+                                            chat_id,
+                                            message_id,
+                                            &format!(
+                                                "Paid {} {ticker} to the request (fee {}). Your receipt, for whoever asked — it points them at the payment and holds nothing secret:\n<code>{}</code>",
+                                                sompi_to_kaspa_string(paid.value_petals),
+                                                sompi_to_kaspa_string(paid.fee_petals),
+                                                html_escape(&paid.code)
+                                            ),
+                                            None,
+                                        )
+                                        .await;
+                                        send_qr(&token, chat_id, &paid.code, "The receipt, to scan").await;
+                                    }
                                     Ok(paid) if share_key.is_some() => {
                                         service.note_spent(petals);
                                         {
@@ -632,10 +672,10 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
                             }
                             "⌫" => {
                                 buf.pop();
-                                let line = if share_key.is_some() {
-                                    pin_line_locked(petals, buf, ticker)
-                                } else {
-                                    pin_line(petals, buf, ticker)
+                                let line = match share_key.as_deref() {
+                                    Some(k) if k.starts_with("marigoldreq:") => pin_line_request(petals, buf, ticker),
+                                    Some(_) => pin_line_locked(petals, buf, ticker),
+                                    None => pin_line(petals, buf, ticker),
                                 };
                                 edit(&token, chat_id, message_id, &line, Some(&keypad(false))).await;
                             }
@@ -643,10 +683,10 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
                                 if buf.len() < 12 {
                                     buf.push_str(k);
                                 }
-                                let line = if share_key.is_some() {
-                                    pin_line_locked(petals, buf, ticker)
-                                } else {
-                                    pin_line(petals, buf, ticker)
+                                let line = match share_key.as_deref() {
+                                    Some(k) if k.starts_with("marigoldreq:") => pin_line_request(petals, buf, ticker),
+                                    Some(_) => pin_line_locked(petals, buf, ticker),
+                                    None => pin_line(petals, buf, ticker),
                                 };
                                 edit(&token, chat_id, message_id, &line, Some(&keypad(false))).await;
                             }
@@ -747,10 +787,8 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
                 }
                 continue;
             }
-            if text.starts_with("marigoldreq:") {
-                send(&token, chat_id, "A request code: paying requests from the phone is not there yet. In your wallet: <code>pay &lt;that code&gt;</code>.").await;
-                continue;
-            }
+            // A pasted or scanned request code is '/pay' with that code.
+            let text = if text.starts_with("marigoldreq:") { format!("/pay {text}") } else { text };
 
             // Buttons say words; commands say slashes. Both land here.
             let lowered = text.to_lowercase();
@@ -780,6 +818,26 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
                 "history" => {
                     let n = rest.first().and_then(|s| s.parse::<usize>().ok()).unwrap_or(10);
                     send(&token, chat_id, &format!("<pre>{}</pre>", html_escape(&service.history_text(n)))).await
+                }
+                // '/pay marigoldreq:…': the request says the amount; the PIN
+                // confirms it. It used to fall through to the amount keypad,
+                // which read as the bot not knowing what it was handed
+                // (tester, 2026-09-21).
+                "pay" if rest.first().is_some_and(|c| c.starts_with("marigoldreq:")) => {
+                    let code = rest[0].to_string();
+                    match WalletService::request_amount(&code) {
+                        Err(why) => send(&token, chat_id, &html_escape(&why)).await,
+                        Ok(petals) => match service.spend_allowed(petals, cfg.daily_limit_petals) {
+                            Err(why) => send(&token, chat_id, &html_escape(&why)).await,
+                            Ok(()) => {
+                                if let Some(mid) =
+                                    send_with_keyboard(&token, chat_id, &pin_line_request(petals, "", ticker), &keypad(false)).await
+                                {
+                                    pending = Pending::Pin { petals, buf: String::new(), message_id: mid, key: Some(code) };
+                                }
+                            }
+                        },
+                    }
                 }
                 "pay" => match rest.first().and_then(|s| crate::utils::try_parse_required_nonzero_kaspa_as_sompi_u64(Some(s)).ok()) {
                     // '/pay 5' typed: straight to the PIN keypad; '/pay 5 marigoldkey:…'
