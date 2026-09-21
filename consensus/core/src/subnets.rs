@@ -187,6 +187,11 @@ pub const SUBNETWORK_ID_NOTE_POOL: SubnetworkId = SubnetworkId::from_namespace([
 /// pool's", per the spec's own instruction. Namespace bytes spell "ANCR" in ASCII.
 pub const SUBNETWORK_ID_FINALITY_ANCHOR: SubnetworkId = SubnetworkId::from_namespace([0x41, 0x4e, 0x43, 0x52]);
 
+/// The user-lane subnetwork ID of the lane registry (docs/marigold/LANE-REGISTRY.md):
+/// a company claims a four-byte namespace of its own with one transaction in this
+/// lane, paying the registration fee. Namespace bytes spell "LANE" in ASCII.
+pub const SUBNETWORK_ID_LANE_REGISTRY: SubnetworkId = SubnetworkId::from_namespace([0x4c, 0x41, 0x4e, 0x45]);
+
 /// Uninhabited marker types for reserved system subnetworks.
 /// Per KIP-21, subnetwork IDs with a 19-byte zero suffix (`[x, 0×19]`) are reserved:
 /// only [`NativeSubnetwork::FIRST_BYTE`] and [`CoinbaseSubnetwork::FIRST_BYTE`] are

@@ -22,6 +22,7 @@ pub mod guide;
 pub mod halt;
 pub mod help;
 pub mod history;
+pub mod lane;
 pub mod list;
 pub mod message;
 pub mod miner;
@@ -84,8 +85,8 @@ pub fn register_handlers(cli: &Arc<KaspaCli>) -> Result<()> {
         [
             about, account, address, advanced, auto, backup, balance, close, connect, create, details, disconnect, estimate, exchange,
             exit, export, guide, help, history, import, rpc, list, mint, mobile, mv, pay, receive, request, miner, message, monitor,
-            mute, network, node, note, open, otp, ping, pskb, quit, reload, select, server, settings, sweep, track, transfer, utxos,
-            wallet,
+            lane, mute, network, node, note, open, otp, ping, pskb, quit, reload, select, server, settings, sweep, track, transfer,
+            utxos, wallet,
             // halt,
             // theme,  start, stop
         ]

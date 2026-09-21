@@ -5,6 +5,7 @@
 
 pub mod descriptor;
 pub mod kind;
+pub mod lane;
 pub mod notepool;
 pub mod pskb;
 pub mod variants;
