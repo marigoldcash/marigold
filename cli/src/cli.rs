@@ -1920,7 +1920,7 @@ impl KaspaCli {
             };
             tprintln!(
                 self,
-                "ledger: {} {ticker}  ({} piece{})",
+                "ledger: {} {ticker}  ({} piece{}){so_far}",
                 crate::ui::ledger_amount(ledger),
                 pieces.separated_string(),
                 if pieces == 1 { "" } else { "s" }
@@ -2325,7 +2325,7 @@ impl KaspaCli {
                                     self,
                                     "Minted {} {ticker} into {notes} note(s) (fee {} {ticker}).",
                                     kaspa_wallet_core::utils::sompi_to_kaspa_string(amount),
-                                    kaspa_wallet_core::utils::sompi_to_kaspa_string(fees)
+                                    crate::ui::ledger_amount(fees)
                                 );
                                 // An own-lane mint is not done when it is submitted:
                                 // it is a queue of batches only this machine's miner
