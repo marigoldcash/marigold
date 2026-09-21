@@ -225,6 +225,36 @@ impl Balance {
             }
         }
 
+        // A rising balance on a mining wallet hides a debit from anyone
+        // comparing two figures minutes apart (tester, 2026-09-21): say what
+        // arrived on its own in the last hour, so the rise has a name.
+        if let Some(journal) = ctx.journal()
+            && let Ok(entries) = journal.read()
+        {
+            let since = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0)
+                .saturating_sub(3600);
+            let income: u64 = entries
+                .iter()
+                .filter(|e| e.kind == "minted" && e.detail.contains("on its own") && e.at >= since)
+                .map(|e| e.petals)
+                .sum();
+            if income > 0 {
+                tprintln!(ctx, "");
+                tprintln!(
+                    ctx,
+                    "{}",
+                    ui::dim(format!(
+                        "{} in the last hour: +{} {ticker}, minted into notes on its own.",
+                        if ctx.mining_active() { "Mining income" } else { "Income" },
+                        sompi_to_kaspa_string(income)
+                    ))
+                );
+            }
+        }
+
         if total == 0
             && let Some(balance) = account.as_ref().and_then(|account| account.balance())
             && balance.mature > 0
