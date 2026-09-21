@@ -215,9 +215,11 @@ impl Note {
         }
         let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(None).await?;
 
+        let before = ctx.notes_now().await;
         let result = notepool::pay_payment_request(&ctx.wallet(), wallet_secret, request, amount_override).await?;
         ctx.record("paid", paid, result.fee_petals, "request", result.transaction_id.to_string());
         ctx.refresh_prompt_total().await;
+        ctx.say_notes_change(before).await;
         tprintln!(
             ctx,
             "paid {} note(s) (fee {} {ticker}); tx: {}",

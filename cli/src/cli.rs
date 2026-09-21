@@ -2593,6 +2593,48 @@ impl KaspaCli {
         Err(Error::custom("The public computer could not be reached, so nothing was done. 'connect public' tries again."))
     }
 
+    /// The notes total now, in petals, for a command to compare against
+    /// when it is done.
+    pub async fn notes_now(&self) -> u64 {
+        self.total_holdings().await.0
+    }
+
+    /// "notes 1,289.85 → 1,279.84": the figure before a command and after
+    /// it, on one line. On a mining wallet income arrives every few seconds
+    /// and a payment's debit was gone from the balance before anyone looked
+    /// for it (tester, 2026-09-21); this is the debit, on the spot.
+    pub async fn say_notes_change(&self, before: u64) {
+        let after = self.notes_now().await;
+        if after == before {
+            return;
+        }
+        let ticker = self.ticker();
+        let change = if after >= before {
+            format!("+{}", kaspa_wallet_core::utils::sompi_to_kaspa_string(after - before))
+        } else {
+            format!("−{}", kaspa_wallet_core::utils::sompi_to_kaspa_string(before - after))
+        };
+        tprintln!(
+            self,
+            "{}",
+            crate::ui::dim(format!(
+                "notes {} → {} {ticker} ({change})",
+                kaspa_wallet_core::utils::sompi_to_kaspa_string(before),
+                kaspa_wallet_core::utils::sompi_to_kaspa_string(after)
+            ))
+        );
+    }
+
+    /// Whether this wallet is being mined into right now, by its own
+    /// threads or by the background miner it steers.
+    pub fn mining_active(&self) -> bool {
+        #[cfg(feature = "embedded-node")]
+        if self.cpu_miner.lock().unwrap().is_some() {
+            return true;
+        }
+        self.remote_mining.load(Ordering::SeqCst)
+    }
+
     /// Mark a deliberate change of connection for as long as the guard lives.
     pub fn switching(&self) -> SwitchingGuard {
         self.switching.store(true, Ordering::SeqCst);

@@ -49,6 +49,7 @@ impl Pay {
         let now = ctx.wallet().rpc_api().get_server_info().await?.virtual_daa_score;
         let until_daa = now + seconds * bps;
         let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(None).await?;
+        let before = ctx.notes_now().await;
         let result = notepool::hand_over_locked(&ctx.wallet(), wallet_secret, petals, share_pk, until_daa).await?;
         let text = result.handover.to_text();
         ctx.record(
@@ -71,6 +72,8 @@ impl Pay {
             crate::cli::humanised_minutes(seconds / 60),
             sompi_to_kaspa_string(result.transfer.fee_petals)
         );
+        ctx.refresh_prompt_total().await;
+        ctx.say_notes_change(before).await;
         tprintln!(ctx, "");
         Ok(())
     }
@@ -108,6 +111,7 @@ impl Pay {
         };
         let ticker = ctx.ticker();
         let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(None).await?;
+        let before = ctx.notes_now().await;
         let result = notepool::hand_over(&ctx.wallet(), wallet_secret, selection).await?;
         let text = result.handover.to_text();
         ctx.record(
@@ -118,6 +122,7 @@ impl Pay {
             result.transfer.transaction_id.to_string(),
         );
         ctx.refresh_prompt_total().await;
+        ctx.say_notes_change(before).await;
 
         tprintln!(ctx, "");
         if let Some(qr) = crate::modules::note::qr_string(&text) {
