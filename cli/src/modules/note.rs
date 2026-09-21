@@ -97,10 +97,16 @@ impl Note {
         let ticker = ctx.ticker();
         // Amount is optional per POOL-SPEC.md P5.6's two QR forms: pinned (40-byte)
         // or left for the payer to fill in (32-byte, the printed/static form).
-        let amount_petals = if argv.is_empty() { None } else { Some(try_parse_required_nonzero_kaspa_as_sompi_u64(argv.first())?) };
+        // 'request [amount] [for <n> minutes|hours|days]': a day unless said.
+        let (amount_words, lifetime) = match argv.iter().position(|w| w == "for") {
+            Some(i) => (&argv[..i], Some(Self::request_lifetime_secs(&argv[i + 1..])?)),
+            None => (&argv[..], None),
+        };
+        let amount_petals =
+            if amount_words.is_empty() { None } else { Some(try_parse_required_nonzero_kaspa_as_sompi_u64(amount_words.first())?) };
         let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(None).await?;
 
-        let request = create_payment_request(&ctx.wallet(), &wallet_secret, amount_petals).await?;
+        let request = create_payment_request(&ctx.wallet(), &wallet_secret, amount_petals, lifetime).await?;
         let text = request.to_text();
         if let Some(qr) = qr_string(&text) {
             tprintln!(ctx, "{}", qr);
@@ -110,6 +116,14 @@ impl Note {
             Some(amount) => tprintln!(ctx, "requesting {} {ticker}", sompi_to_kaspa_string(amount)),
             None => tprintln!(ctx, "no pinned amount - the payer chooses"),
         }
+        tprintln!(
+            ctx,
+            "{}",
+            crate::ui::dim(format!(
+                "Signed by its key and good for {}; a payer's wallet refuses it altered or late.",
+                crate::cli::humanised_minutes(lifetime.unwrap_or(notepool::DEFAULT_REQUEST_LIFETIME_SECS) / 60)
+            ))
+        );
 
         let timeout = Duration::from_secs(120);
         tprintln!(ctx, "watching for payment (up to {}s; the request stays claimable after a timeout)...", timeout.as_secs());
@@ -135,6 +149,25 @@ impl Note {
         Ok(())
     }
 
+    /// 'for <n> minutes|hours|days' after 'request': how long the code is good.
+    fn request_lifetime_secs(words: &[String]) -> Result<u64> {
+        let (Some(n), Some(unit)) = (words.first(), words.get(1)) else {
+            return Err(Error::custom("say how long: 'for <n> minutes', 'for <n> hours' or 'for <n> days'".to_string()));
+        };
+        let n: u64 = n.parse().map_err(|_| Error::custom(format!("'{n}' is not a number")))?;
+        let unit_secs = match unit.trim_end_matches('s') {
+            "minute" | "min" | "m" => 60,
+            "hour" | "h" => 3_600,
+            "day" | "d" => 86_400,
+            other => return Err(Error::custom(format!("'{other}' — say minutes, hours or days"))),
+        };
+        let total = n.checked_mul(unit_secs).ok_or_else(|| Error::custom("that is too long".to_string()))?;
+        if !(60..=365 * 86_400).contains(&total) {
+            return Err(Error::custom("a request is good for between a minute and a year".to_string()));
+        }
+        Ok(total)
+    }
+
     /// `note pay <request-text> [amount]` — pay a payment request from held notes.
     pub(crate) async fn pay(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
         let ticker = ctx.ticker();
@@ -143,6 +176,9 @@ impl Note {
             return Ok(());
         }
         let request = PaymentRequest::from_text(&argv[0])?;
+        // Checked before anything is shown: an altered or stale code is not
+        // a question to put to the person, it is a refusal with a reason.
+        request.verify()?;
         let amount_override = if argv.len() > 1 { Some(try_parse_required_nonzero_kaspa_as_sompi_u64(argv.get(1))?) } else { None };
         // What the person sees is what gets signed, or nothing happens. A
         // request code is plain bytes — key and amount, unsigned — so a
@@ -163,7 +199,15 @@ impl Note {
         };
         let key_hex = hex::encode(request.pk);
         tprintln!(ctx, "");
-        tprintln!(ctx, "Paying {} {ticker} to the request key …{}.", sompi_to_kaspa_string(paid), &key_hex[key_hex.len() - 8..]);
+        let left = if request.expires_at == 0 {
+            String::new()
+        } else {
+            format!(
+                " (good for {} more)",
+                crate::cli::humanised_minutes(request.expires_at.saturating_sub(notepool::now_unix_secs_pub()) / 60)
+            )
+        };
+        tprintln!(ctx, "Paying {} {ticker} to the request key …{}{left}.", sompi_to_kaspa_string(paid), &key_hex[key_hex.len() - 8..]);
         let answer = ctx.term().ask(false, "Pay it? [y/N]: ").await?.trim().to_lowercase();
         if !answer.starts_with('y') {
             tprintln!(ctx, "Nothing paid.");

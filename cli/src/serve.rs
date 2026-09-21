@@ -396,7 +396,7 @@ impl WalletService {
     }
 
     pub async fn request(&self, petals: Option<u64>) -> std::result::Result<String, String> {
-        let request = notepool::create_payment_request(&self.wallet, &self.secret, petals).await.map_err(|e| e.to_string())?;
+        let request = notepool::create_payment_request(&self.wallet, &self.secret, petals, None).await.map_err(|e| e.to_string())?;
         Ok(request.to_text())
     }
 

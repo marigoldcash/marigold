@@ -486,6 +486,25 @@ pub async fn redeem_with(
 pub struct PaymentRequest {
     pub pk: [u8; 32],
     pub amount_petals: Option<u64>,
+    /// Unix seconds after which the request is not to be paid; 0 for none.
+    pub expires_at: u64,
+    /// BIP340 signature by the request key over the fields above, so a code
+    /// altered in transit — amount or key swapped in a displayed QR — is
+    /// told apart from a real one (founder, 2026-09-20). Absent only on a
+    /// code from a wallet older than 2.48, which is refused at payment.
+    pub signature: Option<[u8; 64]>,
+}
+
+/// How long a request stays payable unless the requester says otherwise.
+pub const DEFAULT_REQUEST_LIFETIME_SECS: u64 = 24 * 3600;
+
+fn now_unix_secs() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+/// The clock requests are dated by, for callers that show how long is left.
+pub fn now_unix_secs_pub() -> u64 {
+    now_unix_secs()
 }
 
 /// Text-encoding prefix for payment requests. A wallet-level convention (what a QR
@@ -546,24 +565,91 @@ impl PaymentReceipt {
 }
 
 impl PaymentRequest {
-    pub fn encode(&self) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(40);
-        bytes.extend_from_slice(&self.pk);
-        if let Some(amount) = self.amount_petals {
-            bytes.extend_from_slice(&amount.to_le_bytes());
+    /// The bytes the request key signs: key, amount (0 for none), expiry.
+    fn signed_bytes(&self) -> [u8; 48] {
+        let mut out = [0u8; 48];
+        out[..32].copy_from_slice(&self.pk);
+        out[32..40].copy_from_slice(&self.amount_petals.unwrap_or(0).to_le_bytes());
+        out[40..].copy_from_slice(&self.expires_at.to_le_bytes());
+        out
+    }
+
+    fn message(&self) -> Message {
+        use sha2::Digest;
+        let mut hasher = sha2::Sha256::new();
+        hasher.update(b"marigold-request-v2");
+        hasher.update(self.signed_bytes());
+        let digest: [u8; 32] = hasher.finalize().into();
+        Message::from_digest(digest)
+    }
+
+    /// A signed request under `sk`, good until `expires_at` (0 for no end).
+    pub fn signed(sk: &[u8; 32], amount_petals: Option<u64>, expires_at: u64) -> Result<Self> {
+        let secret_key = SecretKey::from_slice(sk).map_err(|e| Error::Custom(format!("request key: {e}")))?;
+        let keypair = Keypair::from_secret_key(SECP256K1, &secret_key);
+        let mut request = Self { pk: keypair.x_only_public_key().0.serialize(), amount_petals, expires_at, signature: None };
+        request.signature = Some(*keypair.sign_schnorr(request.message()).as_ref());
+        Ok(request)
+    }
+
+    /// Whether this code is one to pay: signed by its own key, unaltered,
+    /// and not past its date. The error says which it is not.
+    pub fn verify(&self) -> Result<()> {
+        let Some(signature) = self.signature else {
+            return Err(Error::Custom(
+                "this request is unsigned — it comes from a wallet older than 2.48, which cannot be told from an altered one; ask for a new request".to_string(),
+            ));
+        };
+        let pk = secp256k1::XOnlyPublicKey::from_slice(&self.pk)
+            .map_err(|_| Error::Custom("this request's key is not a valid key".to_string()))?;
+        let signature = secp256k1::schnorr::Signature::from_slice(&signature)
+            .map_err(|_| Error::Custom("this request's signature is malformed".to_string()))?;
+        SECP256K1.verify_schnorr(&signature, &self.message(), &pk).map_err(|_| {
+            Error::Custom("this request has been altered — its amount or key does not match its signature; do not pay it".to_string())
+        })?;
+        if self.expires_at != 0 && now_unix_secs() > self.expires_at {
+            return Err(Error::Custom("this request has expired — ask for a new one".to_string()));
         }
-        bytes
+        Ok(())
+    }
+
+    pub fn encode(&self) -> Vec<u8> {
+        match self.signature {
+            Some(signature) => {
+                let mut bytes = Vec::with_capacity(112);
+                bytes.extend_from_slice(&self.signed_bytes());
+                bytes.extend_from_slice(&signature);
+                bytes
+            }
+            // The unsigned forms, kept only so an old code decodes far enough
+            // to be refused with a reason.
+            None => {
+                let mut bytes = Vec::with_capacity(40);
+                bytes.extend_from_slice(&self.pk);
+                if let Some(amount) = self.amount_petals {
+                    bytes.extend_from_slice(&amount.to_le_bytes());
+                }
+                bytes
+            }
+        }
     }
 
     pub fn decode(bytes: &[u8]) -> Result<Self> {
         match bytes.len() {
-            32 => Ok(Self { pk: bytes.try_into().unwrap(), amount_petals: None }),
+            32 => Ok(Self { pk: bytes.try_into().unwrap(), amount_petals: None, expires_at: 0, signature: None }),
             40 => {
                 let pk: [u8; 32] = bytes[..32].try_into().unwrap();
                 let amount = u64::from_le_bytes(bytes[32..].try_into().unwrap());
-                Ok(Self { pk, amount_petals: Some(amount) })
+                Ok(Self { pk, amount_petals: Some(amount), expires_at: 0, signature: None })
             }
-            len => Err(Error::Custom(format!("payment request must be 32 or 40 bytes, got {len}"))),
+            112 => {
+                let pk: [u8; 32] = bytes[..32].try_into().unwrap();
+                let amount = u64::from_le_bytes(bytes[32..40].try_into().unwrap());
+                let expires_at = u64::from_le_bytes(bytes[40..48].try_into().unwrap());
+                let signature: [u8; 64] = bytes[48..].try_into().unwrap();
+                Ok(Self { pk, amount_petals: (amount != 0).then_some(amount), expires_at, signature: Some(signature) })
+            }
+            len => Err(Error::Custom(format!("payment request must be 32, 40 or 112 bytes, got {len}"))),
         }
     }
 
@@ -1352,6 +1438,7 @@ pub async fn create_payment_request(
     wallet: &Arc<Wallet>,
     wallet_secret: &Secret,
     amount_petals: Option<u64>,
+    lifetime_secs: Option<u64>,
 ) -> Result<PaymentRequest> {
     if let Some(amount) = amount_petals {
         decompose_amount(amount).ok_or_else(|| {
@@ -1363,7 +1450,10 @@ pub async fn create_payment_request(
     let sk = SecretKey::new(&mut secp256k1::rand::thread_rng());
     let key = PaymentRequestKey::new(sk.secret_bytes(), amount_petals);
     let info = wallet.store().as_note_key_store()?.store_payment_request(wallet_secret, key).await?;
-    Ok(PaymentRequest { pk: info.pk, amount_petals })
+    let expires_at = now_unix_secs() + lifetime_secs.unwrap_or(DEFAULT_REQUEST_LIFETIME_SECS);
+    let request = PaymentRequest::signed(&sk.secret_bytes(), amount_petals, expires_at)?;
+    debug_assert_eq!(request.pk, info.pk);
+    Ok(request)
 }
 
 /// Pay a payment request (the payer's half of sign-to-fresh-pk, upgraded by
@@ -1379,6 +1469,8 @@ pub async fn pay_payment_request(
     request: PaymentRequest,
     amount_override: Option<u64>,
 ) -> Result<TransferResult> {
+    // Every path that pays a request checks it here, whatever showed it.
+    request.verify()?;
     let amount = request
         .amount_petals
         .or(amount_override)
@@ -1649,7 +1741,7 @@ pub async fn pos_checkout(
     timeout: Duration,
     on_request: Option<PosCheckoutRequestHook>,
 ) -> Result<PosCheckoutResult> {
-    let request = create_payment_request(wallet, &wallet_secret, Some(amount_petals)).await?;
+    let request = create_payment_request(wallet, &wallet_secret, Some(amount_petals), None).await?;
     if let Some(on_request) = on_request {
         on_request(&request);
     }
@@ -2032,24 +2124,55 @@ mod tests {
     #[test]
     fn payment_request_round_trips_both_forms() {
         // The 40-byte pinned-amount form and the 32-byte amount-omitted form
-        // (POOL-SPEC.md P5.6's two QR variants), distinguished by length alone.
-        let with_amount = PaymentRequest { pk: [0xabu8; 32], amount_petals: Some(111_000_000) };
+        // (POOL-SPEC.md P5.6's two QR variants), distinguished by length alone;
+        // both unsigned, both refused at payment since 2.48.
+        let with_amount = PaymentRequest { pk: [0xabu8; 32], amount_petals: Some(111_000_000), expires_at: 0, signature: None };
         assert_eq!(with_amount.encode().len(), 40);
         assert_eq!(PaymentRequest::from_text(&with_amount.to_text()).unwrap(), with_amount);
+        assert!(with_amount.verify().unwrap_err().to_string().contains("unsigned"));
 
-        let without_amount = PaymentRequest { pk: [0xcdu8; 32], amount_petals: None };
+        let without_amount = PaymentRequest { pk: [0xcdu8; 32], amount_petals: None, expires_at: 0, signature: None };
         assert_eq!(without_amount.encode().len(), 32);
         assert_eq!(PaymentRequest::from_text(&without_amount.to_text()).unwrap(), without_amount);
 
         assert!(PaymentRequest::decode(&[0u8; 33]).is_err());
         assert!(PaymentRequest::from_text("marigoldnote:00").is_err());
+    }
+
+    /// A signed request round-trips, verifies, and stops verifying the
+    /// moment any signed byte changes or its date has passed.
+    #[test]
+    fn a_signed_request_is_told_from_an_altered_one() {
+        let sk = [7u8; 32];
+        let far = now_unix_secs() + 3600;
+        let request = PaymentRequest::signed(&sk, Some(250_000_000), far).unwrap();
+        assert_eq!(request.encode().len(), 112);
+        let back = PaymentRequest::from_text(&request.to_text()).unwrap();
+        assert_eq!(back, request);
+        back.verify().unwrap();
+
+        let mut more = back;
+        more.amount_petals = Some(2_500_000_000);
+        assert!(more.verify().unwrap_err().to_string().contains("altered"));
+        let mut other_key = back;
+        other_key.pk[0] ^= 1;
+        assert!(other_key.verify().is_err());
+        let mut later = back;
+        later.expires_at += 1;
+        assert!(later.verify().unwrap_err().to_string().contains("altered"));
+
+        let expired = PaymentRequest::signed(&sk, None, now_unix_secs() - 1).unwrap();
+        assert!(expired.verify().unwrap_err().to_string().contains("expired"));
+        let open_ended = PaymentRequest::signed(&sk, None, 0).unwrap();
+        open_ended.verify().unwrap();
+        assert_eq!(PaymentRequest::from_text(&open_ended.to_text()).unwrap().amount_petals, None);
 
         let receipt = PaymentReceipt { transaction_id: Hash::from_bytes([7u8; 32]), request_pk: [9u8; 32], amount_petals: 1_234_567 };
         let text = receipt.to_text();
         assert!(text.starts_with(PAYMENT_RECEIPT_PREFIX));
         assert_eq!(PaymentReceipt::from_text(&text).unwrap(), receipt);
         assert!(PaymentReceipt::from_text("marigoldreceipt:00").is_err(), "a short receipt is refused");
-        assert!(PaymentReceipt::from_text(&with_amount.to_text()).is_err(), "a request is not a receipt");
+        assert!(PaymentReceipt::from_text(&request.to_text()).is_err(), "a request is not a receipt");
     }
 
     #[test]
