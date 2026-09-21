@@ -163,6 +163,11 @@ pub struct KaspaCli {
     /// A 'connect' or 'disconnect' is running: the disconnection it causes
     /// is its own doing and is not announced as a lost link.
     switching: Arc<AtomicBool>,
+    /// 'mine start' given while the wallet's own copy syncs behind a public
+    /// computer: the share asked for, kept until the hand-over, when mining
+    /// starts by itself. Asking the public computer for work meanwhile would
+    /// tell its operator where the rewards go.
+    pending_mine_percent: Mutex<Option<u32>>,
 }
 
 /// See [`KaspaCli::otp_session`].
@@ -356,6 +361,7 @@ impl KaspaCli {
             otp_session: Mutex::new(OtpSession::default()),
             ledger_known: Arc::new(AtomicBool::new(true)),
             switching: Arc::new(AtomicBool::new(false)),
+            pending_mine_percent: Mutex::new(None),
         });
 
         let term = Arc::new(Terminal::try_new_with_options(kaspa_cli.clone(), options.terminal)?);
@@ -1297,8 +1303,23 @@ impl KaspaCli {
                         // The moment this becomes true is the moment to say
                         // it: mining needs your own synced node, and this is
                         // the only point at which the wallet knows it has one.
-                        tprintln!(this, "You can now mine with spare CPU — 'mine start'.");
-                        tprintln!(this, "");
+                        // A 'mine start' given while waiting starts now.
+                        let pending = this.pending_mine_percent.lock().unwrap().take();
+                        match pending {
+                            Some(percent) => {
+                                if let Err(err) = this.start_mining(Some(percent.to_string())).await {
+                                    tprintln!(
+                                        this,
+                                        "{}",
+                                        style(format!("Mining could not start: {err} — 'mine start' tries again.")).yellow()
+                                    );
+                                }
+                            }
+                            None => {
+                                tprintln!(this, "You can now mine with spare CPU — 'mine start'.");
+                                tprintln!(this, "");
+                            }
+                        }
                         this.term().refresh_prompt();
                         this.request_open_housekeeping();
                     }
@@ -1335,8 +1356,28 @@ impl KaspaCli {
         if !self.embedded_node_in_use() && !self.connected_to_local_node() {
             tprintln!(self, "");
             if self.embedded_node_pending() {
-                tprintln!(self, "The sync is still catching up. Mining starts once it is ready —");
-                tprintln!(self, "'connect status' shows how far along it is.");
+                // Said "mining starts once it is ready" and then did nothing
+                // when it was (tester, 2026-09-21). Keep the share and start
+                // at the hand-over.
+                let Some(percent) = self.mining_share(arg).await? else { return Ok(()) };
+                *self.pending_mine_percent.lock().unwrap() = Some(percent);
+                let cores = crate::miner::cores();
+                tprintln!(self, "");
+                tprintln!(
+                    self,
+                    "{}",
+                    style(format!(
+                        "Mining is set up — {percent}% of this machine ({} of {cores} cores) — and begins on its own once your own copy of the network has caught up.",
+                        crate::miner::threads_for_percent(percent)
+                    ))
+                    .yellow()
+                );
+                tprintln!(
+                    self,
+                    "{}",
+                    style("Until then nothing is asked of the public computer, which would learn where your rewards go.").dim()
+                );
+                tprintln!(self, "'mine status' shows it waiting, 'mine stop' cancels; 'connect status' shows the sync.");
             } else if self.wallet().is_connected() && !self.remote_miner_present() && !self.connected_to_local_node() {
                 // Connected, but not to a node of ours and not to the background
                 // miner: another wallet on this machine holds the network, and
@@ -1423,6 +1464,10 @@ impl KaspaCli {
 
     #[cfg(feature = "embedded-node")]
     pub async fn stop_mining(self: &Arc<Self>) -> Result<()> {
+        if self.pending_mine_percent.lock().unwrap().take().is_some() && self.cpu_miner.lock().unwrap().is_none() {
+            tprintln!(self, "Mining cancelled; it had been waiting for the sync to catch up.");
+            return Ok(());
+        }
         if self.remote_miner_present() && self.cpu_miner.lock().unwrap().is_none() {
             return self.stop_remote_mining().await;
         }
@@ -1507,14 +1552,25 @@ impl KaspaCli {
                             n => format!(", {} not accepted", n.separated_string()),
                         }
                     );
+                    if let Some(reason) = miner.last_rejection() {
+                        tprintln!(self, "{}", style(format!("The last one the node refused: {reason}")).dim());
+                    }
                 }
             }
             None => {
-                tprintln!(self, "Not mining.");
-                if self.embedded_node_in_use() || self.connected_to_local_node() {
-                    tprintln!(self, "'mine start' begins, using whatever CPU nothing else wants.");
+                if let Some(percent) = *self.pending_mine_percent.lock().unwrap() {
+                    tprintln!(
+                        self,
+                        "Set up at {percent}% — waiting for your own copy of the network to catch up; it begins on its own then."
+                    );
+                    tprintln!(self, "{}", style("'connect status' shows the sync; 'mine stop' cancels.").dim());
                 } else {
-                    tprintln!(self, "Mining needs the network synced on this machine — 'connect'.");
+                    tprintln!(self, "Not mining.");
+                    if self.embedded_node_in_use() || self.connected_to_local_node() {
+                        tprintln!(self, "'mine start' begins, using whatever CPU nothing else wants.");
+                    } else {
+                        tprintln!(self, "Mining needs the network synced on this machine — 'connect'.");
+                    }
                 }
             }
         }
@@ -1552,9 +1608,6 @@ impl KaspaCli {
 
     #[cfg(feature = "embedded-node")]
     pub fn embedded_node_running(&self) -> bool {
-                    if let Some(reason) = miner.last_rejection() {
-                        tprintln!(self, "{}", style(format!("The last one the node refused: {reason}")).dim());
-                    }
         self.embedded_node.lock().unwrap().is_some()
     }
 
