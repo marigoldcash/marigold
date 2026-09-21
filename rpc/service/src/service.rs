@@ -799,6 +799,13 @@ NOTE: This error usually indicates an RPC conversion error between the node and 
         let transaction: Transaction = request.transaction.try_into()?;
         let transaction_id = transaction.id();
         let session = self.consensus_manager.consensus().unguarded_session();
+        // A node in its first sync validates against a state its sync is
+        // about to replace: it took a payment in and lost it (tester,
+        // 2026-09-20). Refused outright, like a block template (founder's
+        // decision the same day); the wallet offers a public node instead.
+        if session.async_is_consensus_in_transitional_ibd_state().await {
+            return Err(RpcError::ConsensusInTransitionalIbdState);
+        }
         let orphan = match allow_orphan {
             true => Orphan::Allowed,
             false => Orphan::Forbidden,
@@ -819,6 +826,13 @@ NOTE: This error usually indicates an RPC conversion error between the node and 
         let transaction: Transaction = request.transaction.try_into()?;
         let transaction_id = transaction.id();
         let session = self.consensus_manager.consensus().unguarded_session();
+        // A node in its first sync validates against a state its sync is
+        // about to replace: it took a payment in and lost it (tester,
+        // 2026-09-20). Refused outright, like a block template (founder's
+        // decision the same day); the wallet offers a public node instead.
+        if session.async_is_consensus_in_transitional_ibd_state().await {
+            return Err(RpcError::ConsensusInTransitionalIbdState);
+        }
         let replaced_transaction =
             self.flow_context.submit_rpc_transaction_replacement(&session, transaction).await.map_err(|err| {
                 let err = RpcError::RejectedTransaction(transaction_id, err.to_string());
