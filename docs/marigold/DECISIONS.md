@@ -393,3 +393,11 @@ is priced like plumbing; notes are money and cost a penny to move.
 
 **Why.** A request was plain bytes; a swapped amount or key in a displayed QR would have been paid exactly as shown to nobody. The confirmation added the same day made the tampering visible; the signature makes it detectable, and the date bounds how long a photographed request stays live. Cheap: the requester's wallet holds the request key already. A bearer handover code cannot expire the same way — the key is the money — and is warned about instead.
 
+## Lanes are claimed on the chain; verification is a paid service, and the chain takes nothing (2026-09-21)
+
+**Decision.** A company's lane — its four-byte user-lane namespace for anchoring records — is claimed with one transaction in the registry lane (`LANE`), paying 100 MAGLD to the registry address, the claim (tag, company key, label) in the payload; the first valid claim of a tag holds it, and the chain is the registry. Verification against marigold.cash's archival node is a service with a prepaid balance per lane: 10 MAGLD a month to keep the archive paid whether or not anyone verifies, and 0.01 MAGLD per verification call. The chain takes nothing from any of it. Format and rules in [LANE-REGISTRY.md](LANE-REGISTRY.md).
+
+**Why on the chain.** A form and a list would make marigold.cash the registrar, with a database to keep and a story to explain; a claim on the chain is the same story everything else here tells, first valid claim wins, anyone can list them from an archival node, and the fee is paid where it can be seen.
+
+**Why a service fee, and why it is not a fund.** Verification is free to anyone with an archival node, and the companies were always meant to be able to run their own. What marigold.cash charges for is the archive it runs and the endpoint in front of it, like any host charges for hosting; the earnings pay for the archive and for the people who build the software. It is off-chain revenue for a service, never a protocol fee or an allocation, so the whitepaper's "every fee goes to miners, no fund of any kind" stays exactly true, and the page says so in as many words.
+
