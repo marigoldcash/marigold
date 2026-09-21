@@ -383,3 +383,13 @@ is priced like plumbing; notes are money and cost a penny to move.
 
 **What it costs.** Nothing at runtime: the one place that compares versions (a loopback node carrying the own lane from build 2.0.195) compares the three figures as numbers, and 2.45.x is above 2.0.195. The release counter will reach a few hundred before mainnet at the current pace; it restarts at the era change.
 
+## A node in its first sync takes no transactions, and request codes are signed and dated (2026-09-20)
+
+**Decision, sync.** A node whose consensus is still in the transitional state of its first sync refuses `SubmitTransaction` and `SubmitTransactionReplacement` the way it refuses block templates. The wallet, on the same condition, tells the person they need a public computer for this while their own copy catches up, and offers to switch to one on the spot; no means nothing is paid.
+
+**Why.** A tester's payments through their own syncing node were taken in against a pool state the sync then replaced: one refused, one accepted and lost, 100 TMAGLD gone from the balance and received by nobody (2026-09-20). A wallet-side refusal alone would leave older wallets exposed; the node is the last line.
+
+**Decision, requests.** A `marigoldreq:` code is 112 bytes: key (32) ‖ amount in petals (8, zero for none) ‖ expiry as unix seconds (8, zero for none) ‖ BIP340 signature (64) by the request key over a tagged hash of the first 48. A request is good for a day unless `request … for <n> minutes|hours|days` says otherwise. The payer's wallet verifies before showing anything and refuses an altered, unsigned or expired code with the reason. The 32- and 40-byte unsigned forms still decode, only to be refused as older than 2.48.
+
+**Why.** A request was plain bytes; a swapped amount or key in a displayed QR would have been paid exactly as shown to nobody. The confirmation added the same day made the tampering visible; the signature makes it detectable, and the date bounds how long a photographed request stays live. Cheap: the requester's wallet holds the request key already. A bearer handover code cannot expire the same way — the key is the money — and is warned about instead.
+

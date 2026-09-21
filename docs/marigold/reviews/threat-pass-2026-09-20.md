@@ -26,10 +26,10 @@ Every code decoder length-checks before it slices, no decoder trusts a length fi
 
 ## Open, for decisions or later work
 
-- **A node in its first sync accepts transactions it will lose.** The wallet now refuses to use such a node; whether `SubmitTransaction` should refuse during IBD the way block templates do is a node question for P8.4.
+- ~~A node in its first sync accepts transactions it will lose.~~ Decided the same evening: the node refuses `SubmitTransaction` (and replacements) while its consensus is in the transitional sync state, as it refuses block templates; the wallet turns its own refusal into the choice of paying through a public computer now or not at all.
 - **The wallet trusts its node's word** for balances, sync state, which notes exist, and now which notes come back. Inherent for a light wallet; a second node's opinion is the only check, and out of scope for now.
-- **A request code carries no signature.** The confirmation closes the practical attack; a signed request (key signs amount and expiry) would let the wallet tell a tampered code from a real one. Design question.
+- ~~A request code carries no signature.~~ Done the same evening: a request is 112 bytes, key ‖ amount ‖ expiry ‖ BIP340 signature by the request key, good for a day unless `request … for <n> minutes|hours|days` says otherwise. A payer's wallet refuses an altered, unsigned (pre-2.48) or expired code with the reason, before anything is shown.
 - **Receipts have no consumer yet** (P8.0i). A forged receipt achieves nothing mechanical today.
-- **Codes carry no expiry.** A photographed `marigoldpay:` is money until rotated (warned); a photographed request is live indefinitely.
+- **Handover codes carry no expiry.** A photographed `marigoldpay:` is money until rotated (warned); requests now expire (above). A bearer code cannot expire by design: the key is the money.
 - **`MARIGOLD_WALLET_PASSWORD`** stays visible in the process environment; the file is the better route and the usage text should say so.
 - **A bundle paid to a share key shares one one-time key**, so its notes are linkable to each other on chain. Stated design.
