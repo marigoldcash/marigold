@@ -129,10 +129,10 @@ pub fn evaluate(document: &Document, own: Version, network: Option<NetworkId>) -
                 .filter_map(|entry| entry.signed())
                 .filter(|signed| signed.verify(&trustees).is_ok())
                 .max_by_key(|signed| signed.notice.issued_at);
-            if let Some(signed) = newest {
-                if signed.notice.refuses(own.0, own.1) {
-                    return Verdict::TooOld { min: format!("{}.{}", signed.notice.min_major, signed.notice.min_release) };
-                }
+            if let Some(signed) = newest
+                && signed.notice.refuses(own.0, own.1)
+            {
+                return Verdict::TooOld { min: format!("{}.{}", signed.notice.min_major, signed.notice.min_release) };
             }
         }
     }

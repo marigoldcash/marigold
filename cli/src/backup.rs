@@ -244,6 +244,20 @@ pub fn human_size(bytes: usize) -> String {
     }
 }
 
+/// Write a restored file for its owner alone: a restored vault is the
+/// wallet, and the archive's own modes are not kept.
+pub(crate) fn write_owner_only(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path)?.write_all(bytes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -369,18 +383,4 @@ mod tests {
         let stray = vec![entry("marigold.wallet/marigold.keys", b"w"), entry("something-else.dat", b"?")];
         assert!(rename_entries(stray, "marigold", "spare").is_err());
     }
-}
-
-/// Write a restored file for its owner alone: a restored vault is the
-/// wallet, and the archive's own modes are not kept.
-pub(crate) fn write_owner_only(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
-    use std::io::Write;
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    options.open(path)?.write_all(bytes)
 }

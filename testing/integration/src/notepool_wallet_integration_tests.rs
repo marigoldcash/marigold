@@ -450,7 +450,8 @@ async fn wallet_notepool_receive_flows_test() {
     // ---------- (b) sign-to-fresh-pk ----------
     const PAYMENT_PETALS: u64 = 5_000_000; // 0.05 MAGLD -> 5x0.01 from A's minted notes
 
-    let request = create_payment_request(&wallet_b, &secret_b, Some(PAYMENT_PETALS)).await.expect("create_payment_request failed");
+    let request =
+        create_payment_request(&wallet_b, &secret_b, Some(PAYMENT_PETALS), None).await.expect("create_payment_request failed");
     let request_text = request.to_text();
     assert_eq!(wallet_b.store().as_note_key_store().unwrap().payment_requests().await.unwrap().len(), 1);
 
@@ -597,7 +598,8 @@ async fn wallet_notepool_spend_flows_test() {
     // ---------- split-requiring spend ----------
     const PAYMENT_PETALS: u64 = 3_000_000; // 0.03 — no exact representation from one 0.1
 
-    let request = create_payment_request(&wallet_b, &secret_b, Some(PAYMENT_PETALS)).await.expect("create_payment_request failed");
+    let request =
+        create_payment_request(&wallet_b, &secret_b, Some(PAYMENT_PETALS), None).await.expect("create_payment_request failed");
     let awaiter = {
         let wallet_b = wallet_b.clone();
         let secret_b = secret_b.clone();

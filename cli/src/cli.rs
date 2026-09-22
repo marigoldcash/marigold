@@ -167,6 +167,7 @@ pub struct KaspaCli {
     /// computer: the share asked for, kept until the hand-over, when mining
     /// starts by itself. Asking the public computer for work meanwhile would
     /// tell its operator where the rewards go.
+    #[cfg_attr(not(feature = "embedded-node"), allow(dead_code))]
     pending_mine_percent: Mutex<Option<u32>>,
 }
 
@@ -264,8 +265,8 @@ pub(crate) fn humanised_minutes(minutes: u64) -> String {
 }
 
 /// "20 minutes", "3 hours", "4 days": how long a wait is, in the unit a
-/// person would pick.
-#[cfg(feature = "embedded-node")]
+/// person would pick. Not gated on the embedded node: the lane command uses
+/// it for the wide-lane countdown whatever the build (CI caught the gate).
 pub(crate) fn humanised_wait(seconds: f64) -> String {
     if seconds < 90.0 {
         return format!("{} seconds", (seconds.round() as u64).max(1));
@@ -1945,20 +1946,18 @@ impl KaspaCli {
         }
         let mut vanished: Option<(usize, u64)> = None;
         let mut unfound: Option<(usize, u64)> = None;
-        if notes > 0 && self.wallet.is_connected() {
-            if let Ok(Some(result)) = kaspa_wallet_core::account::notepool::reconcile_held_notes(&self.wallet).await {
-                if !result.moved_to_unknown.is_empty() {
-                    let value: u64 = result
-                        .moved_to_unknown
-                        .iter()
-                        .map(|i| kaspa_consensus_core::notepool::DENOMINATION_PETALS[i.d as usize])
-                        .sum();
-                    notes = notes.saturating_sub(value);
-                    vanished = Some((result.moved_to_unknown.len(), value));
-                }
-                if !result.pending.is_empty() {
-                    unfound = Some((result.pending.len(), result.pending_petals));
-                }
+        if notes > 0
+            && self.wallet.is_connected()
+            && let Ok(Some(result)) = kaspa_wallet_core::account::notepool::reconcile_held_notes(&self.wallet).await
+        {
+            if !result.moved_to_unknown.is_empty() {
+                let value: u64 =
+                    result.moved_to_unknown.iter().map(|i| kaspa_consensus_core::notepool::DENOMINATION_PETALS[i.d as usize]).sum();
+                notes = notes.saturating_sub(value);
+                vanished = Some((result.moved_to_unknown.len(), value));
+            }
+            if !result.pending.is_empty() {
+                unfound = Some((result.pending.len(), result.pending_petals));
             }
         }
 

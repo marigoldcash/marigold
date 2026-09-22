@@ -837,7 +837,7 @@ impl Note {
                 None => per_size.push((petals, 1)),
             }
         }
-        per_size.sort_by(|a, b| b.0.cmp(&a.0));
+        per_size.sort_by_key(|a| std::cmp::Reverse(a.0));
         let sizes = format!(
             "{} {ticker}",
             per_size.iter().map(|(p, n)| format!("{n} × {}", sompi_to_kaspa_string(*p))).collect::<Vec<_>>().join(", ")
