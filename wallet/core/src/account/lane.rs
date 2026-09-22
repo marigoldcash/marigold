@@ -14,6 +14,7 @@ use kaspa_consensus_core::config::params::Params;
 use kaspa_consensus_core::network::NetworkType;
 use kaspa_consensus_core::subnets::{SUBNETWORK_ID_LANE_REGISTRY, SUBNETWORK_NAMESPACE_LEN, SUBNETWORK_TAG_LEN, SubnetworkId};
 use kaspa_hashes::Hash;
+use secp256k1::{Keypair, Message, SECP256K1, SecretKey};
 
 /// What a claim costs, in petals: 100 MAGLD (founder, 2026-09-21).
 pub const LANE_REGISTRATION_FEE_PETALS: u64 = 100 * 100_000_000;
@@ -184,6 +185,142 @@ pub async fn claim_lane(
     last.ok_or_else(|| Error::Custom("the claim produced no transaction".to_string()))
 }
 
+/// Payload version of a signed anchor. Version 1 (33 bytes, the root alone)
+/// was the gateway contract's first draft; it carries no proof of who wrote
+/// it, and a lane is not exclusive at the chain level — anyone can put a
+/// transaction in any subnetwork — so from version 2 an anchor is signed by
+/// the lane's registered key, and a verifier checks that before the root.
+pub const ANCHOR_VERSION: u8 = 2;
+
+/// What a lane's transaction carries: a 32-byte root and the lane key's
+/// signature over it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AnchorPayload {
+    pub root: [u8; 32],
+    pub signature: [u8; 64],
+}
+
+impl AnchorPayload {
+    /// The bytes the lane key signs: a tagged hash of the lane and the root,
+    /// so a signature is good for one root in one lane and nothing else.
+    fn message(lane: &SubnetworkId, root: &[u8; 32]) -> Message {
+        use sha2::Digest;
+        let mut hasher = sha2::Sha256::new();
+        hasher.update(b"marigold-anchor-v2");
+        hasher.update(lane.as_bytes());
+        hasher.update(root);
+        let digest: [u8; 32] = hasher.finalize().into();
+        Message::from_digest(digest)
+    }
+
+    pub fn sign(lane_sk: &[u8; 32], lane: &SubnetworkId, root: [u8; 32]) -> Result<Self> {
+        let secret_key = SecretKey::from_slice(lane_sk).map_err(|e| Error::Custom(format!("lane key: {e}")))?;
+        let keypair = Keypair::from_secret_key(SECP256K1, &secret_key);
+        let signature = *keypair.sign_schnorr(Self::message(lane, &root)).as_ref();
+        Ok(Self { root, signature })
+    }
+
+    /// Whether this anchor, found in `lane`, was signed by the key registered
+    /// for that lane.
+    pub fn verify(&self, lane: &SubnetworkId, lane_pk: &[u8; 32]) -> Result<()> {
+        let pk = secp256k1::XOnlyPublicKey::from_slice(lane_pk)
+            .map_err(|_| Error::Custom("the lane's key is not a valid key".to_string()))?;
+        let signature = secp256k1::schnorr::Signature::from_slice(&self.signature)
+            .map_err(|_| Error::Custom("the anchor's signature is malformed".to_string()))?;
+        SECP256K1.verify_schnorr(&signature, &Self::message(lane, &self.root), &pk).map_err(|_| {
+            Error::Custom("this anchor was not signed by the lane's registered key — it is not the company's".to_string())
+        })
+    }
+
+    /// `version (1) ‖ root (32) ‖ signature (64)`.
+    pub fn encode(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(97);
+        out.push(ANCHOR_VERSION);
+        out.extend_from_slice(&self.root);
+        out.extend_from_slice(&self.signature);
+        out
+    }
+
+    pub fn decode(bytes: &[u8]) -> Result<Self> {
+        if bytes.len() != 97 || bytes[0] != ANCHOR_VERSION {
+            return Err(Error::Custom(
+                "not a signed anchor (version 2 is 97 bytes; a 33-byte version-1 anchor carries no signature and proves nothing)"
+                    .to_string(),
+            ));
+        }
+        Ok(Self { root: bytes[1..33].try_into().unwrap(), signature: bytes[33..].try_into().unwrap() })
+    }
+}
+
+/// The label under which a lane's key is kept among the wallet's share keys:
+/// derived from the vault key like every share key, so it is recoverable from
+/// the vault words, and never leaves the wallet.
+pub fn lane_key_label(tag: &str) -> String {
+    format!("lane:{}", tag.to_ascii_uppercase())
+}
+
+/// The wallet's key for `tag`, if it has made one.
+pub async fn lane_key(wallet: &Arc<Wallet>, tag: &str) -> Result<Option<crate::storage::notekeys::ShareKeyInfo>> {
+    let label = lane_key_label(tag);
+    Ok(wallet.store().as_note_key_store()?.share_keys().await?.into_iter().find(|s| s.label == label))
+}
+
+/// A key for `tag`, made now if the wallet has none.
+pub async fn lane_key_or_new(
+    wallet: &Arc<Wallet>,
+    wallet_secret: &Secret,
+    tag: &str,
+) -> Result<crate::storage::notekeys::ShareKeyInfo> {
+    if let Some(existing) = lane_key(wallet, tag).await? {
+        return Ok(existing);
+    }
+    wallet.store().as_note_key_store()?.add_share_key(wallet_secret, &lane_key_label(tag)).await
+}
+
+/// What an anchoring transaction pays itself, so it has an output: a tenth.
+pub const ANCHOR_SELF_PAYMENT_PETALS: u64 = 10_000_000;
+
+/// Anchor `root` in the lane of `tag`, signed with the wallet's key for that
+/// lane: one transaction in the lane's subnetwork, paying a tenth to this
+/// wallet's own address plus the network fee. Returns the transaction id,
+/// which is what a record holder is given alongside their proof.
+pub async fn anchor(
+    account: Arc<dyn Account>,
+    wallet_secret: Secret,
+    payment_secret: Option<Secret>,
+    tag: &str,
+    root: [u8; 32],
+) -> Result<Hash> {
+    let parsed = LaneClaim::parse_tag(tag)?;
+    let lane = SubnetworkId::from_tag(LaneClaim { tag: parsed, pk: [0; 32], label: String::new() }.tag_text().as_bytes())
+        .ok_or_else(|| Error::Custom("not a lane".to_string()))?;
+    let wallet = account.wallet();
+    let key = lane_key(wallet, tag)
+        .await?
+        .ok_or_else(|| Error::Custom(format!("this wallet has no key for lane {tag}: 'lane key {tag}' makes one")))?;
+    let sk = wallet.store().as_note_key_store()?.share_secret(&wallet_secret, key.index).await?;
+    let payload = AnchorPayload::sign(&sk, &lane, root)?;
+    let to = account.receive_address()?;
+    let keydata = account.prv_key_data(wallet_secret).await?;
+    let signer = Arc::new(Signer::new(account.clone(), keydata, payment_secret));
+    let settings = GeneratorSettings::try_new_with_account(
+        account.clone(),
+        PaymentDestination::PaymentOutputs(PaymentOutputs::from((to, ANCHOR_SELF_PAYMENT_PETALS))),
+        None,
+        Fees::SenderPays(0),
+        Some(payload.encode()),
+    )?
+    .with_subnetwork_id(lane);
+    let generator = Generator::try_new(settings, Some(signer), None)?;
+    let mut stream = generator.stream();
+    let mut last = None;
+    while let Some(transaction) = stream.try_next().await? {
+        transaction.try_sign()?;
+        last = Some(transaction.try_submit(&account.wallet().rpc_api()).await?);
+    }
+    last.ok_or_else(|| Error::Custom("the anchor produced no transaction".to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -216,5 +353,29 @@ mod tests {
         assert!(LaneClaim::parse_tag("ab-1").is_err());
         assert!(LaneClaim::parse_tag("").is_err());
         assert!(LaneClaim::new(tag, [0u8; 32], &"x".repeat(65)).is_err());
+    }
+
+    /// A signed anchor round-trips, verifies under its lane and key, and
+    /// fails under another lane, another key, or a changed root.
+    #[test]
+    fn an_anchor_is_good_for_one_root_in_one_lane() {
+        let sk = [9u8; 32];
+        let pk = Keypair::from_secret_key(SECP256K1, &SecretKey::from_slice(&sk).unwrap()).x_only_public_key().0.serialize();
+        let lane = SubnetworkId::from_tag(b"ACME").unwrap();
+        let root = [0xabu8; 32];
+        let anchor = AnchorPayload::sign(&sk, &lane, root).unwrap();
+        let bytes = anchor.encode();
+        assert_eq!(bytes.len(), 97);
+        let back = AnchorPayload::decode(&bytes).unwrap();
+        assert_eq!(back, anchor);
+        back.verify(&lane, &pk).unwrap();
+        assert!(back.verify(&SubnetworkId::from_tag(b"ACMEX").unwrap(), &pk).is_err(), "another lane");
+        assert!(back.verify(&lane, &[7u8; 32]).is_err(), "another key");
+        let mut other = back;
+        other.root[0] ^= 1;
+        assert!(other.verify(&lane, &pk).is_err(), "another root");
+        let mut v1 = vec![1u8];
+        v1.extend_from_slice(&root);
+        assert!(AnchorPayload::decode(&v1).is_err(), "an unsigned version-1 anchor is not accepted");
     }
 }
