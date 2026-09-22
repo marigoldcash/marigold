@@ -995,6 +995,10 @@ impl KaspaCli {
         env!("CARGO_PKG_VERSION").to_string()
     }
 
+    pub fn is_shutting_down(&self) -> bool {
+        self.shutdown.load(Ordering::SeqCst)
+    }
+
     pub fn wallet(&self) -> Arc<Wallet> {
         self.wallet.clone()
     }
@@ -4137,6 +4141,11 @@ pub async fn kaspa_cli(terminal_options: TerminalOptions, banner: Option<String>
 
     // cli starts notification->term trace pipe task
     cli.start().await?;
+
+    // Once a day: is there a newer wallet, and is this one still allowed on the
+    // network the trustees sign for? Nothing waits on it.
+    #[cfg(not(target_arch = "wasm32"))]
+    crate::release_check::start(&cli);
 
     // terminal blocks async execution, delivering commands to the terminals
     cli.run().await?;

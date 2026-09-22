@@ -118,6 +118,8 @@ kaspa-grpc-client.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+# The release-check test signs a notice with generated trustee keys.
+secp256k1.workspace = true
 
 [lints]
 workspace = true

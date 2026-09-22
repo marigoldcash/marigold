@@ -23,6 +23,23 @@ struct Args {
     #[arg(long, value_name = "PATH", exclusive = true)]
     generate_key: Option<PathBuf>,
 
+    /// Sign a release notice instead of running: the oldest wallet release
+    /// (`major.release`, e.g. `2.58`) that still follows this network's consensus.
+    /// Prints one JSON line with this trustee's signature and exits. Needs
+    /// --trustee-index, one of the key options, and --network.
+    #[arg(long, value_name = "MAJOR.RELEASE")]
+    sign_release_notice: Option<String>,
+
+    /// The network the release notice is for, as the wallet names it: `testnet-10`
+    /// or `mainnet`
+    #[arg(long, requires = "sign_release_notice")]
+    network: Option<String>,
+
+    /// Unix seconds the release notice is issued at; every trustee must sign the
+    /// same value. Defaults to now.
+    #[arg(long, requires = "sign_release_notice")]
+    issued_at: Option<u64>,
+
     /// This trustee's BIP340 secret key, hex-encoded (64 chars). Prefer --key-file.
     #[arg(long, conflicts_with = "key_file")]
     secret_key: Option<String>,
@@ -102,6 +119,35 @@ async fn main() {
         }
         _ => panic!("exactly one of --secret-key or --key-file is required"),
     };
+
+    if let Some(min_version) = &args.sign_release_notice {
+        let (major, release) = min_version
+            .split_once('.')
+            .and_then(|(a, b)| Some((a.parse::<u32>().ok()?, b.parse::<u32>().ok()?)))
+            .expect("--sign-release-notice takes MAJOR.RELEASE, for example 2.58");
+        let network = args.network.clone().expect("--network is required with --sign-release-notice");
+        let issued_at = args.issued_at.unwrap_or_else(|| {
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("clock before 1970").as_secs()
+        });
+        let notice = kaspa_consensus_core::finality_anchor::release_notice::ReleaseNotice {
+            network,
+            min_major: major,
+            min_release: release,
+            issued_at,
+        };
+        let keypair = secp256k1::Keypair::from_seckey_slice(secp256k1::SECP256K1, &secret_key).expect("invalid secret key");
+        let signature = notice.sign(&keypair);
+        println!(
+            "{{\"trustee\": {}, \"network\": \"{}\", \"min_version\": \"{}.{}\", \"issued_at\": {}, \"signature\": \"{}\"}}",
+            trustee_index,
+            notice.network,
+            notice.min_major,
+            notice.min_release,
+            notice.issued_at,
+            faster_hex::hex_string(&signature)
+        );
+        return;
+    }
 
     let trustee_keys = if args.trustee_keys.is_empty() {
         None

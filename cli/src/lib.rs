@@ -23,6 +23,8 @@ pub mod modules;
 mod notifier;
 pub mod platform;
 pub mod qrpng;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod release_check;
 pub mod result;
 #[cfg(feature = "embedded-node")]
 pub mod serve;

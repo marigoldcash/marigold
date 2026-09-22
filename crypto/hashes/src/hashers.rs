@@ -60,6 +60,7 @@ blake3_hasher! {
     struct NotePoolOutputsHash => b"NotePoolOutputs",
 
     struct FinalityAnchorSigningHash => b"FinalityAnchor",
+    struct ReleaseNoticeSigningHash => b"ReleaseNotice",
 }
 
 #[macro_export]
