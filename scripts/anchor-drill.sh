@@ -49,7 +49,9 @@ node_args() {
 start_node() {
   systemctl stop $UNIT 2>/dev/null || true
   # shellcheck disable=SC2046
-  systemd-run --unit=$UNIT --uid=marigold --gid=marigold --property=LimitNOFILE=65536 \
+  # PrivateTmp: the headers-proof staging database goes under /tmp/rusty-kaspa, a
+  # fixed path that on this host belongs to another user; a private /tmp sidesteps it.
+  systemd-run --unit=$UNIT --uid=marigold --gid=marigold --property=LimitNOFILE=65536 --property=PrivateTmp=yes \
     --property=Restart=no --collect -- $BIN/marigoldd $(node_args "$1")
   sleep 3; systemctl is-active $UNIT >/dev/null || { echo "attacker node did not start"; journalctl -u $UNIT -n 20 --no-pager -o cat; exit 1; }
 }
