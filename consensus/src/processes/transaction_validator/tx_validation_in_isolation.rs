@@ -7,7 +7,7 @@ use kaspa_consensus_core::finality_anchor::{AnchorPayload, verify_anchor, verify
 use kaspa_consensus_core::notepool::{PoolOp, validate_stateless};
 use kaspa_consensus_core::subnets::{
     CoinbaseSubnetwork, NativeSubnetwork, SUBNETWORK_ID_FINALITY_ANCHOR, SUBNETWORK_ID_NOTE_POOL, SUBNETWORK_NAMESPACE_LEN,
-    SUBNETWORK_ZERO_TAIL_LEN, Subnetwork,
+    SUBNETWORK_TAG_LEN, SUBNETWORK_WIDE_ZERO_TAIL_LEN, SUBNETWORK_ZERO_TAIL_LEN, Subnetwork,
 };
 use kaspa_consensus_core::tx::Transaction;
 use std::collections::HashSet;
@@ -18,7 +18,10 @@ impl TransactionValidator {
     /// header contextual validation if it becomes HF activation dependent. This is bcs we rely
     /// on checks here to be truly independent and avoid calling it multiple times wherever possible
     /// (e.g., BBT relies on mempool in isolation checks even though virtual daa score might have changed)   
-    pub fn validate_tx_in_isolation(&self, tx: &Transaction) -> TxResult<()> {
+    /// `pov_daa_score` is the score the transaction is judged at — the block's
+    /// for a block, virtual's for the mempool — for the one isolation rule that
+    /// has a switch, the lane shape.
+    pub fn validate_tx_in_isolation(&self, tx: &Transaction, pov_daa_score: u64) -> TxResult<()> {
         self.check_transaction_inputs_in_isolation(tx)?;
         self.check_transaction_outputs_in_isolation(tx)?;
         self.check_coinbase_in_isolation(tx)?;
@@ -26,7 +29,7 @@ impl TransactionValidator {
         check_transaction_output_value_ranges(tx)?;
         check_duplicate_transaction_inputs(tx)?;
         check_gas(tx)?;
-        check_transaction_subnetwork(tx)?;
+        check_transaction_subnetwork(tx, self.wide_lanes_activation.is_active(pov_daa_score))?;
         check_transaction_version(tx)?;
         check_tx_version_specific_fields(tx)?;
         check_note_pool_payload(tx)?;
@@ -230,8 +233,9 @@ fn check_transaction_output_value_ranges(tx: &Transaction) -> TxResult<()> {
     Ok(())
 }
 
-fn check_transaction_subnetwork(tx: &Transaction) -> TxResult<()> {
+fn check_transaction_subnetwork(tx: &Transaction, wide_lanes: bool) -> TxResult<()> {
     const ZEROES_16: &[u8; SUBNETWORK_ZERO_TAIL_LEN] = &[0; SUBNETWORK_ZERO_TAIL_LEN];
+    const ZEROES_15: &[u8; SUBNETWORK_WIDE_ZERO_TAIL_LEN] = &[0; SUBNETWORK_WIDE_ZERO_TAIL_LEN];
 
     // KIP-21 subnetwork ID shape, checked in priority order:
     // - `[x, 0×19]` (19-byte zero suffix): reserved system ID. Only NATIVE and
@@ -241,12 +245,17 @@ fn check_transaction_subnetwork(tx: &Transaction) -> TxResult<()> {
     //   Since the 19-suffix case is handled above, at least one of
     //   `bytes[1..4]` is non-zero, so the namespace is never all-zero here.
     //   Gated behind the Toccata HF.
+    // - `[tag (5 bytes), 0×15]` once wide lanes are active (Marigold, PLAN
+    //   P9.4c): a five-letter ticker as a lane. Every four-byte lane is also
+    //   of this shape, so nothing that was valid stops being valid.
     // - Any other shape: rejected.
+    let tail_len = if wide_lanes { SUBNETWORK_TAG_LEN } else { SUBNETWORK_NAMESPACE_LEN };
+    let tail_zero: &[u8] = if wide_lanes { ZEROES_15 } else { ZEROES_16 };
     match tx.subnetwork_id.as_bytes() {
         // Native and coinbase (reserved) subnetwork IDs are always allowed
         [NativeSubnetwork::FIRST_BYTE, rest @ ..] | [CoinbaseSubnetwork::FIRST_BYTE, rest @ ..] if rest == ZEROES_19 => Ok(()),
         [_x, rest @ ..] if rest == ZEROES_19 => Err(TxRuleError::SubnetworksDisabled(tx.subnetwork_id)),
-        bytes if tx.version >= TX_VERSION_TOCCATA && &bytes[SUBNETWORK_NAMESPACE_LEN..] == ZEROES_16 => Ok(()),
+        bytes if tx.version >= TX_VERSION_TOCCATA && &bytes[tail_len..] == tail_zero => Ok(()),
         _ => Err(TxRuleError::SubnetworksDisabled(tx.subnetwork_id)),
     }
 }
@@ -340,7 +349,7 @@ mod tests {
             vec![9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
         );
 
-        tv.validate_tx_in_isolation(&valid_cb).unwrap();
+        tv.validate_tx_in_isolation(&valid_cb, 0).unwrap();
 
         let valid_tx = Transaction::new(
             0,
@@ -406,23 +415,23 @@ mod tests {
             vec![],
         );
 
-        tv.validate_tx_in_isolation(&valid_tx).unwrap();
+        tv.validate_tx_in_isolation(&valid_tx, 0).unwrap();
 
         let mut tx: Transaction = valid_tx.clone();
         tx.subnetwork_id = SubnetworkId::from_byte(3);
-        assert_match!(tv.validate_tx_in_isolation(&tx), Err(TxRuleError::SubnetworksDisabled(_)));
+        assert_match!(tv.validate_tx_in_isolation(&tx, 0), Err(TxRuleError::SubnetworksDisabled(_)));
 
         let mut tx = valid_tx.clone();
         tx.inputs = vec![];
-        assert_match!(tv.validate_tx_in_isolation(&tx), Err(TxRuleError::NoTxInputs));
+        assert_match!(tv.validate_tx_in_isolation(&tx, 0), Err(TxRuleError::NoTxInputs));
 
         let mut tx = valid_tx.clone();
         tx.inputs = (0..params.max_tx_inputs + 1).map(|_| valid_tx.inputs[0].clone()).collect();
-        assert_match!(tv.validate_tx_in_isolation(&tx), Err(TxRuleError::TooManyInputs(_, _)));
+        assert_match!(tv.validate_tx_in_isolation(&tx, 0), Err(TxRuleError::TooManyInputs(_, _)));
 
         let mut tx = valid_tx.clone();
         tx.inputs[0].signature_script = vec![0; params.max_signature_script_len().upper_bound() + 1];
-        assert_match!(tv.validate_tx_in_isolation(&tx), Err(TxRuleError::TooBigSignatureScript(_, _)));
+        assert_match!(tv.validate_tx_in_isolation(&tx, 0), Err(TxRuleError::TooBigSignatureScript(_, _)));
 
         let mut forked_params = params.clone();
         forked_params.toccata_activation = ForkActivation::new(100);
@@ -438,7 +447,7 @@ mod tests {
         );
         let mut tx = valid_tx.clone();
         tx.inputs[0].signature_script = vec![0; forked_params.prior_max_signature_script_len + 1];
-        assert_match!(forked_tv.validate_tx_in_isolation(&tx), Ok(()));
+        assert_match!(forked_tv.validate_tx_in_isolation(&tx, 0), Ok(()));
         assert_match!(
             forked_tv.validate_tx_in_header_context(&tx, LockTimeArg::Finalized, 99),
             Err(TxRuleError::TooBigSignatureScript(_, _))
@@ -447,43 +456,82 @@ mod tests {
 
         let mut tx = valid_tx.clone();
         tx.outputs = (0..params.max_tx_outputs + 1).map(|_| valid_tx.outputs[0].clone()).collect();
-        assert_match!(tv.validate_tx_in_isolation(&tx), Err(TxRuleError::TooManyOutputs(_, _)));
+        assert_match!(tv.validate_tx_in_isolation(&tx, 0), Err(TxRuleError::TooManyOutputs(_, _)));
 
         let mut tx = valid_tx.clone();
         tx.outputs[0].script_public_key = ScriptPublicKey::new(0, scriptvec![0u8; params.max_script_public_key_len + 1]);
-        assert_match!(tv.validate_tx_in_isolation(&tx), Err(TxRuleError::TooBigScriptPublicKey(_, _)));
+        assert_match!(tv.validate_tx_in_isolation(&tx, 0), Err(TxRuleError::TooBigScriptPublicKey(_, _)));
 
         let mut tx = valid_tx.clone();
         tx.inputs.push(tx.inputs[0].clone());
-        assert_match!(tv.validate_tx_in_isolation(&tx), Err(TxRuleError::TxDuplicateInputs));
+        assert_match!(tv.validate_tx_in_isolation(&tx, 0), Err(TxRuleError::TxDuplicateInputs));
 
         let mut tx = valid_tx.clone();
         tx.gas = 1;
-        assert_match!(tv.validate_tx_in_isolation(&tx), Err(TxRuleError::TxHasGas(_)));
+        assert_match!(tv.validate_tx_in_isolation(&tx, 0), Err(TxRuleError::TxHasGas(_)));
 
         let mut tx = valid_tx.clone();
         tx.payload = vec![0];
-        assert_match!(tv.validate_tx_in_isolation(&tx), Ok(()));
+        assert_match!(tv.validate_tx_in_isolation(&tx, 0), Ok(()));
 
         let mut tx = valid_tx.clone();
         tx.version = 1;
         tx.inputs[0].compute_commit = ComputeCommit::SigopCount(1.into());
-        assert_match!(tv.validate_tx_in_isolation(&tx), Err(TxRuleError::SigopCountInV1(_, _)));
+        assert_match!(tv.validate_tx_in_isolation(&tx, 0), Err(TxRuleError::SigopCountInV1(_, _)));
 
         let mut tx = valid_tx.clone();
         tx.version = 0;
         tx.inputs[0].compute_commit = ComputeCommit::ComputeBudget(1.into());
-        assert_match!(tv.validate_tx_in_isolation(&tx), Err(TxRuleError::ComputeBudgetInV0(_, _)));
+        assert_match!(tv.validate_tx_in_isolation(&tx, 0), Err(TxRuleError::ComputeBudgetInV0(_, _)));
 
         let mut tx = valid_tx.clone();
         tx.version = TX_VERSION_TOCCATA + 1;
-        assert_match!(tv.validate_tx_in_isolation(&tx), Err(TxRuleError::UnknownTxVersion(_)));
+        assert_match!(tv.validate_tx_in_isolation(&tx, 0), Err(TxRuleError::UnknownTxVersion(_)));
 
         // Test prev version upper bound in header context
         // TODO(post-toccata): turn back into pure in-isolation test
         let mut tx = valid_tx;
         tx.version = TX_VERSION + 1;
         assert_match!(tv.validate_tx_in_header_context(&tx, LockTimeArg::Finalized, 0), Err(TxRuleError::UnknownTxVersion(_)));
+    }
+
+    fn check_transaction_subnetwork_4(tx: &Transaction) -> super::TxResult<()> {
+        super::check_transaction_subnetwork(tx, false)
+    }
+
+    /// Wide lanes: a five-byte tag is a lane once active and not before;
+    /// a four-byte lane is a lane under both rules; a sixth byte never is.
+    #[test]
+    fn wide_lanes_take_five_byte_tags_once_active() {
+        use kaspa_consensus_core::subnets::SubnetworkId;
+        use kaspa_consensus_core::tx::TransactionOutpoint;
+        let tx_with = |subnetwork_id: SubnetworkId| {
+            let input = TransactionInput {
+                previous_outpoint: TransactionOutpoint { transaction_id: TransactionId::from_slice(&[0u8; 32]), index: 0 },
+                signature_script: vec![],
+                sequence: 0,
+                compute_commit: ComputeCommit::SigopCount(0.into()),
+            };
+            let output = TransactionOutput { value: 1, script_public_key: ScriptPublicKey::new(0, scriptvec!(0u8)), covenant: None };
+            Transaction::new(TX_VERSION_TOCCATA, vec![input], vec![output], 0, subnetwork_id, 0, vec![])
+        };
+        let five = SubnetworkId::from_tag(b"ACMEX").unwrap();
+        let four = SubnetworkId::from_tag(b"ACME").unwrap();
+        assert_eq!(four, SubnetworkId::from_namespace(*b"ACME"), "a four-byte lane is the same id under both rules");
+        assert!(SubnetworkId::from_tag(b"ACMEXY").is_none());
+        assert!(SubnetworkId::from_tag(b"").is_none());
+        assert_eq!(five.tag(), b"ACMEX");
+        assert_eq!(four.tag(), b"ACME");
+        assert_match!(super::check_transaction_subnetwork(&tx_with(five), false), Err(TxRuleError::SubnetworksDisabled(_)));
+        super::check_transaction_subnetwork(&tx_with(five), true).unwrap();
+        super::check_transaction_subnetwork(&tx_with(four), false).unwrap();
+        super::check_transaction_subnetwork(&tx_with(four), true).unwrap();
+        let mut six = five.into_bytes();
+        six[5] = b'Z';
+        assert_match!(
+            super::check_transaction_subnetwork(&tx_with(SubnetworkId::from_bytes(six)), true),
+            Err(TxRuleError::SubnetworksDisabled(_))
+        );
     }
 
     #[test]
@@ -512,8 +560,8 @@ mod tests {
 
         // Reserved IDs (19-byte zero suffix): native/coinbase only, allowed at any version.
         for version in [TX_VERSION, TX_VERSION_TOCCATA] {
-            super::check_transaction_subnetwork(&tx_with(SUBNETWORK_ID_NATIVE, version)).unwrap();
-            super::check_transaction_subnetwork(&tx_with(SUBNETWORK_ID_COINBASE, version)).unwrap();
+            check_transaction_subnetwork_4(&tx_with(SUBNETWORK_ID_NATIVE, version)).unwrap();
+            check_transaction_subnetwork_4(&tx_with(SUBNETWORK_ID_COINBASE, version)).unwrap();
         }
 
         // [x, 0×19] for any x ∉ {NATIVE, COINBASE} → rejected at every version.
@@ -524,7 +572,7 @@ mod tests {
             let reserved_shape = SubnetworkId::from_byte(byte);
             for version in [TX_VERSION, TX_VERSION_TOCCATA] {
                 assert_match!(
-                    super::check_transaction_subnetwork(&tx_with(reserved_shape, version)),
+                    check_transaction_subnetwork_4(&tx_with(reserved_shape, version)),
                     Err(TxRuleError::SubnetworksDisabled(_))
                 );
             }
@@ -534,9 +582,9 @@ mod tests {
         // — any first byte (including native/coinbase) is accepted post-cov-HF.
         for namespace in [[0x11, 0x22, 0x33, 0x44], [0x00, 0x00, 0x00, 0x01], [0xde, 0xad, 0xbe, 0xef], [0x07, 0x01, 0, 0]] {
             let lane = sid(namespace, [0; SUBNETWORK_ZERO_TAIL_LEN]);
-            super::check_transaction_subnetwork(&tx_with(lane, TX_VERSION_TOCCATA)).unwrap();
+            check_transaction_subnetwork_4(&tx_with(lane, TX_VERSION_TOCCATA)).unwrap();
             // Pre-HF: user lanes are forbidden.
-            assert_match!(super::check_transaction_subnetwork(&tx_with(lane, TX_VERSION)), Err(TxRuleError::SubnetworksDisabled(_)));
+            assert_match!(check_transaction_subnetwork_4(&tx_with(lane, TX_VERSION)), Err(TxRuleError::SubnetworksDisabled(_)));
         }
 
         // Non-zero tail → rejected even post-HF.
@@ -544,14 +592,14 @@ mod tests {
         dirty_tail[0] = 1;
         let tail_byte_set = sid([0x11, 0, 0, 0], dirty_tail);
         assert_match!(
-            super::check_transaction_subnetwork(&tx_with(tail_byte_set, TX_VERSION_TOCCATA)),
+            check_transaction_subnetwork_4(&tx_with(tail_byte_set, TX_VERSION_TOCCATA)),
             Err(TxRuleError::SubnetworksDisabled(_))
         );
         let mut dirty_tail_last = [0u8; SUBNETWORK_ZERO_TAIL_LEN];
         *dirty_tail_last.last_mut().unwrap() = 0xff;
         let tail_last_set = sid([0, 0, 0, 1], dirty_tail_last);
         assert_match!(
-            super::check_transaction_subnetwork(&tx_with(tail_last_set, TX_VERSION_TOCCATA)),
+            check_transaction_subnetwork_4(&tx_with(tail_last_set, TX_VERSION_TOCCATA)),
             Err(TxRuleError::SubnetworksDisabled(_))
         );
 

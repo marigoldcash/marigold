@@ -1663,7 +1663,7 @@ impl VirtualStateProcessor {
         args: &TransactionValidationArgs,
         selected_parent: Hash,
     ) -> TxResult<()> {
-        self.transaction_validator.validate_tx_in_isolation(&mutable_tx.tx)?;
+        self.transaction_validator.validate_tx_in_isolation(&mutable_tx.tx, virtual_daa_score)?;
         self.transaction_validator.validate_tx_in_header_context_with_args(
             &mutable_tx.tx,
             virtual_daa_score,

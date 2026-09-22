@@ -144,6 +144,7 @@ impl ConsensusServices {
             tx_script_cache_counters,
             mass_calculator.clone(),
             params.toccata_activation,
+            params.wide_lanes_activation,
             params.mass_per_sig_op,
             params.finality_anchor,
         );

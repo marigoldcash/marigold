@@ -26,6 +26,8 @@ pub struct TransactionValidator {
     ghostdag_k: KType,
     sig_cache: Cache<SigCacheKey, bool>,
     toccata_activation: ForkActivation,
+    /// Five-byte lane tags from this score (Marigold, PLAN P9.4c).
+    wide_lanes_activation: ForkActivation,
     mass_per_sig_op: u64,
     /// Finality-anchor params (P6.11) — anchor-subnetwork payloads are fully
     /// verifiable in isolation (parse/shape/signatures/equivocation rule are all
@@ -49,6 +51,7 @@ impl TransactionValidator {
         counters: Arc<TxScriptCacheCounters>,
         mass_calculator: MassCalculator,
         toccata_activation: ForkActivation,
+        wide_lanes_activation: ForkActivation,
         mass_per_sig_op: u64,
         finality_anchor_params: FinalityAnchorParams,
     ) -> Self {
@@ -63,6 +66,7 @@ impl TransactionValidator {
             sig_cache: Cache::with_counters(10_000, counters),
             mass_calculator,
             toccata_activation,
+            wide_lanes_activation,
             mass_per_sig_op,
             finality_anchor_params,
         }
@@ -89,6 +93,7 @@ impl TransactionValidator {
             sig_cache: Cache::with_counters(10_000, counters),
             mass_calculator: MassCalculator::new(0, 0, 0),
             toccata_activation: ForkActivation::never(),
+            wide_lanes_activation: ForkActivation::never(),
             mass_per_sig_op: 0,
             finality_anchor_params: FinalityAnchorParams::LAUNCH_UNKEYED,
         }

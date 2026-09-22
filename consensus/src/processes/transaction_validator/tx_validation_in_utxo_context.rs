@@ -378,6 +378,7 @@ mod tests {
             Default::default(),
             MassCalculator::new(0, 0, 0),
             ForkActivation::always(),
+            ForkActivation::always(),
             params.mass_per_sig_op,
             params.finality_anchor,
         );

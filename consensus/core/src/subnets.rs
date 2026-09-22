@@ -19,6 +19,14 @@ pub const SUBNETWORK_NAMESPACE_LEN: usize = 4;
 /// Number of trailing zero bytes required in a user-lane subnetwork ID.
 pub const SUBNETWORK_ZERO_TAIL_LEN: usize = SUBNETWORK_ID_SIZE - SUBNETWORK_NAMESPACE_LEN;
 
+/// A lane tag once wide lanes are active (Marigold, `wide_lanes_activation`):
+/// up to five bytes, like a ticker symbol, followed by fifteen zero bytes. A
+/// four-byte namespace followed by a zero is the same twenty bytes under both
+/// rules, so every lane from before keeps its identity.
+pub const SUBNETWORK_TAG_LEN: usize = 5;
+/// Trailing zero bytes of a wide-lane subnetwork ID.
+pub const SUBNETWORK_WIDE_ZERO_TAIL_LEN: usize = SUBNETWORK_ID_SIZE - SUBNETWORK_TAG_LEN;
+
 const _: () = assert!(SUBNETWORK_NAMESPACE_LEN + SUBNETWORK_ZERO_TAIL_LEN == SUBNETWORK_ID_SIZE);
 
 /// The domain representation of a Subnetwork ID
@@ -70,6 +78,24 @@ impl SubnetworkId {
     /// The 4-byte namespace must have at least one non-zero byte — an all-zero
     /// namespace yields the native reserved ID. Validation enforces the shape
     /// at the consensus layer (see `check_transaction_subnetwork`).
+    /// A lane from its tag: one to five bytes, zero-padded. None for an
+    /// empty or over-long tag, or one that is all zero.
+    pub fn from_tag(tag: &[u8]) -> Option<SubnetworkId> {
+        if tag.is_empty() || tag.len() > SUBNETWORK_TAG_LEN || tag.iter().all(|b| *b == 0) {
+            return None;
+        }
+        let mut bytes = [0u8; SUBNETWORK_ID_SIZE];
+        bytes[..tag.len()].copy_from_slice(tag);
+        Some(SubnetworkId(bytes))
+    }
+
+    /// The tag of a lane: its leading bytes up to the first of the zero
+    /// tail, at most five. Empty for the native and coinbase subnetworks.
+    pub fn tag(&self) -> &[u8] {
+        let end = self.0[..SUBNETWORK_TAG_LEN].iter().rposition(|b| *b != 0).map(|i| i + 1).unwrap_or(0);
+        &self.0[..end]
+    }
+
     pub const fn from_namespace(namespace: [u8; SUBNETWORK_NAMESPACE_LEN]) -> SubnetworkId {
         let mut bytes = [0u8; SUBNETWORK_ID_SIZE];
         let mut i = 0;

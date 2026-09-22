@@ -381,6 +381,9 @@ pub struct OverrideParams {
     /// Time-locked notes activation DAA score (POOL-SPEC.md P5.9, PLAN P8.0g)
     pub note_locks_activation: Option<ForkActivation>,
 
+    /// Wide lanes activation DAA score (five-byte lane tags, PLAN P9.4c)
+    pub wide_lanes_activation: Option<ForkActivation>,
+
     /// Launch finality-anchor params (POOL-SPEC.md P5.8, PLAN P6.11)
     pub finality_anchor: Option<FinalityAnchorParams>,
 }
@@ -417,6 +420,7 @@ impl From<Params> for OverrideParams {
             toccata_activation: Some(p.toccata_activation),
             pool_activation: Some(p.pool_activation),
             note_locks_activation: Some(p.note_locks_activation),
+            wide_lanes_activation: Some(p.wide_lanes_activation),
             finality_anchor: Some(p.finality_anchor),
         }
     }
@@ -502,6 +506,14 @@ pub struct Params {
     /// onward a `TransferLocked` op is valid and a note may carry a lock. Its own
     /// switch, after `pool_activation`, so every node reading locks has upgraded.
     pub note_locks_activation: ForkActivation,
+
+    /// Wide lanes (PLAN P9.4c, founder 2026-09-22): from this DAA score a
+    /// user-lane subnetwork id is five tag bytes and fifteen zeros instead of
+    /// four and sixteen, so a lane tag can be a five-letter ticker. A
+    /// four-byte lane is the same id under both rules. Its own switch,
+    /// because a node on the old rule rejects a block carrying a five-byte
+    /// lane and never reconsiders.
+    pub wide_lanes_activation: ForkActivation,
 
     /// Launch finality-anchor params (POOL-SPEC.md P5.8, PLAN P6.11): the pinned
     /// trustee keys, anchoring depth, staged cadence schedule, and the unconditional
@@ -754,6 +766,7 @@ impl Params {
             toccata_activation: overrides.toccata_activation.unwrap_or(self.toccata_activation),
             pool_activation: overrides.pool_activation.unwrap_or(self.pool_activation),
             note_locks_activation: overrides.note_locks_activation.unwrap_or(self.note_locks_activation),
+            wide_lanes_activation: overrides.wide_lanes_activation.unwrap_or(self.wide_lanes_activation),
             finality_anchor: overrides.finality_anchor.unwrap_or(self.finality_anchor),
         }
     }
@@ -803,6 +816,9 @@ impl From<NetworkId> for Params {
 /// at which every node the founder runs has the reading code, with a margin for the
 /// testers' embedded nodes; an older node stops at the first locked transfer.
 pub const TESTNET_NOTE_LOCKS_ACTIVATION_DAA_SCORE: u64 = 11_400_000;
+/// Wide lanes on testnet-10: about three days after the 2026-09-22 release,
+/// so every node and tester has upgraded before the first five-letter lane.
+pub const TESTNET_WIDE_LANES_ACTIVATION_DAA_SCORE: u64 = 18_000_000;
 
 pub const MAINNET_PARAMS: Params = Params {
     // Kaspa's DNS seeders removed (P2.4) — this is a different network, their seeders
@@ -861,6 +877,8 @@ pub const MAINNET_PARAMS: Params = Params {
     toccata_activation: ForkActivation::always(),
     pool_activation: ForkActivation::always(),
     note_locks_activation: ForkActivation::never(),
+    // Mainnet has wide lanes from its first block: nothing to protect yet.
+    wide_lanes_activation: ForkActivation::always(),
     finality_anchor: FinalityAnchorParams::LAUNCH_UNKEYED,
 };
 
@@ -945,6 +963,7 @@ pub const TESTNET_PARAMS: Params = Params {
     toccata_activation: ForkActivation::always(),
     pool_activation: ForkActivation::always(),
     note_locks_activation: ForkActivation::new(TESTNET_NOTE_LOCKS_ACTIVATION_DAA_SCORE),
+    wide_lanes_activation: ForkActivation::new(TESTNET_WIDE_LANES_ACTIVATION_DAA_SCORE),
     finality_anchor: FinalityAnchorParams { trustees: Some(TESTNET_TRUSTEES), ..FinalityAnchorParams::LAUNCH_UNKEYED },
 };
 
@@ -1002,6 +1021,7 @@ pub const SIMNET_PARAMS: Params = Params {
     toccata_activation: ForkActivation::always(),
     pool_activation: ForkActivation::always(),
     note_locks_activation: ForkActivation::always(),
+    wide_lanes_activation: ForkActivation::always(),
     finality_anchor: FinalityAnchorParams::LAUNCH_UNKEYED,
 };
 
@@ -1049,6 +1069,7 @@ pub const DEVNET_PARAMS: Params = Params {
     toccata_activation: ForkActivation::never(),
     pool_activation: ForkActivation::never(),
     note_locks_activation: ForkActivation::never(),
+    wide_lanes_activation: ForkActivation::never(),
     finality_anchor: FinalityAnchorParams::LAUNCH_UNKEYED,
 };
 
