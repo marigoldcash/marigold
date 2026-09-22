@@ -488,10 +488,11 @@ a large RAM (~64GB) can set this value to ~3.0-4.0 and gain superior performance
 pub fn parse_args() -> Args {
     match Args::parse(std::env::args_os()) {
         Ok(args) => args,
-        Err(err) => {
-            println!("{err}");
-            std::process::exit(1);
-        }
+        // `--version` and `--help` are not failures: clap's own exit prints
+        // them and leaves with 0, and a real usage error with 2. Upstream
+        // left with 1 for all three, which made `marigoldd --version` fail
+        // every script that checked its exit code (the arm64 build, 2026-09-22).
+        Err(err) => err.exit(),
     }
 }
 
