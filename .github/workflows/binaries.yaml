@@ -3,7 +3,11 @@
 # Native builds on native runners: the node inside the wallet pulls in RocksDB
 # and secp256k1, which cross-compile badly from Linux and, for macOS, not
 # legally at all. One macOS runner builds both Mac targets and folds them into
-# a universal binary; Rosetta lets it run the Intel one for the report.
+# a universal binary; Rosetta lets it run the Intel one for the report. The
+# arm64 Linux build runs on GitHub's own arm64 runner (free for public
+# repositories) and is the trustee kit: besides the wallet it ships the node
+# and the trustee signer, so a trustee on a Raspberry Pi 4/5 or any other
+# 64-bit ARM Linux machine downloads them like everyone else (2026-09-22).
 #
 # Every job runs `marigold-cli --platform` on the binary it built, so a piece
 # that is guarded out on that platform (disk-space check, mining priority,
@@ -35,6 +39,7 @@ jobs:
       matrix:
         include:
           - { os: ubuntu-latest,  name: linux-x86_64,   target: x86_64-unknown-linux-gnu, ext: "" }
+          - { os: ubuntu-24.04-arm, name: linux-arm64,  target: aarch64-unknown-linux-gnu, ext: "", trustee_kit: true }
           - { os: windows-latest, name: windows-x86_64, target: x86_64-pc-windows-msvc,   ext: ".exe" }
     steps:
       - name: Fix CRLF on Windows
@@ -62,15 +67,29 @@ jobs:
       - name: Build
         run: cargo build --release -p kaspa-cli --bin marigold-cli --features embedded-node --target ${{ matrix.target }}
 
+      - name: Build the node and the trustee signer (trustee kit)
+        if: matrix.trustee_kit
+        run: cargo build --release --bin marigoldd --bin marigold-trustee-signer --target ${{ matrix.target }}
+
       - name: Platform report
         shell: bash
         run: ./target/${{ matrix.target }}/release/marigold-cli${{ matrix.ext }} --platform
+
+      - name: Trustee kit report
+        if: matrix.trustee_kit
+        run: |
+          ./target/${{ matrix.target }}/release/marigoldd --version
+          ./target/${{ matrix.target }}/release/marigold-trustee-signer --version
 
       - name: Name the binary
         shell: bash
         run: |
           mkdir -p out
           cp target/${{ matrix.target }}/release/marigold-cli${{ matrix.ext }} out/marigold-cli-${{ matrix.name }}${{ matrix.ext }}
+          if [ "${{ matrix.trustee_kit }}" = "true" ]; then
+            cp target/${{ matrix.target }}/release/marigoldd out/marigoldd-${{ matrix.name }}
+            cp target/${{ matrix.target }}/release/marigold-trustee-signer out/marigold-trustee-signer-${{ matrix.name }}
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
