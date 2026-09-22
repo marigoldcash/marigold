@@ -31,12 +31,14 @@ use kaspa_consensus_core::{
 };
 use kaspa_core::{debug, info, warn};
 use kaspa_grpc_client::GrpcClient;
-type DynRpcApi = dyn kaspa_rpc_core::api::rpc::RpcApi;
+pub type DynRpcApi = dyn kaspa_rpc_core::api::rpc::RpcApi;
 use kaspa_hashes::Hash;
 use kaspa_rpc_core::notify::mode::NotificationMode;
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::Arc;
+
+pub mod rehearsal;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
@@ -93,6 +95,41 @@ fn write_state(path: &PathBuf, state: LastSigned) {
     if let Err(err) = std::fs::write(path, format!("{} {}", state.score, state.block)) {
         warn!("[SIGNER] failed to persist signing state to {}: {err}", path.display());
     }
+}
+
+/// Connects to a node: `host:port` for gRPC, `ws://` or `wss://` for wRPC.
+pub async fn connect_rpc(rpc_server: &str) -> Result<Arc<DynRpcApi>, String> {
+    let client: Arc<DynRpcApi> = if rpc_server.starts_with("ws://") || rpc_server.starts_with("wss://") {
+        use kaspa_wrpc_client::client::{ConnectOptions, ConnectStrategy};
+        let client = Arc::new(
+            kaspa_wrpc_client::KaspaRpcClient::new(kaspa_wrpc_client::WrpcEncoding::Borsh, Some(rpc_server), None, None, None)
+                .map_err(|e| format!("{}: {e}", rpc_server))?,
+        );
+        let options = ConnectOptions {
+            block_async_connect: true,
+            strategy: ConnectStrategy::Retry,
+            url: Some(rpc_server.to_string()),
+            ..Default::default()
+        };
+        client.connect(Some(options)).await.map_err(|e| format!("failed to connect to {}: {e}", rpc_server))?;
+        client
+    } else {
+        Arc::new(
+            GrpcClient::connect_with_args(
+                NotificationMode::Direct,
+                format!("grpc://{}", rpc_server),
+                None,
+                true,
+                None,
+                false,
+                Some(500_000),
+                Default::default(),
+            )
+            .await
+            .map_err(|e| format!("failed to connect to {}: {e}", rpc_server))?,
+        )
+    };
+    Ok(client)
 }
 
 /// Builds the canonical zero-input, zero-output anchor-lane transaction for `anchor`.
@@ -178,42 +215,7 @@ impl TrusteeSigner {
         assert!((config.trustee_index as usize) < TRUSTEE_COUNT, "trustee index out of range");
         let keypair = secp256k1::Keypair::from_seckey_slice(secp256k1::SECP256K1, &config.secret_key)
             .map_err(|e| format!("invalid secret key: {e}"))?;
-        let client: Arc<DynRpcApi> = if config.rpc_server.starts_with("ws://") || config.rpc_server.starts_with("wss://") {
-            use kaspa_wrpc_client::client::{ConnectOptions, ConnectStrategy};
-            let client = Arc::new(
-                kaspa_wrpc_client::KaspaRpcClient::new(
-                    kaspa_wrpc_client::WrpcEncoding::Borsh,
-                    Some(&config.rpc_server),
-                    None,
-                    None,
-                    None,
-                )
-                .map_err(|e| format!("{}: {e}", config.rpc_server))?,
-            );
-            let options = ConnectOptions {
-                block_async_connect: true,
-                strategy: ConnectStrategy::Retry,
-                url: Some(config.rpc_server.clone()),
-                ..Default::default()
-            };
-            client.connect(Some(options)).await.map_err(|e| format!("failed to connect to {}: {e}", config.rpc_server))?;
-            client
-        } else {
-            Arc::new(
-                GrpcClient::connect_with_args(
-                    NotificationMode::Direct,
-                    format!("grpc://{}", config.rpc_server),
-                    None,
-                    true,
-                    None,
-                    false,
-                    Some(500_000),
-                    Default::default(),
-                )
-                .await
-                .map_err(|e| format!("failed to connect to {}: {e}", config.rpc_server))?,
-            )
-        };
+        let client = connect_rpc(&config.rpc_server).await?;
         let last_signed = read_state(&config.state_file).unwrap_or_default();
         let (incoming_sink, incoming) = mpsc::unbounded_channel();
         Ok(Self {

@@ -15,13 +15,24 @@ struct Args {
     rpc_server: String,
 
     /// This signer's trustee index (0..5) into the network's pinned key set
-    #[arg(short, long, required_unless_present = "generate_key")]
+    #[arg(short, long, required_unless_present_any = ["generate_key", "rehearse_forgeries", "drill_status"])]
     trustee_index: Option<u8>,
 
     /// Make a fresh trustee key: write the secret to this file (owner-only), print
     /// the public key to pin in params, and exit. Refuses to overwrite.
     #[arg(long, value_name = "PATH", exclusive = true)]
     generate_key: Option<PathBuf>,
+
+    /// Rehearse anchor forgeries against the node at --rpc-server instead of running:
+    /// submit every shape of bad anchor and report that each was refused and the
+    /// node's anchor state did not move. Needs no key. Exit code 1 on any failure.
+    #[arg(long)]
+    rehearse_forgeries: bool,
+
+    /// Print one line with the node's sink, DAA score and anchor state, and exit
+    /// (the anchor drill's status probe, scripts/anchor-drill.sh).
+    #[arg(long)]
+    drill_status: bool,
 
     /// Sign a release notice instead of running: the oldest wallet release
     /// (`major.release`, e.g. `2.58`) that still follows this network's consensus.
@@ -108,6 +119,25 @@ async fn main() {
         writeln!(file, "{hex_secret}").expect("cannot write the key file");
         println!("{}", faster_hex::hex_string(&xonly.serialize()));
         return;
+    }
+    if args.drill_status {
+        let client = kaspa_trustee_signer::connect_rpc(&args.rpc_server).await.expect("cannot reach the node");
+        println!("{}", kaspa_trustee_signer::rehearsal::drill_status_line(&client).await.expect("status failed"));
+        return;
+    }
+    if args.rehearse_forgeries {
+        let client = kaspa_trustee_signer::connect_rpc(&args.rpc_server).await.expect("cannot reach the node");
+        let report = kaspa_trustee_signer::rehearsal::rehearse_forgeries(&client).await.expect("rehearsal failed to run");
+        println!("anchor status before: {}", report.status_before);
+        for case in &report.cases {
+            println!("[{}] {} — {}", if case.passed() { "ok" } else { "FAIL" }, case.name, case.answer);
+        }
+        println!("anchor status after:  {}", report.status_after);
+        if report.ratchet_moved {
+            println!("[FAIL] the anchor ratchet moved to the forgeries' target");
+        }
+        println!("{}", if report.passed() { "rehearsal passed: every forgery refused, ratchet unmoved" } else { "REHEARSAL FAILED" });
+        std::process::exit(if report.passed() { 0 } else { 1 });
     }
     let trustee_index = args.trustee_index.expect("--trustee-index is required");
 
