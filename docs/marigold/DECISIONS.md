@@ -409,3 +409,11 @@ is priced like plumbing; notes are money and cost a penny to move.
 
 **What it asks of operators.** A node on the old rule rejects a block carrying a five-letter lane and never reconsiders, so every node must be on the new build before the activation score; the release notes say so, and the wallet refuses a five-letter claim before then.
 
+## Anchors are signed by the lane key; listed tickers need a trustee endorsement (2026-09-22)
+
+**Decision, anchors.** An anchoring transaction's payload carries a BIP340 signature by the lane's registered key over the lane and the root (encoding version 2). A lane is not exclusive at the chain level: any transaction can carry any subnetwork id, so without the signature a stranger's entry in a company's lane would pass as the company's. The wallet keeps a lane's key in its vault as a labelled share key, recoverable from the vault words; the gateway carries the signature and never the key.
+
+**Decision, tickers.** Symbols listed on the public exchanges are protected: a claim on one is valid only with three of five trustee signatures over the tag and the claimant's key, for as long as the trustees stand, on the anchors' own sunset schedule. Enforced by the registry rule, the wallet and the service, never by consensus. Listed companies prove authority through their own domain as given in the exchange directory. Unlisted tags stay free, first come. The plan is PLAN.md P9.4e.
+
+**Why not consensus.** A ticker list in consensus is a list the chain must carry and a fork to change; in the registry rule it is a wallet release, and the sunset is a date, not a fork. The chain still records every claim; the rule only decides which counts.
+

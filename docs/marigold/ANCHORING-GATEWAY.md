@@ -26,6 +26,9 @@ Request body (JSON):
 ```json
 {
   "root": "9f3c…64 hex chars…a1",     // required: 32-byte digest, lowercase hex
+  "lane": "ACME",                      // required: the integrator's claimed lane tag
+  "signature": "…128 hex chars…",      // required: the lane key's signature over the root (see the encoding below);
+                                       // the lane key stays with the integrator, the gateway only carries the signature
   "label": "acme-t&a-2026-08"          // optional: opaque client string, ≤ 64 bytes,
                                        // stored by the gateway for the client's own
                                        // bookkeeping; NOT written on chain
@@ -80,11 +83,11 @@ Public. `{ "node_synced": bool, "network": "marigold-mainnet", "virtual_daa_scor
 This is the part that must hold regardless of the gateway's existence — a verifier must be able to check an anchor against any archival node with no gateway involved:
 
 - The anchoring transaction lives in a **dedicated user-lane subnetwork**: a 20-byte subnetwork id of the form `[4-byte namespace, 16 zero bytes]`. The namespace is the four-byte tag of the lane the integrator has claimed in the registry ([LANE-REGISTRY.md](LANE-REGISTRY.md)); no namespace is granted in advance (founder, 2026-09-22, superseding the pinned `"T360"` of rev 2). Filtering a block's transactions by this subnetwork id finds all of this integration's anchors.
-- The transaction payload is exactly **33 bytes**: `0x01` (payload version) followed by the 32-byte root, big-endian as submitted.
+- The transaction payload is **97 bytes**: `0x02` (payload version) ‖ the 32-byte root ‖ a 64-byte BIP340 signature by the lane's registered key over `SHA256("marigold-anchor-v2" ‖ subnetwork id (20) ‖ root)`. A lane is not exclusive at the chain level — anyone can put a transaction in any subnetwork — so the signature is what makes an anchor the company's; a verifier checks it against the key in the lane's claim before looking at the root. (The 33-byte `0x01` form of rev 2 carried no signature and is not accepted by verifiers since 2026-09-22.)
 - Independent verification of a document, end to end:
   1. Hash the document (the integrator's declared hash function).
   2. Walk the supplied Merkle inclusion proof to a root.
-  3. Fetch the transaction by `txid` from any archival Marigold node (or block explorer) and check its payload carries that root and its subnetwork id matches.
+  3. Fetch the transaction by `txid` from any archival Marigold node (or block explorer); check its subnetwork id is the company's lane, that the payload's signature verifies under the key in the lane's registry claim, and that the payload carries that root.
   4. Read the accepting block's timestamp — that is the attestation time.
 - **Archival note**: Marigold, like Kaspa, prunes old transaction data on ordinary nodes. Long-term verification therefore relies on archival nodes (the partner integration includes a commitment to run one; marigold.cash will run one as well). Verifiers should be pointed at an archival endpoint or an explorer backed by one.
 
