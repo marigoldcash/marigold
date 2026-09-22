@@ -37,6 +37,9 @@ Outside testers have been on the network since 2026-09-07. The log was started o
 | 2026-09-20 | tester (macOS) | Sync status went "Step 3 of 3, 77%" → "Step 2 of 3, 99%" → "Step 3 of 3, 76%". | The node syncs in passes, each counting from zero; the status did not know about passes. | 7d228c89 | no | yes, log sink |
 | 2026-09-20 | tester (macOS) | `settings` printed "Unable to parse setting key `advanced`: invalid type: boolean" above the table. | Switches stored as booleans were read as text. | 82aed4a0 | no | — |
 
+| 2026-09-21 | tester (Linux) | The wallet starved the machine of memory during its first sync; the kernel's out-of-memory killer fired. | The wallet's own node runs with server-sized caches (scale 1.0, several gigabytes in practice, doubled while a second consensus is staged for the first sync) whatever the machine has, and nothing watches free memory. | memory.rs: the node is sized to the machine at start; a watchdog stops the miner when free memory is low and the sync when it is nearly gone. | no | yes, cli (sizing, watermarks); live squeeze |
+| 2026-09-22 | tester (macOS) | The machine froze (spinning beach ball) with the wallet syncing and mining; a hard power-off. | The same: a server-sized node on a laptop, and no back-off. | same fix | no | same |
+
 ## Open questions the log has raised
 
 - A node still catching up can accept a transaction and lose it when the sync replaces the state it was validated against. The wallet now refuses to use such a node; whether the node itself should refuse `SubmitTransaction` while in IBD (the way it refuses block templates) is a node-side question for P8.4's drills.
