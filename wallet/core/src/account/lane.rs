@@ -23,10 +23,11 @@ pub const LANE_CLAIM_VERSION: u8 = 1;
 /// The longest label a claim may carry, in bytes.
 pub const LANE_LABEL_MAX: usize = 64;
 
-/// Tags that cannot be claimed: the lanes the network itself uses, the
-/// registry's own, and the one granted by agreement before the registry
-/// existed.
-pub const RESERVED_TAGS: [&str; 4] = ["POOL", "ANCR", "LANE", "T360"];
+/// Tags that cannot be claimed: the lanes the network itself uses and the
+/// registry's own. Nobody else's is reserved: every company, the first
+/// integration partner included, claims its lane the same way (founder,
+/// 2026-09-22).
+pub const RESERVED_TAGS: [&str; 3] = ["POOL", "ANCR", "LANE"];
 
 /// Where the registration fee goes, per network. Testnet: an address of the
 /// project's, so claims can be made today; mainnet: set at the parameter
@@ -58,7 +59,7 @@ impl LaneClaim {
     pub fn parse_tag(text: &str) -> Result<[u8; 4]> {
         let upper = text.trim().to_ascii_uppercase();
         if upper.len() != 4 || !upper.bytes().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit()) {
-            return Err(Error::Custom(format!("a lane tag is four letters or digits, like T360 — '{text}' is not")));
+            return Err(Error::Custom(format!("a lane tag is four letters or digits, like ACME — '{text}' is not")));
         }
         if RESERVED_TAGS.contains(&upper.as_str()) {
             return Err(Error::Custom(format!("'{upper}' is taken")));
@@ -155,7 +156,7 @@ mod tests {
         assert_eq!(LaneClaim::decode(&bytes).unwrap(), claim);
         assert!(LaneClaim::decode(&bytes[..40]).is_err(), "a truncated claim is refused");
         assert!(LaneClaim::parse_tag("pool").is_err(), "the pool's lane is not for claiming");
-        assert!(LaneClaim::parse_tag("t360").is_err(), "the partner's lane is taken");
+        assert!(LaneClaim::parse_tag("t360").is_ok(), "nobody's lane is reserved in advance");
         assert!(LaneClaim::parse_tag("ab").is_err());
         assert!(LaneClaim::parse_tag("ab-1").is_err());
         assert!(LaneClaim::new(tag, [0u8; 32], &"x".repeat(65)).is_err());

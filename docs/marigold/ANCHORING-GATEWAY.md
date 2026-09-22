@@ -79,7 +79,7 @@ Public. `{ "node_synced": bool, "network": "marigold-mainnet", "virtual_daa_scor
 
 This is the part that must hold regardless of the gateway's existence — a verifier must be able to check an anchor against any archival node with no gateway involved:
 
-- The anchoring transaction lives in a **dedicated user-lane subnetwork**: a 20-byte subnetwork id of the form `[4-byte namespace, 16 zero bytes]`. The namespace for this integration is **pinned: `0x54 0x33 0x36 0x30` (ASCII `"T360"`)** — integrator's choice, 2026-08-16. Filtering a block's transactions by this subnetwork id finds all of this integration's anchors.
+- The anchoring transaction lives in a **dedicated user-lane subnetwork**: a 20-byte subnetwork id of the form `[4-byte namespace, 16 zero bytes]`. The namespace is the four-byte tag of the lane the integrator has claimed in the registry ([LANE-REGISTRY.md](LANE-REGISTRY.md)); no namespace is granted in advance (founder, 2026-09-22, superseding the pinned `"T360"` of rev 2). Filtering a block's transactions by this subnetwork id finds all of this integration's anchors.
 - The transaction payload is exactly **33 bytes**: `0x01` (payload version) followed by the 32-byte root, big-endian as submitted.
 - Independent verification of a document, end to end:
   1. Hash the document (the integrator's declared hash function).
@@ -96,7 +96,7 @@ This is the part that must hold regardless of the gateway's existence — a veri
 
 ## Resolved (formerly OPEN)
 
-1. **Subnetwork namespace: `"T360"`** (`0x54 0x33 0x36 0x30`) — pinned above.
+1. **Subnetwork namespace** — whatever tag the integrator claims in the lane registry; formerly pinned to `"T360"`, unpinned 2026-09-22.
 2. **Token rotation: zero-downtime by design** — active-token *sets* with an unbounded overlap window, specified under Authentication above. (Issuance channel — how a new token is delivered out of band — remains an ops detail, deliberately outside this contract.)
 
 ## OPEN items for v1
