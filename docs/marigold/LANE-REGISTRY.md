@@ -1,6 +1,6 @@
 # The lane registry
 
-A company that anchors its records on Marigold does so in a lane of its own: a user-lane subnetwork whose four-byte tag is the company's, so that anyone can find its anchoring transactions by filtering a block for that tag and verify them against any archival node, as [ANCHORING-GATEWAY.md](ANCHORING-GATEWAY.md) describes. This page is how a lane is claimed: on the chain, with one transaction, for a fee. No lane is granted in advance to anyone; the first integration partner claims theirs at launch like every other company (founder, 2026-09-22). The chain is the registry. Nobody keeps a list.
+A company that anchors its records on Marigold does so in a lane of its own: a user-lane subnetwork whose tag, up to five letters like a ticker symbol, is the company's, so that anyone can find its anchoring transactions by filtering a block for that tag and verify them against any archival node, as [ANCHORING-GATEWAY.md](ANCHORING-GATEWAY.md) describes. This page is how a lane is claimed: on the chain, with one transaction, for a fee. No lane is granted in advance to anyone; the first integration partner claims theirs at launch like every other company (founder, 2026-09-22). The chain is the registry. Nobody keeps a list.
 
 ## Claiming a tag
 
@@ -8,9 +8,9 @@ A claim is one ordinary transaction with three properties:
 
 - it lives in the registry's own lane, subnetwork id `[0x4c 0x41 0x4e 0x45, 16 zero bytes]` ("LANE");
 - it pays at least the registration fee, **100 MAGLD**, to the registry address of the network (testnet: `marigoldtest:qqfc69eulu3v8qamcasxqcx3wxvsfzjkv73fau4exk5kem70nqjsqgm3wm9g8`; mainnet: set at the parameter freeze, PLAN P9.5);
-- its payload is a claim: `0x01` (version) ‖ tag (4 bytes) ‖ the company's public key (32 bytes, x-only BIP340) ‖ label length (1 byte) ‖ label (UTF-8, at most 64 bytes).
+- its payload is a claim: `0x02` (version) ‖ tag (5 bytes, zero-padded) ‖ the company's public key (32 bytes, x-only BIP340) ‖ label length (1 byte) ‖ label (UTF-8, at most 64 bytes). (Version `0x01`, the first testnet claims, carried a four-byte tag.)
 
-A tag is exactly four ASCII capitals or digits. `POOL`, `ANCR` and `LANE` are the network's own and cannot be claimed. The wallet makes the claim with `lane claim <TAG> <key> [label]`; the key is the company's, the one its anchors will be attributed to, and the wallet never holds its secret.
+A tag is one to five ASCII capitals or digits, like a ticker symbol, and the lane's subnetwork id is the tag zero-padded to twenty bytes. Five-letter tags need wide lanes, a consensus rule with its own activation (testnet-10: DAA score 18,000,000; mainnet: from the first block); until then tags of up to four letters can be claimed, and every four-letter lane keeps its identity under both rules. `POOL`, `ANCR` and `LANE` are the network's own and cannot be claimed. The wallet makes the claim with `lane claim <TAG> <key> [label]`; the key is the company's, the one its anchors will be attributed to, and the wallet never holds its secret.
 
 **The first valid claim of a tag holds it.** Validity is the three properties above; order is the chain's: the claim whose accepting block comes first in the selected chain wins, and a later claim of the same tag is a donation. A claim is never undone and a tag never changes hands on the chain; a company that loses its key makes a new claim under a new tag.
 

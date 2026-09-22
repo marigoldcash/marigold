@@ -401,3 +401,11 @@ is priced like plumbing; notes are money and cost a penny to move.
 
 **Why a service fee, and why it is not a fund.** Verification is free to anyone with an archival node, and the companies were always meant to be able to run their own. What marigold.cash charges for is the archive it runs and the endpoint in front of it, like any host charges for hosting; the earnings pay for the archive and for the people who build the software. It is off-chain revenue for a service, never a protocol fee or an allocation, so the whitepaper's "every fee goes to miners, no fund of any kind" stays exactly true, and the page says so in as many words.
 
+## Lane tags are up to five letters, like a ticker (2026-09-22)
+
+**Decision.** A user-lane subnetwork id is five tag bytes and fifteen zeros, not four and sixteen: a lane tag is one to five capitals or digits. A hard fork with its own activation (`wide_lanes_activation`: testnet-10 at DAA 18,000,000, about three days after the release; mainnet from genesis). Every four-byte lane is the same twenty bytes under both rules, so nothing that existed changes identity.
+
+**Why.** Companies will want their ticker as their lane, and tickers on the NASDAQ, and for funds and ETFs, are five letters; four would be a lasting irritation for exactly the companies the registry is for (founder). The cost is small: one constant in the shape check, no change to headers, so miners and ASICs are untouched, and a one-line divergence from upstream's KIP-21 shape.
+
+**What it asks of operators.** A node on the old rule rejects a block carrying a five-letter lane and never reconsiders, so every node must be on the new build before the activation score; the release notes say so, and the wallet refuses a five-letter claim before then.
+

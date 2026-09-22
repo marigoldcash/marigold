@@ -15,7 +15,7 @@ impl Lane {
                 tprintln!(ctx, "");
                 tpara!(
                     ctx,
-                    "A lane is a company's own corner of the chain: a four-letter tag under which its anchoring transactions live, so anyone can find and verify them. Claiming one costs {} {ticker}, paid to the registry once; the first valid claim of a tag holds it. See marigold.cash for what a lane is for and what verification takes.",
+                    "A lane is a company's own corner of the chain: a tag of up to five letters or digits, like a ticker symbol, under which its anchoring transactions live, so anyone can find and verify them. Claiming one costs {} {ticker}, paid to the registry once; the first valid claim of a tag holds it. See marigold.cash for what a lane is for and what verification takes.",
                     sompi_to_kaspa_string(LANE_REGISTRATION_FEE_PETALS)
                 );
                 tprintln!(ctx, "");
@@ -48,8 +48,29 @@ impl Lane {
         let label = argv[2..].join(" ");
         let claim = LaneClaim::new(tag, pk, &label)?;
         let account = ctx.ledger_account().await?;
-        let network = ctx.wallet().network_id()?.network_type();
+        let network_id = ctx.wallet().network_id()?;
+        let network = network_id.network_type();
         let to = registry_address(network)?;
+        // Said before the money question: a five-letter tag is refused for
+        // its own reason until wide lanes are active on this network.
+        if LaneClaim::needs_wide_lanes(&claim.tag) {
+            let activation = kaspa_consensus_core::config::params::Params::from(network_id).wide_lanes_activation;
+            let now = ctx.wallet().rpc_api().get_server_info().await?.virtual_daa_score;
+            if !activation.is_active(now) {
+                tprintln!(
+                    ctx,
+                    "{}",
+                    style(format!(
+                        "Five-letter lanes open on this network at DAA score {} (it is {} now, about {} away). A tag of up to four letters can be claimed today.",
+                        activation.daa_score().separated_string(),
+                        now.separated_string(),
+                        crate::cli::humanised_wait(activation.daa_score().saturating_sub(now) as f64 / kaspa_consensus_core::config::params::Params::from(network_id).bps() as f64)
+                    ))
+                    .yellow()
+                );
+                return Ok(());
+            }
+        }
         let mature = account.balance().map(|b| b.mature).unwrap_or(0);
         if mature < LANE_REGISTRATION_FEE_PETALS {
             tprintln!(
