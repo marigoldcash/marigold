@@ -17,6 +17,7 @@ mod matchers;
 // Not feature-gated: `cores()`, `format_hashrate` and the `MinerControl`
 // plumbing are used by the status paths whether or not a node is compiled
 // in, and everything the module needs is an unconditional dependency.
+pub mod memory;
 pub mod miner;
 pub mod modules;
 mod notifier;

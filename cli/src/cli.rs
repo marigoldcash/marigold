@@ -1233,6 +1233,18 @@ impl KaspaCli {
         tprintln!(self, "");
         tprintln!(self, "{}", style("Network sync started!").green());
         tprintln!(self, "");
+        if let Some(memory) = crate::memory::read() {
+            let scale = crate::memory::ram_scale_for(memory);
+            tprintln!(
+                self,
+                "{}",
+                crate::ui::dim(format!(
+                    "This machine has {}; the sync is sized to use about {} of it, and backs off if memory runs short.",
+                    crate::memory::gigabytes(memory.total),
+                    crate::memory::gigabytes((scale * 4.0 * 1024.0 * 1024.0 * 1024.0) as u64)
+                ))
+            );
+        }
         tprintln!(self, "A first sync takes anywhere from half an hour to a few hours. Leaving the");
         tprintln!(self, "wallet before it finishes discards it — after that, restarts are free.");
         tprintln!(self, "");
@@ -2583,11 +2595,13 @@ impl KaspaCli {
         let this = self.clone();
         workflow_core::task::spawn(async move {
             let mut last_run = Instant::now();
+            let mut memory_warned_at: Option<Instant> = None;
             loop {
                 workflow_core::task::sleep(Duration::from_secs(5)).await;
                 if this.shutdown.load(Ordering::SeqCst) {
                     break;
                 }
+                this.watch_memory(&mut memory_warned_at).await;
                 if !this.wallet.is_open() || !this.wallet.is_connected() {
                     continue;
                 }
@@ -2702,6 +2716,75 @@ impl KaspaCli {
             return true;
         }
         self.remote_mining.load(Ordering::SeqCst)
+    }
+
+    /// Back off before the operating system has to. Low: the miner stops
+    /// and the person is told, once every few minutes while it lasts.
+    /// Critical: the sync is stopped as well, cleanly, with what that costs
+    /// said plainly — the alternative on both testers' machines was the
+    /// whole machine (2026-09-22).
+    async fn watch_memory(self: &Arc<Self>, warned_at: &mut Option<Instant>) {
+        let Some(memory) = crate::memory::read() else { return };
+        let low = crate::memory::low_watermark(memory);
+        let critical = crate::memory::critical_watermark(memory);
+        if memory.available >= low {
+            *warned_at = None;
+            return;
+        }
+        let recently = warned_at.is_some_and(|at| at.elapsed() < Duration::from_secs(300));
+        #[cfg(feature = "embedded-node")]
+        let mining = self.cpu_miner.lock().unwrap().is_some();
+        #[cfg(not(feature = "embedded-node"))]
+        let mining = false;
+        if memory.available < critical {
+            #[cfg(feature = "embedded-node")]
+            if self.embedded_node_running() {
+                tprintln!(self, "");
+                tprintln!(
+                    self,
+                    "{}",
+                    style(format!(
+                        "Memory is nearly gone: {} free of {}. Stopping the sync so this machine stays usable.",
+                        crate::memory::gigabytes(memory.available),
+                        crate::memory::gigabytes(memory.total)
+                    ))
+                    .red()
+                );
+                if mining {
+                    let _ = self.stop_mining().await;
+                }
+                let _ = self.stop_embedded_node().await;
+                tprintln!(
+                    self,
+                    "{}",
+                    style("'connect' starts it again once memory is free; 'connect public' uses a public computer instead, which needs none.").yellow()
+                );
+                tprintln!(self, "");
+                *warned_at = Some(Instant::now());
+                return;
+            }
+        }
+        if !recently {
+            tprintln!(self, "");
+            tprintln!(
+                self,
+                "{}",
+                style(format!(
+                    "Memory is running low: {} free of {}.",
+                    crate::memory::gigabytes(memory.available),
+                    crate::memory::gigabytes(memory.total)
+                ))
+                .yellow()
+            );
+            if mining {
+                tprintln!(self, "{}", style("The miner is stopped to give the machine room; 'mine start' once it has some.").yellow());
+                #[cfg(feature = "embedded-node")]
+                let _ = self.stop_mining().await;
+            }
+            tprintln!(self, "{}", crate::ui::dim("If it keeps falling the sync is stopped too, rather than let the system freeze."));
+            tprintln!(self, "");
+            *warned_at = Some(Instant::now());
+        }
     }
 
     /// Mark a deliberate change of connection for as long as the guard lives.

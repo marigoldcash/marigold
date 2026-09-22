@@ -137,7 +137,11 @@ impl EmbeddedNode {
                 .map(|address| address.normalize(0).ip.is_loopback())
                 .unwrap_or(false),
         };
+        // Sized to the machine: a server-sized node took two testers'
+        // laptops down (2026-09-22).
+        let ram_scale = crate::memory::ram_scale();
         let mut args = Args {
+            ram_scale,
             accept_own_below_floor: own_lane,
             appdir: Some(appdir.to_string_lossy().to_string()),
             utxoindex: true,
