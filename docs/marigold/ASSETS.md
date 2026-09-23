@@ -34,32 +34,36 @@ The line between the two is that everything in the first list is a shape that co
 
 ```
 Note {
-    asset: AssetId,          // 8 bytes, see below; all zeros is MAGLD
+    asset: AssetId,          // 20 bytes: the issuing lane's subnetwork id; all zeros is MAGLD
     d:     DenominationTag,  // 1 byte, unchanged
     pk:    [u8; 32],         // unchanged
     sn:    Hash,             // unchanged
 }
 ```
 
-**`asset`** is eight bytes. All zeros is MAGLD, the native asset, the one the ledger emits and the only one mint and redeem know. Any other value is a lane tag ([LANE-REGISTRY.md](LANE-REGISTRY.md)): the one-to-five ASCII capitals or digits of a claimed lane, zero-padded to eight bytes. A tag is a ticker already by the registry's own decision (2026-09-22), the lane's subnetwork id is that same tag zero-padded to twenty bytes, and eight bytes leaves room should tags grow. An explorer shows the tag; nothing needs a lookup to display an asset's name. The tag is the asset and the lane's key is its issuer; a lane whose tag is never used as an asset is an anchoring lane and nothing more.
+**`asset`** is the issuing lane's subnetwork id, twenty bytes, no second encoding. All zeros is the native subnetwork id already, so all zeros is MAGLD: the native asset, the one the ledger emits and the only one mint and redeem know. Any other value is a claimed lane ([LANE-REGISTRY.md](LANE-REGISTRY.md)): its tag, zero-padded to twenty bytes, exactly the id its anchoring transactions already carry. An explorer shows the tag; nothing needs a lookup to display an asset's name. The tag is the asset and the lane's key is its issuer; a lane whose tag is never used as an asset is an anchoring lane and nothing more.
+
+**Tags grow to sixteen bytes** under `assets_activation`, from the five of wide lanes, with the alphabet widened from capitals and digits to capitals, digits, the dot and the hyphen. Founder-asked 2026-09-23: a ticker with its exchange must fit, and the Hong Kong and mainland forms do not fit in eight bytes, let alone five. Sixteen holds every form in use: `0700.HK` (7), `09988.HK` (8), `600519.SS` and `000001.SZ` (9), and the ISO 10383 market codes if a registry policy ever prefers them, `700.XHKG` (8), `600519.XSHG` and `000001.XSHE` (11). Consensus already asks only that the bytes after the tag are zero (`check_transaction_subnetwork`), so the change is the tail length under the activation and the wallet's alphabet check; every lane claimed so far is the same twenty bytes under both rules, as it was when four-letter lanes became five. Tags of one byte stay impossible, since `[x, 0×19]` is a reserved system id. The four bytes past sixteen stay zero, which keeps a lane id visibly a lane id and leaves room for one more widening. Which exchange suffix an issuer writes is not a consensus matter: the registry's listing policy (trustee endorsement for listed tickers, DECISIONS 2026-09-22) is where `0700.HK` and `700.HK` are kept from both being claimed, the chain only keeps them from being the same lane.
 
 The denomination ladder is the same for every asset: tag `d` is worth 10 to the power of `d` minus 2 units of the asset, so tag 0 is one cent of a dollar-denominated asset exactly as it is 0.01 MAGLD. The table in P5.1 is a table of ladder positions; the unit is the asset's. No per-asset table exists and none is needed.
 
 ### The leaf
 
-Every existing commitment must stand, so the MAGLD leaf does not change: `H_leaf(d || pk)` unlocked and `H_leaf(d || pk || refund_pk || until_daa)` locked, exactly P5.9. A note of any other asset has the asset in front: `H_leaf(asset || d || pk)` and `H_leaf(asset || d || pk || refund_pk || until_daa)`. The four preimage lengths are 33, 73, 41 and 81 bytes, so no two can collide, the same argument P5.9 made for the lock. The pool state map's value becomes `(asset, d, pk, lock?)`; the store adds the asset as a field that is absent for MAGLD, the way the lock is absent for an unlocked note, so no entry written so far needs rewriting and no migration runs at activation.
+Every existing commitment must stand, so the MAGLD leaf does not change: `H_leaf(d || pk)` unlocked and `H_leaf(d || pk || refund_pk || until_daa)` locked, exactly P5.9. A note of any other asset has the asset in front: `H_leaf(asset || d || pk)` and `H_leaf(asset || d || pk || refund_pk || until_daa)`. The four preimage lengths are 33, 73, 53 and 93 bytes, so no two can collide, the same argument P5.9 made for the lock. The pool state map's value becomes `(asset, d, pk, lock?)`; the store adds the asset as a field that is absent for MAGLD, the way the lock is absent for an unlocked note, so no entry written so far needs rewriting and no migration runs at activation.
 
 ### The wire
 
-Pool protocol version 2. `NewNote` gains the asset:
+Pool protocol version 2. `NewNote` gains the asset, encoded compactly so that MAGLD, which is nearly every note, pays one byte:
 
 ```rust
 struct NewNote {
-    asset: AssetId,        // 8 bytes
+    asset: Option<AssetId>,  // borsh: 0x00 for MAGLD (1 byte), 0x01 || 20 bytes otherwise
     d:     DenominationTag,
     pk:    [u8; 32],
-}                          // 41 bytes
+}                            // 34 bytes for MAGLD, 54 for any other asset
 ```
+
+`Some` of all zeros is invalid, so every asset has exactly one encoding and a payload cannot spell MAGLD two ways.
 
 `Transfer`, `TransferLocked`, `Mint` and `Redeem` keep their shapes and their tags with the wider `NewNote` inside them. Two new variants:
 
@@ -82,7 +86,7 @@ A version-1 payload is a version-2 payload whose every note is MAGLD. Before the
 
 ### Signing
 
-`pool_protocol_version` in the signing preimage becomes 2, and `op.produced` is serialized as `asset || d || pk` per note, 41 bytes each. `op_type` takes 4 for issue and 5 for retire. The freshness anchor, the transparent outputs hash and the serials are as they are.
+`pool_protocol_version` in the signing preimage becomes 2, and `op.produced` is serialized per note as its wire encoding, `asset-option || d || pk`, 34 or 54 bytes. `op_type` takes 4 for issue and 5 for retire. The freshness anchor, the transparent outputs hash and the serials are as they are.
 
 The issuer's signature is its own preimage, domain-separated from the holders':
 
@@ -91,7 +95,7 @@ NotePoolIssuerHash = H(
     "NotePoolIssuer"
     || pool_protocol_version              // u8 = 2
     || op_type                             // 4 or 5
-    || asset                               // 8 bytes
+    || asset                               // 20 bytes
     || produced (issue) or sorted serials (retire)
     || transparent_outputs_hash
     || freshness.anchor_daa_score
@@ -128,7 +132,7 @@ Two parameters, both `ForkActivation`s:
 - `assets_activation`: the version-2 wire, the wider leaf and the registry as consensus state. Testnet-10: a DAA score chosen when the build is ready, about a day out, the fleet upgraded ahead of it on the usual recipe. Mainnet: always.
 - `asset_issue_activation`: issue and retire accepted, non-zero assets allowed in notes. Testnet-10: set only when the founder wants the rehearsal. Mainnet: never, until decided.
 
-Between the two, every note on the chain is MAGLD, an issue or retire is invalid everywhere, and the only visible change is that payloads and leaves are eight bytes wider for nothing. That is the price of the foundation.
+Between the two, every note on the chain is MAGLD, an issue or retire is invalid everywhere, and the only visible change is one byte more per produced note on the wire and tags up to sixteen bytes in the registry. That is the price of the foundation.
 
 ### Invariants added
 
@@ -143,11 +147,13 @@ Between the two, every note on the chain is MAGLD, an issue or retire is invalid
 - `consensus/core/src/config/params.rs`: the two activations, with the testnet-10 score and the mainnet values above.
 - `rpc`: the asset on `RpcNoteEntry`, an `GetAssetSupply` call, and the registry readable over RPC.
 - `wallet`: the asset stored with every note in the vault now, zero for all of them, so no vault ever needs migrating; the version-2 payloads at the activation; nothing else until the coin phase.
-- `docs/marigold/POOL-SPEC.md`: this page as P5.10 once decided; `LANE-REGISTRY.md`: the re-claim and the registry as consensus state; the whitepaper: one paragraph in Section 10.
+- `consensus/core/src/subnets.rs` and the transaction validator: the sixteen-byte tag tail under `assets_activation`; `wallet/core/src/account/lane.rs`: the alphabet and length.
+- `docs/marigold/POOL-SPEC.md`: this page as P5.10 once decided; `LANE-REGISTRY.md`: sixteen-byte tags with the dot and the hyphen, the re-claim, and the registry as consensus state; the whitepaper: one paragraph in Section 10.
 
 ## Verify
 
 - A version-1 payload is refused after `assets_activation` and accepted before; a version-2 payload the other way round; the fleet upgraded on the recipe pays across the activation without a failed payment beyond the wallets that were not upgraded.
+- A sixteen-byte tag with a dot, `600519.SS`, is claimable after the activation and refused before; a four- and a five-letter lane keep their ids across it.
 - A note minted, rotated, split, merged, locked and redeemed after the activation has asset zero in every RPC view and its leaf hash equals the version-1 leaf, so the commitment of a block containing only MAGLD notes is the same the old code would have computed.
 - Before `asset_issue_activation`, an issue op signed by a valid lane key is refused by consensus, not only by the mempool, and a `NewNote` with a non-zero asset is refused in every op.
 - On a private testnet with `asset_issue_activation` set: a claim, an issue of ten notes under the claim's key, a rotation of one, a split of one, a locked hand-over of one, a retire of two by the issuer, and at every block `Σ pool(A) = issued − retired`; an issue signed by a key that is not the tag's is refused; a re-claim by the current key changes which key can issue; a transfer that consumes dollar notes and produces MAGLD notes, or mixes assets across consumed and produced, is refused; a dollar transfer without a MAGLD stamp is refused for zero fee exactly as a MAGLD transfer is.
@@ -158,6 +164,6 @@ Between the two, every note on the chain is MAGLD, an issue or retire is invalid
 - **Freeze.** Regulated issuers are expected to be able to freeze funds on legal order. The founder's position today is that cash cannot be frozen and that this is a discussion for when an issuer exists. Nothing in the foundation decides it: a freeze would be a per-asset operation authorized by the issuer, and I7 keeps it away from MAGLD whatever the answer. If the answer is no, an issuer must be found who accepts that; if yes, it is one more op and one more field, added the way the lock was.
 - **Who can retire.** The draft requires both the notes' keys and the issuer's key, so that `issued − retired` only moves when the issuer says dollars left the bank, which makes it the number an attestation can match. The alternative, letting any holder burn their own notes, is simpler and is rejected for now for that reason.
 - **Committing the registry.** The lane map is rebuilt from the registry lane at sync rather than committed in the header. If lanes come to matter to consensus in more ways than issuing, it should get a commitment; adding a header field is a hard fork and would be better done before mainnet if it is going to be done at all. Decide before `assets_activation` on mainnet.
-- **Listing.** Whether an asset's lane needs the trustee endorsement listed tickers already need, and whether an unendorsed tag can issue at all.
+- **Listing.** Whether an asset's lane needs the trustee endorsement listed tickers already need, and whether an unendorsed tag can issue at all. This is also where one exchange-suffix convention per market would be chosen, so that a security is not claimable under two spellings.
 - **Stamps for asset-only wallets.** Issuer-supplied stamps, wallets keeping a little MAGLD, or a later rule letting a fee be paid in the asset to the miner, which mixes assets into the block reward and is the least attractive.
 - **Redemption flow.** A holder rotates notes to the issuer's key and is paid off-chain; the issuer retires. Whether the chain should carry a redemption request, with a receipt like a payment's, is a wallet question.

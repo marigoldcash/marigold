@@ -95,6 +95,34 @@ pub fn lower_process_priority() {
     }
 }
 
+/// Above this much resident memory, a node that has just finished its first
+/// sync is restarted in place: the sync fills every cache to its budget and
+/// glibc keeps the freed heap, so a tester saw six gigabytes held after
+/// "sync complete" that a restart brought down to two hundred megabytes.
+pub const RESTART_AFTER_SYNC_ABOVE: u64 = 3 * 1024 * 1024 * 1024 / 2;
+
+/// This process's resident memory, in bytes.
+#[cfg(target_os = "linux")]
+pub fn process_rss() -> Option<u64> {
+    let statm = std::fs::read_to_string("/proc/self/statm").ok()?;
+    let pages: u64 = statm.split_whitespace().nth(1)?.parse().ok()?;
+    Some(pages * 4096)
+}
+
+#[cfg(all(not(target_os = "linux"), not(target_arch = "wasm32")))]
+pub fn process_rss() -> Option<u64> {
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+    let pid = Pid::from_u32(std::process::id());
+    let mut system = System::new();
+    system.refresh_processes_specifics(ProcessesToUpdate::Some(&[pid]), ProcessRefreshKind::new().with_memory());
+    system.process(pid).map(|p| p.memory())
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn process_rss() -> Option<u64> {
+    None
+}
+
 /// The scale for the machine this runs on; a full node's when it cannot be
 /// measured.
 pub fn ram_scale() -> f64 {

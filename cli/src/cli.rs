@@ -1324,6 +1324,8 @@ impl KaspaCli {
     pub(crate) fn start_node_handover_task(self: &Arc<Self>, rpc: Rpc) {
         let this = self.clone();
         workflow_core::task::spawn(async move {
+            let mut rpc = rpc;
+            let mut restarted = false;
             loop {
                 workflow_core::task::sleep(Duration::from_secs(60)).await;
                 if this.shutdown.load(Ordering::SeqCst) {
@@ -1339,6 +1341,39 @@ impl KaspaCli {
                 }
                 if !Self::node_is_synced(&rpc).await {
                     continue;
+                }
+                // The first sync leaves the node holding everything it read:
+                // every cache full to its budget, and the heap the sync used
+                // kept by the allocator. A tester measured six gigabytes held
+                // after "sync complete" that a restart took down to two
+                // hundred megabytes (2026-09-23). So, once, the node is
+                // restarted in place: its database is complete now, and a
+                // restart is a normal start.
+                if !restarted
+                    && let Some(rss) = crate::memory::process_rss()
+                    && rss > crate::memory::RESTART_AFTER_SYNC_ABOVE
+                {
+                    restarted = true;
+                    tprintln!(this, "");
+                    tprintln!(
+                        this,
+                        "{}",
+                        style(format!(
+                            "Your sync has caught up. Restarting it once to give back the {} it used while reading the network.",
+                            crate::memory::gigabytes(rss)
+                        ))
+                        .green()
+                    );
+                    match this.restart_embedded_node().await {
+                        Ok(Some(fresh)) => {
+                            rpc = fresh;
+                            continue;
+                        }
+                        Ok(None) => break,
+                        Err(err) => {
+                            tprintln!(this, "{}", style(format!("The restart did not work ({err}); carrying on as it is.")).yellow());
+                        }
+                    }
                 }
                 match this.adopt_embedded_node(rpc.clone()).await {
                     Ok(()) => {
@@ -1649,6 +1684,22 @@ impl KaspaCli {
             None => tprintln!(self, "No sync of your own is running."),
         }
         Ok(())
+    }
+
+    /// Stops the node in this process and starts it again on its completed
+    /// database, quietly: no talk of a discarded first sync, because the
+    /// sync is exactly what has just finished.
+    #[cfg(feature = "embedded-node")]
+    async fn restart_embedded_node(self: &Arc<Self>) -> Result<Option<Rpc>> {
+        let node = self.embedded_node.lock().unwrap().take();
+        self.embedded_node_adopted.store(false, Ordering::SeqCst);
+        crate::log_sink::clear_sync_progress();
+        if let Some(node) = node {
+            node.stop().await?;
+            drop(node);
+            self.release_embedded_node_memory().await;
+        }
+        self.spawn_embedded_node().await
     }
 
     /// After the node in this process has stopped, let go of it: the wallet's
