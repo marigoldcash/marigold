@@ -24,5 +24,19 @@ fi
 printf 'marigold_last_block_age_seconds %s\n' "$age" >> "$tmp"
 {% endif %}
 
+# Finality-anchor state as the node sees it, through the trustee signer's status
+# probe over gRPC (added 2026-09-23 after the testnet ran two and a half hours in
+# fail-open unnoticed: a lagging signer host had cost the quorum). `stale` is the
+# spec's fail-open flag; `age_daa` is how far the latest anchor trails the sink.
+status=$(timeout 10 /opt/marigold/bin/marigold-trustee-signer --rpc-server 127.0.0.1:26210 --drill-status 2>/dev/null || true)
+case "$status" in *"enforcing true"*) enforcing=1 ;; *) enforcing=0 ;; esac
+case "$status" in *"stale true"*) stale=1 ;; *) stale=0 ;; esac
+sink=$(printf '%s' "$status" | sed -n 's/^sink [0-9a-f]* at DAA \([0-9]*\) .*/\1/p')
+anchor=$(printf '%s' "$status" | sed -n 's/.*anchor at DAA \([0-9]*\) .*/\1/p')
+if [ -n "$sink" ] && [ -n "$anchor" ]; then age_daa=$(( sink - anchor )); else age_daa=999999; fi
+printf 'marigold_anchor_enforcing %s\n' "$enforcing" >> "$tmp"
+printf 'marigold_anchor_stale %s\n' "$stale" >> "$tmp"
+printf 'marigold_anchor_age_daa %s\n' "$age_daa" >> "$tmp"
+
 chmod 644 "$tmp"
 mv "$tmp" "$out"
