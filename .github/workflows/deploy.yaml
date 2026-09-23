@@ -1,7 +1,10 @@
 name: Build and upload assets
+# Upstream's release workflow. Marigold's binaries are published under
+# marigold-wallet by binaries.yaml and gui-binaries.yaml, so this no longer
+# fires on a source release (it did for v2.59–v2.62 and only queued runners);
+# it stays runnable by hand.
 on:
-  release:
-    types: [ published ]
+  workflow_dispatch:
 
 jobs:
   build:
