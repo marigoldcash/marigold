@@ -40,10 +40,15 @@ PAYOUT=$(grep -h ExecStart /etc/systemd/system/marigold-miner.service | grep -oE
 SHARE=65
 
 node_args() {
-  # $1: the peer to connect to (and nothing else)
+  # $1: the peer to reach. --connect would also close the node to inbound peers
+  # (kaspad sets the inbound limit to zero with it), and a syncer for other test
+  # nodes must listen; so the production peer is added with --addpeer, and only
+  # the isolation phase, which wants no peers at all, uses --connect.
+  local peer_flag=--addpeer
+  [ "$1" = "$NOWHERE" ] && peer_flag=--connect
   echo --testnet --utxoindex --disable-upnp --nodnsseed --loglevel=info \
     --appdir=$APPDIR --listen=$ATT_P2P --rpclisten=$ATT_GRPC --rpclisten-borsh=$ATT_WRPC_ADDR \
-    --connect="$1" --externalip=127.0.0.1 ${EXTRA_NODE_ARGS:-}
+    $peer_flag="$1" --externalip=127.0.0.1 ${EXTRA_NODE_ARGS:-}
 }
 
 start_node() {
