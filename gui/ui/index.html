@@ -39,6 +39,7 @@
       <button data-tab="balance" class="tab active">Balance</button>
       <button data-tab="pay" class="tab">Pay</button>
       <button data-tab="request" class="tab">Request</button>
+      <button data-tab="give" class="tab">Give</button>
       <button data-tab="status" class="tab">Status</button>
     </nav>
 
@@ -49,13 +50,19 @@
     </div>
 
     <div id="tab-pay" class="tab-panel" hidden>
-      <h1>Pay a request</h1>
-      <label>The code you were given
-        <textarea id="pay-code" rows="4" placeholder="marigoldreq:…"></textarea>
+      <h1>A code you were given</h1>
+      <label>Paste it here — a request to pay, or notes handed to you
+        <textarea id="pay-code" rows="4" placeholder="marigoldreq:… or marigoldpay:…"></textarea>
       </label>
       <p id="pay-amount" class="amount"></p>
-      <button id="pay" class="primary" disabled>Pay</button>
+      <p id="pay-kind" class="hint"></p>
+      <label id="pay-choose" hidden>This request lets you choose the amount
+        <input id="pay-chosen" inputmode="decimal" placeholder="1.00">
+      </label>
+      <button id="pay" class="primary" hidden>Pay</button>
+      <button id="take" class="primary" hidden>Take it</button>
       <p id="pay-error" class="error"></p>
+      <p id="take-done" class="ok" hidden></p>
       <div id="pay-done" hidden>
         <p class="ok">Paid.</p>
         <p id="pay-summary"></p>
@@ -64,6 +71,22 @@
         </label>
         <button id="copy-receipt">Copy the receipt</button>
         <p class="hint">It points them straight at the payment and holds nothing secret.</p>
+      </div>
+    </div>
+
+    <div id="tab-give" class="tab-panel" hidden>
+      <h1>Hand notes over</h1>
+      <label>Amount
+        <input id="give-amount" inputmode="decimal" placeholder="1.00">
+      </label>
+      <button id="give" class="primary">Make the code</button>
+      <p id="give-error" class="error"></p>
+      <div id="give-done" hidden>
+        <p id="give-summary" class="ok"></p>
+        <img id="give-qr" class="qr" alt="">
+        <textarea id="give-code" rows="5" readonly></textarea>
+        <button id="copy-give">Copy the code</button>
+        <p class="hint">Whoever holds this code can take the notes, like cash. Hand it to one person, once. A request code is the safer way when the other side can make one.</p>
       </div>
     </div>
 

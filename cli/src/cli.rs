@@ -526,6 +526,7 @@ impl KaspaCli {
             None,
             say,
             Some(local_miner),
+            "telegram",
         );
         let handle = tokio::spawn(crate::telegram::run_bot(service, path, cfg));
         self.telegram_bot.lock().unwrap().replace(handle);

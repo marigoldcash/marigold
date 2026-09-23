@@ -62,30 +62,70 @@ $("password").addEventListener("keydown", (e) => { if (e.key === "Enter") $("ope
 
 for (const b of document.querySelectorAll(".tab")) b.addEventListener("click", () => tab(b.dataset.tab));
 
-// Pay: the amount shows as soon as a code is pasted, before anything is spent.
+// A pasted code: the app says what it is before anything happens.
+let pasted = null;
 $("pay-code").addEventListener("input", async () => {
   const code = $("pay-code").value.trim();
-  $("pay-done").hidden = true; $("pay-error").textContent = "";
-  if (!code) { $("pay-amount").textContent = ""; $("pay").disabled = true; return; }
+  $("pay-done").hidden = true; $("take-done").hidden = true; $("pay-error").textContent = "";
+  $("pay").hidden = true; $("take").hidden = true; $("pay-choose").hidden = true; $("pay-kind").textContent = ""; $("pay-amount").textContent = "";
+  pasted = null;
+  if (!code) return;
   try {
-    const amount = await invoke("request_amount", { code });
-    $("pay-amount").textContent = `${amount} ${opened.ticker}`;
-    $("pay").disabled = false;
-  } catch (e) { $("pay-amount").textContent = ""; $("pay-error").textContent = String(e); $("pay").disabled = true; }
+    const c = await invoke("classify", { code });
+    pasted = c;
+    if (c.kind === "request") {
+      if (c.amount) { $("pay-amount").textContent = `${c.amount} ${opened.ticker}`; $("pay-kind").textContent = "A request for payment."; }
+      else { $("pay-kind").textContent = "A request for payment that lets you choose the amount."; $("pay-choose").hidden = false; }
+      $("pay").hidden = false;
+    } else if (c.kind === "handover" || c.kind === "note") {
+      $("pay-kind").textContent = c.kind === "note" ? "A single note handed to you." : "Notes handed to you. Taking them makes them yours alone.";
+      $("take").hidden = false;
+    } else if (c.kind === "receipt") {
+      $("pay-kind").textContent = "A receipt for a payment somebody made. There is nothing to pay here.";
+    } else {
+      $("pay-error").textContent = "That is not a Marigold code.";
+    }
+  } catch (e) { $("pay-error").textContent = String(e); }
 });
 $("pay").addEventListener("click", async () => {
   $("pay").disabled = true; $("pay-error").textContent = "";
   try {
-    const paid = await invoke("pay", { code: $("pay-code").value.trim() });
+    const paid = await invoke("pay", { code: $("pay-code").value.trim(), amount: $("pay-chosen").value });
     $("pay-summary").textContent = `${paid.value} ${opened.ticker} in ${paid.notes} note(s), fee ${paid.fee} ${opened.ticker}.`;
     $("receipt").value = paid.receipt;
-    $("pay-done").hidden = false;
-    $("pay-code").value = ""; $("pay-amount").textContent = "";
+    $("pay-done").hidden = false; $("pay").hidden = true; $("pay-choose").hidden = true;
+    $("pay-code").value = ""; $("pay-amount").textContent = ""; $("pay-kind").textContent = ""; $("pay-chosen").value = "";
     refreshBalance();
-  } catch (e) { $("pay-error").textContent = String(e); $("pay").disabled = false; }
+  } catch (e) { $("pay-error").textContent = String(e); }
+  $("pay").disabled = false;
+});
+$("take").addEventListener("click", async () => {
+  $("take").disabled = true; $("pay-error").textContent = "";
+  try {
+    const line = await invoke("take", { code: $("pay-code").value.trim() });
+    $("take-done").textContent = line; $("take-done").hidden = false; $("take").hidden = true;
+    $("pay-code").value = ""; $("pay-kind").textContent = "";
+    refreshBalance();
+  } catch (e) { $("pay-error").textContent = String(e); }
+  $("take").disabled = false;
 });
 $("copy-receipt").dataset.label = "Copy the receipt";
 $("copy-receipt").addEventListener("click", () => copy($("receipt").value, $("copy-receipt"), "Copied"));
+
+// Give: notes as a code, like cash.
+$("give").addEventListener("click", async () => {
+  $("give").disabled = true; $("give-error").textContent = "";
+  try {
+    const g = await invoke("give", { amount: $("give-amount").value });
+    $("give-summary").textContent = `${g.value} ${opened.ticker} in ${g.notes} note(s), fee ${g.fee} ${opened.ticker}.`;
+    $("give-qr").src = g.qr; $("give-code").value = g.code; $("give-done").hidden = false;
+    $("give-amount").value = "";
+    refreshBalance();
+  } catch (e) { $("give-error").textContent = String(e); }
+  $("give").disabled = false;
+});
+$("copy-give").dataset.label = "Copy the code";
+$("copy-give").addEventListener("click", () => copy($("give-code").value, $("copy-give"), "Copied"));
 
 // Request: make the code, show it as a QR, and watch until it is paid.
 $("request").addEventListener("click", async () => {

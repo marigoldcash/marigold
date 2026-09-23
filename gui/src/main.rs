@@ -48,6 +48,23 @@ struct PaidOut {
 }
 
 #[derive(Serialize)]
+struct Classified {
+    /// "request", "handover", "note", "receipt" or "unknown".
+    kind: String,
+    /// A pinned request's amount; empty when the payer chooses or it is no request.
+    amount: String,
+}
+
+#[derive(Serialize)]
+struct Given {
+    code: String,
+    value: String,
+    fee: String,
+    notes: usize,
+    qr: String,
+}
+
+#[derive(Serialize)]
 struct Requested {
     code: String,
     amount: String,
@@ -113,6 +130,7 @@ async fn open(app: AppHandle, state: State<'_, App>, wallet: String, password: S
         node: node_url,
         mine: None,
         network: Some(network_id),
+        origin: "desktop",
     };
     let session = open_session(&options, state.shutdown.clone(), say).await.map_err(|e| e.to_string())?;
     let access = match node.as_str() {
@@ -169,22 +187,72 @@ async fn history(state: State<'_, App>) -> Result<String, String> {
     with_service(&state, |s| async move { Ok(s.history_text(12)) }).await
 }
 
-/// What a request code asks for, before anything is paid.
+/// What a pasted code is, before anything is done with it.
 #[tauri::command]
-async fn request_amount(code: String) -> Result<String, String> {
-    let petals = kaspa_cli_lib::serve::WalletService::request_amount(code.trim())?;
-    Ok(sompi_to_kaspa_string(petals))
+async fn classify(code: String) -> Result<Classified, String> {
+    use kaspa_wallet_core::account::notepool::{
+        BEARER_NOTE_PREFIX, HANDOVER_PREFIX, LOCKED_HANDOVER_PREFIX, PAYMENT_RECEIPT_PREFIX, PaymentRequest,
+    };
+    let code = code.trim();
+    if let Ok(request) = PaymentRequest::from_text(code) {
+        request.verify().map_err(|e| e.to_string())?;
+        return Ok(Classified {
+            kind: "request".into(),
+            amount: request.amount_petals.map(sompi_to_kaspa_string).unwrap_or_default(),
+        });
+    }
+    let kind = if code.starts_with(HANDOVER_PREFIX) || code.starts_with(LOCKED_HANDOVER_PREFIX) {
+        "handover"
+    } else if code.starts_with(BEARER_NOTE_PREFIX) {
+        "note"
+    } else if code.starts_with(PAYMENT_RECEIPT_PREFIX) {
+        "receipt"
+    } else {
+        "unknown"
+    };
+    Ok(Classified { kind: kind.into(), amount: String::new() })
 }
 
+/// `amount` is used only when the request pins none.
 #[tauri::command]
-async fn pay(state: State<'_, App>, code: String) -> Result<PaidOut, String> {
+async fn pay(state: State<'_, App>, code: String, amount: String) -> Result<PaidOut, String> {
+    let chosen = if amount.trim().is_empty() {
+        None
+    } else {
+        Some(try_kaspa_str_to_sompi(amount.trim()).map_err(|e| e.to_string())?.filter(|p| *p > 0).ok_or("that is not an amount")?)
+    };
     with_service(&state, |s| async move {
-        let paid = s.pay_request(code.trim()).await?;
+        let paid = s.pay_request_with(code.trim(), chosen).await?;
         Ok(PaidOut {
             receipt: paid.code,
             value: sompi_to_kaspa_string(paid.value_petals),
             fee: sompi_to_kaspa_string(paid.fee_petals),
             notes: paid.notes,
+        })
+    })
+    .await
+}
+
+/// Takes a code somebody handed over: a hand-over, a locked hand-over, or a bare note.
+#[tauri::command]
+async fn take(state: State<'_, App>, code: String) -> Result<String, String> {
+    with_service(&state, |s| async move { s.receive(code.trim()).await }).await
+}
+
+/// Hands notes over: a code whoever holds it can take.
+#[tauri::command]
+async fn give(state: State<'_, App>, amount: String) -> Result<Given, String> {
+    let petals =
+        try_kaspa_str_to_sompi(amount.trim()).map_err(|e| e.to_string())?.filter(|p| *p > 0).ok_or("that is not an amount")?;
+    with_service(&state, |s| async move {
+        let paid = s.pay(petals).await?;
+        let qr = qr_data_url(&paid.code);
+        Ok(Given {
+            code: paid.code,
+            value: sompi_to_kaspa_string(paid.value_petals),
+            fee: sompi_to_kaspa_string(paid.fee_petals),
+            notes: paid.notes,
+            qr,
         })
     })
     .await
@@ -242,8 +310,10 @@ fn main() {
             balance,
             status,
             history,
-            request_amount,
+            classify,
             pay,
+            take,
+            give,
             request,
             wait_request,
             qr

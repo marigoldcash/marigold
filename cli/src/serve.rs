@@ -138,6 +138,9 @@ pub type LocalMiner = Arc<dyn Fn() -> Option<kaspa_rpc_core::RpcMinerStatus> + S
 pub struct WalletService {
     wallet: Arc<Wallet>,
     secret: Secret,
+    /// Where requests come from, for the history: "telegram" for the bot,
+    /// "desktop" for the app.
+    origin: &'static str,
     network_id: NetworkId,
     journal: Journal,
     miner: Option<Arc<MinerHost>>,
@@ -163,11 +166,13 @@ impl WalletService {
         miner: Option<Arc<MinerHost>>,
         say: Say,
         local_miner: Option<LocalMiner>,
+        origin: &'static str,
     ) -> Arc<Self> {
         let rpc = wallet.rpc_api();
         Arc::new(Self {
             wallet,
             secret,
+            origin,
             network_id,
             journal: Journal::new(folder, name),
             miner,
@@ -217,6 +222,11 @@ impl WalletService {
 
     pub fn ticker(&self) -> &'static str {
         kaspa_wallet_core::utils::kaspa_suffix(&self.network_id.network_type())
+    }
+
+    /// self.tag("request").as_str(), "code (desktop)": what happened, and through what.
+    fn tag(&self, what: &str) -> String {
+        format!("{what} ({})", self.origin)
     }
 
     fn record(&self, kind: &str, petals: u64, stamp: u64, detail: &str, tx: &str) {
@@ -306,7 +316,7 @@ impl WalletService {
             "paid",
             result.value_petals,
             result.stamp_petals + result.transfer.fee_petals,
-            "code handed over (telegram)",
+            self.tag("code handed over").as_str(),
             &result.transfer.transaction_id.to_string(),
         );
         Ok(Paid {
@@ -329,11 +339,24 @@ impl WalletService {
     /// Pay a request code: the receiver's key and amount, signed by them,
     /// checked again here. `Paid::code` is the receipt to hand back.
     pub async fn pay_request(&self, code: &str) -> std::result::Result<Paid, String> {
+        self.pay_request_with(code, None).await
+    }
+
+    /// Pays a request; `amount` is what the payer chose when the request pins
+    /// none (the desktop wallet asks for it), and is ignored when it does.
+    pub async fn pay_request_with(&self, code: &str, amount: Option<u64>) -> std::result::Result<Paid, String> {
         let request = notepool::PaymentRequest::from_text(code).map_err(|e| e.to_string())?;
-        let amount = Self::request_amount(code)?;
+        request.verify().map_err(|e| e.to_string())?;
+        let (amount, chosen) = match request.amount_petals {
+            Some(pinned) => (pinned, None),
+            None => {
+                let chosen = amount.ok_or_else(|| "this request pins no amount; say how much to pay".to_string())?;
+                (chosen, Some(chosen))
+            }
+        };
         let result =
-            notepool::pay_payment_request(&self.wallet, self.secret.clone(), request, None).await.map_err(|e| e.to_string())?;
-        self.record("paid", amount, result.fee_petals, "request (telegram)", &result.transaction_id.to_string());
+            notepool::pay_payment_request(&self.wallet, self.secret.clone(), request, chosen).await.map_err(|e| e.to_string())?;
+        self.record("paid", amount, result.fee_petals, self.tag("request").as_str(), &result.transaction_id.to_string());
         let receipt =
             notepool::PaymentReceipt { transaction_id: result.transaction_id, request_pk: request.pk, amount_petals: amount };
         Ok(Paid { code: receipt.to_text(), value_petals: amount, fee_petals: result.fee_petals, notes: result.external_serials.len() })
@@ -353,7 +376,7 @@ impl WalletService {
             "offered",
             result.value_petals,
             result.stamp_petals + result.transfer.fee_petals,
-            "locked code (telegram)",
+            self.tag("locked code").as_str(),
             &result.transfer.transaction_id.to_string(),
         );
         Ok(Paid {
@@ -381,7 +404,7 @@ impl WalletService {
             let result = notepool::receive_locked(&self.wallet, self.secret.clone(), handover).await.map_err(|e| e.to_string())?;
             let stamp = result.notes.iter().any(|(_, d)| *d == kaspa_consensus_core::notepool::DenominationTag::D0_01);
             let value = if stamp { result.value_petals - DENOMINATION_PETALS[0] } else { result.value_petals };
-            self.record("received", value, 0, "locked code (telegram)", &result.rotation.transaction_id.to_string());
+            self.record("received", value, 0, self.tag("locked code").as_str(), &result.rotation.transaction_id.to_string());
             Ok(format!(
                 "Received {} {} in {} note(s), taken in time and made yours alone.",
                 sompi_to_kaspa_string(value),
@@ -393,7 +416,7 @@ impl WalletService {
             let result = notepool::receive_handover(&self.wallet, self.secret.clone(), handover).await.map_err(|e| e.to_string())?;
             let stamp = result.notes.iter().any(|(_, d)| *d == kaspa_consensus_core::notepool::DenominationTag::D0_01);
             let value = if stamp { result.value_petals - DENOMINATION_PETALS[0] } else { result.value_petals };
-            self.record("received", value, 0, "code (telegram)", &result.rotation.transaction_id.to_string());
+            self.record("received", value, 0, self.tag("code").as_str(), &result.rotation.transaction_id.to_string());
             Ok(format!(
                 "Received {} {} in {} note(s). Made yours alone with the payer's stamp.",
                 sompi_to_kaspa_string(value),
@@ -404,7 +427,13 @@ impl WalletService {
             let bearer = BearerNote::from_text(code).map_err(|e| e.to_string())?;
             let result = notepool::bearer_import(&self.wallet, self.secret.clone(), bearer).await.map_err(|e| e.to_string())?;
             let value = DENOMINATION_PETALS[bearer.d as usize];
-            self.record("received", value, result.rotation.fee_petals, "note (telegram)", &result.rotation.transaction_id.to_string());
+            self.record(
+                "received",
+                value,
+                result.rotation.fee_petals,
+                self.tag("note").as_str(),
+                &result.rotation.transaction_id.to_string(),
+            );
             self.note_spent(result.rotation.fee_petals);
             Ok(format!(
                 "Received {} {} (fee {}).",
@@ -427,7 +456,7 @@ impl WalletService {
         let request = notepool::PaymentRequest::from_text(code).map_err(|e| e.to_string())?;
         match notepool::await_payment_request(&self.wallet, &self.secret, request.pk, timeout).await {
             Ok(claimed) => {
-                self.record("received", claimed.total_petals, 0, "request (telegram)", "");
+                self.record("received", claimed.total_petals, 0, self.tag("request").as_str(), "");
                 Ok(Some(format!(
                     "Paid: {} {} arrived in {} note(s).",
                     sompi_to_kaspa_string(claimed.total_petals),
@@ -553,6 +582,8 @@ pub struct SessionOptions {
     pub node: Option<String>,
     pub mine: Option<u32>,
     pub network: Option<NetworkId>,
+    /// Named in the history beside every entry this session makes.
+    pub origin: &'static str,
 }
 
 /// An open wallet on a connected node, with the service the bot and the GUI
@@ -694,6 +725,7 @@ pub async fn open_session(options: &SessionOptions, shutdown: Arc<AtomicBool>, s
         miner_host.clone().filter(|h| h.address_bound()),
         say,
         None,
+        options.origin,
     );
     Ok(Session { service, wallet, rpc, node, miner_host, folder, network_id })
 }
@@ -718,6 +750,7 @@ pub async fn serve(args: Vec<String>) -> Result<()> {
             node: options.node.clone(),
             mine: options.mine,
             network: options.network,
+            origin: "telegram",
         },
         shutdown.clone(),
         Arc::new(|line: String| log::info!("{line}")),

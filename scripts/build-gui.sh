@@ -21,7 +21,7 @@ fi
 NO_BUMP=1 CHECK=1 scripts/remote-build.sh marigold-cli | grep -E "^→ syncing|Finished" || true
 echo "→ cargo build --release in gui/ on $HOST"
 # shellcheck disable=SC2029
-$SSH "$HOST" "cd $REMOTE_DIR/gui && cargo build --release --jobs \$(nproc) 2>&1 | grep -vE '^\s+(Compiling|Downloaded|Downloading|Updating|Locking|Adding)' | tail -30"
+$SSH "$HOST" "set -o pipefail; cd $REMOTE_DIR/gui && cargo build --release --jobs \$(nproc) 2>&1 | grep -vE '^\s+(Compiling|Downloaded|Downloading|Updating|Locking|Adding)' | tail -30"
 mkdir -p gui/target/release
 rsync -a --info=name -e "$SSH" "$HOST:$REMOTE_DIR/gui/target/release/marigold-wallet" gui/target/release/marigold-wallet
 echo "✓ done — gui/target/release/marigold-wallet ($(grep -m1 '^version' gui/Cargo.toml))"
