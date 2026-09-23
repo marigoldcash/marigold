@@ -188,6 +188,8 @@ cargo run --release --bin marigold-cli
 
 Usage is documented in [docs/marigold/WALLET.md](docs/marigold/WALLET.md).
 
+There is also a **desktop wallet** in [gui/](gui/): the same wallet with screens instead of commands, built with Tauri over the very code the terminal wallet runs. It is released beside the terminal wallet under the same version.
+
 **Ready-made binaries** for Linux, macOS and Windows are not attached here: they are published under [marigold-wallet](https://github.com/marigoldcash/marigold-wallet/releases/latest), one release per wallet version, named after the version inside it. A tag `v2.R.B` in this repository and the release `v2.R.B` there are the same code; the binaries are built from this repository's source by its own [Wallet binaries](https://github.com/marigoldcash/marigold/actions/workflows/binaries.yaml) workflow on GitHub's runners. Docker users get the same wallet through the marigold-wallet repository's compose file.
 
 ## Development process and review

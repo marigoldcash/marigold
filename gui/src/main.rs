@@ -34,6 +34,8 @@ struct Opened {
     wallet: String,
     network: String,
     own_node: bool,
+    /// How the wallet reaches the network, in the words the open screen used.
+    access: String,
     ticker: String,
 }
 
@@ -54,7 +56,8 @@ struct Requested {
 
 /// The wallet settings decide the folder and the network, as everywhere else.
 async fn probe() -> Result<(Arc<Wallet>, String, NetworkId), String> {
-    let wallet = Arc::new(Wallet::try_with_rpc(None, Wallet::local_store().map_err(|e| e.to_string())?, None).map_err(|e| e.to_string())?);
+    let wallet =
+        Arc::new(Wallet::try_with_rpc(None, Wallet::local_store().map_err(|e| e.to_string())?, None).map_err(|e| e.to_string())?);
     wallet.load_settings().await.ok();
     let folder = wallet
         .settings()
@@ -93,10 +96,10 @@ async fn open(app: AppHandle, state: State<'_, App>, wallet: String, password: S
         "own" => None,
         "local" => Some(format!("ws://127.0.0.1:{}", network_id.default_borsh_rpc_port())),
         "public" => Some(
-            kaspa_wrpc_client::Resolver::default()
-                .get_url(kaspa_wrpc_client::WrpcEncoding::Borsh, network_id)
-                .await
-                .map_err(|e| format!("no public computer answers: {e}"))?,
+            kaspa_wrpc_client::resolver::public_nodes(network_id)
+                .into_iter()
+                .next()
+                .ok_or_else(|| "no public computer is known for this network".to_string())?,
         ),
         url => Some(url.to_string()),
     };
@@ -104,12 +107,26 @@ async fn open(app: AppHandle, state: State<'_, App>, wallet: String, password: S
     let say: kaspa_cli_lib::serve::Say = Arc::new(move |line: String| {
         let _ = say_app.emit("say", line);
     });
-    let options = SessionOptions { wallet: wallet.clone(), password: Secret::from(password), node: node_url, mine: None, network: Some(network_id) };
+    let options = SessionOptions {
+        wallet: wallet.clone(),
+        password: Secret::from(password),
+        node: node_url,
+        mine: None,
+        network: Some(network_id),
+    };
     let session = open_session(&options, state.shutdown.clone(), say).await.map_err(|e| e.to_string())?;
+    let access = match node.as_str() {
+        "own" => "your own sync",
+        "local" => "a node on this machine",
+        "public" => "a public computer",
+        _ => "the node you named",
+    }
+    .to_string();
     let opened = Opened {
         wallet,
         network: network_id.to_string(),
         own_node: session.own_node(),
+        access,
         ticker: session.service.ticker().to_string(),
     };
     let mut guard = state.session.lock().await;
@@ -208,6 +225,13 @@ fn qr_data_url(text: &str) -> String {
 }
 
 fn main() {
+    // WebKitGTK's DMA-BUF renderer fails on NVIDIA's driver ("Failed to create
+    // GBM buffer … Permission denied") and shows a blank window; the classic
+    // renderer is fine. Set before any thread exists, as the standard requires.
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+        unsafe { std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1") };
+    }
     tauri::Builder::default()
         .manage(App { session: tokio::sync::Mutex::new(None), shutdown: Arc::new(AtomicBool::new(false)) })
         .invoke_handler(tauri::generate_handler![

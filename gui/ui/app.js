@@ -52,7 +52,7 @@ $("open").addEventListener("click", async () => {
   try {
     opened = await invoke("open", { wallet: $("wallet-list").value, password: $("password").value, node: $("node").value });
     $("password").value = "";
-    $("context").textContent = `${opened.wallet} · ${opened.network} · ${opened.own_node ? "your own sync" : "public computer"}`;
+    $("context").textContent = `${opened.wallet} · ${opened.network} · ${opened.access}`;
     $("say").textContent = "";
     show("home"); tab("balance");
   } catch (e) { $("open-error").textContent = String(e); $("say").textContent = ""; }

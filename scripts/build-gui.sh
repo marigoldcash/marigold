@@ -24,4 +24,4 @@ echo "→ cargo build --release in gui/ on $HOST"
 $SSH "$HOST" "cd $REMOTE_DIR/gui && cargo build --release --jobs \$(nproc) 2>&1 | grep -vE '^\s+(Compiling|Downloaded|Downloading|Updating|Locking|Adding)' | tail -30"
 mkdir -p gui/target/release
 rsync -a --info=name -e "$SSH" "$HOST:$REMOTE_DIR/gui/target/release/marigold-wallet" gui/target/release/marigold-wallet
-echo "✓ done — gui/target/release/marigold-wallet ($(gui/target/release/marigold-wallet --version 2>/dev/null || grep -m1 '^version' gui/Cargo.toml))"
+echo "✓ done — gui/target/release/marigold-wallet ($(grep -m1 '^version' gui/Cargo.toml))"
