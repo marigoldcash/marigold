@@ -122,6 +122,9 @@ pub struct KaspaCli {
     /// been mined into is minutes of work with nothing to show for it.
     loading: Arc<AtomicBool>,
     auto_payment_secret: Mutex<Option<Guarded>>,
+    /// The password typed at 'open', kept for the session for tidying — mint,
+    /// sweep, rotation — whether or not automation is on. A spend still asks.
+    tidying_secret: Mutex<Option<Guarded>>,
     /// Spends priced for our own block, watched until they land; see
     /// `retry_stale_own_lane_spends`.
     own_lane_spends: Mutex<Vec<OwnLaneSpend>>,
@@ -352,6 +355,7 @@ impl KaspaCli {
             telegram_bot: Mutex::new(None),
             loading: Arc::new(AtomicBool::new(false)),
             auto_payment_secret: Mutex::new(None),
+            tidying_secret: Mutex::new(None),
             own_lane_spends: Mutex::new(Vec::new()),
             own_lane_capture: Mutex::new(None),
             connected_server_version: Mutex::new(None),
@@ -1866,6 +1870,7 @@ impl KaspaCli {
 
     /// Drop every armed automation and the secret with it (wallet close).
     pub fn disarm_automation(&self) {
+        self.tidying_secret.lock().unwrap().take();
         self.auto_threshold_petals.store(0, Ordering::SeqCst);
         self.auto_sweep_utxos.store(0, Ordering::SeqCst);
         self.auto_secret.lock().unwrap().take();
@@ -3524,7 +3529,19 @@ impl KaspaCli {
             let payment = self.auto_payment_secret.lock().unwrap().as_mut().map(|g| g.reveal());
             return Ok((secret, payment));
         }
+        // Automation off is not a reason to ask again: the password from
+        // 'open' is on hand for the session (founder, 2026-09-23: "sweep did
+        // not have to ask me for a password anymore … it is not a payment").
+        let from_open = self.tidying_secret.lock().unwrap().as_mut().map(|g| g.reveal());
+        if let Some(secret) = from_open {
+            return Ok((secret, None));
+        }
         self.ask_wallet_secret(account).await
+    }
+
+    /// Keep the password from 'open' for tidying until 'close'.
+    pub fn hold_tidying_secret(&self, secret: Secret) {
+        *self.tidying_secret.lock().unwrap() = Some(Guarded::from_secret(secret));
     }
 
     pub(crate) async fn ask_wallet_secret(&self, account: Option<&Arc<dyn Account>>) -> Result<(Secret, Option<Secret>)> {

@@ -253,6 +253,12 @@ impl Wallet {
                     tprintln!(ctx, "This account's key has its own passphrase, so the automatic housekeeping");
                     tprintln!(ctx, "cannot sign on its own. Run 'auto on' to turn it on for this session.");
                 }
+                // Whatever the automation settings, tidying this session — a
+                // 'sweep' or 'mint' typed by hand — does not ask for the
+                // password again; only a key with its own passphrase does.
+                if !needs_passphrase {
+                    ctx.hold_tidying_secret(wallet_secret.clone());
+                }
                 if auto_sweep_on && !needs_passphrase {
                     let threshold = meta
                         .as_ref()
