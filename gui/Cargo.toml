@@ -5,7 +5,7 @@
 # kept in step by scripts/bump-version.sh.
 [package]
 name = "marigold-gui"
-version = "2.62.268"
+version = "2.63.269"
 edition = "2024"
 rust-version = "1.91.0"
 license = "ISC"
