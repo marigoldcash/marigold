@@ -31,7 +31,34 @@
     <p class="hint">Through a public computer, whoever runs it sees which notes your wallet asks about. A sync of your own needs a few gigabytes and some time.</p>
     <button id="open" class="primary">Open</button>
     <p id="open-error" class="error"></p>
-    <p class="hint">No wallet yet? Create one in the terminal wallet with <code>wallet create</code>; this app opens it.</p>
+    <p class="hint">No wallet yet? <button id="go-create" class="link">Create one</button> · <button id="go-restore" class="link">Restore one from its 24 words</button></p>
+  </section>
+
+  <section id="screen-create" class="screen" hidden>
+    <h1 id="create-title">Create a wallet</h1>
+    <label>A name for it
+      <input id="create-name" placeholder="marigold" autocomplete="off">
+    </label>
+    <label>Password, eight characters or more
+      <input id="create-password" type="password" autocomplete="new-password">
+    </label>
+    <label>The same password again
+      <input id="create-password2" type="password" autocomplete="new-password">
+    </label>
+    <label id="create-words-label" hidden>Your 24 words, in order
+      <textarea id="create-words" rows="4" autocomplete="off" spellcheck="false"></textarea>
+    </label>
+    <p id="restore-hint" class="hint" hidden>The words bring back your ledger account and the keys of your notes. The notes themselves also need the wallet's files: restore those with the terminal wallet's <code>backup restore</code>.</p>
+    <button id="create" class="primary">Create</button>
+    <button id="create-back">Back</button>
+    <p id="create-error" class="error"></p>
+  </section>
+
+  <section id="screen-words" class="screen" hidden>
+    <h1>Write these 24 words down</h1>
+    <p class="hint">They bring the whole wallet back: the notes and the ledger account. Anyone who has them has your money. Paper, not a screenshot.</p>
+    <ol id="words" class="words"></ol>
+    <button id="words-done" class="primary">I have written them down</button>
   </section>
 
   <section id="screen-home" class="screen" hidden>

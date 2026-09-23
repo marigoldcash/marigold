@@ -48,6 +48,13 @@ struct PaidOut {
 }
 
 #[derive(Serialize)]
+struct Created {
+    filename: String,
+    /// The 24 vault words, space-separated: the whole wallet comes back from them.
+    words: String,
+}
+
+#[derive(Serialize)]
 struct Classified {
     /// "request", "handover", "note", "receipt" or "unknown".
     kind: String,
@@ -87,6 +94,52 @@ async fn probe() -> Result<(Arc<Wallet>, String, NetworkId), String> {
         .unwrap_or(NetworkId::with_suffix(kaspa_consensus_core::network::NetworkType::Testnet, 10));
     wallet.store().set_storage_folder(&folder).map_err(|e| e.to_string())?;
     Ok((wallet, folder, network_id))
+}
+
+/// Makes a wallet the way the terminal wallet's wizard does: 24 vault words, a
+/// ledger account derived from them, the vault keyed by them. With `words`, the
+/// same wallet is rebuilt from a written-down set (its notes still need the
+/// wallet's files, restored with the terminal wallet's `backup restore`).
+#[tauri::command]
+async fn create_wallet(name: String, password: String, words: Option<String>) -> Result<Created, String> {
+    use kaspa_wallet_core::storage::keydata::PrvKeyDataVariantKind;
+    use kaspa_wallet_core::storage::local::notevault::{account_mnemonic_from_vault_words, new_vault_words};
+    let name = name.trim();
+    let name = if name.is_empty() { "marigold" } else { name };
+    if password.chars().count() < 8 {
+        return Err("a password needs at least eight characters".to_string());
+    }
+    let (wallet, _, network_id) = probe().await?;
+    wallet.set_network_id(&network_id).map_err(|e| e.to_string())?;
+    let bare = kaspa_wallet_core::storage::make_filename(&Some(name.to_string()), &None);
+    if wallet.store().exists(Some(&bare)).await.unwrap_or(false) {
+        return Err(format!("a wallet named '{bare}' already exists on this machine"));
+    }
+    let vault_words = match words {
+        Some(given) => {
+            let normalised: Vec<String> = given.split_whitespace().map(|w| w.to_lowercase()).collect();
+            if normalised.len() != 24 {
+                return Err(format!("that is {} words; a wallet has 24", normalised.len()));
+            }
+            let phrase = normalised.join(" ");
+            kaspa_bip32::Mnemonic::new(phrase.clone(), kaspa_bip32::Language::English)
+                .map_err(|_| "those are not 24 wallet words".to_string())?;
+            phrase
+        }
+        None => new_vault_words().map_err(|e| e.to_string())?,
+    };
+    let secret = Secret::from(password);
+    let account = account_mnemonic_from_vault_words(&vault_words).map_err(|e| e.to_string())?;
+    let prv = PrvKeyDataCreateArgs::new(None, None, Secret::from(account.phrase_string()), PrvKeyDataVariantKind::Mnemonic);
+    wallet.store().batch().await.map_err(|e| e.to_string())?;
+    let args = WalletCreateArgs::new(Some(name.to_string()), None, EncryptionKind::XChaCha20Poly1305, None, true);
+    let (descriptor, _) = wallet.create_wallet(&secret, args).await.map_err(|e| e.to_string())?;
+    let key_id = wallet.create_prv_key_data(&secret, prv).await.map_err(|e| e.to_string())?;
+    wallet.create_account_bip32(&secret, key_id, None, AccountCreateArgsBip32::new(None, None)).await.map_err(|e| e.to_string())?;
+    wallet.store().flush(&secret).await.map_err(|e| e.to_string())?;
+    let store = wallet.store().as_note_key_store().map_err(|e| e.to_string())?;
+    store.vault_restore_from_words(&vault_words, &secret).await.map_err(|e| e.to_string())?;
+    Ok(Created { filename: descriptor.filename, words: vault_words })
 }
 
 #[tauri::command]
@@ -305,6 +358,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             version,
             wallets,
+            create_wallet,
             open,
             close,
             balance,

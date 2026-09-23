@@ -28,8 +28,7 @@ async function copy(text, button, done) {
   catch (_) { button.textContent = "Select it and copy"; }
 }
 
-async function init() {
-  $("version").textContent = "v" + (await invoke("version"));
+async function loadWallets(select_filename) {
   try {
     const list = await invoke("wallets");
     const select = $("wallet-list");
@@ -39,11 +38,47 @@ async function init() {
       o.value = w.filename; o.textContent = w.title === w.filename ? w.filename : `${w.title} (${w.filename})`;
       select.appendChild(o);
     }
-    if (!list.length) $("open-error").textContent = "No wallet found on this machine.";
+    if (select_filename) select.value = select_filename;
+    $("open-error").textContent = list.length ? "" : "No wallet on this machine yet — create one below.";
   } catch (e) { $("open-error").textContent = String(e); }
+}
+async function init() {
+  $("version").textContent = "v" + (await invoke("version"));
+  await loadWallets();
   await listen("say", (event) => { $("say").textContent = event.payload; });
   show("open");
 }
+
+// Create or restore a wallet.
+let restoring = false;
+function showCreate(restore) {
+  restoring = restore;
+  $("create-title").textContent = restore ? "Restore a wallet" : "Create a wallet";
+  $("create").textContent = restore ? "Restore" : "Create";
+  $("create-words-label").hidden = !restore; $("restore-hint").hidden = !restore;
+  $("create-error").textContent = ""; $("create-password").value = ""; $("create-password2").value = ""; $("create-words").value = "";
+  show("create");
+}
+$("go-create").addEventListener("click", () => showCreate(false));
+$("go-restore").addEventListener("click", () => showCreate(true));
+$("create-back").addEventListener("click", () => show("open"));
+$("create").addEventListener("click", async () => {
+  $("create-error").textContent = "";
+  if ($("create-password").value !== $("create-password2").value) { $("create-error").textContent = "The two passwords differ."; return; }
+  $("create").disabled = true;
+  try {
+    const made = await invoke("create_wallet", { name: $("create-name").value, password: $("create-password").value, words: restoring ? $("create-words").value : null });
+    await loadWallets(made.filename);
+    if (restoring) { show("open"); }
+    else {
+      const ol = $("words"); ol.innerHTML = "";
+      for (const w of made.words.split(" ")) { const li = document.createElement("li"); li.textContent = w; ol.appendChild(li); }
+      show("words");
+    }
+  } catch (e) { $("create-error").textContent = String(e); }
+  $("create").disabled = false;
+});
+$("words-done").addEventListener("click", () => { $("words").innerHTML = ""; show("open"); });
 
 $("open").addEventListener("click", async () => {
   const button = $("open");
