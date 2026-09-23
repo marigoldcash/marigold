@@ -188,14 +188,24 @@ $("copy-receipt").addEventListener("click", () => copy($("receipt").value, $("co
 $("give").addEventListener("click", async () => {
   $("give").disabled = true; $("give-error").textContent = "";
   try {
-    const g = await invoke("give", { amount: $("give-amount").value });
-    $("give-summary").textContent = `${g.value} ${opened.ticker} in ${g.notes} note(s), fee ${g.fee} ${opened.ticker}.`;
+    const locked = $("give-key").value.trim() !== "";
+    const g = await invoke("give", { amount: $("give-amount").value, key: $("give-key").value, minutes: Number($("give-minutes").value) });
+    $("give-summary").textContent = `${g.value} ${opened.ticker} in ${g.notes} note(s), fee ${g.fee} ${opened.ticker}.` + (locked ? " Only the key's holder can take it, within the time you chose; then it comes back to you." : "");
     $("give-qr").src = g.qr; $("give-code").value = g.code; $("give-done").hidden = false;
     $("give-amount").value = "";
     refreshBalance();
   } catch (e) { $("give-error").textContent = String(e); }
   $("give").disabled = false;
 });
+$("give-key").addEventListener("input", () => { $("give-minutes-label").hidden = $("give-key").value.trim() === ""; });
+$("share-key").addEventListener("click", async () => {
+  try {
+    const k = await invoke("share_key");
+    $("share-qr").src = k.qr; $("share-code").value = k.code; $("share-done").hidden = false;
+  } catch (e) { $("request-error").textContent = String(e); }
+});
+$("copy-share").dataset.label = "Copy the key";
+$("copy-share").addEventListener("click", () => copy($("share-code").value, $("copy-share"), "Copied"));
 $("copy-give").dataset.label = "Copy the code";
 $("copy-give").addEventListener("click", () => copy($("give-code").value, $("copy-give"), "Copied"));
 

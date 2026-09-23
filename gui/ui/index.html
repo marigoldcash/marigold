@@ -107,6 +107,18 @@
       <label>Amount
         <input id="give-amount" inputmode="decimal" placeholder="1.00">
       </label>
+      <label>Only for one person: their share key (leave empty for a code anyone can take)
+        <input id="give-key" placeholder="marigoldkey:…" autocomplete="off" spellcheck="false">
+      </label>
+      <label id="give-minutes-label" hidden>They have this long to take it; afterwards the notes come back to you
+        <select id="give-minutes">
+          <option value="15">15 minutes</option>
+          <option value="60" selected>1 hour</option>
+          <option value="360">6 hours</option>
+          <option value="1440">1 day</option>
+          <option value="10080">7 days</option>
+        </select>
+      </label>
       <button id="give" class="primary">Make the code</button>
       <p id="give-error" class="error"></p>
       <div id="give-done" hidden>
@@ -120,6 +132,15 @@
 
     <div id="tab-request" class="tab-panel" hidden>
       <h1>Request a payment</h1>
+      <div class="aside">
+        <p class="hint">Or let someone hand notes to you alone, with a time limit: give them your share key.</p>
+        <button id="share-key">Show my share key</button>
+        <div id="share-done" hidden>
+          <img id="share-qr" class="qr small-qr" alt="">
+          <textarea id="share-code" rows="2" readonly></textarea>
+          <button id="copy-share">Copy the key</button>
+        </div>
+      </div>
       <label>Amount, or leave it empty and let the payer choose
         <input id="request-amount" inputmode="decimal" placeholder="1.00">
       </label>

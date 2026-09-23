@@ -355,13 +355,35 @@ async fn take(state: State<'_, App>, code: String) -> Result<String, String> {
     with_service(&state, |s| async move { s.receive(code.trim()).await }).await
 }
 
-/// Hands notes over: a code whoever holds it can take.
+/// Your share key: give it to someone so their hand-over can be made for you
+/// alone, with a time lock (PLAN P8.0g). A fresh key each time, labelled.
 #[tauri::command]
-async fn give(state: State<'_, App>, amount: String) -> Result<Given, String> {
+async fn share_key(state: State<'_, App>) -> Result<Requested, String> {
+    with_service(&state, |s| async move {
+        let code = s.share_key("desktop").await?;
+        let qr = qr_data_url(&code);
+        Ok(Requested { code, amount: String::new(), qr })
+    })
+    .await
+}
+
+/// Hands notes over: a code whoever holds it can take — or, with `key`, one
+/// only that key's holder can take, and only within `minutes`, after which the
+/// notes come back to this wallet by themselves.
+#[tauri::command]
+async fn give(state: State<'_, App>, amount: String, key: String, minutes: u64) -> Result<Given, String> {
     let petals =
         try_kaspa_str_to_sompi(amount.trim()).map_err(|e| e.to_string())?.filter(|p| *p > 0).ok_or("that is not an amount")?;
+    let key = key.trim().to_string();
     with_service(&state, |s| async move {
-        let paid = s.pay(petals).await?;
+        let paid = if key.is_empty() {
+            s.pay(petals).await?
+        } else {
+            if !kaspa_cli_lib::serve::WalletService::is_share_key(&key) {
+                return Err("that is not a share key (marigoldkey:…)".to_string());
+            }
+            s.pay_locked(petals, &key, minutes.clamp(1, 7 * 24 * 60) * 60).await?
+        };
         let qr = qr_data_url(&paid.code);
         Ok(Given {
             code: paid.code,
@@ -438,6 +460,7 @@ fn main() {
             pay,
             take,
             give,
+            share_key,
             request,
             wait_request,
             qr
