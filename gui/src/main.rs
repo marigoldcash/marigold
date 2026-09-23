@@ -205,10 +205,19 @@ async fn open(app: AppHandle, state: State<'_, App>, wallet: String, password: S
         network: Some(network_id),
         origin: "desktop",
     };
-    let session = open_session(&options, state.shutdown.clone(), say).await.map_err(|e| e.to_string())?;
+    let session = open_session(&options, state.shutdown.clone(), say).await.map_err(|e| {
+        let text = e.to_string();
+        // The node's own words tell a terminal user to type a command; here
+        // the way out is a choice on this screen (founder, 2026-09-23).
+        if text.contains("already in use") {
+            "Looks like there is already a Marigold network running on this computer. Select \"A network running on this computer\" to connect to it.".to_string()
+        } else {
+            text
+        }
+    })?;
     let access = match node.as_str() {
         "own" => "your own sync",
-        "local" => "a node on this machine",
+        "local" => "a network on this computer",
         "public" => "a public computer",
         _ => "the node you named",
     }
@@ -286,7 +295,7 @@ async fn machine(state: State<'_, App>) -> Result<Machine, String> {
 async fn mine(state: State<'_, App>, action: String) -> Result<String, String> {
     let access = state.access.lock().unwrap().clone();
     if access == "public" && action == "start" {
-        return Err("Mining through a public computer would tell its operator where your rewards go. Open the wallet with a node on this machine or a sync of your own to mine.".to_string());
+        return Err("Mining through a public computer would tell its operator where your rewards go. Open the wallet with a network running on this computer or a sync of your own to mine.".to_string());
     }
     let session_rpc = state.session.lock().await.as_ref().map(|s| s.rpc.clone()).ok_or("no wallet is open")?;
     if action == "start" {
