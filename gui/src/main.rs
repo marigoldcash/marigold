@@ -355,6 +355,12 @@ async fn take(state: State<'_, App>, code: String) -> Result<String, String> {
     with_service(&state, |s| async move { s.receive(code.trim()).await }).await
 }
 
+/// The open wallet's 24 words, shown again only against its password.
+#[tauri::command]
+async fn words(state: State<'_, App>, password: String) -> Result<String, String> {
+    with_service(&state, |s| async move { s.recovery_words(Secret::from(password)).await }).await
+}
+
 /// Your share key: give it to someone so their hand-over can be made for you
 /// alone, with a time lock (PLAN P8.0g). A fresh key each time, labelled.
 #[tauri::command]
@@ -461,6 +467,7 @@ fn main() {
             take,
             give,
             share_key,
+            words,
             request,
             wait_request,
             qr

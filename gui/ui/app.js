@@ -240,6 +240,18 @@ async function watch(code) {
   }
 }
 
+$("show-words").addEventListener("click", async () => {
+  $("words-error").textContent = "";
+  try {
+    const text = await invoke("words", { password: $("words-password").value });
+    $("words-password").value = "";
+    const ol = $("words-again"); ol.innerHTML = "";
+    for (const w of text.split(" ")) { const li = document.createElement("li"); li.textContent = w; ol.appendChild(li); }
+    ol.hidden = false; $("hide-words").hidden = false;
+  } catch (e) { $("words-error").textContent = String(e); }
+});
+$("hide-words").addEventListener("click", () => { $("words-again").innerHTML = ""; $("words-again").hidden = true; $("hide-words").hidden = true; });
+$("close-wallet").addEventListener("click", () => { $("words-again").innerHTML = ""; $("words-again").hidden = true; $("hide-words").hidden = true; });
 $("refresh-status").addEventListener("click", refreshStatus);
 $("close-wallet").addEventListener("click", async () => {
   watching = null; if (syncTimer) { clearInterval(syncTimer); syncTimer = null; } $("syncing").hidden = true;

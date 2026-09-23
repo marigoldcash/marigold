@@ -388,6 +388,14 @@ impl WalletService {
     }
 
     /// A share key to hand out (P8.0g).
+    /// The wallet's 24 recovery words, against the password given now: a wrong
+    /// one cannot open the vault, so nothing is shown. For the desktop wallet;
+    /// the bot never offers this.
+    pub async fn recovery_words(&self, password: Secret) -> std::result::Result<String, String> {
+        let store = self.wallet.store().as_note_key_store().map_err(|e| e.to_string())?;
+        store.recovery_words(&password).await.map_err(|_| "that is not this wallet's password".to_string())
+    }
+
     pub async fn share_key(&self, label: &str) -> std::result::Result<String, String> {
         let store = self.wallet.store().as_note_key_store().map_err(|e| e.to_string())?;
         let info = store.add_share_key(&self.secret, label).await.map_err(|e| e.to_string())?;

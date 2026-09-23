@@ -431,3 +431,15 @@ is priced like plumbing; notes are money and cost a penny to move.
 
 **Why its own workspace.** The GUI needs a webview toolkit the node's CI runners and the musl build do not carry, and must never add a dependency to the node. `gui/` is excluded from the root workspace and reads the crates by path; the version is copied in by `scripts/bump-version.sh`.
 
+
+## Assets in the note pool: lay the foundation now, build the coin later (2026-09-23)
+
+**Decision.** The note gains an asset field now, on the testnet, with MAGLD as the all-zeros asset and every other value a claimed lane tag; rotate, split, merge and the locked rotation carry it through, mint and redeem stay MAGLD-only, and two reserved operations, issue and retire, signed by the lane's key, are the bridge for any other asset. Conservation runs per asset, fees stay in MAGLD, per-asset outstanding totals are consensus state, and the lane registry becomes consensus state with a re-claim as key rotation. Two activations: the wire and the leaf go live on testnet-10 and are always-on for mainnet; issuing is never on mainnet until decided. Plan in [ASSETS.md](ASSETS.md), PLAN P8.0k.
+
+**Why now.** The founder's original idea was a stablecoin once Marigold is established, and the honest conclusion of that discussion is that the coin is a regulated issuer holding a reserve at a bank, far out, and after MAGLD is in use. But MAGLD is a community project, and a hard fork on a running mainnet is a political event; the shape the pool needs for a second asset costs eight bytes per note while unused and can be settled while the testnet is still where consensus changes are made. So the shape lands now and the policy waits.
+
+**Why on the pool and not a lane or a covenant.** A lane-payload token is enforced by an indexer, not by consensus, and would put a weaker trust model beside the pool; a covenant token has to police conservation in script with no loops. The pool already has fixed denominations, six operations, per-operation conservation and a commitment in every header; an asset is one more field and the same rules, and every node then checks at every block that an asset's notes in circulation equal what its issuer issued minus what it retired, which is the on-chain half of a reserve's proof.
+
+**What is written down now and not left to a later fork.** MAGLD has no issuer: no operation a lane key authorizes can create, destroy or touch a MAGLD note, whatever an issuer is later allowed to do to its own notes. That sentence is the foundation's guarantee to the community and is why it goes in before anyone can want otherwise.
+
+**What waits.** Freeze on legal order: the founder's position is that cash cannot be frozen, and that this is a discussion for when there is an issuer; the foundation decides nothing about it either way. Also open: whether the registry gets a header commitment (to be decided before mainnet, since that is a header field), listing, stamps for wallets that hold only the asset, and the redemption flow.
