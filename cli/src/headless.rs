@@ -173,13 +173,13 @@ pub async fn mine_to(args: Vec<String>) -> Result<()> {
             .map_err(|err| crate::error::Error::custom(format!("cannot reach {url}: {err}")))?;
             let client = Arc::new(client);
             log::info!("Mining against the node at {url}; it keeps reconnecting if that node goes away.");
-            if let Ok(info) = client.get_server_info().await {
-                if info.network_id != network_id {
-                    return Err(crate::error::Error::custom(format!(
-                        "{url} is on {}, but {address} is a {network_id} address",
-                        info.network_id
-                    )));
-                }
+            if let Ok(info) = client.get_server_info().await
+                && info.network_id != network_id
+            {
+                return Err(crate::error::Error::custom(format!(
+                    "{url} is on {}, but {address} is a {network_id} address",
+                    info.network_id
+                )));
             }
             let rpc: Arc<kaspa_wallet_core::rpc::DynRpcApi> = client.clone();
             (Node::Grpc(client), rpc)

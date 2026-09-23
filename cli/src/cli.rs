@@ -1250,13 +1250,14 @@ impl KaspaCli {
             return Ok(());
         }
 
-        if ensure_connection && !self.wallet.is_connected() {
-            if let Err(err) = self.exec_within("connect public").await {
-                // No public node either: bind to our own anyway. An incomplete
-                // view beats none, and 'node status' explains what it is.
-                tprintln!(self, "Could not reach a public computer ({err}) — using your own copy while it catches up.");
-                self.adopt_embedded_node(rpc.clone()).await?;
-            }
+        if ensure_connection
+            && !self.wallet.is_connected()
+            && let Err(err) = self.exec_within("connect public").await
+        {
+            // No public node either: bind to our own anyway. An incomplete
+            // view beats none, and 'node status' explains what it is.
+            tprintln!(self, "Could not reach a public computer ({err}) — using your own copy while it catches up.");
+            self.adopt_embedded_node(rpc.clone()).await?;
         }
 
         self.announce_sync_started();
@@ -1490,15 +1491,14 @@ impl KaspaCli {
         let network_id = self.wallet.network_id()?;
         if let Ok(appdir) =
             crate::embedded::appdir_in(self.wallet.settings().get::<String>(WalletSettings::Folder).as_deref(), network_id)
-        {
-            if !self.disk_allows(
+            && !self.disk_allows(
                 &appdir,
                 crate::space::MINING,
                 "mining",
                 "Mining pays into this wallet block after block, and the node's copy of the\nchain grows with it. 'history clear' frees old transaction history.",
-            ) {
-                return Ok(());
-            }
+            )
+        {
+            return Ok(());
         }
 
         let account = match self.wallet.account() {
