@@ -36,7 +36,7 @@ impl Connect {
                 return Ok(());
             }
             Some("details") => {
-                crate::modules::node::Node::default().details(&ctx).await;
+                crate::modules::node::Node.details(&ctx).await;
                 return Ok(());
             }
             Some("logs") => {
@@ -47,7 +47,7 @@ impl Connect {
             }
             // Already syncing (or in sync): 'connect' alone is a status report.
             None if ctx.embedded_node_running() => {
-                crate::modules::node::Node::default().status(&ctx).await;
+                crate::modules::node::Node.status(&ctx).await;
                 return Ok(());
             }
             _ => {}
