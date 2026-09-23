@@ -26,6 +26,10 @@ pub struct TelegramConfig {
     /// command typed in a group cannot post a bearer code there.
     #[serde(default)]
     pub chat_id: Option<i64>,
+    /// The chat 'backup telegram' posts to — a private group the bot is a
+    /// member of, given once and kept.
+    #[serde(default)]
+    pub backup_chat_id: Option<i64>,
     /// "argon2" for a PIN hashed with Argon2id; absent for the first
     /// wallets' plain SHA-256, kept verifiable until the PIN is set again.
     #[serde(default)]
@@ -103,6 +107,7 @@ impl TelegramConfig {
             pin_hash: String::new(),
             daily_limit_petals,
             chat_id: None,
+            backup_chat_id: None,
             pin_kdf: Some("argon2".to_string()),
             pairing_made: 0,
             pairing_failures: 0,
@@ -963,5 +968,171 @@ mod tests {
         assert_eq!(old.pin_kdf.as_deref(), Some("argon2"));
         assert!(old.pin_matches("1357"));
         assert!(!old.pin_matches("2468"));
+    }
+}
+
+// ---- Backups as messages (founder, 2026-09-23): the encrypted archive of
+// 'wallet backup', posted to a private group in parts the bot can also read
+// back. The bot API takes uploads to 50 MB but hands out files to 20 MB only,
+// so parts are cut below 20 MB, and each carries in its caption what a
+// restore needs to check it.
+
+/// Telegram hands a bot files of at most 20 MB through getFile; the parts stay
+/// under that with room for the container.
+pub const BACKUP_PART_BYTES: usize = 19 * 1024 * 1024;
+
+pub async fn send_plain(token: &str, chat_id: i64, text: &str) -> Result<(), String> {
+    let params = [("chat_id", chat_id.to_string()), ("text", text.to_string())];
+    call(token, "sendMessage", &params).await.map(|_| ())
+}
+
+/// Uploads one file as a document with a caption.
+pub async fn send_document(token: &str, chat_id: i64, file_name: &str, bytes: Vec<u8>, caption: &str) -> Result<(), String> {
+    let part = reqwest::multipart::Part::bytes(bytes)
+        .file_name(file_name.to_string())
+        .mime_str("application/octet-stream")
+        .map_err(|e| e.to_string())?;
+    let form = reqwest::multipart::Form::new()
+        .text("chat_id", chat_id.to_string())
+        .text("caption", caption.to_string())
+        .part("document", part);
+    let url = format!("https://api.telegram.org/bot{token}/sendDocument");
+    let response =
+        reqwest::Client::new().post(url).multipart(form).send().await.map_err(|e| e.to_string().replace(token, "<token>"))?;
+    if response.status().is_success() {
+        Ok(())
+    } else {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        Err(format!("sendDocument answered {status}: {}", body.chars().take(200).collect::<String>()))
+    }
+}
+
+/// Downloads a file the bot has been told about (by file id).
+pub async fn download_file(token: &str, file_id: &str) -> Result<Vec<u8>, String> {
+    let params = [("file_id", file_id.to_string())];
+    let info = call(token, "getFile", &params).await?;
+    let path = info
+        .get("result")
+        .and_then(|r| r.get("file_path"))
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "getFile gave no file path (a file over 20 MB cannot be fetched by a bot)".to_string())?;
+    let url = format!("https://api.telegram.org/file/bot{token}/{path}");
+    let response = reqwest::Client::new().get(url).send().await.map_err(|e| e.to_string().replace(token, "<token>"))?;
+    if !response.status().is_success() {
+        return Err(format!("the file download answered {}", response.status()));
+    }
+    response.bytes().await.map(|b| b.to_vec()).map_err(|e| e.to_string().replace(token, "<token>"))
+}
+
+/// A backup part as it arrives at the bot: which backup, which part of how
+/// many, and the file to fetch.
+#[derive(Debug, Clone)]
+pub struct BackupPart {
+    pub backup: String,
+    pub index: usize,
+    pub count: usize,
+    pub file_id: String,
+    pub size: u64,
+}
+
+/// The part file name: `<backup>.p<index>of<count>`.
+pub fn part_file_name(backup: &str, index: usize, count: usize) -> String {
+    format!("{backup}.p{index:03}of{count:03}")
+}
+
+pub fn parse_part_file_name(name: &str) -> Option<(String, usize, usize)> {
+    let (backup, rest) = name.rsplit_once(".p")?;
+    let (index, count) = rest.split_once("of")?;
+    Some((backup.to_string(), index.parse().ok()?, count.parse().ok()?))
+}
+
+/// Waits for the parts of one backup to be sent (or forwarded) to the bot,
+/// from anyone in `chat` if given, and hands them back once all are there.
+/// `progress` is told about each part as it lands.
+pub async fn collect_backup_parts(
+    token: &str,
+    chat: Option<i64>,
+    wanted: Option<&str>,
+    timeout: Duration,
+    progress: &(dyn Fn(String) + Send + Sync),
+) -> Result<Vec<BackupPart>, String> {
+    let started = std::time::Instant::now();
+    let mut offset: i64 = 0;
+    // Skip whatever the bot had queued before this restore began.
+    if let Ok(v) = call(token, "getUpdates", &[("offset", "-1".to_string()), ("timeout", "0".to_string())]).await
+        && let Some(last) = v.get("result").and_then(|r| r.as_array()).and_then(|a| a.last())
+        && let Some(id) = last.get("update_id").and_then(|v| v.as_i64())
+    {
+        offset = id + 1;
+    }
+    let mut parts: std::collections::BTreeMap<usize, BackupPart> = std::collections::BTreeMap::new();
+    let mut backup: Option<String> = wanted.map(|w| w.to_string());
+    let mut count: Option<usize> = None;
+    while started.elapsed() < timeout {
+        let params = [("offset", offset.to_string()), ("timeout", "20".to_string()), ("allowed_updates", "[\"message\"]".to_string())];
+        let updates = match call(token, "getUpdates", &params).await {
+            Ok(v) => v,
+            Err(e) => {
+                progress(format!("(telegram: {e}; trying again)"));
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                continue;
+            }
+        };
+        let Some(list) = updates.get("result").and_then(|r| r.as_array()) else { continue };
+        for update in list {
+            if let Some(id) = update.get("update_id").and_then(|v| v.as_i64()) {
+                offset = offset.max(id + 1);
+            }
+            let Some(message) = update.get("message") else { continue };
+            if let Some(chat) = chat {
+                let from_chat = message.get("chat").and_then(|c| c.get("id")).and_then(|v| v.as_i64()).unwrap_or(0);
+                if from_chat != chat {
+                    continue;
+                }
+            }
+            let Some(document) = message.get("document") else { continue };
+            let Some(name) = document.get("file_name").and_then(|v| v.as_str()) else { continue };
+            let Some((of_backup, index, of_count)) = parse_part_file_name(name) else { continue };
+            match &backup {
+                Some(b) if *b != of_backup => {
+                    progress(format!("(a part of another backup, {of_backup}, ignored)"));
+                    continue;
+                }
+                None => backup = Some(of_backup.clone()),
+                _ => {}
+            }
+            count = Some(of_count);
+            let file_id = document.get("file_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let size = document.get("file_size").and_then(|v| v.as_u64()).unwrap_or(0);
+            if !parts.contains_key(&index) {
+                parts.insert(index, BackupPart { backup: of_backup, index, count: of_count, file_id, size });
+                progress(format!("part {index} of {of_count} received"));
+            }
+        }
+        if let Some(count) = count
+            && parts.len() == count
+            && (1..=count).all(|i| parts.contains_key(&i))
+        {
+            return Ok(parts.into_values().collect());
+        }
+    }
+    Err(match (backup, count) {
+        (Some(b), Some(c)) => format!("gave up waiting: {} of {c} parts of {b} arrived", parts.len()),
+        _ => "gave up waiting: no backup part reached the bot".to_string(),
+    })
+}
+
+#[cfg(test)]
+mod backup_part_tests {
+    use super::{parse_part_file_name, part_file_name};
+
+    #[test]
+    fn backup_part_names_round_trip() {
+        let name = part_file_name("marigold-test10-2026-09-23T20-10-01.mgb", 7, 112);
+        assert_eq!(name, "marigold-test10-2026-09-23T20-10-01.mgb.p007of112");
+        assert_eq!(parse_part_file_name(&name), Some(("marigold-test10-2026-09-23T20-10-01.mgb".to_string(), 7, 112)));
+        assert_eq!(parse_part_file_name("random.pdf"), None);
+        assert_eq!(parse_part_file_name("x.p1of"), None);
     }
 }

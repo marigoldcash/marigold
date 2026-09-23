@@ -762,9 +762,15 @@ impl Wallet {
                 if argv.first().map(|s| s.as_str()) == Some("verify") {
                     return self.backup_verify(&ctx, argv[1..].to_vec()).await;
                 }
+                if argv.first().map(|s| s.as_str()) == Some("telegram") {
+                    return self.backup_telegram(&ctx, argv[1..].to_vec()).await;
+                }
                 return self.backup(&ctx, argv).await;
             }
             "restore" => {
+                if argv.first().map(|s| s.as_str()) == Some("telegram") {
+                    return self.restore_telegram(&ctx, argv[1..].to_vec(), &guard).await;
+                }
                 return self.restore(&ctx, argv, &guard).await;
             }
             "help" => {
@@ -874,24 +880,8 @@ impl Wallet {
             return Ok(());
         }
         let passphrase = Secret::from(pass.as_bytes().to_vec());
-
-        // Paths in the archive are relative to the storage folder, so an
-        // archive restores by dropping one directory into place.
-        let dir = kaspa_wallet_core::storage::local::wallet_dir_name(&name);
-        let mut entries = vec![archive::ArchiveEntry {
-            path: format!("{dir}/{}", kaspa_wallet_core::storage::local::keys_file_name(&name)),
-            data: std::fs::read(&wallet_file).map_err(|e| Error::custom(format!("cannot read the wallet file: {e}")))?,
-        }];
-        // The transactions folder is deliberately left out even though it now
-        // lives inside the wallet directory: it is a record of what happened,
-        // not a means of getting anything back, and it is by far the largest
-        // thing in there.
-        if vault_folder.exists() {
-            archive::collect_tree(&vault_folder, &format!("{dir}/notes"), &mut entries)?;
-        }
-
+        let (entries, packed) = Self::pack_wallet(&name, &wallet_file, &vault_folder, &passphrase)?;
         let file_count = entries.len();
-        let packed = archive::pack(&entries, &passphrase)?;
         Self::write_private(&target, &packed)?;
 
         // Read it back and open it. A backup that was never opened is a guess,
@@ -1147,6 +1137,208 @@ impl Wallet {
     ///
     /// The default name carries no wallet name, because the filename is the one
     /// part of a backup that whoever stores it can read.
+    /// The open wallet — its keys file and every note file — as archive
+    /// entries and the sealed archive, checked to read back before anything
+    /// is done with it.
+    fn pack_wallet(
+        name: &str,
+        wallet_file: &std::path::Path,
+        vault_folder: &std::path::Path,
+        passphrase: &Secret,
+    ) -> Result<(Vec<crate::backup::ArchiveEntry>, Vec<u8>)> {
+        use crate::backup as archive;
+        let dir = kaspa_wallet_core::storage::local::wallet_dir_name(name);
+        let mut entries = vec![archive::ArchiveEntry {
+            path: format!("{dir}/{}", kaspa_wallet_core::storage::local::keys_file_name(name)),
+            data: std::fs::read(wallet_file).map_err(|e| Error::custom(format!("cannot read the wallet file: {e}")))?,
+        }];
+        if vault_folder.exists() {
+            archive::collect_tree(vault_folder, &format!("{dir}/notes"), &mut entries)?;
+        }
+        let packed = archive::pack(&entries, passphrase)?;
+        let restored = archive::unpack(&packed, passphrase)?;
+        if restored.len() != entries.len() || entries.iter().zip(restored.iter()).any(|(a, b)| a.path != b.path || a.data != b.data) {
+            return Err(Error::custom("the backup did not read back correctly — do not rely on it"));
+        }
+        Ok((entries, packed))
+    }
+
+    /// The passphrase for a backup, asked twice, with the same rules as a
+    /// file backup: eight characters at least, nothing written on an empty one.
+    async fn ask_backup_passphrase(ctx: &Arc<KaspaCli>) -> Result<Option<Secret>> {
+        let pass = ctx.term().ask(true, "Passphrase for this backup: ").await?.trim().to_string();
+        if pass.is_empty() {
+            tprintln!(ctx, "No passphrase — nothing sent.");
+            return Ok(None);
+        }
+        if pass.len() < 8 {
+            tprintln!(ctx, "That is under 8 characters. This will sit on Telegram's servers — nothing sent.");
+            return Ok(None);
+        }
+        let again = ctx.term().ask(true, "Again: ").await?.trim().to_string();
+        if pass != again {
+            tprintln!(ctx, "Those did not match — nothing sent.");
+            return Ok(None);
+        }
+        Ok(Some(Secret::from(pass.as_bytes().to_vec())))
+    }
+
+    /// 'wallet backup telegram [<chat id>]': the same encrypted archive as a
+    /// file backup, posted to a private group as parts the bot can read back
+    /// (founder, 2026-09-23, after the nightly backups of other systems that
+    /// work this way). Needs the bot from 'mobile telegram <token>'; the chat
+    /// is given once and kept.
+    async fn backup_telegram(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
+        use crate::backup as archive;
+        use crate::telegram::{BACKUP_PART_BYTES, TelegramConfig, part_file_name, send_document, send_plain};
+        if !ctx.wallet().is_open() {
+            tprintln!(ctx, "Open a wallet first — 'backup telegram' backs up the wallet you have open.");
+            return Ok(());
+        }
+        let descriptor = ctx.store().descriptor().ok_or_else(|| Error::custom("no wallet is open"))?;
+        let name = descriptor.filename.clone();
+        let folder: String = ctx
+            .wallet()
+            .settings()
+            .get(WalletSettings::Folder)
+            .unwrap_or_else(|| kaspa_wallet_core::storage::local::default_storage_folder().to_string());
+        let cfg_path = TelegramConfig::path(&folder, &name);
+        let Some(mut cfg) = TelegramConfig::load(&cfg_path) else {
+            tprintln!(
+                ctx,
+                "No Telegram bot is set up for this wallet. 'mobile telegram <token>' first, with a token from @BotFather."
+            );
+            return Ok(());
+        };
+        let chat_id = match argv.first() {
+            Some(arg) => {
+                let id: i64 = arg.replace(',', "").parse().map_err(|_| Error::custom("the chat id is a number, like -603049415"))?;
+                cfg.backup_chat_id = Some(id);
+                cfg.save(&cfg_path).map_err(|e| Error::custom(format!("cannot save the bot settings: {e}")))?;
+                id
+            }
+            None => match cfg.backup_chat_id {
+                Some(id) => id,
+                None => {
+                    tprintln!(ctx, "Where to? 'backup telegram <chat id>' the first time: a private group the bot is a member of.");
+                    tprintln!(ctx, "{}", crate::ui::dim("The id is shown in the group's info; a group's id is negative."));
+                    return Ok(());
+                }
+            },
+        };
+        let vault_folder = ctx.wallet().store().as_note_key_store()?.vault_folder().await?;
+        let wallet_dir = vault_folder.parent().ok_or_else(|| Error::custom("cannot work out the wallet folder"))?.to_path_buf();
+        let wallet_file = wallet_dir.join(kaspa_wallet_core::storage::local::keys_file_name(&name));
+        if !wallet_file.exists() {
+            return Err(Error::custom(format!("{} is missing — nothing to back up", wallet_file.display())));
+        }
+        tprintln!(ctx, "");
+        tpara!(
+            ctx,
+            "This posts your whole wallet — the keys, every note, the lot — to that Telegram chat, \
+            encrypted under a passphrase you choose now. Telegram keeps the messages; the passphrase \
+            is the only thing between them and your money. \
+            "
+        );
+        tprintln!(ctx, "");
+        let Some(passphrase) = Self::ask_backup_passphrase(ctx).await? else { return Ok(()) };
+        let (entries, packed) = Self::pack_wallet(&name, &wallet_file, &vault_folder, &passphrase)?;
+        let digest = {
+            use sha2::{Digest, Sha256};
+            let mut h = Sha256::new();
+            h.update(&packed);
+            faster_hex::hex_string(&h.finalize())
+        };
+        let stamp = chrono::Utc::now().format("%Y-%m-%dT%H-%M-%S").to_string();
+        let backup = format!("marigold-{name}-{stamp}.mgb");
+        let parts: Vec<&[u8]> = packed.chunks(BACKUP_PART_BYTES).collect();
+        let count = parts.len();
+        let token = cfg.token.clone();
+        tprintln!(
+            ctx,
+            "Sending {} ({} files, {}) as {} part(s)…",
+            backup,
+            entries.len().separated_string(),
+            archive::human_size(packed.len()),
+            count
+        );
+        send_plain(
+            &token,
+            chat_id,
+            &format!("----- Marigold backup {backup}: {count} part(s), {} bytes, sha256 {digest}", packed.len()),
+        )
+        .await
+        .map_err(Error::custom)?;
+        for (i, chunk) in parts.iter().enumerate() {
+            let index = i + 1;
+            let file_name = part_file_name(&backup, index, count);
+            let caption = format!("Part {index} of {count} of {backup} · sha256 {}…", &digest[..16]);
+            send_document(&token, chat_id, &file_name, chunk.to_vec(), &caption).await.map_err(Error::custom)?;
+            tprintln!(ctx, "  part {index} of {count} sent ({})", archive::human_size(chunk.len()));
+        }
+        send_plain(&token, chat_id, &format!("----- End of Marigold backup {backup}")).await.map_err(Error::custom)?;
+        let (active, retired) = Self::note_counts(&entries);
+        tprintln!(ctx, "");
+        tprintln!(ctx, "{}", style(format!("Sent {backup}: {count} part(s), {}.", archive::human_size(packed.len()))).green());
+        tprintln!(ctx, "{} note keys you can spend, {} retired.", active.separated_string(), retired.separated_string());
+        tprintln!(ctx, "");
+        tpara!(
+            ctx,
+            "To bring it back on any machine: 'wallet restore telegram <bot token>', then forward the \
+            part messages from that chat to the bot. It needs this passphrase and nothing else. \
+            "
+        );
+        tprintln!(ctx, "");
+        tprintln!(ctx, "{}", style("Those messages are enough to spend your money. Keep that chat private.").red());
+        tprintln!(ctx, "");
+        Ok(())
+    }
+
+    /// 'wallet restore telegram <bot token> [<name>]': collects the parts of
+    /// one backup forwarded to the bot and restores the wallet from them.
+    async fn restore_telegram(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>, guard: &WalletGuard<'_>) -> Result<()> {
+        use crate::backup as archive;
+        use crate::telegram::{collect_backup_parts, download_file};
+        let Some(token) = argv.first().cloned() else {
+            tprintln!(ctx, "usage: 'wallet restore telegram <bot token> [<name>]'");
+            tprintln!(
+                ctx,
+                "{}",
+                crate::ui::dim("The token of the bot the backup was sent with, from @BotFather; <name> restores under another name.")
+            );
+            return Ok(());
+        };
+        let new_name = argv.get(1).cloned();
+        tprintln!(ctx, "");
+        tpara!(
+            ctx,
+            "Now forward the backup's part messages from the backup chat to the bot (select them all, \
+            forward, pick the bot). The wallet waits up to ten minutes for all of them. \
+            "
+        );
+        tprintln!(ctx, "");
+        let ctx_ = ctx.clone();
+        let progress = move |line: String| tprintln!(ctx_, "  {line}");
+        let parts =
+            collect_backup_parts(&token, None, None, std::time::Duration::from_secs(600), &progress).await.map_err(Error::custom)?;
+        let backup = parts[0].backup.clone();
+        let mut bytes = Vec::new();
+        for part in &parts {
+            tprintln!(ctx, "  fetching part {} of {}…", part.index, part.count);
+            bytes.extend(download_file(&token, &part.file_id).await.map_err(Error::custom)?);
+        }
+        tprintln!(ctx, "Received {} ({}).", backup, archive::human_size(bytes.len()));
+        let tmp = std::env::temp_dir().join(format!("{backup}.restore"));
+        crate::backup::write_owner_only(&tmp, &bytes).map_err(|e| Error::custom(format!("cannot write the archive: {e}")))?;
+        let mut restore_args = vec![tmp.to_string_lossy().to_string()];
+        if let Some(name) = new_name {
+            restore_args.push(name);
+        }
+        let outcome = self.restore(ctx, restore_args, guard).await;
+        let _ = std::fs::remove_file(&tmp);
+        outcome
+    }
+
     fn backup_target(arg: Option<&str>) -> Result<std::path::PathBuf> {
         let stamp = chrono::Local::now().format("%Y%m%d-%H%M").to_string();
         let generated = format!("marigold-backup-{stamp}.mgb");
