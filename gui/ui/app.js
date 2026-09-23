@@ -4,6 +4,29 @@ const $ = (id) => document.getElementById(id);
 
 let opened = null;
 let watching = null;
+let syncTimer = null;
+
+// A sync of the app's own: say how far it is, every few seconds, until it is done.
+async function followSync() {
+  try {
+    const st = await invoke("sync_state");
+    const banner = $("syncing");
+    if (st.synced) {
+      banner.hidden = true;
+      if (st.own_node) { banner.textContent = ""; }
+      clearInterval(syncTimer); syncTimer = null;
+      return;
+    }
+    banner.hidden = false;
+    banner.textContent = st.own_node
+      ? `Your copy of the network is catching up: ${st.headers.toLocaleString()} headers, ${st.blocks.toLocaleString()} blocks so far. Notes work through a public computer meanwhile only if you opened it that way; paying and requesting wait for the sync.`
+      : `The node this wallet uses is still catching up (${st.blocks.toLocaleString()} blocks so far); figures may change until it has.`;
+  } catch (_) {}
+}
+function startSyncWatch() {
+  if (syncTimer) clearInterval(syncTimer);
+  followSync(); syncTimer = setInterval(followSync, 5000);
+}
 
 function show(screen) {
   for (const s of document.querySelectorAll(".screen")) s.hidden = s.id !== `screen-${screen}`;
@@ -103,7 +126,7 @@ $("open").addEventListener("click", async () => {
     $("password").value = "";
     $("context").textContent = `${opened.wallet} · ${opened.network} · ${opened.access}`;
     $("say").textContent = "";
-    show("home"); tab("balance");
+    show("home"); tab("balance"); startSyncWatch();
   } catch (e) { $("open-error").textContent = String(e); $("say").textContent = ""; }
   button.disabled = false;
 });
@@ -209,7 +232,7 @@ async function watch(code) {
 
 $("refresh-status").addEventListener("click", refreshStatus);
 $("close-wallet").addEventListener("click", async () => {
-  watching = null;
+  watching = null; if (syncTimer) { clearInterval(syncTimer); syncTimer = null; } $("syncing").hidden = true;
   await invoke("close");
   opened = null; $("context").textContent = "";
   show("open");

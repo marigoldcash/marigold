@@ -26,6 +26,15 @@ struct App {
 }
 
 #[derive(Serialize)]
+struct SyncState {
+    synced: bool,
+    own_node: bool,
+    blocks: u64,
+    headers: u64,
+    daa: u64,
+}
+
+#[derive(Serialize)]
 struct Machine {
     memory: String,
     mining: String,
@@ -247,6 +256,16 @@ async fn status(state: State<'_, App>) -> Result<String, String> {
     with_service(&state, |s| async move { Ok(s.status_text().await) }).await
 }
 
+/// Where the node the wallet uses stands: for a sync of its own, the figures
+/// that move while it catches up.
+#[tauri::command]
+async fn sync_state(state: State<'_, App>) -> Result<SyncState, String> {
+    let (rpc, own_node) = state.session.lock().await.as_ref().map(|s| (s.rpc.clone(), s.own_node())).ok_or("no wallet is open")?;
+    let synced = matches!(rpc.get_server_info().await, Ok(info) if info.is_synced);
+    let dag = rpc.get_block_dag_info().await.map_err(|e| e.to_string())?;
+    Ok(SyncState { synced, own_node, blocks: dag.block_count, headers: dag.header_count, daa: dag.virtual_daa_score })
+}
+
 /// The machine's memory and the miner, for the Status screen.
 #[tauri::command]
 async fn machine(state: State<'_, App>) -> Result<Machine, String> {
@@ -414,6 +433,7 @@ fn main() {
             history,
             machine,
             mine,
+            sync_state,
             classify,
             pay,
             take,
