@@ -22,7 +22,21 @@ async function refreshBalance() {
 }
 async function refreshStatus() {
   try { $("status").textContent = await invoke("status"); } catch (e) { $("status").textContent = String(e); }
+  try {
+    const m = await invoke("machine");
+    $("machine").textContent = `Memory: ${m.memory}\n${m.mining}`;
+    $("mine-note").textContent = m.can_mine ? "Mining pays to this wallet's ledger address and starts only once the sync is complete." : "Mining needs a node on this machine or a sync of your own: through a public computer, its operator would see where your rewards go.";
+    $("mine-start").hidden = !m.can_mine; $("mine-stop").hidden = !m.can_mine;
+  } catch (e) { $("machine").textContent = String(e); }
 }
+$("mine-start").addEventListener("click", async () => {
+  $("mine-error").textContent = "";
+  try { $("machine").textContent = await invoke("mine", { action: "start" }); setTimeout(refreshStatus, 3000); } catch (e) { $("mine-error").textContent = String(e); }
+});
+$("mine-stop").addEventListener("click", async () => {
+  $("mine-error").textContent = "";
+  try { await invoke("mine", { action: "stop" }); refreshStatus(); } catch (e) { $("mine-error").textContent = String(e); }
+});
 async function copy(text, button, done) {
   try { await navigator.clipboard.writeText(text); button.textContent = done; setTimeout(() => (button.textContent = button.dataset.label), 1500); }
   catch (_) { button.textContent = "Select it and copy"; }

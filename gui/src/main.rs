@@ -21,6 +21,15 @@ use tauri::{AppHandle, Emitter, Manager, State};
 struct App {
     session: tokio::sync::Mutex<Option<Session>>,
     shutdown: Arc<AtomicBool>,
+    /// "own", "local", "public" or an address: what the open screen chose.
+    access: std::sync::Mutex<String>,
+}
+
+#[derive(Serialize)]
+struct Machine {
+    memory: String,
+    mining: String,
+    can_mine: bool,
 }
 
 #[derive(Serialize)]
@@ -181,7 +190,9 @@ async fn open(app: AppHandle, state: State<'_, App>, wallet: String, password: S
         wallet: wallet.clone(),
         password: Secret::from(password),
         node: node_url,
-        mine: None,
+        // A miner host is made whenever the wallet has a ledger address, so the
+        // Status screen can start it; nothing mines until asked.
+        mine: Some(50),
         network: Some(network_id),
         origin: "desktop",
     };
@@ -205,6 +216,7 @@ async fn open(app: AppHandle, state: State<'_, App>, wallet: String, password: S
         old.close().await;
     }
     *guard = Some(session);
+    *state.access.lock().unwrap() = node;
     Ok(opened)
 }
 
@@ -233,6 +245,38 @@ async fn balance(state: State<'_, App>) -> Result<String, String> {
 #[tauri::command]
 async fn status(state: State<'_, App>) -> Result<String, String> {
     with_service(&state, |s| async move { Ok(s.status_text().await) }).await
+}
+
+/// The machine's memory and the miner, for the Status screen.
+#[tauri::command]
+async fn machine(state: State<'_, App>) -> Result<Machine, String> {
+    let memory = match kaspa_cli_lib::memory::read() {
+        Some(m) => format!("{} free of {}", kaspa_cli_lib::memory::gigabytes(m.available), kaspa_cli_lib::memory::gigabytes(m.total)),
+        None => "not measured".to_string(),
+    };
+    let access = state.access.lock().unwrap().clone();
+    let can_mine = access != "public";
+    let mining = with_service(&state, |s| async move { Ok(s.mine(None).await) }).await?;
+    Ok(Machine { memory, mining, can_mine })
+}
+
+/// "start" or "stop". Mining through a public computer is refused: the block
+/// template it hands out carries this wallet's payout address, and its operator
+/// would see it — the terminal wallet refuses the same way.
+#[tauri::command]
+async fn mine(state: State<'_, App>, action: String) -> Result<String, String> {
+    let access = state.access.lock().unwrap().clone();
+    if access == "public" && action == "start" {
+        return Err("Mining through a public computer would tell its operator where your rewards go. Open the wallet with a node on this machine or a sync of your own to mine.".to_string());
+    }
+    let session_rpc = state.session.lock().await.as_ref().map(|s| s.rpc.clone()).ok_or("no wallet is open")?;
+    if action == "start" {
+        let synced = matches!(session_rpc.get_server_info().await, Ok(info) if info.is_synced);
+        if !synced {
+            return Err("The sync has to finish first; blocks built on an unfinished copy are accepted by nobody.".to_string());
+        }
+    }
+    with_service(&state, |s| async move { Ok(s.mine(Some(action.as_str())).await) }).await
 }
 
 #[tauri::command]
@@ -354,7 +398,11 @@ fn main() {
         unsafe { std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1") };
     }
     tauri::Builder::default()
-        .manage(App { session: tokio::sync::Mutex::new(None), shutdown: Arc::new(AtomicBool::new(false)) })
+        .manage(App {
+            session: tokio::sync::Mutex::new(None),
+            shutdown: Arc::new(AtomicBool::new(false)),
+            access: std::sync::Mutex::new(String::new()),
+        })
         .invoke_handler(tauri::generate_handler![
             version,
             wallets,
@@ -364,6 +412,8 @@ fn main() {
             balance,
             status,
             history,
+            machine,
+            mine,
             classify,
             pay,
             take,

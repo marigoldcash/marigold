@@ -33,7 +33,7 @@ button:focus-visible { outline: 2px solid var(--petal); outline-offset: 2px; }
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 12px; }
 .tab { border: none; background: none; margin: 0; padding: 10px 12px; color: var(--moss); border-bottom: 2px solid transparent; border-radius: 0; }
 .tab.active { color: var(--gold); border-bottom-color: var(--gold); }
-.figures { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; white-space: pre-wrap; font-variant-numeric: tabular-nums; margin: 0; }
+.figures { overflow-wrap: anywhere; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; white-space: pre-wrap; font-variant-numeric: tabular-nums; margin: 0; }
 .figures.small { font-size: 12px; color: var(--moss); }
 .hint { color: var(--moss); font-size: 13px; }
 .error { color: var(--bad); min-height: 1.4em; }

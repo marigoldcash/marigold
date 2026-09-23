@@ -32,6 +32,7 @@ kaspa-wallet-keys = { path = "../wallet/keys" }
 kaspa-consensus-core = { path = "../consensus/core" }
 kaspa-wrpc-client = { path = "../rpc/wrpc/client" }
 kaspa-bip32 = { path = "../wallet/bip32" }
+kaspa-rpc-core = { path = "../rpc/core" }
 
 [workspace]
 

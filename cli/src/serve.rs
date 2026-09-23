@@ -702,6 +702,19 @@ pub async fn open_session(options: &SessionOptions, shutdown: Arc<AtomicBool>, s
             wallet.clone().accounts_activate(Some(ids)).await?;
         }
     }
+    // Select the first account, as the terminal's 'open' does: `wallet.account()`
+    // answers only for a selected one, and the miner's payout address, the
+    // ledger line of the balance and the bot's mining all ask it. Without this
+    // the desktop wallet showed "No miner runs with this wallet" and no ledger.
+    {
+        let guard = wallet.guard();
+        let guard = guard.lock().await;
+        if let Ok(mut accounts) = wallet.accounts(None, &guard).await
+            && let Ok(Some(account)) = accounts.try_next().await
+        {
+            wallet.select(Some(&account)).await?;
+        }
+    }
     log::info!("Wallet '{}' open{}", options.wallet, if wallet.account().is_ok() { " with a ledger account" } else { ", notes only" });
 
     // The miner pays to this wallet's own address.
