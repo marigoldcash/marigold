@@ -28,7 +28,6 @@ use kaspa_consensus_core::{
     tx::Transaction,
 };
 use kaspa_hashes::Hash;
-use kaspa_rpc_core::api::rpc::RpcApi;
 use std::sync::Arc;
 
 /// How far back along the selected chain the rehearsal looks for a real anchor to
@@ -129,7 +128,7 @@ pub async fn drill_status_line(client: &Arc<DynRpcApi>) -> Result<String, String
 }
 
 pub async fn rehearse_forgeries(client: &Arc<DynRpcApi>) -> Result<Report, String> {
-    let (status_before, score_before) = anchor_status_line(client).await?;
+    let (status_before, _) = anchor_status_line(client).await?;
     let dag = client.get_block_dag_info().await.map_err(|e| e.to_string())?;
     let sink = dag.sink;
     let sink_score = client.get_block(sink, false).await.map_err(|e| e.to_string())?.header.daa_score;
