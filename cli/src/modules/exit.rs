@@ -14,18 +14,18 @@ impl Exit {
         // therefore throws away every minute of it, and the founder lost an
         // hour that way before anything said so (2026-09-07).
         #[cfg(feature = "embedded-node")]
-        if let Ok(cli) = ctx.clone().downcast_arc::<KaspaCli>() {
-            if cli.embedded_node_syncing() {
-                tprintln!(cli, "");
-                tprintln!(cli, "{}", style("The network sync has not finished its first run.").yellow());
-                tprintln!(cli, "{}", style("Leaving now discards all of it — the next start begins again from scratch.").yellow());
-                tprintln!(cli, "{}", style("(Once it has finished the first time, stopping and starting is free.)").dim());
-                tprintln!(cli, "");
-                let answer = term.ask(false, "Leave anyway, losing the progress? [y/N]: ").await?.trim().to_lowercase();
-                if !answer.starts_with('y') {
-                    tprintln!(cli, "Staying. 'connect status' shows how far along it is.");
-                    return Ok(());
-                }
+        if let Ok(cli) = ctx.clone().downcast_arc::<KaspaCli>()
+            && cli.embedded_node_syncing()
+        {
+            tprintln!(cli, "");
+            tprintln!(cli, "{}", style("The network sync has not finished its first run.").yellow());
+            tprintln!(cli, "{}", style("Leaving now discards all of it — the next start begins again from scratch.").yellow());
+            tprintln!(cli, "{}", style("(Once it has finished the first time, stopping and starting is free.)").dim());
+            tprintln!(cli, "");
+            let answer = term.ask(false, "Leave anyway, losing the progress? [y/N]: ").await?.trim().to_lowercase();
+            if !answer.starts_with('y') {
+                tprintln!(cli, "Staying. 'connect status' shows how far along it is.");
+                return Ok(());
             }
         }
 

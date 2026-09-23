@@ -190,10 +190,10 @@ impl WalletService {
         if let Some(host) = &self.miner {
             return Some((host.status(), "here"));
         }
-        if let Some(local) = &self.local_miner {
-            if let Some(status) = local() {
-                return Some((status, "in the terminal"));
-            }
+        if let Some(local) = &self.local_miner
+            && let Some(status) = local()
+        {
+            return Some((status, "in the terminal"));
         }
         match self.rpc.get_miner_status().await {
             Ok(status) if status.available => Some((status, "in the background program")),
