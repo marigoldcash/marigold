@@ -1063,14 +1063,10 @@ pub async fn collect_backup_parts(
     progress: &(dyn Fn(String) + Send + Sync),
 ) -> Result<Vec<BackupPart>, String> {
     let started = std::time::Instant::now();
+    // Whatever the bot already has queued is read too: a part forwarded a
+    // minute before the restore began is exactly what is wanted, and parts of
+    // any other backup are ignored by name.
     let mut offset: i64 = 0;
-    // Skip whatever the bot had queued before this restore began.
-    if let Ok(v) = call(token, "getUpdates", &[("offset", "-1".to_string()), ("timeout", "0".to_string())]).await
-        && let Some(last) = v.get("result").and_then(|r| r.as_array()).and_then(|a| a.last())
-        && let Some(id) = last.get("update_id").and_then(|v| v.as_i64())
-    {
-        offset = id + 1;
-    }
     let mut parts: std::collections::BTreeMap<usize, BackupPart> = std::collections::BTreeMap::new();
     let mut backup: Option<String> = wanted.map(|w| w.to_string());
     let mut count: Option<usize> = None;
