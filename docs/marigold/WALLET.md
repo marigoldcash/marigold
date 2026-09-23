@@ -191,6 +191,25 @@ Copies the backup's files in, recovers `K` from the words, deep-verifies (report
 
 **Caveat found while validating this**: if the *source* wallet the backup came from is still active and mid-spend (e.g. you're testing restore against a backup you just took without pausing the original wallet), a rotation batch that happens to need a fee-stamp from a note the source wallet is simultaneously spending will fail with `already consumed by transaction ... in the mempool` (or, once that transaction confirms, `does not exist in the pool`) — a real instance of POOL-SPEC.md's same-key-in-two-wallets hazard, not a wallet defect. Mine a confirming block for the source wallet's pending transaction and re-run `note vault restore` (idempotent — it re-copies and re-verifies) to pick up wherever it left off.
 
+## 11b. Back up to Telegram, restore from Telegram (2026-09-23)
+
+The same encrypted archive as `wallet backup`, sent as messages instead of written to a file, the way nightly server backups often are. It needs the wallet's bot (`mobile telegram <token>`, the token from @BotFather) and a private group the bot is a member of.
+
+```
+backup telegram -603049415      # the first time: the group's id (negative for a group); kept afterwards
+backup telegram                 # every time after
+```
+
+The wallet asks for a backup passphrase (eight characters or more, twice), packs the keys file and every note file, checks the archive reads back, and posts it: a start message, the parts as documents named `marigold-<wallet>-<time>.mgb.p001of003` with "Part 1 of 3" captions, and an end message. Parts are under 20 MB because that is the most a bot may fetch back. Telegram keeps the messages; the passphrase is the only thing between them and the money, so choose it accordingly and keep the group private.
+
+To bring the wallet back on any machine:
+
+```
+wallet restore telegram <bot token> [<name>]
+```
+
+then forward the part messages from the group to the bot (select them all, forward, pick the bot). The wallet waits up to ten minutes, fetches each part, reassembles the archive and runs the ordinary restore, asking for the passphrase. A bot cannot read a chat's history, which is why the parts have to be forwarded to it. The Telegram bot API is the whole dependency; nothing is stored on any server of ours.
+
 ## 12. Notes-only wallets
 
 Answer `n` to `Keep a ledger account too?` and the wallet has a vault and nothing else: no account key, no ledger address ever derived, `list` shows no account and the prompt carries no account name. Everything under `note` works exactly as above — `request`, `pay`, `receive`/`export`, `note pos`, `note verify`, `note vault backup`/`restore`, `note history` — because none of it ever needed the ledger; it only used the account as a handle. `balance` shows notes alone. The ledger commands (`mint`, `redeem`, `transfer`, `sweep`, `estimate`, `address`, `utxos`, `message sign`) refuse with one line: *This wallet keeps notes only — there is no ledger account. 'account create bip32' adds one.* That command attaches the ledger at any later time, derived from the same 24 words, so there is no new secret and backups need nothing extra.
