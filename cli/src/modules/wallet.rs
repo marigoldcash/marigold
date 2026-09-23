@@ -763,13 +763,25 @@ impl Wallet {
                     return self.backup_verify(&ctx, argv[1..].to_vec()).await;
                 }
                 if argv.first().map(|s| s.as_str()) == Some("telegram") {
+                    #[cfg(feature = "embedded-node")]
                     return self.backup_telegram(&ctx, argv[1..].to_vec()).await;
+                    #[cfg(not(feature = "embedded-node"))]
+                    {
+                        tprintln!(ctx, "Telegram backups need the full wallet build.");
+                        return Ok(());
+                    }
                 }
                 return self.backup(&ctx, argv).await;
             }
             "restore" => {
                 if argv.first().map(|s| s.as_str()) == Some("telegram") {
+                    #[cfg(feature = "embedded-node")]
                     return self.restore_telegram(&ctx, argv[1..].to_vec(), &guard).await;
+                    #[cfg(not(feature = "embedded-node"))]
+                    {
+                        tprintln!(ctx, "Telegram backups need the full wallet build.");
+                        return Ok(());
+                    }
                 }
                 return self.restore(&ctx, argv, &guard).await;
             }
@@ -1165,6 +1177,7 @@ impl Wallet {
 
     /// The passphrase for a backup, asked twice, with the same rules as a
     /// file backup: eight characters at least, nothing written on an empty one.
+    #[cfg(feature = "embedded-node")]
     async fn ask_backup_passphrase(ctx: &Arc<KaspaCli>) -> Result<Option<Secret>> {
         let pass = ctx.term().ask(true, "Passphrase for this backup: ").await?.trim().to_string();
         if pass.is_empty() {
@@ -1188,6 +1201,7 @@ impl Wallet {
     /// (founder, 2026-09-23, after the nightly backups of other systems that
     /// work this way). Needs the bot from 'mobile telegram <token>'; the chat
     /// is given once and kept.
+    #[cfg(feature = "embedded-node")]
     async fn backup_telegram(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
         use crate::backup as archive;
         use crate::telegram::{BACKUP_PART_BYTES, TelegramConfig, part_file_name, send_document, send_plain};
@@ -1296,6 +1310,7 @@ impl Wallet {
 
     /// 'wallet restore telegram <bot token> [<name>]': collects the parts of
     /// one backup forwarded to the bot and restores the wallet from them.
+    #[cfg(feature = "embedded-node")]
     async fn restore_telegram(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>, guard: &WalletGuard<'_>) -> Result<()> {
         use crate::backup as archive;
         use crate::telegram::{collect_backup_parts, download_file};
