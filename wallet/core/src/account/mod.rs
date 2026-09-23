@@ -344,7 +344,26 @@ pub trait Account: AnySync + Send + Sync + 'static {
         let mut consumed = 0u64;
         while let Some(transaction) = stream.try_next().await? {
             transaction.try_sign()?;
-            match transaction.try_submit(&self.wallet().rpc_api()).await {
+            // A submit that never answers — the node was restarted under the
+            // wallet, the request went with the old connection — must not hold
+            // the sweep forever: a founder's wallet sat idle for hours at
+            // "submitted 56,550 transaction(s)…" (2026-09-23). Two minutes, then
+            // the sweep stops with a reason; 'sweep' again carries on.
+            let rpc = self.wallet().rpc_api();
+            let submit = transaction.try_submit(&rpc);
+            let deadline = workflow_core::task::sleep(std::time::Duration::from_secs(120));
+            futures::pin_mut!(submit);
+            futures::pin_mut!(deadline);
+            let outcome = match futures::future::select(submit, deadline).await {
+                futures::future::Either::Left((outcome, _)) => outcome,
+                futures::future::Either::Right(((), _)) => {
+                    return Err(Error::Custom(
+                        "the node stopped answering while a transaction was being submitted; the sweep stops here — 'sweep' again carries on from what is done"
+                            .to_string(),
+                    ));
+                }
+            };
+            match outcome {
                 Ok(id) => ids.push(id),
                 // The node already has this one. That is not a failure — it is
                 // the same transaction arriving twice, which happens when a
