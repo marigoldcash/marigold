@@ -274,13 +274,13 @@ impl WalletService {
         let mut lines = Vec::new();
         let mut total = 0u64;
         let mut counts = [0usize; DENOMINATION_PETALS.len()];
-        if let Ok(store) = self.wallet.store().as_note_key_store() {
-            if let Ok(mut stream) = store.iter().await {
-                while let Ok(Some(info)) = stream.try_next().await {
-                    if info.status == NoteStatus::Active {
-                        counts[info.d as usize] += 1;
-                        total += DENOMINATION_PETALS[info.d as usize];
-                    }
+        if let Ok(store) = self.wallet.store().as_note_key_store()
+            && let Ok(mut stream) = store.iter().await
+        {
+            while let Ok(Some(info)) = stream.try_next().await {
+                if info.status == NoteStatus::Active {
+                    counts[info.d as usize] += 1;
+                    total += DENOMINATION_PETALS[info.d as usize];
                 }
             }
         }
@@ -290,16 +290,16 @@ impl WalletService {
                 lines.push(format!("  {} × {}", n, sompi_to_kaspa_string(DENOMINATION_PETALS[i])));
             }
         }
-        if let Ok(account) = self.wallet.account() {
-            if let Some(balance) = account.balance() {
-                let pending = balance.pending;
-                lines.push(format!(
-                    "Ledger: {} {}{}",
-                    sompi_to_kaspa_string(balance.mature),
-                    self.ticker(),
-                    if pending > 0 { format!(" ({} pending)", sompi_to_kaspa_string(pending)) } else { String::new() }
-                ));
-            }
+        if let Ok(account) = self.wallet.account()
+            && let Some(balance) = account.balance()
+        {
+            let pending = balance.pending;
+            lines.push(format!(
+                "Ledger: {} {}{}",
+                sompi_to_kaspa_string(balance.mature),
+                self.ticker(),
+                if pending > 0 { format!(" ({} pending)", sompi_to_kaspa_string(pending)) } else { String::new() }
+            ));
         }
         if !self.wallet.is_connected() {
             lines.push("Not connected to the network right now; these are the last known figures.".to_string());
@@ -792,15 +792,17 @@ pub async fn serve(args: Vec<String>) -> Result<()> {
     let mut last_report = std::time::Instant::now();
     while !shutdown.load(Ordering::SeqCst) {
         let synced = matches!(rpc.get_server_info().await, Ok(info) if info.is_synced);
-        if let (Some(host), Some(percent)) = (&service.miner, options.mine) {
-            if synced && !started_once && host.miner().is_none() {
-                match host.start(percent) {
-                    Ok(s) => {
-                        started_once = true;
-                        log::info!("In sync. Mining started: {} threads at {}%.", s.threads, s.percent);
-                    }
-                    Err(e) => log::warn!("mining could not start: {e}"),
+        if let (Some(host), Some(percent)) = (&service.miner, options.mine)
+            && synced
+            && !started_once
+            && host.miner().is_none()
+        {
+            match host.start(percent) {
+                Ok(s) => {
+                    started_once = true;
+                    log::info!("In sync. Mining started: {} threads at {}%.", s.threads, s.percent);
                 }
+                Err(e) => log::warn!("mining could not start: {e}"),
             }
         }
         if last_report.elapsed() >= Duration::from_secs(300) {

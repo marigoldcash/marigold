@@ -1105,8 +1105,8 @@ pub async fn collect_backup_parts(
             count = Some(of_count);
             let file_id = document.get("file_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
             let size = document.get("file_size").and_then(|v| v.as_u64()).unwrap_or(0);
-            if !parts.contains_key(&index) {
-                parts.insert(index, BackupPart { backup: of_backup, index, count: of_count, file_id, size });
+            if let std::collections::btree_map::Entry::Vacant(slot) = parts.entry(index) {
+                slot.insert(BackupPart { backup: of_backup, index, count: of_count, file_id, size });
                 progress(format!("part {index} of {of_count} received"));
             }
         }
