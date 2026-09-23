@@ -1298,8 +1298,8 @@ impl Wallet {
         tprintln!(ctx, "");
         tpara!(
             ctx,
-            "To bring it back on any machine: 'wallet restore telegram <bot token>', then forward the \
-            part messages from that chat to the bot. It needs this passphrase and nothing else. \
+            "To bring it back on any machine: 'wallet restore telegram' (it asks for the bot's token), then \
+            forward the part messages from that chat to the bot. It needs this passphrase and nothing else. \
             "
         );
         tprintln!(ctx, "");
@@ -1314,16 +1314,20 @@ impl Wallet {
     async fn restore_telegram(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>, guard: &WalletGuard<'_>) -> Result<()> {
         use crate::backup as archive;
         use crate::telegram::{collect_backup_parts, download_file};
-        let Some(token) = argv.first().cloned() else {
-            tprintln!(ctx, "usage: 'wallet restore telegram <bot token> [<name>]'");
-            tprintln!(
-                ctx,
-                "{}",
-                crate::ui::dim("The token of the bot the backup was sent with, from @BotFather; <name> restores under another name.")
-            );
-            return Ok(());
+        // The token is asked for hidden, never typed on the command line: a
+        // line with it would sit in the terminal and in the history.
+        let (token, new_name) = match argv.first().map(|s| s.as_str()) {
+            Some(first) if first.contains(':') => (first.to_string(), argv.get(1).cloned()),
+            _ => {
+                tprintln!(ctx, "{}", crate::ui::dim("The token of the bot the backup was sent with, from @BotFather."));
+                let token = ctx.term().ask(true, "Bot token: ").await?.trim().to_string();
+                if token.is_empty() {
+                    tprintln!(ctx, "No token — nothing restored.");
+                    return Ok(());
+                }
+                (token, argv.first().cloned())
+            }
         };
-        let new_name = argv.get(1).cloned();
         tprintln!(ctx, "");
         tpara!(
             ctx,

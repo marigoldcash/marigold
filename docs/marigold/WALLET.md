@@ -205,10 +205,10 @@ The wallet asks for a backup passphrase (eight characters or more, twice), packs
 To bring the wallet back on any machine:
 
 ```
-wallet restore telegram <bot token> [<name>]
+wallet restore telegram [<name>]
 ```
 
-then forward the part messages from the group to the bot (select them all, forward, pick the bot). The wallet waits up to ten minutes, fetches each part, reassembles the archive and runs the ordinary restore, asking for the passphrase. A bot cannot read a chat's history, which is why the parts have to be forwarded to it. The Telegram bot API is the whole dependency; nothing is stored on any server of ours.
+It asks for the bot's token hidden (a token typed on the command line would sit in the terminal and its history); then forward the part messages from the group to the bot (select them all, forward, pick the bot). The wallet waits up to ten minutes, fetches each part, reassembles the archive and runs the ordinary restore, asking for the passphrase. A bot cannot read a chat's history, which is why the parts have to be forwarded to it. The Telegram bot API is the whole dependency; nothing is stored on any server of ours.
 
 ## 12. Notes-only wallets
 
