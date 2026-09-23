@@ -197,7 +197,13 @@ impl log::Log for TerminalLogger {
         // Time and level, because these records exist to answer "is it making
         // progress?" — a stream of messages with no clock cannot. Short form:
         // this is a wallet, not a server log.
-        if let Some(progress) = parse_progress(&record.args().to_string()) {
+        let message = record.args().to_string();
+        // A resumed header stage counts from where it stopped, so its
+        // percentage starts low again; that is not the step starting over.
+        if message.contains("Resuming the header download") {
+            LAST_HEADERS_PERCENT.store(0, std::sync::atomic::Ordering::Relaxed);
+        }
+        if let Some(progress) = parse_progress(&message) {
             record_progress(progress);
             if let Ok(now) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
                 LAST_PROGRESS.store(now.as_secs(), std::sync::atomic::Ordering::Relaxed);

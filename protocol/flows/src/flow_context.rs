@@ -18,7 +18,9 @@ use kaspa_consensus_notify::{
     notification::{Notification, PruningPointUtxoSetOverrideNotification},
     root::ConsensusNotificationRoot,
 };
-use kaspa_consensusmanager::{BlockProcessingBatch, ConsensusInstance, ConsensusManager, ConsensusProxy, ConsensusSessionOwned};
+use kaspa_consensusmanager::{
+    BlockProcessingBatch, ConsensusInstance, ConsensusManager, ConsensusProxy, ConsensusSessionOwned, StagingConsensus,
+};
 use kaspa_core::{
     debug, info,
     kaspad_env::{name, version},
@@ -271,6 +273,14 @@ pub struct FlowContextInner {
     shared_transaction_requests: Arc<Mutex<HashMap<TransactionId, RequestScopeMetadata>>>,
     is_ibd_running: Arc<AtomicBool>,
     ibd_metadata: Arc<RwLock<Option<IbdMetadata>>>,
+    /// A staging consensus kept from a failed IBD-with-proof attempt, with the
+    /// pruning point its proof ended at (Marigold, 2026-09-23: the header
+    /// stage of a first sync resumes within one run of the node). The next
+    /// attempt whose proof ends at the same pruning point continues the header
+    /// download into it instead of starting over; a different pruning point
+    /// discards it. It lives only as long as the process: a restart still
+    /// starts the stage over.
+    kept_staging: Mutex<Option<KeptStaging>>,
     pub address_manager: Arc<Mutex<AddressManager>>,
     connection_manager: RwLock<Option<Arc<ConnectionManager>>>,
     mining_manager: MiningManagerProxy,
@@ -294,6 +304,14 @@ pub struct FlowContextInner {
 #[derive(Clone)]
 pub struct FlowContext {
     inner: Arc<FlowContextInner>,
+}
+
+/// A staging consensus that outlived the IBD attempt that filled it.
+pub struct KeptStaging {
+    pub staging: StagingConsensus,
+    /// The pruning point of the proof it was built for; only a proof ending at
+    /// the same block may continue into it.
+    pub pruning_point: Hash,
 }
 
 pub struct IbdRunningGuard {
@@ -376,6 +394,7 @@ impl FlowContext {
                 node_id: Uuid::new_v4().into(),
                 consensus_manager,
                 orphans_pool: AsyncRwLock::new(OrphanBlocksPool::new(max_orphans)),
+                kept_staging: Mutex::new(None),
                 shared_block_requests: Arc::new(Mutex::new(HashMap::new())),
                 transactions_spread: AsyncRwLock::new(TransactionsSpread::new(hub.clone())),
                 shared_transaction_requests: Arc::new(Mutex::new(HashMap::new())),
@@ -438,6 +457,19 @@ impl FlowContext {
 
     pub fn mining_manager(&self) -> &MiningManagerProxy {
         &self.mining_manager
+    }
+
+    /// Takes the staging kept from the last failed attempt, if any.
+    pub fn take_kept_staging(&self) -> Option<KeptStaging> {
+        self.kept_staging.lock().take()
+    }
+
+    /// Keeps a staging for the next attempt. Anything kept before is cancelled:
+    /// one attempt's worth of headers is all there is room for.
+    pub fn keep_staging(&self, staging: StagingConsensus, pruning_point: Hash) {
+        if let Some(previous) = self.kept_staging.lock().replace(KeptStaging { staging, pruning_point }) {
+            previous.staging.cancel();
+        }
     }
 
     pub fn try_set_ibd_running(&self, peer: PeerKey, relay_daa_score: u64) -> Option<IbdRunningGuard> {

@@ -1,3 +1,4 @@
+use crate::flow_context::KeptStaging;
 use crate::{
     flow_context::FlowContext,
     flow_trait::Flow,
@@ -201,9 +202,17 @@ impl IbdFlow {
             }
             IbdType::DownloadHeadersProof => {
                 drop(session); // Avoid holding the previous consensus throughout the staging IBD
-                let staging = self.ctx.consensus_manager.new_staging_consensus();
-                match self.ibd_with_headers_proof(&staging, negotiation_output.syncer_virtual_selected_parent, &relay_block).await {
+                // The staging in use and, once the proof has been checked, the
+                // pruning point it is valid for; filled in by the stage below
+                // so a failure can keep it for the next attempt.
+                let mut slot: Option<(StagingConsensus, Option<Hash>)> = None;
+                let kept = self.ctx.take_kept_staging();
+                let outcome = self
+                    .ibd_with_headers_proof(kept, &mut slot, negotiation_output.syncer_virtual_selected_parent, &relay_block)
+                    .await;
+                match outcome {
                     Ok(()) => {
+                        let (staging, _) = slot.take().expect("a successful header stage always used a staging");
                         spawn_blocking(|| staging.commit()).await.unwrap();
                         info!(
                             "Header download stage of IBD with headers proof completed successfully from {}. Committed staging consensus.",
@@ -221,7 +230,17 @@ impl IbdFlow {
                     }
                     Err(e) => {
                         warn!("IBD with headers proof from {} was unsuccessful ({})", self.router, e);
-                        staging.cancel();
+                        match slot.take() {
+                            Some((staging, Some(pruning_point))) => {
+                                info!(
+                                    "Keeping the headers downloaded so far: the next attempt whose proof ends at pruning point {} continues from them",
+                                    pruning_point
+                                );
+                                self.ctx.keep_staging(staging, pruning_point);
+                            }
+                            Some((staging, None)) => staging.cancel(),
+                            None => {}
+                        }
                         return Err(e);
                     }
                 }
@@ -435,24 +454,86 @@ impl IbdFlow {
         Ok(())
     }
 
+    /// The header stage of a first sync. `kept` is a staging left by a failed
+    /// attempt; `slot` receives the staging this attempt used, with the pruning
+    /// point it is valid for once the proof has been checked, so the caller can
+    /// commit it, keep it, or cancel it.
     async fn ibd_with_headers_proof(
         &mut self,
-        staging: &StagingConsensus,
+        kept: Option<KeptStaging>,
+        slot: &mut Option<(StagingConsensus, Option<Hash>)>,
         syncer_virtual_selected_parent: Hash,
         relay_block: &Block,
     ) -> Result<(), ProtocolError> {
         info!("Starting IBD with headers proof with peer {}", self.router);
 
+        // The proof first, against the current consensus: no staging is touched
+        // until the pruning point it ends at is known.
+        let mut kept = kept;
+        let (proof, proof_metadata, pruning_point) = match self.fetch_pruning_proof(relay_block).await {
+            Ok(fetched) => fetched,
+            Err(e) => {
+                if let Some(k) = kept.take() {
+                    *slot = Some((k.staging, Some(k.pruning_point)));
+                }
+                return Err(e);
+            }
+        };
+        let (staging, resumed) = match kept.take() {
+            Some(k) if k.pruning_point == pruning_point => {
+                info!(
+                    "Resuming the header download from the last attempt: the proof ends at the same pruning point {}",
+                    pruning_point
+                );
+                (k.staging, true)
+            }
+            Some(k) => {
+                info!(
+                    "The network's pruning point moved on ({} to {}); the headers kept from the last attempt are discarded",
+                    k.pruning_point, pruning_point
+                );
+                k.staging.cancel();
+                (self.ctx.consensus_manager.new_staging_consensus(), false)
+            }
+            None => (self.ctx.consensus_manager.new_staging_consensus(), false),
+        };
+        *slot = Some((staging, Some(pruning_point)));
+        let staging = &slot.as_ref().expect("just set").0;
         let staging_session = staging.session().await;
 
-        let pruning_point = self.sync_and_validate_pruning_proof(&staging_session, relay_block).await?;
-        self.sync_headers(&staging_session, syncer_virtual_selected_parent, pruning_point, relay_block).await?;
+        let highest_known = if resumed {
+            // Where the last attempt got to on this peer's chain, by the same
+            // negotiation a regular sync uses, only against the staging.
+            match self.negotiate_missing_syncer_chain_segment(&staging_session).await {
+                Ok(negotiated) => match negotiated.highest_known_syncer_chain_hash {
+                    Some(known) => {
+                        info!("Continuing the header download from {}", known);
+                        known
+                    }
+                    None => pruning_point,
+                },
+                Err(e) => {
+                    warn!("Could not find where the last attempt stopped ({}); downloading the headers again", e);
+                    pruning_point
+                }
+            }
+        } else {
+            self.sync_pruning_point_anticone(&staging_session, proof, proof_metadata, pruning_point).await?;
+            pruning_point
+        };
+        self.sync_headers(&staging_session, syncer_virtual_selected_parent, highest_known, relay_block).await?;
         staging_session.async_validate_pruning_points(syncer_virtual_selected_parent).await?;
         self.validate_staging_timestamps(&self.ctx.consensus().session().await, &staging_session).await?;
         Ok(())
     }
 
-    async fn sync_and_validate_pruning_proof(&mut self, staging: &ConsensusProxy, relay_block: &Block) -> Result<Hash, ProtocolError> {
+    /// Requests and validates the peer's pruning proof against the current
+    /// consensus; nothing is written anywhere. Returns the proof, its metadata
+    /// and the pruning point it ends at.
+    async fn fetch_pruning_proof(
+        &mut self,
+        relay_block: &Block,
+    ) -> Result<(PruningPointProof, PruningProofMetadata, Hash), ProtocolError> {
         // [Toccata] Guard IBD from outdated nodes. P2P flow registration does not protect
         // fresh IBD peers, and the relay block is usually the syncer sink, so reject an unexpected
         // block version before requesting the pruning proof. The pruning point itself is
@@ -509,6 +590,18 @@ impl IbdFlow {
             unix_now(),
         )?;
 
+        Ok((proof, proof_metadata, proof_pruning_point))
+    }
+
+    /// The rest of the proof stage: the pruning point, its anticone and the
+    /// trusted data go into the staging, and the proof is applied there.
+    async fn sync_pruning_point_anticone(
+        &mut self,
+        staging: &ConsensusProxy,
+        proof: PruningPointProof,
+        proof_metadata: PruningProofMetadata,
+        proof_pruning_point: Hash,
+    ) -> Result<(), ProtocolError> {
         self.router
             .enqueue(make_message!(Payload::RequestPruningPointAndItsAnticone, RequestPruningPointAndItsAnticoneMessage {}))
             .await?;
@@ -681,7 +774,7 @@ impl IbdFlow {
         }
         staging.async_clear_body_missing_anticone_set().await;
         info!("Done processing trusted blocks");
-        Ok(proof_pruning_point)
+        Ok(())
     }
 
     async fn sync_headers(
