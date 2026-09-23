@@ -1,7 +1,9 @@
 # The desktop wallet (gui/), built natively on each platform like the terminal
-# wallet in binaries.yaml. Bare executables for now: the system webview does
-# the rendering (WebKitGTK on Linux, WebView2 on Windows 10/11, WebKit on
-# macOS), so nothing is bundled with them yet. Run by hand with the
+# wallet in binaries.yaml: the bare executable and, since 2026-09-23, the
+# installers people double-click — .deb and AppImage on Linux, .dmg on macOS,
+# .msi on Windows — made by the Tauri CLI. The system webview does the
+# rendering (WebKitGTK on Linux, WebView2 on Windows 10/11, WebKit on macOS).
+# Unsigned until the founder decides on certificates. Run by hand with the
 # marigold-wallet release tag to attach them, or empty to keep artifacts only.
 name: Desktop wallet binaries
 
@@ -24,13 +26,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-22.04,     name: linux-x86_64,   target: x86_64-unknown-linux-gnu,  ext: "" }
-          - { os: ubuntu-22.04-arm, name: linux-arm64,    target: aarch64-unknown-linux-gnu, ext: "" }
-          - { os: macos-14,         name: macos-arm64,    target: aarch64-apple-darwin,      ext: "" }
+          - { os: ubuntu-22.04,     name: linux-x86_64,   target: x86_64-unknown-linux-gnu,  ext: "",     bundles: "deb,appimage" }
+          - { os: ubuntu-22.04-arm, name: linux-arm64,    target: aarch64-unknown-linux-gnu, ext: "",     bundles: "deb,appimage" }
+          - { os: macos-14,         name: macos-arm64,    target: aarch64-apple-darwin,      ext: "",     bundles: "dmg" }
           # Intel macOS is built on the Apple Silicon runner: the Intel runners
           # sit in a queue for hours, and Apple's toolchain cross-builds fine.
-          - { os: macos-14,         name: macos-x86_64,   target: x86_64-apple-darwin,       ext: "" }
-          - { os: windows-latest,   name: windows-x86_64, target: x86_64-pc-windows-msvc,    ext: ".exe" }
+          - { os: macos-14,         name: macos-x86_64,   target: x86_64-apple-darwin,       ext: "",     bundles: "dmg" }
+          - { os: windows-latest,   name: windows-x86_64, target: x86_64-pc-windows-msvc,    ext: ".exe", bundles: "msi" }
     steps:
       - name: Fix CRLF on Windows
         if: runner.os == 'Windows'
@@ -63,14 +65,34 @@ jobs:
           key: gui-${{ matrix.name }}
           workspaces: gui
 
-      - name: Build
-        run: cargo build --release --manifest-path gui/Cargo.toml --target ${{ matrix.target }}
+      # The Tauri CLI makes the installers; cached by version so it compiles once.
+      - name: Cache the Tauri CLI
+        id: tauri-cli
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-tauri${{ matrix.ext }}
+          key: tauri-cli-2-${{ runner.os }}-${{ runner.arch }}
 
-      - name: Name the binary
+      - name: Install the Tauri CLI
+        if: steps.tauri-cli.outputs.cache-hit != 'true'
+        run: cargo install tauri-cli --version "^2" --locked
+
+      - name: Build the app and its installers
+        working-directory: gui
+        run: cargo tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+
+      - name: Name the binary and the installers
         shell: bash
         run: |
           mkdir -p out
+          V=$(grep -m1 '^version' gui/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
           cp gui/target/${{ matrix.target }}/release/marigold-wallet${{ matrix.ext }} out/marigold-wallet-${{ matrix.name }}${{ matrix.ext }}
+          B=gui/target/${{ matrix.target }}/release/bundle
+          for f in $B/deb/*.deb; do [ -f "$f" ] && cp "$f" out/marigold-wallet-$V-${{ matrix.name }}.deb; done
+          for f in $B/appimage/*.AppImage; do [ -f "$f" ] && cp "$f" out/marigold-wallet-$V-${{ matrix.name }}.AppImage; done
+          for f in $B/dmg/*.dmg; do [ -f "$f" ] && cp "$f" out/marigold-wallet-$V-${{ matrix.name }}.dmg; done
+          for f in $B/msi/*.msi; do [ -f "$f" ] && cp "$f" out/marigold-wallet-$V-${{ matrix.name }}.msi; done
+          ls -la out
 
       - uses: actions/upload-artifact@v4
         with:
