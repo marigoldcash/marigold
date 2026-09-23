@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Marigold</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <div class="brand">Marigold</div>
+  <div id="context" class="context"></div>
+</header>
+
+<main>
+  <section id="screen-open" class="screen">
+    <h1>Open your wallet</h1>
+    <label>Wallet
+      <select id="wallet-list"></select>
+    </label>
+    <label>Password
+      <input id="password" type="password" autocomplete="current-password">
+    </label>
+    <label>Network access
+      <select id="node">
+        <option value="public">A public computer (works at once)</option>
+        <option value="local">A node running on this machine</option>
+        <option value="own">Sync here, inside the app</option>
+      </select>
+    </label>
+    <p class="hint">Through a public computer, whoever runs it sees which notes your wallet asks about. A sync of your own needs a few gigabytes and some time.</p>
+    <button id="open" class="primary">Open</button>
+    <p id="open-error" class="error"></p>
+    <p class="hint">No wallet yet? Create one in the terminal wallet with <code>wallet create</code>; this app opens it.</p>
+  </section>
+
+  <section id="screen-home" class="screen" hidden>
+    <nav class="tabs">
+      <button data-tab="balance" class="tab active">Balance</button>
+      <button data-tab="pay" class="tab">Pay</button>
+      <button data-tab="request" class="tab">Request</button>
+      <button data-tab="status" class="tab">Status</button>
+    </nav>
+
+    <div id="tab-balance" class="tab-panel">
+      <pre id="balance" class="figures">…</pre>
+      <h2>Recent</h2>
+      <pre id="history" class="figures small"></pre>
+    </div>
+
+    <div id="tab-pay" class="tab-panel" hidden>
+      <h1>Pay a request</h1>
+      <label>The code you were given
+        <textarea id="pay-code" rows="4" placeholder="marigoldreq:…"></textarea>
+      </label>
+      <p id="pay-amount" class="amount"></p>
+      <button id="pay" class="primary" disabled>Pay</button>
+      <p id="pay-error" class="error"></p>
+      <div id="pay-done" hidden>
+        <p class="ok">Paid.</p>
+        <p id="pay-summary"></p>
+        <label>Your receipt — give it to whoever asked for the payment
+          <textarea id="receipt" rows="4" readonly></textarea>
+        </label>
+        <button id="copy-receipt">Copy the receipt</button>
+        <p class="hint">It points them straight at the payment and holds nothing secret.</p>
+      </div>
+    </div>
+
+    <div id="tab-request" class="tab-panel" hidden>
+      <h1>Request a payment</h1>
+      <label>Amount, or leave it empty and let the payer choose
+        <input id="request-amount" inputmode="decimal" placeholder="1.00">
+      </label>
+      <button id="request" class="primary">Make the code</button>
+      <p id="request-error" class="error"></p>
+      <div id="request-done" hidden>
+        <img id="request-qr" class="qr" alt="">
+        <textarea id="request-code" rows="5" readonly></textarea>
+        <button id="copy-request">Copy the code</button>
+        <p id="request-watch" class="hint">Watching for the payment…</p>
+        <p id="request-paid" class="ok" hidden></p>
+      </div>
+    </div>
+
+    <div id="tab-status" class="tab-panel" hidden>
+      <pre id="status" class="figures small">…</pre>
+      <button id="refresh-status">Refresh</button>
+      <button id="close-wallet">Close the wallet</button>
+    </div>
+  </div>
+  </section>
+</main>
+
+<footer>
+  <div id="say" class="say"></div>
+  <div id="version" class="version"></div>
+</footer>
+<script src="app.js"></script>
+</body>
+</html>

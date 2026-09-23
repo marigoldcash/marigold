@@ -42,7 +42,7 @@ fi
 echo "→ syncing working tree to $HOST:$REMOTE_DIR"
 $SSH "$HOST" "mkdir -p $REMOTE_DIR"
 rsync -a --delete --info=stats1 \
-  --exclude '/target' --exclude '/.git' --exclude '/.claude' \
+  --exclude '/target' --exclude '/gui/target' --exclude '/.git' --exclude '/.claude' \
   --exclude '/deploy/ansible/.fetched' --exclude '*.pdf' --exclude '/docker/*.tar' \
   --exclude '/whitepaper' --exclude '/upstream' \
   -e "$SSH" ./ "$HOST:$REMOTE_DIR/"

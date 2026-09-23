@@ -544,19 +544,45 @@ impl WalletService {
     }
 }
 
-pub async fn serve(args: Vec<String>) -> Result<()> {
-    let mut options = match parse(&args) {
-        Ok(o) => o,
-        Err(message) => {
-            eprintln!("{message}");
-            std::process::exit(2);
-        }
-    };
-    kaspa_core::log::init_logger(None, "info");
-    let shutdown = Arc::new(AtomicBool::new(false));
-    let stop = Arc::new(Stop(shutdown.clone()));
-    Arc::new(Signals::new(&stop)).init();
+/// What a session needs to open: the same things `marigold-cli serve` takes
+/// from its arguments, and the GUI from its screens.
+pub struct SessionOptions {
+    pub wallet: String,
+    pub password: Secret,
+    /// `grpc://…`, `ws://…`/`wss://…`, or `None` for a node inside the process.
+    pub node: Option<String>,
+    pub mine: Option<u32>,
+    pub network: Option<NetworkId>,
+}
 
+/// An open wallet on a connected node, with the service the bot and the GUI
+/// talk to. Dropping it does not stop a node started inside the process;
+/// call `close` for that.
+pub struct Session {
+    pub service: Arc<WalletService>,
+    pub wallet: Arc<Wallet>,
+    pub rpc: Arc<DynRpcApi>,
+    node: Node,
+    pub miner_host: Option<Arc<MinerHost>>,
+    pub folder: String,
+    pub network_id: NetworkId,
+}
+
+impl Session {
+    pub fn own_node(&self) -> bool {
+        matches!(self.node, Node::Own(_))
+    }
+
+    pub async fn close(self) {
+        if let Node::Own(node) = &self.node {
+            let _ = node.stop().await;
+        }
+    }
+}
+
+/// Opens the wallet and connects it, the way `serve` does; `say` receives
+/// the service's one-line remarks.
+pub async fn open_session(options: &SessionOptions, shutdown: Arc<AtomicBool>, say: Say) -> Result<Session> {
     // The wallet's settings say which network and which folder; read them the
     // way the terminal wallet does, before anything opens.
     let probe = Wallet::try_with_rpc(None, Wallet::local_store()?, None)?;
@@ -574,9 +600,6 @@ pub async fn serve(args: Vec<String>) -> Result<()> {
             .unwrap_or(NetworkId::with_suffix(kaspa_consensus_core::network::NetworkType::Testnet, 10)),
     };
     drop(probe);
-
-    let telegram_path = TelegramConfig::path(&folder, &options.wallet);
-    let telegram = TelegramConfig::load(&telegram_path);
 
     log::info!("Marigold wallet service {}: wallet '{}' on {network_id}", env!("CARGO_PKG_VERSION"), options.wallet);
     let miner_host = options.mine.map(|_| MinerHost::new_unbound(shutdown.clone()));
@@ -641,7 +664,7 @@ pub async fn serve(args: Vec<String>) -> Result<()> {
         }
         Node::Wrpc(_) => {}
     }
-    let descriptors = wallet.clone().wallet_open(options.password.reveal(), Some(options.wallet.clone()), true, false).await?;
+    let descriptors = wallet.clone().wallet_open(options.password.clone(), Some(options.wallet.clone()), true, false).await?;
     if let Some(descriptors) = descriptors {
         let ids: Vec<_> = descriptors.iter().map(|d| d.account_id).collect();
         if !ids.is_empty() {
@@ -664,14 +687,45 @@ pub async fn serve(args: Vec<String>) -> Result<()> {
 
     let service = WalletService::new(
         wallet.clone(),
-        options.password.reveal(),
+        options.password.clone(),
         network_id,
         &folder,
         &options.wallet,
         miner_host.clone().filter(|h| h.address_bound()),
-        Arc::new(|line: String| log::info!("{line}")),
+        say,
         None,
     );
+    Ok(Session { service, wallet, rpc, node, miner_host, folder, network_id })
+}
+
+pub async fn serve(args: Vec<String>) -> Result<()> {
+    let mut options = match parse(&args) {
+        Ok(o) => o,
+        Err(message) => {
+            eprintln!("{message}");
+            std::process::exit(2);
+        }
+    };
+    kaspa_core::log::init_logger(None, "info");
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let stop = Arc::new(Stop(shutdown.clone()));
+    Arc::new(Signals::new(&stop)).init();
+
+    let session = open_session(
+        &SessionOptions {
+            wallet: options.wallet.clone(),
+            password: options.password.reveal(),
+            node: options.node.clone(),
+            mine: options.mine,
+            network: options.network,
+        },
+        shutdown.clone(),
+        Arc::new(|line: String| log::info!("{line}")),
+    )
+    .await?;
+    let Session { service, wallet, rpc, node, folder, .. } = session;
+    let telegram_path = TelegramConfig::path(&folder, &options.wallet);
+    let telegram = TelegramConfig::load(&telegram_path);
 
     match telegram {
         Some(cfg) => {

@@ -22,3 +22,4 @@ rustbridge_*.log
 whitepaper/*.pdf
 whitepaper/.build-src.md
 __pycache__/
+/gui/target

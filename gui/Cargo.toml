@@ -1,0 +1,45 @@
+# The Marigold desktop wallet: the wallet's own screens in a window, over the
+# same service the Telegram bot uses (cli/src/serve.rs). Its own workspace,
+# because it needs a webview toolkit the node's CI runners do not carry; it
+# reads the node crates by path and inherits nothing, so the version below is
+# kept in step by scripts/bump-version.sh.
+[package]
+name = "marigold-gui"
+version = "2.60.266"
+edition = "2024"
+rust-version = "1.91.0"
+license = "ISC"
+description = "Marigold desktop wallet"
+publish = false
+
+[[bin]]
+name = "marigold-wallet"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+log = "0.4"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+kaspa-cli = { path = "../cli", features = ["embedded-node"] }
+kaspa-wallet-core = { path = "../wallet/core" }
+kaspa-wallet-keys = { path = "../wallet/keys" }
+kaspa-consensus-core = { path = "../consensus/core" }
+kaspa-wrpc-client = { path = "../rpc/wrpc/client" }
+
+[workspace]
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+
+# The same patched crates the root workspace builds against; a patch only
+# applies at a workspace root, so it is repeated here with the paths adjusted.
+[patch.crates-io]
+workflow-terminal = { path = "../extern/workflow-terminal" }
+

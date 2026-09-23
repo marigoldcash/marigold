@@ -425,3 +425,9 @@ is priced like plumbing; notes are money and cost a penny to move.
 
 **How it is produced.** `marigold-trustee-signer --sign-release-notice 2.56 --network testnet-10` prints one trustee's signature; `scripts/release-notice.sh` collects them from the testnet signer hosts and writes the document into the site clone, which is published like any other page. Raising the minimum is a trustee act, done when a consensus change activates; moving the newest release is a release step. `MARIGOLD_NO_RELEASE_CHECK=1` turns the check off.
 
+## A desktop wallet in Tauri, over the bot's service, beside the terminal wallet (2026-09-23)
+
+**Decision.** The GUI is real screens, not the terminal in a window. It runs on the same wallet service the Telegram bot uses, in-process, so pay, request, receive and status do exactly what the terminal does through the same code. The shell is Tauri 2, not Electron: the project is Rust, the wallet core runs inside the app rather than beside it, the binary is a tenth of Electron's, and the system webview renders (WebView2 on Windows 10/11, WebKit on macOS, WebKitGTK on Linux). Electron's one advantage, identical rendering everywhere, was not worth a 150 MB second runtime and a second language boundary. Two builds from one source and one version: the terminal wallet stays the light one for servers, mine-to, the bot and anyone who prefers it. Founder-asked after five testers asked for a GUI; the terminal-in-a-window idea was set aside because the same testers would have typed `pay` in a nicer font and said the same thing.
+
+**Why its own workspace.** The GUI needs a webview toolkit the node's CI runners and the musl build do not carry, and must never add a dependency to the node. `gui/` is excluded from the root workspace and reads the crates by path; the version is copied in by `scripts/bump-version.sh`.
+

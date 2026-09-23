@@ -1,5 +1,8 @@
 [workspace]
 resolver = "2"
+# The desktop wallet is its own workspace: it needs a webview toolkit the
+# node's CI runners do not carry (gui/Cargo.toml says why).
+exclude = ["gui"]
 members = [
     "daemon",
     "cli",

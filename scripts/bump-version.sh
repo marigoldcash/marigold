@@ -63,6 +63,17 @@ for line in open(path):
         changed += 1
     out.append(line)
 open(path, "w").write("".join(out))
+# The desktop wallet is its own workspace and cannot inherit the version;
+# its manifest and Tauri configuration carry the same number by hand.
+for extra in ("gui/Cargo.toml", "gui/tauri.conf.json"):
+    try:
+        text = open(extra).read()
+    except FileNotFoundError:
+        continue
+    replaced = text.replace(f'version = "{current}"', f'version = "{next_}"', 1).replace(f'"version": "{current}"', f'"version": "{next_}"', 1)
+    if replaced != text:
+        open(extra, "w").write(replaced)
+        changed += 1
 print(f"rewrote {changed} version entries")
 PY
 
