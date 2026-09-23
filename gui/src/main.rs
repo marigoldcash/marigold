@@ -444,8 +444,16 @@ fn main() {
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { .. } = event {
+                // Close the wallet properly before the window goes: a node
+                // running inside the app is stopped and its database left
+                // clean, the way 'exit' does it in the terminal wallet.
                 let state: State<'_, App> = window.state();
                 state.shutdown.store(true, std::sync::atomic::Ordering::SeqCst);
+                tauri::async_runtime::block_on(async {
+                    if let Some(session) = state.session.lock().await.take() {
+                        session.close().await;
+                    }
+                });
             }
         })
         .run(tauri::generate_context!())
