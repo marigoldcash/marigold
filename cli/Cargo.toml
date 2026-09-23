@@ -57,6 +57,7 @@ log.workspace = true
 kaspa-daemon.workspace = true
 kaspa-metrics-core.workspace = true
 kaspa-pow.workspace = true
+kaspa-notify.workspace = true
 kaspa-rpc-core.workspace = true
 kaspa-utils.workspace = true
 kaspa-wallet-core.workspace = true
@@ -109,6 +110,8 @@ features = [
 ]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# The node inside the wallet is given a bounded thread pool (memory.rs).
+rayon.workspace = true
 sysinfo.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 # gRPC pulls tonic, hyper and mio, none of which build for the browser; the

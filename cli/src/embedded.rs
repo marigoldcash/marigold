@@ -140,8 +140,13 @@ impl EmbeddedNode {
         // Sized to the machine: a server-sized node took two testers'
         // laptops down (2026-09-22).
         let ram_scale = crate::memory::ram_scale();
+        // And given fewer threads, behind everything else on the machine.
+        let threads = crate::memory::node_threads();
+        rayon::ThreadPoolBuilder::new().num_threads(threads).build_global().ok();
+        crate::memory::lower_process_priority();
         let mut args = Args {
             ram_scale,
+            async_threads: threads,
             accept_own_below_floor: own_lane,
             appdir: Some(appdir.to_string_lossy().to_string()),
             utxoindex: true,

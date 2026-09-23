@@ -61,6 +61,14 @@ static BLOCKS_SEEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBoo
 /// after blocks is a new pass; the status names it rather than counting
 /// backwards.
 static PASS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+/// How many times a step fell back to its start within one pass: the node
+/// restarts the step when the peer it reads from goes away.
+static RESTARTS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+static LAST_HEADERS_PERCENT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+pub fn sync_restarts() -> u32 {
+    RESTARTS.load(std::sync::atomic::Ordering::Relaxed)
+}
 
 /// The sync pass the node is on: 0 for the first, 1 for the second, and so on.
 pub fn sync_pass() -> u32 {
@@ -72,9 +80,22 @@ fn record_progress(progress: SyncProgress) {
     use std::sync::atomic::Ordering::Relaxed;
     match progress {
         SyncProgress::Blocks { .. } => BLOCKS_SEEN.store(true, Relaxed),
-        SyncProgress::Headers { .. } | SyncProgress::ChainSegment { .. } => {
+        SyncProgress::Headers { percent, .. } => {
             if BLOCKS_SEEN.swap(false, Relaxed) {
                 PASS.fetch_add(1, Relaxed);
+                LAST_HEADERS_PERCENT.store(0, Relaxed);
+            }
+            // Within one pass the figure only ever rises; a fall of more than
+            // a few points is the step starting over.
+            let last = LAST_HEADERS_PERCENT.swap(percent, Relaxed);
+            if percent + 5 < last {
+                RESTARTS.fetch_add(1, Relaxed);
+            }
+        }
+        SyncProgress::ChainSegment { .. } => {
+            if BLOCKS_SEEN.swap(false, Relaxed) {
+                PASS.fetch_add(1, Relaxed);
+                LAST_HEADERS_PERCENT.store(0, Relaxed);
             }
         }
         SyncProgress::VerifyingProof { .. } => {}
@@ -109,6 +130,8 @@ pub fn clear_sync_progress() {
     *progress_slot().write().unwrap() = None;
     BLOCKS_SEEN.store(false, std::sync::atomic::Ordering::Relaxed);
     PASS.store(0, std::sync::atomic::Ordering::Relaxed);
+    RESTARTS.store(0, std::sync::atomic::Ordering::Relaxed);
+    LAST_HEADERS_PERCENT.store(0, std::sync::atomic::Ordering::Relaxed);
     LAST_PROGRESS.store(0, std::sync::atomic::Ordering::Relaxed);
     SUPPRESSED.store(0, std::sync::atomic::Ordering::Relaxed);
 }

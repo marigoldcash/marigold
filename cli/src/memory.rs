@@ -39,7 +39,15 @@ pub fn read() -> Option<Memory> {
 }
 
 /// What a node at scale 1.0 takes during its first sync, in practice.
-const NODE_AT_FULL_SCALE_GB: f64 = 4.0;
+/// What a full-scale node actually takes on a laptop: a tester's 16 GB Linux
+/// machine held 6.3 GB in the wallet after its sync was stopped, more while
+/// it ran (2026-09-22). The earlier guess of four was half the truth.
+const NODE_AT_FULL_SCALE_GB: f64 = 8.0;
+
+/// Below this much memory the wallet does not start a sync of its own by
+/// itself: the tester's 4 GB machine was "fighting and not usable". 'connect'
+/// still starts one on request.
+pub const SMALL_MACHINE_GB: f64 = 6.0;
 
 /// The node's cache scale for this machine: enough of the machine for the
 /// sync to be quick, never enough to starve everything else. A third of the
@@ -48,8 +56,43 @@ const NODE_AT_FULL_SCALE_GB: f64 = 4.0;
 pub fn ram_scale_for(memory: Memory) -> f64 {
     let total = memory.total as f64 / GB;
     let available = memory.available as f64 / GB;
-    let budget = (total / 3.0).min(available - 1.5).max(0.4);
+    // A quarter of the machine, and never what the machine does not have
+    // free beyond two gigabytes for everything else.
+    let budget = (total / 4.0).min(available - 2.0).max(0.5);
     (budget / NODE_AT_FULL_SCALE_GB).clamp(0.1, 1.0)
+}
+
+/// Whether this machine is too small for a sync of its own to start unasked.
+pub fn too_small_for_own_sync(memory: Memory) -> bool {
+    (memory.total as f64 / GB) < SMALL_MACHINE_GB
+}
+
+/// How many threads the node inside the wallet gets: half the cores on a
+/// laptop (at least two), all but two on a bigger machine. A first sync
+/// validates blocks on every core it is given, and on a four-core laptop
+/// that was 60% of the machine (tester, 2026-09-22).
+pub fn node_threads_for(cores: usize) -> usize {
+    if cores <= 8 { (cores / 2).max(2).min(cores.max(1)) } else { cores - 2 }
+}
+
+pub fn node_threads() -> usize {
+    node_threads_for(crate::miner::cores())
+}
+
+/// Put the whole process behind everything else the person is doing: the
+/// sync is the one thing here that can wait. The miner's threads already
+/// run at idle priority; this covers the node's.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn lower_process_priority() {
+    #[cfg(unix)]
+    unsafe {
+        libc::setpriority(libc::PRIO_PROCESS, 0, 10);
+    }
+    #[cfg(windows)]
+    unsafe {
+        use windows_sys::Win32::System::Threading::{BELOW_NORMAL_PRIORITY_CLASS, GetCurrentProcess, SetPriorityClass};
+        SetPriorityClass(GetCurrentProcess(), BELOW_NORMAL_PRIORITY_CLASS);
+    }
 }
 
 /// The scale for the machine this runs on; a full node's when it cannot be
@@ -86,13 +129,19 @@ mod tests {
     #[test]
     fn the_scale_follows_the_machine() {
         assert!((ram_scale_for(mem(64.0, 50.0)) - 1.0).abs() < 1e-9, "a server gets a full node");
-        assert!((ram_scale_for(mem(16.0, 10.0)) - 1.0).abs() < 0.35, "sixteen gigabytes is roughly full");
-        let laptop = ram_scale_for(mem(8.0, 5.0));
-        assert!(laptop > 0.5 && laptop < 0.75, "eight gigabytes gets about two thirds: {laptop}");
-        let busy_laptop = ram_scale_for(mem(8.0, 2.0));
-        assert!(busy_laptop <= 0.15, "a busy laptop gets the minimum: {busy_laptop}");
-        assert!((ram_scale_for(mem(4.0, 3.0)) - 0.1).abs() < 0.3, "four gigabytes is near the floor");
+        assert!((ram_scale_for(mem(32.0, 28.0)) - 1.0).abs() < 1e-9, "thirty-two gigabytes is full");
+        assert!((ram_scale_for(mem(16.0, 10.0)) - 0.5).abs() < 1e-9, "sixteen gigabytes gets half");
+        assert!((ram_scale_for(mem(8.0, 5.0)) - 0.25).abs() < 1e-9, "eight gigabytes gets a quarter");
+        assert!((ram_scale_for(mem(8.0, 2.0)) - 0.1).abs() < 1e-9, "a busy laptop gets the minimum");
+        assert!((ram_scale_for(mem(4.0, 3.0)) - 0.125).abs() < 1e-9, "four gigabytes is near the floor");
         assert!(ram_scale_for(mem(2.0, 0.5)) >= 0.1, "never below the floor");
+        assert!(too_small_for_own_sync(mem(4.0, 3.0)));
+        assert!(!too_small_for_own_sync(mem(8.0, 1.0)));
+        assert_eq!(node_threads_for(4), 2);
+        assert_eq!(node_threads_for(2), 2);
+        assert_eq!(node_threads_for(1), 1);
+        assert_eq!(node_threads_for(8), 4);
+        assert_eq!(node_threads_for(16), 14);
     }
 
     #[test]

@@ -234,7 +234,9 @@ pub async fn mine_to(args: Vec<String>) -> Result<()> {
     let mut started_once = false;
     let mut last_report = std::time::Instant::now();
     while !shutdown.load(Ordering::SeqCst) {
-        let synced = matches!(rpc.get_server_info().await, Ok(info) if info.is_synced);
+        // The anchor drill's attacker node never calls itself synced (no peers,
+        // so no incoming blocks); MARIGOLD_MINE_UNSYNCED lifts the gate there.
+        let synced = matches!(rpc.get_server_info().await, Ok(info) if info.is_synced) || crate::miner::mine_unsynced();
         // A wallet may have started it already, before the sync caught up.
         if host.miner().is_some() {
             started_once = true;

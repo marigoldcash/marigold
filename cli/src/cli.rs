@@ -85,6 +85,9 @@ pub struct KaspaCli {
     /// it is never written anywhere and is dropped on close/disarm.
     /// Held for the session, as two random-looking halves; see `Guarded`.
     auto_secret: Mutex<Option<Guarded>>,
+    /// True while the 'request' command itself is watching for its payment,
+    /// so the standing watch below leaves that request to it.
+    awaiting_request: Arc<AtomicBool>,
     /// The in-process node, once started. Held here so `node stop` and wallet
     /// shutdown can reach it; `None` means we are talking to someone else's.
     #[cfg(feature = "embedded-node")]
@@ -335,6 +338,7 @@ impl KaspaCli {
             notifier: Notifier::try_new()?,
             sync_state: Mutex::new(None),
             auto_secret: Mutex::new(None),
+            awaiting_request: Arc::new(AtomicBool::new(false)),
             #[cfg(feature = "embedded-node")]
             embedded_node: Mutex::new(None),
             advanced: AtomicBool::new(false),
@@ -1172,6 +1176,34 @@ impl KaspaCli {
     /// then a node is running, but only by accident.
     #[cfg(feature = "embedded-node")]
     async fn start_node_with_handover_inner(self: &Arc<Self>, ensure_connection: bool) -> Result<()> {
+        // A small machine is not asked to carry a sync of its own by itself.
+        // 'connect' still starts one on request, with the same figure shown.
+        if ensure_connection
+            && let Some(memory) = crate::memory::read()
+            && crate::memory::too_small_for_own_sync(memory)
+        {
+            tprintln!(self, "");
+            tprintln!(
+                self,
+                "{}",
+                style(format!(
+                    "This machine has {} of memory. A sync of your own needs more than that to leave the machine usable, so none is started.",
+                    crate::memory::gigabytes(memory.total)
+                ))
+                .yellow()
+            );
+            tprintln!(self, "Using a public computer instead.");
+            tprintln!(
+                self,
+                "{}",
+                style("Whoever runs it sees which notes your wallet asks about. 'connect' starts a sync here anyway.").dim()
+            );
+            tprintln!(self, "");
+            if !self.wallet.is_connected() {
+                self.exec_within("connect public").await?;
+            }
+            return Ok(());
+        }
         // A node that will not start must not cost you a working wallet. It
         // failed for real reasons — the p2p port taken by another Marigold, no
         // room on disk — and the answer to every one of them is the same: say
@@ -1609,11 +1641,36 @@ impl KaspaCli {
                 }
                 tprintln!(self, "Stopping the network sync...");
                 node.stop().await?;
+                drop(node);
+                self.release_embedded_node_memory().await;
                 tprintln!(self, "Stopped.");
             }
             None => tprintln!(self, "No sync of your own is running."),
         }
         Ok(())
+    }
+
+    /// After the node in this process has stopped, let go of it: the wallet's
+    /// questions were bound to its RPC service, and through that to its
+    /// caches and database, so nothing it held could be freed — a tester saw
+    /// 6.3 GB stay in the wallet after "Stopped." (2026-09-22). The wallet is
+    /// bound to an unconnected client instead ('connect' replaces it), and on
+    /// glibc the freed heap is handed back to the system at once.
+    #[cfg(feature = "embedded-node")]
+    async fn release_embedded_node_memory(self: &Arc<Self>) {
+        let network_id = self.wallet.network_id().ok();
+        if let Ok(client) = KaspaRpcClient::new(WrpcEncoding::Borsh, None, None, network_id, None) {
+            let client = Arc::new(client);
+            let rpc: Arc<DynRpcApi> = client.clone();
+            let rpc = Rpc::new(rpc, client.ctl().clone());
+            let _ = self.wallet.utxo_processor().stop().await;
+            let _ = self.wallet.bind_rpc(Some(rpc)).await;
+            let _ = self.wallet.utxo_processor().start().await;
+        }
+        #[cfg(all(target_os = "linux", target_env = "gnu"))]
+        unsafe {
+            libc::malloc_trim(0);
+        }
     }
 
     /// A node that is running but has not finished its first sync — the state
@@ -2594,17 +2651,140 @@ impl KaspaCli {
     /// cancelled each other. It refreshes the prompt figure, runs the opening
     /// sequence once (announced, as soon as the wallet knows its coins), and
     /// thereafter runs quietly once a minute.
+    pub fn set_awaiting_request(&self, on: bool) {
+        self.awaiting_request.store(on, Ordering::SeqCst);
+    }
+
+    /// The standing watch over outstanding payment requests. 'request' watches
+    /// for two minutes and then says the request stays claimable — but nothing
+    /// claimed it: a payment that landed later sat in the pool under a key the
+    /// wallet held and never looked at (tester, 2026-09-22: paid from one
+    /// laptop, "the note did not arrive" on the other). This task keeps a
+    /// notification subscription on every outstanding request key while the
+    /// wallet is open and connected, and claims what lands, whenever it lands.
+    /// A payment made while the wallet was closed still needs a lookup by key
+    /// the node does not offer yet (PLAN P8.0j).
+    fn start_request_watch_task(self: &Arc<Self>) {
+        use kaspa_notify::scope::{NotesChangedScope, Scope};
+        use kaspa_rpc_core::notify::connection::{ChannelConnection, ChannelType};
+        use kaspa_wallet_core::storage::{NoteKeyEntry, NoteProvenance};
+        let this = self.clone();
+        workflow_core::task::spawn(async move {
+            let mut watched: Vec<[u8; 32]> = Vec::new();
+            let mut claimed: HashMap<[u8; 32], u64> = HashMap::new();
+            let mut listener: Option<(Arc<DynRpcApi>, kaspa_notify::listener::ListenerId)> = None;
+            let channel = workflow_core::channel::Channel::<kaspa_rpc_core::Notification>::unbounded();
+            loop {
+                if this.shutdown.load(Ordering::SeqCst) {
+                    break;
+                }
+                // Claim whatever the subscription delivered since the last round.
+                while let Ok(notification) = channel.receiver.try_recv() {
+                    let kaspa_rpc_core::Notification::NotesChanged(notification) = notification else { continue };
+                    if this.awaiting_request.load(Ordering::SeqCst) {
+                        continue;
+                    }
+                    let Some(secret) = this.auto_secret.lock().unwrap().as_mut().map(|g| g.reveal()) else { continue };
+                    let Ok(store) = this.wallet.store().as_note_key_store() else { continue };
+                    for entry in notification.added.iter().filter(|e| watched.contains(&e.pk)) {
+                        let Ok(Some(request)) = store.load_payment_request_key(&secret, &entry.pk).await else { continue };
+                        let Ok(d) = kaspa_consensus_core::notepool::DenominationTag::try_from(entry.denomination) else { continue };
+                        let value = kaspa_consensus_core::notepool::DENOMINATION_PETALS[d as usize];
+                        if store.store(&secret, NoteKeyEntry::new(entry.sn, request.sk, d, NoteProvenance::Cold)).await.is_err() {
+                            continue;
+                        }
+                        let total = claimed.entry(entry.pk).or_insert(0);
+                        *total += value;
+                        this.record("received", value, 0, "request", "");
+                        tprintln!(this, "");
+                        tprintln!(
+                            this,
+                            "{}",
+                            crate::ui::ok(format!(
+                                "A payment for your request arrived: {} {} in a note, now in this wallet.",
+                                kaspa_wallet_core::utils::sompi_to_kaspa_string(value),
+                                this.ticker()
+                            ))
+                        );
+                        let done = match request.amount_petals {
+                            Some(amount) => *total >= amount,
+                            None => true,
+                        };
+                        if done {
+                            let _ = store.remove_payment_request(&secret, &entry.pk).await;
+                            claimed.remove(&entry.pk);
+                            tprintln!(this, "{}", crate::ui::dim("That request is settled and closed."));
+                        }
+                        tprintln!(this, "");
+                    }
+                }
+                // Follow the set of outstanding requests, and the wallet's RPC,
+                // which changes on every 'connect'.
+                let outstanding: Vec<[u8; 32]> = if this.wallet.is_open() {
+                    match this.wallet.store().as_note_key_store() {
+                        Ok(store) => store.payment_requests().await.map(|r| r.iter().map(|i| i.pk).collect()).unwrap_or_default(),
+                        Err(_) => Vec::new(),
+                    }
+                } else {
+                    Vec::new()
+                };
+                let rpc = if this.wallet.is_connected() { Some(this.wallet.rpc_api()) } else { None };
+                let same_rpc = match (&listener, &rpc) {
+                    (Some((old, _)), Some(new)) => Arc::ptr_eq(old, new),
+                    (None, None) => true,
+                    _ => false,
+                };
+                if outstanding != watched || !same_rpc {
+                    if let Some((old, id)) = listener.take() {
+                        let _ = old.unregister_listener(id).await;
+                    }
+                    watched = outstanding;
+                    if let (Some(rpc), false) = (rpc, watched.is_empty()) {
+                        let id = rpc.register_new_listener(ChannelConnection::new(
+                            "notepool-request-watch",
+                            channel.sender.clone(),
+                            ChannelType::Closable,
+                        ));
+                        if rpc.start_notify(id, Scope::NotesChanged(NotesChangedScope::new(vec![], watched.clone()))).await.is_ok() {
+                            listener = Some((rpc, id));
+                        } else {
+                            let _ = rpc.unregister_listener(id).await;
+                            watched.clear();
+                        }
+                    }
+                }
+                workflow_core::task::sleep(Duration::from_secs(3)).await;
+            }
+        });
+    }
+
     fn start_housekeeping_task(self: &Arc<Self>) {
         let this = self.clone();
         workflow_core::task::spawn(async move {
             let mut last_run = Instant::now();
             let mut memory_warned_at: Option<Instant> = None;
+            #[cfg(feature = "embedded-node")]
+            let mut restarts_seen = 0u32;
             loop {
                 workflow_core::task::sleep(Duration::from_secs(5)).await;
                 if this.shutdown.load(Ordering::SeqCst) {
                     break;
                 }
                 this.watch_memory(&mut memory_warned_at).await;
+                #[cfg(feature = "embedded-node")]
+                {
+                    // A first sync that lost its peer repeats the step from
+                    // its start; the percentage falls and, without this line,
+                    // nobody said why (tester, 2026-09-22).
+                    let restarts = crate::log_sink::sync_restarts();
+                    if restarts > restarts_seen {
+                        restarts_seen = restarts;
+                        tprintln!(this, "");
+                        tprintln!(this, "{}", style("The sync started this step over: the computer it was reading from stopped answering, so the step repeats from its start.").yellow());
+                        tprintln!(this, "{}", crate::ui::dim("Nothing is lost beyond the time. 'connect status' follows it."));
+                        tprintln!(this, "");
+                    }
+                }
                 if !this.wallet.is_open() || !this.wallet.is_connected() {
                     continue;
                 }
@@ -2860,6 +3040,7 @@ impl KaspaCli {
     pub async fn start(self: &Arc<Self>) -> Result<()> {
         self.start_notification_pipe_task();
         self.start_housekeeping_task();
+        self.start_request_watch_task();
         self.handlers.start(self).await?;
         // wallet starts rpc and notifier
         self.wallet.load_settings().await.unwrap_or_else(|_| log_error!("Unable to load settings, discarding..."));

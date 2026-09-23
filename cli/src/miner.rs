@@ -78,7 +78,7 @@ pub struct Miner {
 
 /// Cores this machine has, as the denominator for the percentage.
 /// The anchor drill's override of the synced-node gate; see its use.
-fn mine_unsynced() -> bool {
+pub(crate) fn mine_unsynced() -> bool {
     std::env::var("MARIGOLD_MINE_UNSYNCED").is_ok_and(|v| !v.is_empty() && v != "0")
 }
 

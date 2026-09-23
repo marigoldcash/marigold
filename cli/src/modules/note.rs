@@ -126,8 +126,15 @@ impl Note {
         );
 
         let timeout = Duration::from_secs(120);
-        tprintln!(ctx, "watching for payment (up to {}s; the request stays claimable after a timeout)...", timeout.as_secs());
-        match await_payment_request(&ctx.wallet(), &wallet_secret, request.pk, timeout).await {
+        tprintln!(
+            ctx,
+            "watching for payment (up to {}s; after that the wallet keeps watching in the background while it is open)...",
+            timeout.as_secs()
+        );
+        ctx.set_awaiting_request(true);
+        let outcome = await_payment_request(&ctx.wallet(), &wallet_secret, request.pk, timeout).await;
+        ctx.set_awaiting_request(false);
+        match outcome {
             Ok(claimed) => {
                 ctx.record("received", claimed.total_petals, 0, "request", "");
                 tprintln!(
