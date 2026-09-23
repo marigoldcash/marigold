@@ -32,7 +32,7 @@ impl Connect {
         #[cfg(feature = "embedded-node")]
         match argv.first().map(|s| s.as_str()) {
             Some("status") => {
-                crate::modules::node::Node::default().status(&ctx).await;
+                crate::modules::node::Node.status(&ctx).await;
                 return Ok(());
             }
             Some("details") => {
