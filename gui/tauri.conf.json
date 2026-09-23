@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Marigold",
-  "version": "2.60.266",
+  "version": "2.61.267",
   "identifier": "cash.marigold.wallet",
   "build": {
     "frontendDist": "ui"
