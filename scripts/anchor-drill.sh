@@ -43,7 +43,7 @@ node_args() {
   # $1: the peer to connect to (and nothing else)
   echo --testnet --utxoindex --disable-upnp --nodnsseed --loglevel=info \
     --appdir=$APPDIR --listen=$ATT_P2P --rpclisten=$ATT_GRPC --rpclisten-borsh=$ATT_WRPC_ADDR \
-    --connect="$1" --externalip=127.0.0.1
+    --connect="$1" --externalip=127.0.0.1 ${EXTRA_NODE_ARGS:-}
 }
 
 start_node() {
@@ -70,12 +70,15 @@ case "${1:-}" in
     echo "attacker node started at $ATT_WRPC, syncing from production over loopback; watch: journalctl -fu $UNIT"
     ;;
   isolate)
-    start_node $NOWHERE
+    # A node with no peers never calls itself synced (it sees no blocks), and a
+    # node that is not synced hands out no block templates: --enable-unsynced-mining
+    # lifts that on the node, MARIGOLD_MINE_UNSYNCED (below) on the wallet's miner.
+    EXTRA_NODE_ARGS=--enable-unsynced-mining start_node $NOWHERE
     echo "attacker node restarted with no peers"
     ;;
   attack)
     systemctl stop marigold-miner
-    systemd-run --unit=$MINER_UNIT --uid=marigold --gid=marigold --collect -- \
+    systemd-run --unit=$MINER_UNIT --uid=marigold --gid=marigold --collect --setenv=MARIGOLD_MINE_UNSYNCED=1 -- \
       $BIN/marigold-cli mine-to "$PAYOUT" $SHARE --node $ATT_WRPC
     echo "miner moved to the attacker at $(date -u +%H:%M:%S) UTC; leave it five minutes or more"
     ;;

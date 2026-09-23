@@ -75,7 +75,7 @@ members = [
 
 [workspace.package]
 rust-version = "1.91.0"
-version = "2.59.261"
+version = "2.59.262"
 authors = ["Kaspa developers"]
 license = "ISC"
 repository = "https://github.com/kaspanet/rusty-kaspa"
@@ -92,69 +92,69 @@ include = [
 ]
 
 [workspace.dependencies]
-kaspa-testing-integration = { version = "2.59.261", path = "testing/integration" }
-kaspa-addresses = { version = "2.59.261", path = "crypto/addresses" }
-kaspa-addressmanager = { version = "2.59.261", path = "components/addressmanager" }
-kaspa-bip32 = { version = "2.59.261", path = "wallet/bip32" }
-kaspa-cli = { version = "2.59.261", path = "cli" }
-kaspa-connectionmanager = { version = "2.59.261", path = "components/connectionmanager" }
-kaspa-consensus = { version = "2.59.261", path = "consensus" }
-kaspa-consensus-core = { version = "2.59.261", path = "consensus/core" }
-kaspa-consensus-client = { version = "2.59.261", path = "consensus/client" }
-kaspa-consensus-notify = { version = "2.59.261", path = "consensus/notify" }
-kaspa-consensus-wasm = { version = "2.59.261", path = "consensus/wasm" }
-kaspa-consensusmanager = { version = "2.59.261", path = "components/consensusmanager" }
-kaspa-core = { version = "2.59.261", path = "core" }
-kaspa-daemon = { version = "2.59.261", path = "daemon" }
-kaspa-database = { version = "2.59.261", path = "database" }
-kaspa-grpc-client = { version = "2.59.261", path = "rpc/grpc/client" }
-kaspa-trustee-signer = { version = "2.59.261", path = "trustee-signer" }
-kaspa-grpc-core = { version = "2.59.261", path = "rpc/grpc/core" }
-kaspa-grpc-server = { version = "2.59.261", path = "rpc/grpc/server" }
-kaspa-hashes = { version = "2.59.261", path = "crypto/hashes", default-features = false }
-kaspa-index-core = { version = "2.59.261", path = "indexes/core" }
-kaspa-index-processor = { version = "2.59.261", path = "indexes/processor" }
-kaspa-math = { version = "2.59.261", path = "math" }
-kaspa-merkle = { version = "2.59.261", path = "crypto/merkle" }
-kaspa-smt = { version = "2.59.261", path = "crypto/smt", default-features = false }
-kaspa-smt-store = { version = "2.59.261", path = "consensus/smt-store" }
-kaspa-metrics-core = { version = "2.59.261", path = "metrics/core" }
-kaspa-mining = { version = "2.59.261", path = "mining" }
-kaspa-mining-errors = { version = "2.59.261", path = "mining/errors" }
-kaspa-muhash = { version = "2.59.261", path = "crypto/muhash" }
-kaspa-notify = { version = "2.59.261", path = "notify" }
-kaspa-p2p-flows = { version = "2.59.261", path = "protocol/flows" }
-kaspa-p2p-lib = { version = "2.59.261", path = "protocol/p2p" }
-kaspa-p2p-mining = { version = "2.59.261", path = "protocol/mining" }
-kaspa-perf-monitor = { version = "2.59.261", path = "metrics/perf_monitor" }
-kaspa-pow = { version = "2.59.261", path = "consensus/pow" }
-kaspa-rpc-core = { version = "2.59.261", path = "rpc/core" }
-kaspa-seq-commit = { version = "2.59.261", path = "consensus/seq-commit" }
-kaspa-rpc-macros = { version = "2.59.261", path = "rpc/macros" }
-kaspa-rpc-service = { version = "2.59.261", path = "rpc/service" }
-kaspa-txscript = { version = "2.59.261", path = "crypto/txscript" }
-kaspa-txscript-errors = { version = "2.59.261", path = "crypto/txscript/errors" }
-kaspa-txscript-zk-sdk = { version = "2.59.261", path = "crypto/txscript/zk-sdk" }
-kaspa-utils = { version = "2.59.261", path = "utils", default-features = false }
-kaspa-utils-tower = { version = "2.59.261", path = "utils/tower" }
-kaspa-system-info = { version = "2.59.261", path = "system-info" }
-kaspa-build-info = { version = "2.59.261", path = "build-info" }
-kaspa-utxoindex = { version = "2.59.261", path = "indexes/utxoindex" }
-kaspa-wallet = { version = "2.59.261", path = "wallet/native" }
-kaspa-wallet-cli-wasm = { version = "2.59.261", path = "wallet/wasm" }
-kaspa-wallet-keys = { version = "2.59.261", path = "wallet/keys" }
-kaspa-wallet-pskt = { version = "2.59.261", path = "wallet/pskt" }
-kaspa-wallet-core = { version = "2.59.261", path = "wallet/core" }
-kaspa-wallet-macros = { version = "2.59.261", path = "wallet/macros" }
-kaspa-wasm = { version = "2.59.261", path = "wasm" }
-kaspa-wasm-core = { version = "2.59.261", path = "wasm/core" }
-kaspa-wrpc-client = { version = "2.59.261", path = "rpc/wrpc/client" }
-kaspa-wrpc-proxy = { version = "2.59.261", path = "rpc/wrpc/proxy" }
-kaspa-wrpc-server = { version = "2.59.261", path = "rpc/wrpc/server" }
-kaspa-wrpc-wasm = { version = "2.59.261", path = "rpc/wrpc/wasm" }
-kaspa-wrpc-example-subscriber = { version = "2.59.261", path = "rpc/wrpc/examples/subscriber" }
-kaspad = { version = "2.59.261", path = "kaspad" }
-kaspa-alloc = { version = "2.59.261", path = "utils/alloc" }
+kaspa-testing-integration = { version = "2.59.262", path = "testing/integration" }
+kaspa-addresses = { version = "2.59.262", path = "crypto/addresses" }
+kaspa-addressmanager = { version = "2.59.262", path = "components/addressmanager" }
+kaspa-bip32 = { version = "2.59.262", path = "wallet/bip32" }
+kaspa-cli = { version = "2.59.262", path = "cli" }
+kaspa-connectionmanager = { version = "2.59.262", path = "components/connectionmanager" }
+kaspa-consensus = { version = "2.59.262", path = "consensus" }
+kaspa-consensus-core = { version = "2.59.262", path = "consensus/core" }
+kaspa-consensus-client = { version = "2.59.262", path = "consensus/client" }
+kaspa-consensus-notify = { version = "2.59.262", path = "consensus/notify" }
+kaspa-consensus-wasm = { version = "2.59.262", path = "consensus/wasm" }
+kaspa-consensusmanager = { version = "2.59.262", path = "components/consensusmanager" }
+kaspa-core = { version = "2.59.262", path = "core" }
+kaspa-daemon = { version = "2.59.262", path = "daemon" }
+kaspa-database = { version = "2.59.262", path = "database" }
+kaspa-grpc-client = { version = "2.59.262", path = "rpc/grpc/client" }
+kaspa-trustee-signer = { version = "2.59.262", path = "trustee-signer" }
+kaspa-grpc-core = { version = "2.59.262", path = "rpc/grpc/core" }
+kaspa-grpc-server = { version = "2.59.262", path = "rpc/grpc/server" }
+kaspa-hashes = { version = "2.59.262", path = "crypto/hashes", default-features = false }
+kaspa-index-core = { version = "2.59.262", path = "indexes/core" }
+kaspa-index-processor = { version = "2.59.262", path = "indexes/processor" }
+kaspa-math = { version = "2.59.262", path = "math" }
+kaspa-merkle = { version = "2.59.262", path = "crypto/merkle" }
+kaspa-smt = { version = "2.59.262", path = "crypto/smt", default-features = false }
+kaspa-smt-store = { version = "2.59.262", path = "consensus/smt-store" }
+kaspa-metrics-core = { version = "2.59.262", path = "metrics/core" }
+kaspa-mining = { version = "2.59.262", path = "mining" }
+kaspa-mining-errors = { version = "2.59.262", path = "mining/errors" }
+kaspa-muhash = { version = "2.59.262", path = "crypto/muhash" }
+kaspa-notify = { version = "2.59.262", path = "notify" }
+kaspa-p2p-flows = { version = "2.59.262", path = "protocol/flows" }
+kaspa-p2p-lib = { version = "2.59.262", path = "protocol/p2p" }
+kaspa-p2p-mining = { version = "2.59.262", path = "protocol/mining" }
+kaspa-perf-monitor = { version = "2.59.262", path = "metrics/perf_monitor" }
+kaspa-pow = { version = "2.59.262", path = "consensus/pow" }
+kaspa-rpc-core = { version = "2.59.262", path = "rpc/core" }
+kaspa-seq-commit = { version = "2.59.262", path = "consensus/seq-commit" }
+kaspa-rpc-macros = { version = "2.59.262", path = "rpc/macros" }
+kaspa-rpc-service = { version = "2.59.262", path = "rpc/service" }
+kaspa-txscript = { version = "2.59.262", path = "crypto/txscript" }
+kaspa-txscript-errors = { version = "2.59.262", path = "crypto/txscript/errors" }
+kaspa-txscript-zk-sdk = { version = "2.59.262", path = "crypto/txscript/zk-sdk" }
+kaspa-utils = { version = "2.59.262", path = "utils", default-features = false }
+kaspa-utils-tower = { version = "2.59.262", path = "utils/tower" }
+kaspa-system-info = { version = "2.59.262", path = "system-info" }
+kaspa-build-info = { version = "2.59.262", path = "build-info" }
+kaspa-utxoindex = { version = "2.59.262", path = "indexes/utxoindex" }
+kaspa-wallet = { version = "2.59.262", path = "wallet/native" }
+kaspa-wallet-cli-wasm = { version = "2.59.262", path = "wallet/wasm" }
+kaspa-wallet-keys = { version = "2.59.262", path = "wallet/keys" }
+kaspa-wallet-pskt = { version = "2.59.262", path = "wallet/pskt" }
+kaspa-wallet-core = { version = "2.59.262", path = "wallet/core" }
+kaspa-wallet-macros = { version = "2.59.262", path = "wallet/macros" }
+kaspa-wasm = { version = "2.59.262", path = "wasm" }
+kaspa-wasm-core = { version = "2.59.262", path = "wasm/core" }
+kaspa-wrpc-client = { version = "2.59.262", path = "rpc/wrpc/client" }
+kaspa-wrpc-proxy = { version = "2.59.262", path = "rpc/wrpc/proxy" }
+kaspa-wrpc-server = { version = "2.59.262", path = "rpc/wrpc/server" }
+kaspa-wrpc-wasm = { version = "2.59.262", path = "rpc/wrpc/wasm" }
+kaspa-wrpc-example-subscriber = { version = "2.59.262", path = "rpc/wrpc/examples/subscriber" }
+kaspad = { version = "2.59.262", path = "kaspad" }
+kaspa-alloc = { version = "2.59.262", path = "utils/alloc" }
 
 # external
 aes = "0.8.3"

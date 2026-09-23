@@ -77,6 +77,11 @@ pub struct Miner {
 }
 
 /// Cores this machine has, as the denominator for the percentage.
+/// The anchor drill's override of the synced-node gate; see its use.
+fn mine_unsynced() -> bool {
+    std::env::var("MARIGOLD_MINE_UNSYNCED").is_ok_and(|v| !v.is_empty() && v != "0")
+}
+
 pub fn cores() -> usize {
     num_cpus::get().max(1)
 }
@@ -336,7 +341,13 @@ pub fn spawn_session(
                         }
                         // Building on a chain the node has not finished
                         // reading produces blocks nobody will accept.
-                        if response.is_synced {
+                        // MARIGOLD_MINE_UNSYNCED is the anchor drill's override
+                        // (scripts/anchor-drill.sh): its attacker node is cut
+                        // off from every peer on purpose, sees no blocks, and
+                        // therefore never calls itself synced. Nobody else
+                        // should set it; a node that is honestly behind makes
+                        // blocks nobody accepts.
+                        if response.is_synced || mine_unsynced() {
                             match Block::try_from(response.block) {
                                 Ok(block) => miner.set_job(block),
                                 Err(err) => log_warn!("mine: unusable block template ({err})"),
