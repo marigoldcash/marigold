@@ -1226,7 +1226,23 @@ impl Wallet {
         };
         let chat_id = match argv.first() {
             Some(arg) => {
-                let id: i64 = arg.replace(',', "").parse().map_err(|_| Error::custom("the chat id is a number, like -603049415"))?;
+                let given: i64 = arg.replace(',', "").parse().map_err(|_| Error::custom("the chat id is a number, like 603049415"))?;
+                // Telegram shows a group's id as a positive number, and its API
+                // wants it negative — plain groups as -<id>, large ones as
+                // -100<id>. Try the forms in turn and keep the one that answers.
+                let candidates: Vec<i64> =
+                    if given < 0 { vec![given] } else { vec![-given, format!("-100{given}").parse().unwrap_or(-given), given] };
+                let mut found = None;
+                for candidate in candidates {
+                    if crate::telegram::chat_reachable(&cfg.token, candidate).await {
+                        found = Some(candidate);
+                        break;
+                    }
+                }
+                let Some(id) = found else {
+                    tprintln!(ctx, "The bot cannot see a chat with that id. Is it a member of the group? (Add it, then try again.)");
+                    return Ok(());
+                };
                 cfg.backup_chat_id = Some(id);
                 cfg.save(&cfg_path).map_err(|e| Error::custom(format!("cannot save the bot settings: {e}")))?;
                 id

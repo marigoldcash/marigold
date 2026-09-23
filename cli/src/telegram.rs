@@ -981,6 +981,11 @@ mod tests {
 /// under that with room for the container.
 pub const BACKUP_PART_BYTES: usize = 19 * 1024 * 1024;
 
+/// Whether the bot can see the chat: getChat answers for a chat it is in.
+pub async fn chat_reachable(token: &str, chat_id: i64) -> bool {
+    call(token, "getChat", &[("chat_id", chat_id.to_string())]).await.is_ok()
+}
+
 pub async fn send_plain(token: &str, chat_id: i64, text: &str) -> Result<(), String> {
     let params = [("chat_id", chat_id.to_string()), ("text", text.to_string())];
     call(token, "sendMessage", &params).await.map(|_| ())
