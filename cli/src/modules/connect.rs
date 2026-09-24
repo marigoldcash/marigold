@@ -62,6 +62,22 @@ impl Connect {
             }
         }
 
+        // On your own copy while it is still catching up, 'connect public'
+        // (or an address) answered "This wallet cannot connect from here":
+        // the wallet was bound to the node inside this process, which has
+        // no socket to dial with (tester, 2026-09-23). The node keeps
+        // syncing; the wallet moves to a client that can dial, and comes
+        // home when the sync has caught up — the same hand-over as at the
+        // start.
+        #[cfg(feature = "embedded-node")]
+        if !argv.is_empty()
+            && ctx.embedded_node_in_use()
+            && let Some(rpc) = ctx.detach_embedded_node().await
+        {
+            ctx.start_node_handover_task(rpc);
+            tprintln!(ctx, "Your own copy keeps syncing in the background; the wallet moves back to it once it has caught up.");
+        }
+
         if let Some(wrpc_client) = ctx.wallet().try_wrpc_client().as_ref() {
             let network_id = ctx.wallet().network_id()?;
 

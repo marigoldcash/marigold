@@ -1455,6 +1455,11 @@ pub async fn create_payment_request(
     let sk = SecretKey::new(&mut secp256k1::rand::thread_rng());
     let key = PaymentRequestKey::new(sk.secret_bytes(), amount_petals);
     let info = wallet.store().as_note_key_store()?.store_payment_request(wallet_secret, key).await?;
+    // Written now, not at some later commit: a request is money on its way,
+    // and until 2026-09-24 nothing committed it — 'close' with a request
+    // outstanding stopped the wallet ("close called while modified flag is
+    // true"), and a wallet ended by 'exit' lost the request's key.
+    wallet.store().commit(wallet_secret).await?;
     let expires_at = now_unix_secs() + lifetime_secs.unwrap_or(DEFAULT_REQUEST_LIFETIME_SECS);
     let request = PaymentRequest::signed(&sk.secret_bytes(), amount_petals, expires_at)?;
     debug_assert_eq!(request.pk, info.pk);
@@ -1696,6 +1701,7 @@ pub async fn await_payment_request(
         notes.push(entry);
     }
     note_key_store.remove_payment_request(wallet_secret, &pk).await?;
+    wallet.store().commit(wallet_secret).await?;
     Ok(ClaimedPayment { notes, total_petals: total })
 }
 
