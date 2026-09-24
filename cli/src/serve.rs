@@ -9,6 +9,7 @@ use crate::miner::MinerHost;
 use crate::result::Result;
 use crate::telegram::TelegramConfig;
 use futures::TryStreamExt;
+use separator::Separatable;
 use kaspa_consensus_core::network::NetworkId;
 use kaspa_consensus_core::notepool::DENOMINATION_PETALS;
 use kaspa_core::signals::{Shutdown, Signals};
@@ -294,11 +295,15 @@ impl WalletService {
             && let Some(balance) = account.balance()
         {
             let pending = balance.pending;
+            // Two decimals: the ledger is coins to a person, and eight
+            // places of petals read as noise on the balance screen (founder,
+            // 2026-09-24). Notes are always whole denominations, so they need
+            // nothing rounding.
             lines.push(format!(
                 "Ledger: {} {}{}",
-                sompi_to_kaspa_string(balance.mature),
+                two_decimals(balance.mature),
                 self.ticker(),
-                if pending > 0 { format!(" ({} pending)", sompi_to_kaspa_string(pending)) } else { String::new() }
+                if pending > 0 { format!(" ({} pending)", two_decimals(pending)) } else { String::new() }
             ));
         }
         if !self.wallet.is_connected() {
@@ -843,3 +848,23 @@ pub async fn serve(args: Vec<String>) -> Result<()> {
     }
     Ok(())
 }
+
+/// Petals as coins to two places, rounded half up, thousands separated.
+fn two_decimals(petals: u64) -> String {
+    let hundredths = (petals + 500_000) / 1_000_000;
+    format!("{}.{:02}", (hundredths / 100).separated_string(), hundredths % 100)
+}
+
+#[cfg(test)]
+mod balance_format_tests {
+    use super::two_decimals;
+
+    #[test]
+    fn two_places_rounded() {
+        assert_eq!(two_decimals(13_17619344), "13.18");
+        assert_eq!(two_decimals(13_17499999), "13.17");
+        assert_eq!(two_decimals(0), "0.00");
+        assert_eq!(two_decimals(1_234_567_00000000), "1,234,567.00");
+    }
+}
+
