@@ -9,7 +9,6 @@ use crate::miner::MinerHost;
 use crate::result::Result;
 use crate::telegram::TelegramConfig;
 use futures::TryStreamExt;
-use separator::Separatable;
 use kaspa_consensus_core::network::NetworkId;
 use kaspa_consensus_core::notepool::DENOMINATION_PETALS;
 use kaspa_core::signals::{Shutdown, Signals};
@@ -23,6 +22,7 @@ use kaspa_wallet_core::storage::NoteStatus;
 use kaspa_wallet_core::storage::local::journal::{Journal, JournalEntry};
 use kaspa_wallet_core::utils::sompi_to_kaspa_string;
 use kaspa_wallet_core::wallet::Wallet;
+use separator::Separatable;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -867,4 +867,3 @@ mod balance_format_tests {
         assert_eq!(two_decimals(1_234_567_00000000), "1,234,567.00");
     }
 }
-
