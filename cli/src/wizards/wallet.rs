@@ -224,14 +224,12 @@ pub(crate) async fn create(
 
     tprintln!(ctx, "");
 
-    // The vault's 24 words are only an encoding of its key, which lives in
-    // the wallet under the password: password plus a backup brings everything
-    // back, ledger included. So the ceremony is not put in front of everyone
-    // (founder, 2026-09-15). With 'advanced on' it runs as before — your own
-    // words or generated ones, shown once — and 'note vault words' prints
-    // them at any time for whoever wants paper.
-    let ceremony = ctx.advanced();
-    let vault_words = if ceremony {
+    // Every backup opens with the 24 words and never with the password
+    // (founder, 2026-09-24), so the words are shown to everyone at creation,
+    // explained, and checked — the 2026-09-15 choice to keep the ceremony
+    // behind 'advanced on' rested on the password opening backups, which it
+    // no longer does. Supplying your own words stays an advanced option.
+    let vault_words = if ctx.advanced() {
         tprintln!(ctx, "");
         tprintln!(ctx, "---");
         tpara!(
@@ -270,6 +268,7 @@ pub(crate) async fn create(
     };
     // The vault phrase is settled BEFORE any key is made, because the account
     // key is derived from it: one phrase recovers both sides.
+    let generated = vault_words.is_none();
     let vault_words = match vault_words {
         Some(words) => words,
         None => kaspa_wallet_core::storage::local::notevault::new_vault_words()?,
@@ -339,39 +338,33 @@ pub(crate) async fn create(
 
     let store = wallet.store().as_note_key_store()?;
     store.vault_restore_from_words(&vault_words, &wallet_secret).await?;
-    if ceremony {
+    if generated {
         tprintln!(ctx, "");
         crate::ui::recovery_words(ctx, &vault_words);
         tprintln!(ctx, "");
-        if ledger {
-            tpara!(
-                ctx,
-                "\
-                These words bring back your ledger balance on their own. Your NOTES need \
-                the words AND a copy of the vault files ('note vault backup <dir>' makes \
-                one) — nothing can derive a note, which is exactly what makes it cash. \
-                'note vault words' shows them again.\
-                ",
-            );
-        } else {
-            tpara!(
-                ctx,
-                "\
-                Your notes need these words AND a copy of the vault files ('note vault \
-                backup <dir>' makes one) — nothing can derive a note, which is exactly \
-                what makes it cash. 'note vault words' shows them again.\
-                ",
-            );
-        }
+        tpara!(
+            ctx,
+            "\
+            These words are the key to everything. On their own they bring back your ledger \
+            balance; with a backup they bring back your notes — 'backup' writes one to a file, \
+            'backup telegram' keeps one current through your bot — and every backup opens with \
+            these words and nothing else. Your wallet password never opens a backup: a password \
+            is chosen to be remembered, and a backup may sit on someone else's server, where it \
+            can be attacked at leisure. Nothing can derive a note, which is exactly what makes it \
+            cash. Paper, not a photo. 'note vault words' shows them again.\
+            ",
+        );
+        tprintln!(ctx, "");
         term.ask(false, "Press <enter> once you have written them down: ").await?;
+        confirm_words_written(ctx, &term, &vault_words).await?;
     } else {
         tprintln!(ctx, "");
         tpara!(
             ctx,
             "\
-            Your password and a backup are what bring this wallet back: type 'backup' once \
-            you hold anything, and keep the file somewhere safe. Nothing else can recover \
-            it — there is no one to ask.\
+            Your 24 words and a backup are what bring this wallet back: type 'backup' once \
+            you hold anything, and keep the file somewhere safe — it opens with the words, \
+            never with the password. Nothing else can recover it; there is no one to ask.\
             ",
         );
     }
@@ -426,5 +419,40 @@ pub(crate) async fn create(
     wallet.store().set_client_metadata(&wallet_descriptor.filename, Some(meta)).await.ok();
     ctx.wallet().settings().set(WalletSettings::Wallet, wallet_descriptor.filename.clone()).await.ok();
 
+    Ok(())
+}
+
+/// Two words from the paper, at random, before the wallet is used: a
+/// transcription error found now costs a minute; found at recovery it costs
+/// everything (founder, 2026-09-24: "ask for 2 random words afterwards to
+/// verify"). An empty answer shows the words again; the check does not end
+/// until both are right.
+async fn confirm_words_written(ctx: &Arc<KaspaCli>, term: &Arc<Terminal>, words: &str) -> Result<()> {
+    use rand::Rng;
+    let list: Vec<&str> = words.split_whitespace().collect();
+    if list.len() != 24 {
+        return Ok(());
+    }
+    let first = rand::thread_rng().gen_range(0..24usize);
+    let second = (first + rand::thread_rng().gen_range(1..24usize)) % 24;
+    let mut asked = [first.min(second), first.max(second)];
+    asked.sort();
+    tprintln!(ctx, "A quick check that the paper is right: two of the words, by number.");
+    for index in asked {
+        loop {
+            let answer = term.ask(false, &format!("Word {} of 24: ", index + 1)).await?.trim().to_lowercase();
+            if answer == list[index] {
+                break;
+            }
+            if answer.is_empty() {
+                tprintln!(ctx, "");
+                crate::ui::recovery_words(ctx, words);
+                tprintln!(ctx, "");
+                continue;
+            }
+            tprintln!(ctx, "That is not word {}. Check the paper — or press <enter> with nothing to see the words again.", index + 1);
+        }
+    }
+    tprintln!(ctx, "{}", crate::ui::dim("Both right."));
     Ok(())
 }

@@ -458,3 +458,9 @@ is priced like plumbing; notes are money and cost a penny to move.
 
 **Residual risk, stated.** The chat's messages plus the words spend the money; the words alone always did. Telegram holds ciphertext only. A wallet that is never opened never posts, so an old copy on a machine that is never used is still an old copy — the restore says which checkpoint and how many deltas it applied.
 
+## The 24 words are shown to everyone at creation, explained, and two are asked back (2026-09-24)
+
+**Decision.** Every new wallet, terminal and desktop, shows its 24 words in the creation wizard, says what they are for — the ledger balance on their own, the notes together with a backup, and every backup opens with them and never with the password — and then asks for two of the words by number before going on. An empty answer shows the words again; the check ends only when both are right. Supplying your own words stays behind `advanced on` and skips the check. This reverses the 2026-09-15 choice to keep the words behind `advanced on`.
+
+**Why.** That choice rested on the password opening backups: password plus a backup brought everything back, so the words were a second way in that most people never needed. Since today a backup opens with the words alone (the row above), the words are the one thing an owner must hold, and a wallet that never showed them would be a wallet nobody can restore. The two-word check is the cheapest moment to find a transcription error: a minute now against everything at recovery (founder: "ask for 2 random words afterwards to verify"). WALLET.md §3 step 6.
+

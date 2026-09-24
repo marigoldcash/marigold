@@ -108,14 +108,35 @@ $("create").addEventListener("click", async () => {
     await loadWallets(made.filename);
     if (restoring) { show("open"); }
     else {
+      madeWords = made.words.split(" ");
       const ol = $("words"); ol.innerHTML = "";
-      for (const w of made.words.split(" ")) { const li = document.createElement("li"); li.textContent = w; ol.appendChild(li); }
+      for (const w of madeWords) { const li = document.createElement("li"); li.textContent = w; ol.appendChild(li); }
+      $("words").hidden = false; $("words-done").hidden = false; $("words-check").hidden = true; $("check-error").textContent = "";
       show("words");
     }
   } catch (e) { $("create-error").textContent = String(e); }
   $("create").disabled = false;
 });
-$("words-done").addEventListener("click", () => { $("words").innerHTML = ""; show("open"); });
+// Two words from the paper, at random, before the wallet is used: a
+// transcription error found now costs a minute; at recovery it costs
+// everything. The list is hidden while asking, and comes back on request.
+let madeWords = [], checkAt = [];
+$("words-done").addEventListener("click", () => {
+  const a = Math.floor(Math.random() * 24); const b = (a + 1 + Math.floor(Math.random() * 23)) % 24;
+  checkAt = [Math.min(a, b), Math.max(a, b)];
+  $("check-n1").textContent = checkAt[0] + 1; $("check-n2").textContent = checkAt[1] + 1;
+  $("check-w1").value = ""; $("check-w2").value = ""; $("check-error").textContent = "";
+  $("words").hidden = true; $("words-done").hidden = true; $("words-check").hidden = false; $("check-w1").focus();
+});
+$("words-show-again").addEventListener("click", () => {
+  $("words").hidden = false; $("words-done").hidden = false; $("words-check").hidden = true;
+});
+$("check-words").addEventListener("click", () => {
+  const given = [$("check-w1").value, $("check-w2").value].map(w => w.trim().toLowerCase());
+  const wrong = checkAt.findIndex((i, k) => given[k] !== madeWords[i]);
+  if (wrong >= 0) { $("check-error").textContent = `That is not word ${checkAt[wrong] + 1}. Check the paper, or show the words again.`; return; }
+  madeWords = []; $("words").innerHTML = ""; $("words-check").hidden = true; show("open");
+});
 
 $("open").addEventListener("click", async () => {
   const button = $("open");

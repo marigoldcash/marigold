@@ -56,9 +56,21 @@
 
   <section id="screen-words" class="screen" hidden>
     <h1>Write these 24 words down</h1>
-    <p class="hint">They bring the whole wallet back: the notes and the ledger account. Anyone who has them has your money. Paper, not a screenshot.</p>
+    <p class="hint">They bring the whole wallet back: the ledger account on their own, the notes with a backup — and every backup opens with these words and nothing else, never with your password. Anyone who has them has your money. Paper, not a screenshot.</p>
     <ol id="words" class="words"></ol>
     <button id="words-done" class="primary">I have written them down</button>
+    <div id="words-check" hidden>
+      <p class="hint">A quick check that the paper is right: two of the words, by number.</p>
+      <label>Word <span id="check-n1"></span> of 24
+        <input id="check-w1" autocomplete="off" autocapitalize="none" spellcheck="false">
+      </label>
+      <label>Word <span id="check-n2"></span> of 24
+        <input id="check-w2" autocomplete="off" autocapitalize="none" spellcheck="false">
+      </label>
+      <button id="check-words" class="primary">Check</button>
+      <button id="words-show-again">Show the words again</button>
+      <p id="check-error" class="error"></p>
+    </div>
   </section>
 
   <section id="screen-home" class="screen" hidden>
