@@ -119,6 +119,8 @@ Il bot è tuo, non nostro. Lo crei in Telegram in un paio di minuti, dai il toke
 
 La spesa è protetta come con una carta bancaria: un PIN prima di qualsiasi cosa muova denaro, il blocco dopo tre tentativi sbagliati che solo la macchina di casa può togliere, e un limite giornaliero che imposti tu. Quell'account Telegram adesso può muovere denaro, quindi gli serve l'autenticazione a due fattori — il bot te lo dice la prima volta che ci parli.
 
+La stessa chat custodisce anche il tuo backup. Appena glielo chiedi una volta, il portafoglio vi pubblica una copia cifrata di sé stesso e la tiene aggiornata da solo — una copia completa ogni settimana, le modifiche entro pochi minuti da un pagamento — in silenzio, senza notifiche. Se la macchina di casa muore, inoltri quei messaggi a un portafoglio nuovo ed è tutto lì. La copia è chiusa con le tue 24 parole e con nient'altro: non con la password del portafoglio, che digiti ogni giorno e che hai scelto per poterla ricordare, e che chiunque abbia una copia del file potrebbe provare con calma. Le 24 parole non si indovinano. Scrivile quando il portafoglio te le mostra — poi te ne chiederà due per esserne certo — e un backup sul server di qualcun altro è solo rumore per tutti tranne che per te.
+
 I limiti, detti chiaramente. Quando la macchina di casa è spenta, il telefono non può fare proprio niente: niente saldo, niente pagamenti, niente incassi. Un codice di pagamento mandato in chat è valore al portatore finché è in viaggio, esattamente come i codici QR stampati di cui sopra: chi lo legge per primo se lo prende. E un'app per telefono vera e propria, che tenga lei le chiavi, è un lavoro per dopo e probabilmente per qualcun altro. Questa è la versione che non ti chiede di fidarti di nessuno.
 
 ---

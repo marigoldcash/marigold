@@ -119,6 +119,8 @@ The bot is yours, not ours. You make it in Telegram in about two minutes, hand y
 
 Spending is guarded the way a bank card is: a PIN before anything that moves money, a lockout after three wrong tries that only the machine at home can clear, and a daily limit you set yourself. That Telegram account can now move money, so it needs two-factor authentication — the bot tells you so the first time you speak to it.
 
+The same chat keeps your backup. Once you ask it to, the wallet posts an encrypted copy of itself there and keeps it current by itself — a full copy every week, the changes within minutes of a payment — quietly, with no notification. If the machine at home dies, you forward those messages back to a fresh wallet and it is all there. The copy is locked with your 24 words and with nothing else: not your wallet password, which you type every day and chose to be able to remember, and which anyone holding a copy of the file could try at leisure. The 24 words cannot be guessed. Write them down when the wallet shows them — it will ask you for two of them to make sure — and a backup on someone else's server is just noise to everyone but you.
+
 The limits, plainly. When the machine at home is off, the phone can do nothing at all: no balance, no paying, no receiving. A payment code sent through a chat is bearer value while it is in flight, exactly like the printed QR codes above — whoever reads it first can claim it. And a proper phone app, one that holds keys itself, is a job for later and probably for someone else. This is the version that asks you to trust nobody.
 
 ---
