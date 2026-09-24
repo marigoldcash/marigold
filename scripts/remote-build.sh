@@ -67,7 +67,13 @@ fi
 
 echo "→ cargo build --release$BIN_ARGS $FEATURES"
 # shellcheck disable=SC2029
-$SSH "$HOST" "cd $REMOTE_DIR && cargo build --release --jobs \$(nproc) $BIN_ARGS $FEATURES 2>&1 | tail -30"
+# `set -o pipefail` on the far side: without it a failed compile came back
+# as the tail's exit code, the old binary was fetched, and the script said
+# "done" (2026-09-24).
+$SSH "$HOST" "cd $REMOTE_DIR && set -o pipefail && cargo build --release --jobs \$(nproc) $BIN_ARGS $FEATURES 2>&1 | tail -30" || {
+  echo "✗ the build failed — nothing fetched" >&2
+  exit 1
+}
 
 echo "→ fetching binaries"
 mkdir -p target/release
