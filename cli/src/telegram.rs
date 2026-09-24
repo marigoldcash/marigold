@@ -711,6 +711,22 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
             let Some(from) = message.get("from").and_then(|f| f.get("id")).and_then(|v| v.as_i64()) else { continue };
             let Some(chat_id) = message.get("chat").and_then(|c| c.get("id")).and_then(|v| v.as_i64()) else { continue };
             let message_id = message.get("message_id").and_then(|v| v.as_i64()).unwrap_or(0);
+            // A backup part forwarded to a bot that is being answered by an
+            // open wallet would be swallowed here, and the restore on the new
+            // machine would then find nothing (seen 2026-09-24). Say so.
+            if let Some(name) = message.get("document").and_then(|d| d.get("file_name")).and_then(|v| v.as_str())
+                && parse_part_file_name(name).is_some()
+            {
+                send_with_keyboard(
+                    &token,
+                    chat_id,
+                    "That is a backup part, and this wallet is open, so it went nowhere. To restore on another machine, run \
+                     'wallet restore telegram' there first, close every other copy of this wallet, then forward the parts.",
+                    &main_keyboard(),
+                )
+                .await;
+                continue;
+            }
             // A code from the scanner page arrives as web_app_data.
             let scanned =
                 message.get("web_app_data").and_then(|w| w.get("data")).and_then(|d| d.as_str()).map(|s| s.trim().to_string());

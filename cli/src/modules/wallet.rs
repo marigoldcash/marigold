@@ -863,37 +863,26 @@ impl Wallet {
         tpara!(
             ctx,
             "This writes your whole wallet — the keys, every note, the lot — into one file, \
-            encrypted under a passphrase you choose now. It is safe to keep somewhere you do \
+            encrypted with a key made from your 24 words. It is safe to keep somewhere you do \
             not control: a cloud drive, a chat with yourself, a stranger's USB stick. \
             "
         );
         tprintln!(ctx, "");
         tpara!(
             ctx,
-            "Choose a passphrase you do not use anywhere else, and write it down. Nobody can \
-            reset it and nobody keeps a copy: lose it and this file is noise, however much \
-            money it holds. \
+            "The 24 words are the only thing that opens it — not your wallet password. A password \
+            people type every day is chosen to be remembered, and a file on someone else's server \
+            can be attacked at leisure; the words cannot be guessed. Keep them on paper. \
             "
         );
         tprintln!(ctx, "");
 
-        let pass = ctx.term().ask(true, "Passphrase for this backup: ").await?.trim().to_string();
-        if pass.is_empty() {
-            tprintln!(ctx, "No passphrase — nothing written.");
-            return Ok(());
-        }
-        // Short enough to brute-force is the same as no passphrase, for a file
-        // whose whole purpose is to sit somewhere you do not control.
-        if pass.len() < 8 {
-            tprintln!(ctx, "That is under 8 characters. This file may sit on someone else's server — nothing written.");
-            return Ok(());
-        }
-        let again = ctx.term().ask(true, "Again: ").await?.trim().to_string();
-        if pass != again {
-            tprintln!(ctx, "Those did not match — nothing written.");
-            return Ok(());
-        }
-        let passphrase = Secret::from(pass.as_bytes().to_vec());
+        // The words come from the vault under the wallet password, which the
+        // session already holds from 'open'; a password never seals a backup
+        // (founder, 2026-09-24: "24 words are a MUST for backups").
+        let (secret, _) = ctx.ask_wallet_secret_for_tidying(None).await?;
+        let words = ctx.wallet().store().as_note_key_store()?.recovery_words(&secret).await?;
+        let passphrase = archive::key_from_words(&words);
         let (entries, packed) = Self::pack_wallet(&name, &wallet_file, &vault_folder, &passphrase)?;
         let file_count = entries.len();
         Self::write_private(&target, &packed)?;
@@ -1000,13 +989,33 @@ impl Wallet {
         let path = std::path::PathBuf::from(path);
         let bytes = archive::read_file(&path)?;
 
-        let answer = ctx.term().ask(true, "Passphrase for this backup, or the wallet's 24 words: ").await?.trim().to_string();
-        if answer.is_empty() {
-            tprintln!(ctx, "No passphrase — nothing restored.");
+        let answer = Self::ask_restore_key(ctx).await?;
+        let Some(key) = answer else {
+            tprintln!(ctx, "Nothing given — nothing restored.");
             return Ok(());
-        }
-        let entries = archive::unpack(&bytes, &archive::key_from_answer(&answer))?;
+        };
+        let entries = archive::unpack(&bytes, &key)?;
         self.restore_entries(ctx, entries, argv.get(1).cloned(), guard).await
+    }
+
+    /// The key that opens a backup: the wallet's 24 words. A backup from
+    /// before 2026-09-24 was sealed with a passphrase instead; anything that
+    /// is not 24 words is taken as one, with a word about why it is old.
+    async fn ask_restore_key(ctx: &Arc<KaspaCli>) -> Result<Option<Secret>> {
+        use crate::backup as archive;
+        tprintln!(
+            ctx,
+            "{}",
+            crate::ui::dim("A backup opens with the wallet's 24 words (a backup made before September 2026 with its passphrase).")
+        );
+        let answer = ctx.term().ask(true, "The 24 words: ").await?.trim().to_string();
+        if answer.is_empty() {
+            return Ok(None);
+        }
+        if !archive::looks_like_words(&answer) {
+            tprintln!(ctx, "{}", crate::ui::dim("Not 24 words — trying it as the passphrase of an older backup."));
+        }
+        Ok(Some(archive::key_from_answer(&answer)))
     }
 
     /// The restore proper, once the files are decrypted: put them in place
@@ -1334,8 +1343,8 @@ impl Wallet {
         tpara!(
             ctx,
             "To bring it back on any machine: 'wallet restore telegram' (it asks for the bot's token), then \
-            forward the newest checkpoint's part messages and every delta after it to the bot — from that chat \
-            back to the bot itself. At the passphrase prompt, give your 24 words. \
+            forward the bot everything it posted in the last week — select the backup files in that chat, \
+            forward, pick the bot. It opens with your 24 words. \
             "
         );
         tprintln!(ctx, "");
@@ -1368,9 +1377,10 @@ impl Wallet {
         tprintln!(ctx, "");
         tpara!(
             ctx,
-            "Now forward the backup messages from the backup group to the bot: the newest checkpoint's parts \
-            and every delta after it (select them all, forward, pick the bot). The wallet waits up to ten \
-            minutes, and goes on a few seconds after the last part. \
+            "Now forward the bot everything it posted in the last week: open the chat the backups are in, \
+            select the backup files, forward, pick the bot. The wallet takes the newest checkpoint and the \
+            deltas after it and ignores the rest. It waits up to ten minutes, and goes on a few seconds after \
+            the last part. \
             "
         );
         tprintln!(ctx, "");
@@ -1386,12 +1396,10 @@ impl Wallet {
             tprintln!(ctx, "Received {name} ({}).", archive::human_size(bytes.len()));
             archives.insert(name.clone(), bytes);
         }
-        let answer = ctx.term().ask(true, "Passphrase for this backup, or the wallet's 24 words: ").await?.trim().to_string();
-        if answer.is_empty() {
+        let Some(key) = Self::ask_restore_key(ctx).await? else {
             tprintln!(ctx, "Nothing given — nothing restored.");
             return Ok(());
-        }
-        let key = archive::key_from_answer(&answer);
+        };
         let (entries, checkpoint, deltas) = crate::tgbackup::merge(&archives, &key)?;
         tprintln!(ctx, "Restoring checkpoint {checkpoint} with {deltas} delta(s) after it: {} files.", entries.len());
         self.restore_entries(ctx, entries, new_name, guard).await
