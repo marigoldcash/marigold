@@ -191,16 +191,20 @@ Copies the backup's files in, recovers `K` from the words, deep-verifies (report
 
 **Caveat found while validating this**: if the *source* wallet the backup came from is still active and mid-spend (e.g. you're testing restore against a backup you just took without pausing the original wallet), a rotation batch that happens to need a fee-stamp from a note the source wallet is simultaneously spending will fail with `already consumed by transaction ... in the mempool` (or, once that transaction confirms, `does not exist in the pool`) — a real instance of POOL-SPEC.md's same-key-in-two-wallets hazard, not a wallet defect. Mine a confirming block for the source wallet's pending transaction and re-run `note vault restore` (idempotent — it re-copies and re-verifies) to pick up wherever it left off.
 
-## 11b. Back up to Telegram, restore from Telegram (2026-09-23)
+## 11b. Automatic backups to Telegram, and the restore (2026-09-23/24)
 
-The same encrypted archive as `wallet backup`, sent as messages instead of written to a file, the way nightly server backups often are. It needs the wallet's bot (`mobile telegram <token>`, the token from @BotFather) and a private group the bot is a member of.
+The wallet keeps an encrypted copy of itself in Telegram, and keeps it current by itself — the way a phone backs itself up to its maker's cloud, except that the only servers involved are Telegram's and they hold nothing they can read. It needs the wallet's bot (`mobile telegram <token>`, the token from @BotFather) paired with its owner; the backups then go to the bot's own chat with them, the same chat the payment codes arrive in. A private group the bot is a member of can be given instead.
 
 ```
-backup telegram -603049415      # the first time: the group's id (negative for a group); kept afterwards
-backup telegram                 # every time after
+backup telegram                 # the first time: posts a checkpoint and starts the automatic backups; later: a checkpoint now
+backup telegram status          # where they go, on/off, last checkpoint, deltas since, last post
+backup telegram off / on        # pause and resume the automatic posts
+backup telegram 5181777138      # send them to a group instead: its id as Telegram shows it, kept afterwards
 ```
 
-The wallet asks for a backup passphrase (eight characters or more, twice), packs the keys file and every note file, checks the archive reads back, and posts it: a start message, the parts as documents named `marigold-<wallet>-<time>.mgb.p001of003` with "Part 1 of 3" captions, and an end message. Parts are under 20 MB because that is the most a bot may fetch back. Telegram keeps the messages; the passphrase is the only thing between them and the money, so choose it accordingly and keep the group private.
+The first run posts a **checkpoint** — the keys file and every note file — straight away. From then on, while the wallet is open, it posts by itself: a **delta** holding only the files that changed since the last post (and the names of any removed), once the vault has been quiet for two minutes and at most every ten; a fresh checkpoint once a week, or sooner when the deltas since the last one outweigh half of it; and any change still unposted goes out at `close`. Nothing is asked: every archive is sealed under a key made from the wallet's 24 words, which the owner keeps anyway and which bring the whole wallet back on any machine. The wallet remembers what it last posted in `telegram-backup.json` beside the wallet file, which is how a delta knows what changed.
+
+Every backup message is delivered silently — no sound, no badge — so the chat stays quiet unless it is opened. What lands there, per backup: a start message naming it, the parts as documents (`marigold-<wallet>-c20260924T100000.full.mgb.p001of003` for a checkpoint, `….d007.mgb.p001of001` for the seventh delta after it) with "Part 1 of 3" captions and the archive's sha256, and an end message. Parts stay under 20 MB because that is the most a bot may fetch back. A wallet of a few hundred notes is a few hundred kilobytes, so a checkpoint is one part and a delta far less; a week never needs more than the newest checkpoint and the deltas after it forwarded back.
 
 To bring the wallet back on any machine:
 
@@ -208,7 +212,7 @@ To bring the wallet back on any machine:
 wallet restore telegram [<name>]
 ```
 
-It asks for the bot's token hidden (a token typed on the command line would sit in the terminal and its history); then forward the part messages from the group to the bot (select them all, forward, pick the bot). The wallet waits up to ten minutes, fetches each part, reassembles the archive and runs the ordinary restore, asking for the passphrase. A bot cannot read a chat's history, which is why the parts have to be forwarded to it. The Telegram bot API is the whole dependency; nothing is stored on any server of ours.
+It asks for the bot's token hidden (a token typed on the command line would sit in the terminal and its history); then forward the newest checkpoint's parts and every delta after it to the bot — from the bot's chat back to the bot itself, or from the group — in any order (select them all, forward, pick the bot). The wallet collects them, goes on a few seconds after the last part, fetches each, asks for the passphrase — **give your 24 words** — merges the checkpoint and the deltas in order (it refuses if a delta in the middle is missing and says which), and runs the ordinary restore. A pre-checkpoint archive sealed with a passphrase (from before 2026-09-24) restores the same way with its passphrase. A bot cannot read a chat's history, which is why the parts have to be forwarded to it. The Telegram bot API is the whole dependency; nothing is stored on any server of ours.
 
 ## 12. Notes-only wallets
 

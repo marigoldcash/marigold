@@ -32,6 +32,8 @@ pub mod space;
 pub mod splash;
 #[cfg(feature = "embedded-node")]
 pub mod telegram;
+#[cfg(feature = "embedded-node")]
+pub mod tgbackup;
 pub mod ui;
 pub mod utils;
 mod wizards;

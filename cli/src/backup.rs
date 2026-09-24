@@ -53,6 +53,7 @@ const ARCHIVE_VERSION: u8 = 1;
 const MAX_ARCHIVE_BYTES: u64 = 512 * 1024 * 1024;
 
 /// A file on its way into or out of an archive.
+#[derive(Clone)]
 pub struct ArchiveEntry {
     /// Relative, `/`-separated.
     pub path: String,
@@ -383,4 +384,27 @@ mod tests {
         let stray = vec![entry("marigold.wallet/marigold.keys", b"w"), entry("something-else.dat", b"?")];
         assert!(rename_entries(stray, "marigold", "spare").is_err());
     }
+}
+
+/// The key an automatic Telegram backup is sealed with: the wallet's 24
+/// words, normalised, through a domain-separated hash. Nothing has to be
+/// asked or remembered beyond the words, which open everything anyway.
+pub fn key_from_words(words: &str) -> Secret {
+    use sha2::{Digest, Sha256};
+    let normalised = words.split_whitespace().map(|w| w.to_lowercase()).collect::<Vec<_>>().join(" ");
+    let mut h = Sha256::new();
+    h.update(b"marigold-telegram-backup-v1");
+    h.update(normalised.as_bytes());
+    Secret::from(h.finalize().to_vec())
+}
+
+/// Whether an answer at the restore prompt is 24 words rather than a passphrase.
+pub fn looks_like_words(answer: &str) -> bool {
+    let words: Vec<&str> = answer.split_whitespace().collect();
+    words.len() == 24 && words.iter().all(|w| w.chars().all(|c| c.is_ascii_alphabetic()))
+}
+
+/// The key for a restore prompt's answer: the words if that is what was typed, the passphrase otherwise.
+pub fn key_from_answer(answer: &str) -> Secret {
+    if looks_like_words(answer) { key_from_words(answer) } else { Secret::from(answer.as_bytes().to_vec()) }
 }

@@ -734,7 +734,11 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
                     send_with_keyboard(
                         &token,
                         chat_id,
-                        &format!("Paired. This chat now moves money in your wallet: keep 2FA on your Telegram account.\n\n{HELP}"),
+                        &format!(
+                            "Paired. This chat now moves money in your wallet: keep 2FA on your Telegram account.\n\n\
+                             It can also hold your wallet's backup: 'backup telegram' in the wallet posts an encrypted copy here \
+                             and keeps it current by itself.\n\n{HELP}"
+                        ),
                         &main_keyboard(),
                     )
                     .await;
@@ -986,12 +990,15 @@ pub async fn chat_reachable(token: &str, chat_id: i64) -> bool {
     call(token, "getChat", &[("chat_id", chat_id.to_string())]).await.is_ok()
 }
 
+/// A backup message: delivered silently — no sound, no badge — so a chat
+/// that also carries payment codes stays quiet while the wallet keeps its
+/// backup current (founder, 2026-09-24: "messages can be sent silent").
 pub async fn send_plain(token: &str, chat_id: i64, text: &str) -> Result<(), String> {
-    let params = [("chat_id", chat_id.to_string()), ("text", text.to_string())];
+    let params = [("chat_id", chat_id.to_string()), ("text", text.to_string()), ("disable_notification", "true".to_string())];
     call(token, "sendMessage", &params).await.map(|_| ())
 }
 
-/// Uploads one file as a document with a caption.
+/// Uploads one file as a document with a caption, silently (see `send_plain`).
 pub async fn send_document(token: &str, chat_id: i64, file_name: &str, bytes: Vec<u8>, caption: &str) -> Result<(), String> {
     let part = reqwest::multipart::Part::bytes(bytes)
         .file_name(file_name.to_string())
@@ -1000,6 +1007,7 @@ pub async fn send_document(token: &str, chat_id: i64, file_name: &str, bytes: Ve
     let form = reqwest::multipart::Form::new()
         .text("chat_id", chat_id.to_string())
         .text("caption", caption.to_string())
+        .text("disable_notification", "true")
         .part("document", part);
     let url = format!("https://api.telegram.org/bot{token}/sendDocument");
     let response =
@@ -1122,6 +1130,71 @@ pub async fn collect_backup_parts(
         (Some(b), Some(c)) => format!("gave up waiting: {} of {c} parts of {b} arrived", parts.len()),
         _ => "gave up waiting: no backup part reached the bot".to_string(),
     })
+}
+
+/// Waits for the parts of any number of backups forwarded to the bot — a
+/// checkpoint and the deltas after it, in any order — and hands them back
+/// grouped by backup once every backup seen is complete and a poll has
+/// brought nothing new. `progress` is told about each part as it lands.
+pub async fn collect_backup_sets(
+    token: &str,
+    timeout: Duration,
+    progress: &(dyn Fn(String) + Send + Sync),
+) -> Result<std::collections::BTreeMap<String, Vec<BackupPart>>, String> {
+    use std::collections::BTreeMap;
+    let started = std::time::Instant::now();
+    let mut offset: i64 = 0;
+    let mut sets: BTreeMap<String, BTreeMap<usize, BackupPart>> = BTreeMap::new();
+    while started.elapsed() < timeout {
+        // A long poll until the first part; short ones after, so a complete
+        // set is handed back within seconds of its last part.
+        let wait = if sets.is_empty() { "20" } else { "5" };
+        let params = [("offset", offset.to_string()), ("timeout", wait.to_string()), ("allowed_updates", "[\"message\"]".to_string())];
+        let updates = match call(token, "getUpdates", &params).await {
+            Ok(v) => v,
+            Err(e) => {
+                progress(format!("(telegram: {e}; trying again)"));
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                continue;
+            }
+        };
+        let Some(list) = updates.get("result").and_then(|r| r.as_array()) else { continue };
+        let mut new_parts = false;
+        for update in list {
+            if let Some(id) = update.get("update_id").and_then(|v| v.as_i64()) {
+                offset = offset.max(id + 1);
+            }
+            let Some(document) = update.get("message").and_then(|m| m.get("document")) else { continue };
+            let Some(name) = document.get("file_name").and_then(|v| v.as_str()) else { continue };
+            let Some((backup, index, count)) = parse_part_file_name(name) else { continue };
+            let file_id = document.get("file_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let size = document.get("file_size").and_then(|v| v.as_u64()).unwrap_or(0);
+            if let std::collections::btree_map::Entry::Vacant(slot) = sets.entry(backup.clone()).or_default().entry(index) {
+                slot.insert(BackupPart { backup: backup.clone(), index, count, file_id, size });
+                progress(format!("{backup}: part {index} of {count} received"));
+                new_parts = true;
+            }
+        }
+        let all_complete = !sets.is_empty()
+            && sets.values().all(|parts| {
+                let count = parts.values().next().map(|p| p.count).unwrap_or(0);
+                count > 0 && parts.len() == count && (1..=count).all(|i| parts.contains_key(&i))
+            });
+        if all_complete && !new_parts {
+            return Ok(sets.into_iter().map(|(name, parts)| (name, parts.into_values().collect())).collect());
+        }
+    }
+    if sets.is_empty() {
+        return Err("gave up waiting: no backup part reached the bot".to_string());
+    }
+    let missing: Vec<String> = sets
+        .iter()
+        .filter_map(|(name, parts)| {
+            let count = parts.values().next().map(|p| p.count).unwrap_or(0);
+            (parts.len() != count).then(|| format!("{name} ({} of {count} parts)", parts.len()))
+        })
+        .collect();
+    Err(format!("gave up waiting: incomplete — {}", missing.join(", ")))
 }
 
 #[cfg(test)]

@@ -1714,6 +1714,17 @@ impl KaspaCli {
     /// glibc the freed heap is handed back to the system at once.
     #[cfg(feature = "embedded-node")]
     async fn release_embedded_node_memory(self: &Arc<Self>) {
+        self.bind_unconnected_client().await;
+        #[cfg(all(target_os = "linux", target_env = "gnu"))]
+        unsafe {
+            libc::malloc_trim(0);
+        }
+    }
+
+    /// Put the wallet on a wRPC client that is connected to nothing, so
+    /// 'connect' has something to dial with.
+    #[cfg(feature = "embedded-node")]
+    async fn bind_unconnected_client(self: &Arc<Self>) {
         let network_id = self.wallet.network_id().ok();
         if let Ok(client) = KaspaRpcClient::new(WrpcEncoding::Borsh, None, None, network_id, None) {
             let client = Arc::new(client);
@@ -1723,10 +1734,22 @@ impl KaspaCli {
             let _ = self.wallet.bind_rpc(Some(rpc)).await;
             let _ = self.wallet.utxo_processor().start().await;
         }
-        #[cfg(all(target_os = "linux", target_env = "gnu"))]
-        unsafe {
-            libc::malloc_trim(0);
+    }
+
+    /// Take the wallet off the node in this process without stopping the
+    /// node: the wallet goes to a client that can dial, and the node's RPC
+    /// comes back so a hand-over task can bring the wallet home once the
+    /// sync has caught up. None when the wallet was not on it.
+    #[cfg(feature = "embedded-node")]
+    pub async fn detach_embedded_node(self: &Arc<Self>) -> Option<Rpc> {
+        if !self.embedded_node_in_use() {
+            return None;
         }
+        let api = self.wallet.try_rpc_api()?;
+        let ctl = self.wallet.try_rpc_ctl()?;
+        self.bind_unconnected_client().await;
+        self.embedded_node_adopted.store(false, Ordering::SeqCst);
+        Some(Rpc::new(api, ctl))
     }
 
     /// A node that is running but has not finished its first sync — the state
@@ -2769,6 +2792,7 @@ impl KaspaCli {
                         };
                         if done {
                             let _ = store.remove_payment_request(&secret, &entry.pk).await;
+                            let _ = this.wallet.store().commit(&secret).await;
                             claimed.remove(&entry.pk);
                             tprintln!(this, "{}", crate::ui::dim("That request is settled and closed."));
                         }
@@ -2822,12 +2846,16 @@ impl KaspaCli {
             let mut memory_warned_at: Option<Instant> = None;
             #[cfg(feature = "embedded-node")]
             let mut restarts_seen = 0u32;
+            #[cfg(feature = "embedded-node")]
+            let backup_state = Arc::new(Mutex::new(crate::tgbackup::AutoState::default()));
             loop {
                 workflow_core::task::sleep(Duration::from_secs(5)).await;
                 if this.shutdown.load(Ordering::SeqCst) {
                     break;
                 }
                 this.watch_memory(&mut memory_warned_at).await;
+                #[cfg(feature = "embedded-node")]
+                crate::tgbackup::auto_tick(&this, &backup_state).await;
                 #[cfg(feature = "embedded-node")]
                 {
                     // A first sync that lost its peer repeats the step from
@@ -3542,6 +3570,12 @@ impl KaspaCli {
     /// Keep the password from 'open' for tidying until 'close'.
     pub fn hold_tidying_secret(&self, secret: Secret) {
         *self.tidying_secret.lock().unwrap() = Some(Guarded::from_secret(secret));
+    }
+
+    /// The password from 'open', while it is held — for work that must not
+    /// stop to ask, such as the automatic Telegram backup.
+    pub fn tidying_secret(&self) -> Option<Secret> {
+        self.tidying_secret.lock().unwrap().as_mut().map(|g| g.reveal())
     }
 
     pub(crate) async fn ask_wallet_secret(&self, account: Option<&Arc<dyn Account>>) -> Result<(Secret, Option<Secret>)> {
