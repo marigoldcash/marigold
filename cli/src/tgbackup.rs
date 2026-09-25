@@ -498,7 +498,7 @@ pub struct BackupStatus {
     pub destination: String,
     /// A bot is set up for this wallet.
     pub bot: bool,
-    /// The bot has been paired with its owner's Telegram account.
+    /// The bot has somewhere to post: the chat it was paired in.
     pub paired: bool,
     /// The pairing code to send the bot, while one is live and nobody has paired.
     pub pairing_code: Option<String>,
@@ -520,8 +520,8 @@ pub fn status(files: &WalletFiles, cfg: Option<&TelegramConfig>) -> BackupStatus
     BackupStatus {
         destination,
         bot: cfg.is_some(),
-        paired: cfg.is_some_and(|c| c.user_id.is_some()),
-        pairing_code: cfg.and_then(|c| if c.user_id.is_none() && c.pairing_code_live() { c.pairing_code.clone() } else { None }),
+        paired: cfg.is_some_and(|c| target_chat(c).is_some()),
+        pairing_code: cfg.and_then(|c| if target_chat(c).is_none() && c.pairing_code_live() { c.pairing_code.clone() } else { None }),
         automatic: if index.paused {
             "off"
         } else if index.checkpoint.is_empty() {

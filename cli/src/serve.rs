@@ -238,8 +238,9 @@ impl WalletService {
         let files = self.backup_files().await?;
         let key = crate::tgbackup::key_for(&self.wallet, &self.secret).await.map_err(|e| e.to_string())?;
         let (_, packed) = crate::tgbackup::pack_checked(&files, &key).map_err(|e| e.to_string())?;
-        let stamp = chrono::Local::now().format("%Y%m%d-%H%M");
-        Ok((format!("marigold-{}-{stamp}.mgb", self.name), packed))
+        // Named the way the Telegram backups are: readable, and sorted by date.
+        let stamp = chrono::Local::now().format("%Y-%m-%d %H.%M");
+        Ok((format!("Marigold backup - {} - {stamp}.mgb", self.name), packed))
     }
 
     /// Sets the wallet's bot up the way 'mobile telegram <token>' does, and
