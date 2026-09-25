@@ -279,6 +279,38 @@ pub fn wallet_name_in(entries: &[ArchiveEntry]) -> Result<String> {
     Ok(name)
 }
 
+/// What a restore put in place.
+pub struct Restored {
+    pub written: usize,
+    /// The name the backup carried.
+    pub original: String,
+    /// The name the files have now.
+    pub name: String,
+}
+
+/// Puts decrypted backup entries in place under `folder` — under `new_name`
+/// if given — and marks the wallet for key rotation on its first open. The
+/// shared tail of every restore; the terminal adds its questions around it.
+pub fn install_restored(entries: Vec<ArchiveEntry>, folder: &Path, new_name: Option<String>) -> Result<Restored> {
+    let original = wallet_name_in(&entries)?;
+    let name = new_name.unwrap_or_else(|| original.clone());
+    if name.to_lowercase() == "wallet" {
+        return Err(Error::custom("a wallet cannot be named 'wallet'"));
+    }
+    let entries = if name == original { entries } else { rename_entries(entries, &original, &name)? };
+    let written = extract(&entries, folder)?;
+    // A backup is a copy of the keys, and any other copy of it can spend the
+    // same notes. The first open of the restored wallet rotates every note to
+    // fresh keys (POOL-SPEC.md P5.6), which needs the wallet open and a node:
+    // this marker asks for it (threat pass, 2026-09-20).
+    let marker = folder.join(kaspa_wallet_core::storage::local::wallet_dir_name(&name)).join("notes").join(ROTATE_ON_OPEN);
+    if let Some(dir) = marker.parent() {
+        std::fs::create_dir_all(dir).ok();
+    }
+    std::fs::write(&marker, b"restored from a backup; rotate every note on the first open\n").ok();
+    Ok(Restored { written, original, name })
+}
+
 /// The key an automatic Telegram backup is sealed with: the wallet's 24
 /// words, normalised, through a domain-separated hash. Nothing has to be
 /// asked or remembered beyond the words, which open everything anyway.

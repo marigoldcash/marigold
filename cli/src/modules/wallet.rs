@@ -1034,7 +1034,7 @@ impl Wallet {
             .get(WalletSettings::Folder)
             .unwrap_or_else(|| kaspa_wallet_core::storage::local::default_storage_folder().to_string());
         let folder = workflow_store::fs::resolve_path(&folder)?;
-        let crate::tgbackup::Restored { written, original, name } = crate::tgbackup::install_restored(entries, &folder, new_name)?;
+        let crate::backup::Restored { written, original, name } = crate::backup::install_restored(entries, &folder, new_name)?;
 
         tprintln!(ctx, "");
         tprintln!(ctx, "Restored {written} files into {}", style(folder.display().to_string()).bold());

@@ -554,38 +554,6 @@ pub fn pack_checked(files: &WalletFiles, key: &Secret) -> Result<(Vec<ArchiveEnt
     Ok((entries, packed))
 }
 
-/// What a restore put in place.
-pub struct Restored {
-    pub written: usize,
-    /// The name the backup carried.
-    pub original: String,
-    /// The name the files have now.
-    pub name: String,
-}
-
-/// Puts decrypted backup entries in place under `folder` — under `new_name`
-/// if given — and marks the wallet for key rotation on its first open. The
-/// shared tail of every restore; the terminal adds its questions around it.
-pub fn install_restored(entries: Vec<ArchiveEntry>, folder: &Path, new_name: Option<String>) -> Result<Restored> {
-    let original = archive::wallet_name_in(&entries)?;
-    let name = new_name.unwrap_or_else(|| original.clone());
-    if name.to_lowercase() == "wallet" {
-        return Err(Error::custom("a wallet cannot be named 'wallet'"));
-    }
-    let entries = if name == original { entries } else { archive::rename_entries(entries, &original, &name)? };
-    let written = archive::extract(&entries, folder)?;
-    // A backup is a copy of the keys, and any other copy of it can spend the
-    // same notes. The first open of the restored wallet rotates every note to
-    // fresh keys (POOL-SPEC.md P5.6), which needs the wallet open and a node:
-    // this marker asks for it (threat pass, 2026-09-20).
-    let marker = folder.join(kaspa_wallet_core::storage::local::wallet_dir_name(&name)).join("notes").join(archive::ROTATE_ON_OPEN);
-    if let Some(dir) = marker.parent() {
-        std::fs::create_dir_all(dir).ok();
-    }
-    std::fs::write(&marker, b"restored from a backup; rotate every note on the first open\n").ok();
-    Ok(Restored { written, original, name })
-}
-
 /// At 'close': a change not yet posted goes out now rather than at the next open.
 pub async fn flush_before_close(cli: &Arc<KaspaCli>) {
     let Some(secret) = cli.tidying_secret() else { return };

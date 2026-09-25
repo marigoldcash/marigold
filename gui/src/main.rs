@@ -388,7 +388,7 @@ async fn restore_telegram(app: AppHandle, token: String, words: String, name: St
     let key = archive::key_from_words(&words);
     let (entries, checkpoint, deltas) = tgbackup::merge(&archives, &key).map_err(|e| e.to_string())?;
     let new_name = if name.trim().is_empty() { None } else { Some(name.trim().to_string()) };
-    let restored = tgbackup::install_restored(entries, &folder, new_name).map_err(|e| e.to_string())?;
+    let restored = archive::install_restored(entries, &folder, new_name).map_err(|e| e.to_string())?;
     Ok(format!(
         "Restored {} files as '{}' from checkpoint {checkpoint} with {deltas} change set(s) after it. Open it with the password it had when the backup was made; every note is rotated to fresh keys on its first open with a node.",
         restored.written, restored.name
