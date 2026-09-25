@@ -107,6 +107,8 @@ Weil Scheine eigenständige Schlüssel sind und an keine Seed-Phrase und kein Ko
 
 Der rote Faden: Ein Marigold-Schein ist ein Schlüssel, und ein Schlüssel lässt sich drucken, verschicken, in einen Umschlag falten, an den Kühlschrank heften oder auswendig lernen. Dem System ist egal, wie der Schlüssel von Mensch zu Mensch kommt, denn das System weiß nicht, dass es Menschen gibt. Es kennt nur Schlüssel und Scheine — und deshalb hat jeder Weg, auf dem man eine Banknote weitergeben kann, hier eine direkte digitale Entsprechung.
 
+Und nichts davon braucht eine Verbindung. Bitcoin lässt sich offline als QR-Code aufbewahren, aber nicht so ausgeben: Damit zu bezahlen heißt, eine Transaktion zu senden, also muss jemand online sein, und eine Wallet, die nie online ist, kann nicht bezahlen. Ein Marigold-Schein ist der Schlüssel selbst, also kann er offline von Hand zu Hand gehen, genau wie ein Geldschein; das Netz wird erst berührt, wenn der neue Besitzer das Schloss austauscht. Zum Bezahlen musst du nicht verbunden sein, und du brauchst keine Wallet, die ständig online ist.
+
 ---
 
 ## Dein Handy ist eine Fernbedienung, keine Geldbörse
@@ -122,6 +124,8 @@ Das Ausgeben ist abgesichert wie bei einer Bankkarte: eine PIN vor allem, was Ge
 Derselbe Chat bewahrt auch dein Backup auf. Sobald du es einmal verlangst, legt die Wallet dort eine verschlüsselte Kopie von sich selbst ab und hält sie von allein aktuell — jede Woche eine vollständige Kopie, die Änderungen innerhalb weniger Minuten nach einer Zahlung — still, ohne Benachrichtigung. Stirbt der Rechner zu Hause, leitest du diese Nachrichten an eine frische Wallet zurück, und alles ist wieder da. Die Kopie ist mit deinen 24 Wörtern verschlossen und mit nichts sonst: nicht mit deinem Wallet-Passwort, das du jeden Tag tippst und das du dir merken können wolltest — und das jeder, der eine Kopie der Datei hat, in aller Ruhe durchprobieren könnte. Die 24 Wörter lassen sich nicht erraten. Schreib sie auf, wenn die Wallet sie dir zeigt — sie fragt dich anschließend nach zweien davon, um sicherzugehen —, und ein Backup auf einem fremden Server ist für alle außer dir nur Rauschen.
 
 Die Grenzen, ganz offen. Wenn der Rechner zu Hause aus ist, kann das Handy gar nichts: kein Guthaben, kein Bezahlen, kein Annehmen. Ein Zahlungscode, der durch einen Chat geht, ist unterwegs ein Inhaberpapier, genau wie die gedruckten QR-Codes weiter oben — wer ihn zuerst liest, kann ihn einlösen. Und eine richtige Handy-App, die selbst Schlüssel verwahrt, ist eine Aufgabe für später und wahrscheinlich für jemand anderen. Das hier ist die Version, die von dir verlangt, niemandem zu vertrauen.
+
+Es gibt noch eine zweite Art, das Handy zu nutzen, ganz ohne Bot: als Ort, an dem Scheine als Bilder liegen. Ein Schein ist ein Schlüssel, und ein QR-Code dieses Schlüssels ist das Geld selbst; ein Handy mit ein paar solcher Bilder ist eine Geldbörse mit ein paar Scheinen darin. Behandle sie genau wie Bargeld: Wer eines sieht, kopiert oder scannt, kann den Schein an sich nehmen, indem er sein eigenes Schloss davorhängt — ein Screenshot in einem geteilten Album ist ein Geldschein, der auf dem Tisch liegen bleibt. Marigold hat mit Absicht keine eigene Handy-App. Die vollständige Wallet läuft auf einem Rechner, den du kontrollierst, und das Handy ist entweder ihre Fernbedienung oder eine Tasche für Scheine.
 
 ---
 

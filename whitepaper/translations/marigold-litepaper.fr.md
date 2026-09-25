@@ -107,6 +107,8 @@ Comme les billets sont des clés indépendantes, qui ne dépendent d'aucune phra
 
 Le fil conducteur : un billet Marigold est une clé, et une clé peut s'imprimer, s'envoyer par SMS, se plier dans une enveloppe, s'aimanter sur un frigo ou s'apprendre par cœur. Le système se moque de la façon dont la clé passe d'une personne à l'autre, parce qu'il ignore que les personnes existent. Il ne connaît que des clés et des billets — et c'est pourquoi chaque manière de faire circuler un billet de banque a ici un équivalent numérique direct.
 
+Et rien de tout cela n'exige de connexion. Le bitcoin peut être conservé hors ligne sous forme de code QR, mais pas dépensé ainsi : payer avec, c'est diffuser une transaction, donc quelqu'un doit être en ligne, et un portefeuille qui ne l'est jamais ne peut pas payer. Un billet Marigold est la clé elle-même : il peut passer de main en main hors ligne, exactement comme un billet de banque ; le réseau n'est touché que lorsque le nouveau détenteur décide de changer la serrure. Pas besoin d'être connecté pour payer, ni d'un portefeuille en ligne en permanence.
+
 ---
 
 ## Votre téléphone est une télécommande, pas un portefeuille
@@ -122,6 +124,8 @@ Les dépenses sont protégées comme celles d'une carte bancaire : un code ava
 Le même fil de discussion garde votre sauvegarde. Dès que vous le lui demandez une fois, le portefeuille y dépose une copie chiffrée de lui-même et la tient à jour tout seul — une copie complète chaque semaine, les changements quelques minutes après un paiement — en silence, sans notification. Si la machine à la maison meurt, vous transférez ces messages à un portefeuille neuf et tout est là. La copie est verrouillée par vos 24 mots et par rien d'autre : pas par le mot de passe du portefeuille, que vous tapez chaque jour et que vous avez choisi pour pouvoir le retenir, et que quiconque détient une copie du fichier pourrait essayer à loisir. Les 24 mots, eux, ne se devinent pas. Notez-les quand le portefeuille vous les montre — il vous en redemandera deux pour s'en assurer — et une sauvegarde sur le serveur de quelqu'un d'autre n'est que du bruit pour tout le monde sauf vous.
 
 Les limites, sans détour. Quand la machine restée chez vous est éteinte, le téléphone ne peut plus rien faire : pas de solde, pas de paiement, pas de réception. Un code de paiement envoyé dans une conversation est une valeur au porteur tant qu'il circule, exactement comme les QR codes imprimés plus haut — le premier qui le lit peut se l'approprier. Quant à une vraie application mobile, qui détiendrait elle-même les clés, c'est un chantier pour plus tard, et sans doute pour quelqu'un d'autre. Ceci est la version qui ne vous demande de faire confiance à personne.
+
+Il y a une seconde façon d'utiliser le téléphone, sans aucun bot : comme un endroit où garder des billets sous forme d'images. Un billet est une clé, et le code QR de cette clé est l'argent lui-même ; un téléphone qui contient quelques images de ce genre est un portefeuille avec quelques billets dedans. Traitez-les exactement comme des espèces : quiconque en voit, en copie ou en scanne une peut s'approprier le billet en y posant sa propre serrure, si bien qu'une capture d'écran dans un album partagé est un billet oublié sur une table. Marigold n'a pas d'application téléphone autonome, et c'est voulu. Le portefeuille complet tourne sur un ordinateur que vous contrôlez, et le téléphone en est soit la télécommande, soit une poche à billets.
 
 ---
 

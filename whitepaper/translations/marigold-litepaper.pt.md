@@ -107,6 +107,8 @@ Como as cédulas são chaves independentes e não estão amarradas a nenhuma fra
 
 O fio condutor: uma cédula Marigold é uma chave, e uma chave pode ser impressa, mandada por mensagem, dobrada dentro de um envelope, presa na porta da geladeira ou decorada de cabeça. O sistema não se importa com o caminho que a chave faz entre as pessoas, porque o sistema não sabe que pessoas existem. Ele conhece só chaves e cédulas — e é por isso que toda forma de passar uma cédula de papel adiante tem aqui um equivalente digital direto.
 
+E nada disso precisa de conexão. Bitcoin pode ficar guardado offline como um código QR, mas não pode ser gasto assim: pagar com ele é transmitir uma transação, então alguém precisa estar online, e uma carteira que nunca está online não consegue pagar. Uma cédula Marigold é a própria chave, então pode passar de mão em mão offline, exatamente como uma cédula de papel; a rede só é tocada quando o novo dono resolve trocar a fechadura. Você não precisa estar conectado para pagar, nem de uma carteira permanentemente online.
+
 ---
 
 ## Seu celular é um controle remoto, não uma carteira
@@ -122,6 +124,8 @@ Gastar é protegido do mesmo jeito que um cartão de banco: uma senha antes de q
 O mesmo chat guarda o seu backup. Assim que você pede uma vez, a carteira publica ali uma cópia criptografada de si mesma e a mantém atualizada sozinha — uma cópia completa por semana, as mudanças poucos minutos depois de um pagamento — em silêncio, sem notificação. Se a máquina de casa morrer, você encaminha essas mensagens para uma carteira nova e está tudo lá. A cópia está trancada com as suas 24 palavras e com mais nada: não com a senha da carteira, que você digita todo dia e escolheu para conseguir lembrar, e que qualquer um com uma cópia do arquivo poderia tentar com toda a calma. As 24 palavras não se adivinham. Anote-as quando a carteira mostrá-las — depois ela pede duas delas para ter certeza — e um backup no servidor de outra pessoa não passa de ruído para todo mundo, menos para você.
 
 Os limites, sem rodeios. Com a máquina de casa desligada, o celular não faz absolutamente nada: nem saldo, nem pagamento, nem recebimento. Um código de pagamento mandado por uma conversa é valor ao portador enquanto está em trânsito, exatamente como os QR codes impressos acima — quem ler primeiro fica com ele. E um aplicativo de celular de verdade, que guarde as chaves ele mesmo, é tarefa para depois e provavelmente para outra pessoa. Esta é a versão que não pede que você confie em ninguém.
+
+Há um segundo jeito de usar o celular, sem bot nenhum: como um lugar para guardar cédulas em forma de imagem. Uma cédula é uma chave, e o código QR dessa chave é o próprio dinheiro; um celular com algumas dessas imagens é uma carteira com algumas cédulas dentro. Trate-as exatamente como dinheiro vivo: quem vê, copia ou escaneia uma delas pode ficar com a cédula colocando a própria fechadura nela, então uma captura de tela num álbum compartilhado é uma cédula esquecida sobre a mesa. O Marigold não tem um aplicativo de celular independente, e é de propósito. A carteira completa roda num computador que você controla, e o celular é o controle remoto dela ou um bolso para cédulas.
 
 ---
 

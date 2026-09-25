@@ -107,6 +107,8 @@ Como los billetes son llaves independientes y no están atados a ninguna frase s
 
 El hilo común: un billete Marigold es una llave, y una llave se puede imprimir, mandar por mensaje, doblar dentro de un sobre, pegar en la nevera o aprender de memoria. Al sistema le da igual cómo viaja la llave entre las personas, porque el sistema no sabe que las personas existen. Solo conoce llaves y billetes — y por eso cada forma de mover un billete de papel tiene aquí un equivalente digital directo.
 
+Y nada de esto necesita conexión. Bitcoin se puede guardar sin conexión como un código QR, pero no se puede gastar así: pagar con él significa emitir una transacción, así que alguien tiene que estar en línea, y un monedero que nunca está en línea no puede pagar. Un billete Marigold es la llave misma, así que puede pasar de mano en mano sin conexión, exactamente como un billete de papel; la red solo se toca cuando el nuevo dueño decide cambiar la cerradura. No hace falta estar conectado para pagar, ni tener un monedero permanentemente en línea.
+
 ---
 
 ## Tu teléfono es un control remoto, no un monedero
@@ -122,6 +124,8 @@ El gasto está protegido como el de una tarjeta bancaria: un PIN antes de cualqu
 El mismo chat guarda tu copia de seguridad. En cuanto se lo pides una vez, el monedero publica allí una copia cifrada de sí mismo y la mantiene al día por su cuenta — una copia completa cada semana, los cambios a los pocos minutos de un pago — en silencio, sin notificaciones. Si la máquina de casa muere, reenvías esos mensajes a un monedero nuevo y está todo ahí. La copia está cerrada con tus 24 palabras y con nada más: no con la contraseña del monedero, que tecleas cada día y elegiste para poder recordarla, y que cualquiera con una copia del archivo podría probar con toda calma. Las 24 palabras no se pueden adivinar. Escríbelas cuando el monedero te las muestre — después te pedirá dos de ellas para asegurarse — y una copia de seguridad en el servidor de otro no es más que ruido para todos menos para ti.
 
 Los límites, dichos claramente. Cuando la máquina de casa está apagada, el teléfono no puede hacer absolutamente nada: ni saldo, ni pagos, ni cobros. Un código de pago enviado por un chat es valor al portador mientras está en tránsito, exactamente igual que los códigos QR impresos de antes: quien lo lea primero se lo queda. Y una aplicación de teléfono en condiciones, una que guarde las llaves ella misma, es tarea para más adelante y probablemente para otra gente. Esta es la versión que no te pide confiar en nadie.
+
+Hay una segunda manera de usar el teléfono, sin bot alguno: como un sitio donde guardar billetes en forma de imágenes. Un billete es una llave, y un código QR de esa llave es el dinero mismo, así que un teléfono con unas cuantas de esas imágenes es una cartera con unos cuantos billetes dentro. Trátalas exactamente como efectivo: cualquiera que vea, copie o escanee una puede quedarse con el billete poniéndole su propia cerradura, así que una captura en un álbum compartido es un billete olvidado sobre una mesa. Marigold no tiene una app de teléfono independiente, y es a propósito. El monedero completo corre en un ordenador que tú controlas, y el teléfono es su control remoto o un bolsillo para billetes.
 
 ---
 

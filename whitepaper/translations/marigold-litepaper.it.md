@@ -107,6 +107,8 @@ Dato che le banconote sono chiavi indipendenti e non sono legate a nessuna frase
 
 Il filo comune: una banconota Marigold è una chiave, e una chiave si può stampare, mandare per messaggio, piegare dentro una busta, attaccare al frigorifero o imparare a memoria. Al sistema non interessa come la chiave viaggia tra le persone, perché il sistema non sa che le persone esistono. Conosce solo chiavi e banconote — ed è per questo che ogni modo in cui puoi far girare una banconota di carta ha qui un equivalente digitale diretto.
 
+E niente di tutto questo richiede una connessione. Bitcoin si può conservare offline come codice QR, ma non si può spendere così: pagare significa trasmettere una transazione, quindi qualcuno deve essere online, e un portafoglio che non lo è mai non può pagare. Una banconota Marigold è la chiave stessa, quindi può passare di mano in mano offline, esattamente come una banconota di carta; la rete si tocca solo quando il nuovo possessore decide di cambiare la serratura. Per pagare non serve essere connessi, né avere un portafoglio sempre online.
+
 ---
 
 ## Il telefono è un telecomando, non un portafoglio
@@ -122,6 +124,8 @@ La spesa è protetta come con una carta bancaria: un PIN prima di qualsiasi cosa
 La stessa chat custodisce anche il tuo backup. Appena glielo chiedi una volta, il portafoglio vi pubblica una copia cifrata di sé stesso e la tiene aggiornata da solo — una copia completa ogni settimana, le modifiche entro pochi minuti da un pagamento — in silenzio, senza notifiche. Se la macchina di casa muore, inoltri quei messaggi a un portafoglio nuovo ed è tutto lì. La copia è chiusa con le tue 24 parole e con nient'altro: non con la password del portafoglio, che digiti ogni giorno e che hai scelto per poterla ricordare, e che chiunque abbia una copia del file potrebbe provare con calma. Le 24 parole non si indovinano. Scrivile quando il portafoglio te le mostra — poi te ne chiederà due per esserne certo — e un backup sul server di qualcun altro è solo rumore per tutti tranne che per te.
 
 I limiti, detti chiaramente. Quando la macchina di casa è spenta, il telefono non può fare proprio niente: niente saldo, niente pagamenti, niente incassi. Un codice di pagamento mandato in chat è valore al portatore finché è in viaggio, esattamente come i codici QR stampati di cui sopra: chi lo legge per primo se lo prende. E un'app per telefono vera e propria, che tenga lei le chiavi, è un lavoro per dopo e probabilmente per qualcun altro. Questa è la versione che non ti chiede di fidarti di nessuno.
+
+C'è un secondo modo di usare il telefono, senza alcun bot: come posto in cui tenere banconote sotto forma di immagini. Una banconota è una chiave, e il codice QR di quella chiave è il denaro stesso, quindi un telefono con qualche immagine del genere è un portafoglio con qualche banconota dentro. Trattale esattamente come contanti: chiunque ne veda, copi o scansioni una può prendersi la banconota mettendoci la propria serratura, così uno screenshot in un album condiviso è una banconota lasciata su un tavolo. Marigold non ha un'app per telefono a sé stante, di proposito. Il portafoglio completo gira su un computer che controlli tu, e il telefono è il suo telecomando oppure una tasca per banconote.
 
 ---
 
