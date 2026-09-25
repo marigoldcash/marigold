@@ -1181,7 +1181,7 @@ impl Wallet {
             return Ok(());
         }
         let cfg_path = tgbackup::telegram_config_path(ctx)?;
-        let Some(mut cfg) = TelegramConfig::load(&cfg_path) else {
+        let Some(cfg) = TelegramConfig::load(&cfg_path) else {
             tprintln!(
                 ctx,
                 "No Telegram bot is set up for this wallet. 'mobile telegram <token>' first, with a token from @BotFather."
@@ -1205,7 +1205,7 @@ impl Wallet {
                 (None, None) => "nowhere yet".to_string(),
             }
         };
-        let mut first_time = index.checkpoint.is_empty();
+        let first_time = index.checkpoint.is_empty();
         match argv.first().map(|s| s.as_str()) {
             Some("status") => {
                 tprintln!(ctx, "Backups go to {}.", where_to(&cfg));
