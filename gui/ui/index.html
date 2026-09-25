@@ -31,7 +31,7 @@
     <p class="hint">Through a public computer, whoever runs it sees which notes your wallet asks about. A sync of your own needs a few gigabytes and some time.</p>
     <button id="open" class="primary">Open</button>
     <p id="open-error" class="error"></p>
-    <p class="hint">No wallet yet? <button id="go-create" class="link">Create one</button> · <button id="go-restore" class="link">Restore one from its 24 words</button></p>
+    <p class="hint">No wallet yet? <button id="go-create" class="link">Create one</button> · <button id="go-restore" class="link">Restore one from its 24 words</button> · <button id="go-restore-tg" class="link">Restore one from Telegram</button></p>
   </section>
 
   <section id="screen-create" class="screen" hidden>
@@ -73,6 +73,25 @@
     </div>
   </section>
 
+  <section id="screen-restore-tg" class="screen" hidden>
+    <h1>Restore from Telegram</h1>
+    <p class="hint">Your wallet's bot posted its backups into your chat with it. Give the bot's token and the wallet's 24 words, press Start, then forward the bot everything it posted in the last week: select the backup files in that chat, forward, pick the bot. The wallet takes the newest full copy and the changes after it, and ignores the rest.</p>
+    <label>Bot token, from @BotFather
+      <input id="rt-token" autocomplete="off" spellcheck="false" placeholder="123456789:AA…">
+    </label>
+    <label>The wallet's 24 words
+      <textarea id="rt-words" rows="3" autocomplete="off" spellcheck="false"></textarea>
+    </label>
+    <label>A name for the restored wallet — empty keeps the name it had
+      <input id="rt-name" autocomplete="off" placeholder="marigold">
+    </label>
+    <button id="rt-start" class="primary">Start</button>
+    <button id="rt-back">Back</button>
+    <pre id="rt-progress" class="figures small" hidden></pre>
+    <p id="rt-error" class="error"></p>
+    <p id="rt-done" class="ok" hidden></p>
+  </section>
+
   <section id="screen-home" class="screen" hidden>
     <p id="syncing" class="banner" hidden></p>
     <nav class="tabs">
@@ -80,6 +99,7 @@
       <button data-tab="pay" class="tab">Pay</button>
       <button data-tab="request" class="tab">Request</button>
       <button data-tab="give" class="tab">Give</button>
+      <button data-tab="backup" class="tab">Backup</button>
       <button data-tab="status" class="tab">Status</button>
     </nav>
 
@@ -165,6 +185,39 @@
         <p id="request-watch" class="hint">Watching for the payment…</p>
         <p id="request-paid" class="ok" hidden></p>
       </div>
+    </div>
+
+    <div id="tab-backup" class="tab-panel" hidden>
+      <h1>Backup</h1>
+      <pre id="backup-status" class="figures small">…</pre>
+      <p class="hint">Every backup opens with your 24 words and with nothing else — never with your password. A copy on someone else's server is noise to everyone but you.</p>
+      <div id="backup-actions" hidden>
+        <button id="backup-now" class="primary">Back up now</button>
+        <button id="backup-toggle" hidden>Pause automatic backups</button>
+        <p class="hint">After the first backup the wallet keeps the copy current by itself while it is open: a full copy every week, the changes within minutes of a payment, silently. To bring it back on another machine: "Restore one from Telegram" on the opening screen, then forward the bot everything it posted in the last week.</p>
+      </div>
+      <div id="bot-setup" hidden>
+        <h2>Your Telegram bot</h2>
+        <p class="hint">Backups go to your own bot's chat with you — the same bot that lets your phone pay and receive. Make one with @BotFather in Telegram (two minutes) and paste its token here.</p>
+        <label>Bot token
+          <input id="bot-token" autocomplete="off" spellcheck="false" placeholder="123456789:AA…">
+        </label>
+        <label>A PIN the bot asks for before it pays — four digits or more, not the wallet password
+          <input id="bot-pin" type="password" autocomplete="off">
+        </label>
+        <button id="bot-setup-go" class="primary">Set up the bot</button>
+      </div>
+      <div id="bot-pair" hidden>
+        <h2>Pair your phone</h2>
+        <p>Open your bot in Telegram and send it: <code id="pair-code"></code></p>
+        <p class="hint">The code lives fifteen minutes; this screen notices when the pairing is done. Turn on two-step verification in Telegram: that account can move money now.</p>
+        <button id="bot-repair">Make a new code</button>
+      </div>
+      <h2>A backup file</h2>
+      <p class="hint">The same encrypted copy as a file, for a USB stick or a drive of your own. It goes into your Downloads folder.</p>
+      <button id="backup-file">Save a backup file</button>
+      <p id="backup-error" class="error"></p>
+      <p id="backup-done" class="ok" hidden></p>
     </div>
 
     <div id="tab-status" class="tab-panel" hidden>

@@ -151,6 +151,10 @@ pub struct WalletService {
     started: std::time::Instant,
     say: Say,
     local_miner: Option<LocalMiner>,
+    /// The storage folder and the wallet's file name: where its Telegram
+    /// settings and backup index live.
+    folder: String,
+    name: String,
 }
 
 fn utc_day() -> u64 {
@@ -182,7 +186,101 @@ impl WalletService {
             started: std::time::Instant::now(),
             say,
             local_miner,
+            folder: folder.to_string(),
+            name: name.to_string(),
         })
+    }
+
+    pub fn wallet_name(&self) -> &str {
+        &self.name
+    }
+
+    /// The wallet's Telegram settings file.
+    pub fn telegram_path(&self) -> std::path::PathBuf {
+        TelegramConfig::path(&self.folder, &self.name)
+    }
+
+    pub fn telegram_config(&self) -> Option<TelegramConfig> {
+        TelegramConfig::load(&self.telegram_path())
+    }
+
+    async fn backup_files(&self) -> std::result::Result<crate::tgbackup::WalletFiles, String> {
+        crate::tgbackup::WalletFiles::of_wallet(&self.wallet, &self.name).await.map_err(|e| e.to_string())
+    }
+
+    /// What the backup screen shows.
+    pub async fn backup_status(&self) -> std::result::Result<crate::tgbackup::BackupStatus, String> {
+        let files = self.backup_files().await?;
+        Ok(crate::tgbackup::status(&files, self.telegram_config().as_ref()))
+    }
+
+    /// A checkpoint now — and the automatic backups from then on.
+    pub async fn backup_now(&self) -> std::result::Result<String, String> {
+        let files = self.backup_files().await?;
+        let cfg = self.telegram_config().ok_or("no Telegram bot is set up for this wallet yet")?;
+        if crate::tgbackup::target_chat(&cfg).is_none() {
+            return Err("the bot is not paired yet: open it in Telegram and send it the pairing code first".to_string());
+        }
+        crate::tgbackup::set_paused(&files, false).map_err(|e| e.to_string())?;
+        let key = crate::tgbackup::key_for(&self.wallet, &self.secret).await.map_err(|e| e.to_string())?;
+        let say = self.say.clone();
+        let progress = move |line: String| say(format!("Backup: {line}"));
+        crate::tgbackup::run_files(&files, &cfg, &key, true, &progress).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn backup_automatic(&self, on: bool) -> std::result::Result<(), String> {
+        let files = self.backup_files().await?;
+        crate::tgbackup::set_paused(&files, !on).map_err(|e| e.to_string())
+    }
+
+    /// The sealed archive for a backup file, and the name to give it.
+    pub async fn backup_file(&self) -> std::result::Result<(String, Vec<u8>), String> {
+        let files = self.backup_files().await?;
+        let key = crate::tgbackup::key_for(&self.wallet, &self.secret).await.map_err(|e| e.to_string())?;
+        let (_, packed) = crate::tgbackup::pack_checked(&files, &key).map_err(|e| e.to_string())?;
+        let stamp = chrono::Local::now().format("%Y%m%d-%H%M");
+        Ok((format!("marigold-{}-{stamp}.mgb", self.name), packed))
+    }
+
+    /// Sets the wallet's bot up the way 'mobile telegram <token>' does, and
+    /// returns the pairing code to send it. A running bot has to be started
+    /// (or restarted) by the caller, which owns that task.
+    pub fn telegram_setup(&self, token: &str, pin: &str) -> std::result::Result<String, String> {
+        let token = token.trim();
+        if !token.contains(':') || token.len() < 20 {
+            return Err("that does not look like a bot token (BotFather gives one like 123456789:AA...)".to_string());
+        }
+        if pin.trim().len() < 4 {
+            return Err("the PIN needs four characters at least".to_string());
+        }
+        let existing = self.telegram_config();
+        let cfg = TelegramConfig::new(
+            token.to_string(),
+            pin.trim(),
+            existing.map(|c| c.daily_limit_petals).unwrap_or(crate::telegram::DEFAULT_DAILY_LIMIT_PETALS),
+        );
+        cfg.save(&self.telegram_path()).map_err(|e| format!("cannot save the bot settings: {e}"))?;
+        Ok(cfg.pairing_code.unwrap_or_default())
+    }
+
+    /// The automatic backup's tick, for a front end that has no housekeeping loop of its own.
+    pub async fn backup_tick(&self, state: &Arc<Mutex<crate::tgbackup::AutoState>>) {
+        crate::tgbackup::auto_tick_for(
+            self.wallet.clone(),
+            self.telegram_path(),
+            self.name.clone(),
+            self.secret.clone(),
+            state.clone(),
+            self.say.clone(),
+        )
+        .await;
+    }
+
+    /// Before the wallet closes: post any change not yet posted.
+    pub async fn backup_flush(&self) {
+        let say = self.say.clone();
+        let relay = move |line: String| say(line);
+        crate::tgbackup::flush_for(&self.wallet, &self.telegram_path(), &self.name, &self.secret, &relay).await;
     }
 
     /// Which miner, if any: one this service runs, one inside the terminal

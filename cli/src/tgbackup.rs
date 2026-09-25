@@ -22,6 +22,7 @@ use crate::backup::{self as archive, ArchiveEntry, key_from_words};
 use crate::cli::KaspaCli;
 use crate::imports::*;
 use crate::telegram::{BACKUP_PART_BYTES, TelegramConfig, part_file_name, send_document, send_plain};
+use kaspa_wallet_core::wallet::Wallet;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -107,16 +108,22 @@ pub struct WalletFiles {
 }
 
 impl WalletFiles {
+    /// The open wallet's files, for the terminal wallet.
     pub async fn of(cli: &Arc<KaspaCli>) -> Result<Self> {
         let descriptor = cli.store().descriptor().ok_or_else(|| Error::custom("no wallet is open"))?;
-        let name = descriptor.filename.clone();
-        let vault_folder = cli.wallet().store().as_note_key_store()?.vault_folder().await?;
+        Self::of_wallet(&cli.wallet(), &descriptor.filename).await
+    }
+
+    /// The open wallet's files, for whichever front end holds the wallet —
+    /// the terminal, the desktop app, the bot's service.
+    pub async fn of_wallet(wallet: &Arc<Wallet>, name: &str) -> Result<Self> {
+        let vault_folder = wallet.store().as_note_key_store()?.vault_folder().await?;
         let wallet_dir = vault_folder.parent().ok_or_else(|| Error::custom("cannot work out the wallet folder"))?.to_path_buf();
-        let wallet_file = wallet_dir.join(kaspa_wallet_core::storage::local::keys_file_name(&name));
+        let wallet_file = wallet_dir.join(kaspa_wallet_core::storage::local::keys_file_name(name));
         if !wallet_file.exists() {
             return Err(Error::custom(format!("{} is missing — nothing to back up", wallet_file.display())));
         }
-        Ok(Self { name, wallet_dir, wallet_file, vault_folder })
+        Ok(Self { name: name.to_string(), wallet_dir, wallet_file, vault_folder })
     }
 
     /// Every file of the wallet as archive entries, paths as a backup names them.
@@ -260,8 +267,19 @@ pub async fn run(cli: &Arc<KaspaCli>, key: &Secret, force_checkpoint: bool, say:
     let files = WalletFiles::of(cli).await?;
     let cfg_path = telegram_config_path(cli)?;
     let cfg = TelegramConfig::load(&cfg_path).ok_or_else(|| Error::custom("no Telegram bot is set up for this wallet"))?;
-    let chat_id = target_chat(&cfg)
-        .ok_or_else(|| Error::custom("nowhere to post: pair the bot first ('mobile telegram'), or give a group id"))?;
+    run_files(&files, &cfg, key, force_checkpoint, say).await
+}
+
+/// The backup run on a wallet's files: the shared core behind the terminal
+/// command, the housekeeping tick and the desktop wallet's screen.
+pub async fn run_files(
+    files: &WalletFiles,
+    cfg: &TelegramConfig,
+    key: &Secret,
+    force_checkpoint: bool,
+    say: &(dyn Fn(String) + Send + Sync),
+) -> Result<String> {
+    let chat_id = target_chat(cfg).ok_or_else(|| Error::custom("nowhere to post: pair the bot first, or give a group id"))?;
     let mut index = BackupIndex::load(&files.wallet_dir);
     let entries = files.entries()?;
     let plan = if force_checkpoint { Plan::Checkpoint } else { plan(&index, &entries) };
@@ -338,6 +356,27 @@ pub struct AutoState {
 /// Called from housekeeping every few seconds; cheap unless a post is due.
 /// A post runs on its own task so housekeeping never waits on Telegram.
 pub async fn auto_tick(cli: &Arc<KaspaCli>, state: &Arc<Mutex<AutoState>>) {
+    if !cli.wallet().is_open() {
+        return;
+    }
+    let Some(secret) = cli.tidying_secret() else { return };
+    let Some(descriptor) = cli.store().descriptor() else { return };
+    let Ok(cfg_path) = telegram_config_path(cli) else { return };
+    let cli_ = cli.clone();
+    let say: Arc<dyn Fn(String) + Send + Sync> = Arc::new(move |line: String| tprintln!(cli_, "{line}"));
+    auto_tick_for(cli.wallet(), cfg_path, descriptor.filename.clone(), secret, state.clone(), say).await;
+}
+
+/// The tick for any front end: `cfg_path` is the wallet's Telegram settings
+/// file, `say` receives the one line a post produces.
+pub async fn auto_tick_for(
+    wallet: Arc<Wallet>,
+    cfg_path: PathBuf,
+    name: String,
+    secret: Secret,
+    state: Arc<Mutex<AutoState>>,
+    say: Arc<dyn Fn(String) + Send + Sync>,
+) {
     let now = now_secs();
     {
         let mut st = state.lock().unwrap();
@@ -346,16 +385,11 @@ pub async fn auto_tick(cli: &Arc<KaspaCli>, state: &Arc<Mutex<AutoState>>) {
         }
         st.last_check = now;
     }
-    if !cli.wallet().is_open() {
-        return;
-    }
-    let Some(secret) = cli.tidying_secret() else { return };
-    let Ok(cfg_path) = telegram_config_path(cli) else { return };
     let Some(cfg) = TelegramConfig::load(&cfg_path) else { return };
     if target_chat(&cfg).is_none() {
         return;
     }
-    let Ok(files) = WalletFiles::of(cli).await else { return };
+    let Ok(files) = WalletFiles::of_wallet(&wallet, &name).await else { return };
     let index = BackupIndex::load(&files.wallet_dir);
     // Nothing goes anywhere until the owner has asked once: the first
     // 'backup telegram' posts the first checkpoint, and from then on the
@@ -380,45 +414,163 @@ pub async fn auto_tick(cli: &Arc<KaspaCli>, state: &Arc<Mutex<AutoState>>) {
         return;
     }
     state.lock().unwrap().running = true;
-    let cli = cli.clone();
-    let state = state.clone();
     workflow_core::task::spawn(async move {
-        let outcome = run_with_words(&cli, &secret, false).await;
+        let outcome = async {
+            let key = key_for(&wallet, &secret).await?;
+            let quiet = |_line: String| {};
+            run_files(&files, &cfg, &key, false, &quiet).await
+        }
+        .await;
         match outcome {
             Ok(line) if line.starts_with("nothing") => {}
-            Ok(line) => tprintln!(cli, "{}", crate::ui::dim(format!("Telegram backup: {line}."))),
-            Err(err) => tprintln!(cli, "{}", crate::ui::warn(format!("Telegram backup did not go out: {err}"))),
+            Ok(line) => say(crate::ui::dim(format!("Telegram backup: {line}."))),
+            Err(err) => say(crate::ui::warn(format!("Telegram backup did not go out: {err}"))),
         }
         state.lock().unwrap().running = false;
     });
 }
 
+/// The backup key of an open wallet: its 24 words, read from the vault under
+/// the wallet password, through `key_from_words`.
+pub async fn key_for(wallet: &Arc<Wallet>, secret: &Secret) -> Result<Secret> {
+    let store = wallet.store().as_note_key_store()?;
+    let words = store.recovery_words(secret).await?;
+    Ok(key_from_words(&words))
+}
+
 /// A backup run sealed under the wallet's words, which the wallet password unlocks.
 pub async fn run_with_words(cli: &Arc<KaspaCli>, secret: &Secret, force_checkpoint: bool) -> Result<String> {
-    let store = cli.wallet().store().as_note_key_store()?;
-    let words = store.recovery_words(secret).await?;
-    let key = key_from_words(&words);
+    let key = key_for(&cli.wallet(), secret).await?;
     let quiet = |_line: String| {};
     run(cli, &key, force_checkpoint, &quiet).await
+}
+
+/// What a screen or a status line shows about the backups.
+#[derive(Debug, Clone, Serialize)]
+pub struct BackupStatus {
+    /// Where the backups go, in words: "the bot's chat with you", "the group -5181777138", "nowhere yet".
+    pub destination: String,
+    /// A bot is set up for this wallet.
+    pub bot: bool,
+    /// The bot has been paired with its owner's Telegram account.
+    pub paired: bool,
+    /// The pairing code to send the bot, while one is live and nobody has paired.
+    pub pairing_code: Option<String>,
+    /// "on", "off", or "not started".
+    pub automatic: String,
+    pub checkpoint_at: u64,
+    pub checkpoint_bytes: u64,
+    pub deltas: u32,
+    pub last_post_at: u64,
+}
+
+pub fn status(files: &WalletFiles, cfg: Option<&TelegramConfig>) -> BackupStatus {
+    let index = BackupIndex::load(&files.wallet_dir);
+    let destination = match cfg.map(|c| (c.backup_chat_id, c.chat_id)) {
+        Some((Some(id), _)) => format!("the group {id}"),
+        Some((None, Some(_))) => "the bot's chat with you".to_string(),
+        _ => "nowhere yet".to_string(),
+    };
+    BackupStatus {
+        destination,
+        bot: cfg.is_some(),
+        paired: cfg.is_some_and(|c| c.user_id.is_some()),
+        pairing_code: cfg.and_then(|c| if c.user_id.is_none() && c.pairing_code_live() { c.pairing_code.clone() } else { None }),
+        automatic: if index.paused {
+            "off"
+        } else if index.checkpoint.is_empty() {
+            "not started"
+        } else {
+            "on"
+        }
+        .to_string(),
+        checkpoint_at: index.checkpoint_at,
+        checkpoint_bytes: index.checkpoint_bytes,
+        deltas: index.delta_seq,
+        last_post_at: index.last_post_at,
+    }
+}
+
+pub fn set_paused(files: &WalletFiles, paused: bool) -> Result<()> {
+    let mut index = BackupIndex::load(&files.wallet_dir);
+    index.paused = paused;
+    index.save(&files.wallet_dir)
+}
+
+/// The sealed archive of a wallet for a file backup, checked to read back.
+pub fn pack_checked(files: &WalletFiles, key: &Secret) -> Result<(Vec<ArchiveEntry>, Vec<u8>)> {
+    let entries = files.entries()?;
+    let packed = archive::pack(&entries, key)?;
+    let restored = archive::unpack(&packed, key)?;
+    if restored.len() != entries.len() || entries.iter().zip(restored.iter()).any(|(a, b)| a.path != b.path || a.data != b.data) {
+        return Err(Error::custom("the backup did not read back correctly — do not rely on it"));
+    }
+    Ok((entries, packed))
+}
+
+/// What a restore put in place.
+pub struct Restored {
+    pub written: usize,
+    /// The name the backup carried.
+    pub original: String,
+    /// The name the files have now.
+    pub name: String,
+}
+
+/// Puts decrypted backup entries in place under `folder` — under `new_name`
+/// if given — and marks the wallet for key rotation on its first open. The
+/// shared tail of every restore; the terminal adds its questions around it.
+pub fn install_restored(entries: Vec<ArchiveEntry>, folder: &Path, new_name: Option<String>) -> Result<Restored> {
+    let original = archive::wallet_name_in(&entries)?;
+    let name = new_name.unwrap_or_else(|| original.clone());
+    if name.to_lowercase() == "wallet" {
+        return Err(Error::custom("a wallet cannot be named 'wallet'"));
+    }
+    let entries = if name == original { entries } else { archive::rename_entries(entries, &original, &name)? };
+    let written = archive::extract(&entries, folder)?;
+    // A backup is a copy of the keys, and any other copy of it can spend the
+    // same notes. The first open of the restored wallet rotates every note to
+    // fresh keys (POOL-SPEC.md P5.6), which needs the wallet open and a node:
+    // this marker asks for it (threat pass, 2026-09-20).
+    let marker = folder.join(kaspa_wallet_core::storage::local::wallet_dir_name(&name)).join("notes").join(archive::ROTATE_ON_OPEN);
+    if let Some(dir) = marker.parent() {
+        std::fs::create_dir_all(dir).ok();
+    }
+    std::fs::write(&marker, b"restored from a backup; rotate every note on the first open\n").ok();
+    Ok(Restored { written, original, name })
 }
 
 /// At 'close': a change not yet posted goes out now rather than at the next open.
 pub async fn flush_before_close(cli: &Arc<KaspaCli>) {
     let Some(secret) = cli.tidying_secret() else { return };
+    let Some(descriptor) = cli.store().descriptor() else { return };
     let Ok(cfg_path) = telegram_config_path(cli) else { return };
-    let Some(cfg) = TelegramConfig::load(&cfg_path) else { return };
+    let say = |line: String| tprintln!(cli, "{line}");
+    flush_for(&cli.wallet(), &cfg_path, &descriptor.filename, &secret, &say).await;
+}
+
+/// The flush for any front end; `say` receives what happened, or nothing
+/// when there was nothing to post.
+pub async fn flush_for(wallet: &Arc<Wallet>, cfg_path: &Path, name: &str, secret: &Secret, say: &(dyn Fn(String) + Send + Sync)) {
+    let Some(cfg) = TelegramConfig::load(cfg_path) else { return };
     if target_chat(&cfg).is_none() {
         return;
     }
-    let Ok(files) = WalletFiles::of(cli).await else { return };
+    let Ok(files) = WalletFiles::of_wallet(wallet, name).await else { return };
     let index = BackupIndex::load(&files.wallet_dir);
     if index.paused || index.checkpoint.is_empty() || index.gate == files.gate() {
         return;
     }
-    tprintln!(cli, "{}", crate::ui::dim("Backing up the latest changes to Telegram before closing…"));
-    match run_with_words(cli, &secret, false).await {
-        Ok(line) => tprintln!(cli, "{}", crate::ui::dim(format!("Telegram backup: {line}."))),
-        Err(err) => tprintln!(cli, "{}", crate::ui::warn(format!("Telegram backup did not go out: {err}"))),
+    say(crate::ui::dim("Backing up the latest changes to Telegram before closing…"));
+    let outcome = async {
+        let key = key_for(wallet, secret).await?;
+        let quiet = |_line: String| {};
+        run_files(&files, &cfg, &key, false, &quiet).await
+    }
+    .await;
+    match outcome {
+        Ok(line) => say(crate::ui::dim(format!("Telegram backup: {line}."))),
+        Err(err) => say(crate::ui::warn(format!("Telegram backup did not go out: {err}"))),
     }
 }
 

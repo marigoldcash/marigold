@@ -36,7 +36,78 @@ function tab(name) {
   for (const p of document.querySelectorAll(".tab-panel")) p.hidden = p.id !== `tab-${name}`;
   if (name === "balance") refreshBalance();
   if (name === "status") refreshStatus();
+  if (name === "backup") refreshBackup(); else stopPairWatch();
 }
+
+// Backup: where it goes, whether it runs by itself, and the bot behind it.
+let pairTimer = null;
+function stopPairWatch() { if (pairTimer) { clearInterval(pairTimer); pairTimer = null; } }
+const when = (secs) => secs ? new Date(secs * 1000).toLocaleString() : "never";
+const size = (bytes) => bytes < 1024 ? `${bytes} B` : bytes < 1048576 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1048576).toFixed(1)} MB`;
+async function refreshBackup() {
+  try {
+    const st = await invoke("backup_status");
+    $("backup-status").textContent =
+      `Backups go to: ${st.destination}\nAutomatic: ${st.automatic}\nLast full copy: ${when(st.checkpoint_at)}${st.checkpoint_at ? ` (${size(st.checkpoint_bytes)})` : ""}\nChange sets since: ${st.deltas}\nLast post: ${when(st.last_post_at)}`;
+    $("bot-setup").hidden = st.bot;
+    $("bot-pair").hidden = !(st.bot && !st.paired);
+    $("backup-actions").hidden = !(st.bot && st.paired);
+    if (st.bot && !st.paired) {
+      $("pair-code").textContent = st.pairing_code ? `/start ${st.pairing_code}` : "(the code has expired — make a new one)";
+      $("bot-repair").hidden = !!st.pairing_code;
+      if (!pairTimer) pairTimer = setInterval(refreshBackup, 5000);
+    } else stopPairWatch();
+    $("backup-toggle").hidden = st.automatic === "not started";
+    $("backup-toggle").textContent = st.automatic === "on" ? "Pause automatic backups" : "Resume automatic backups";
+    $("backup-toggle").dataset.on = st.automatic === "on" ? "1" : "";
+  } catch (e) { $("backup-status").textContent = String(e); }
+}
+$("backup-now").addEventListener("click", async () => {
+  $("backup-error").textContent = ""; $("backup-done").hidden = true; $("backup-now").disabled = true;
+  try { const line = await invoke("backup_now"); $("backup-done").textContent = `Telegram backup: ${line}.`; $("backup-done").hidden = false; refreshBackup(); }
+  catch (e) { $("backup-error").textContent = String(e); }
+  $("backup-now").disabled = false;
+});
+$("backup-toggle").addEventListener("click", async () => {
+  $("backup-error").textContent = "";
+  try { await invoke("backup_automatic", { on: !$("backup-toggle").dataset.on }); refreshBackup(); } catch (e) { $("backup-error").textContent = String(e); }
+});
+$("backup-file").addEventListener("click", async () => {
+  $("backup-error").textContent = ""; $("backup-done").hidden = true; $("backup-file").disabled = true;
+  try { const path = await invoke("backup_file"); $("backup-done").textContent = `Saved to ${path}. It opens with your 24 words.`; $("backup-done").hidden = false; }
+  catch (e) { $("backup-error").textContent = String(e); }
+  $("backup-file").disabled = false;
+});
+async function setupBot(token, pin) {
+  $("backup-error").textContent = ""; $("bot-setup-go").disabled = true;
+  try { await invoke("telegram_setup", { token, pin }); $("bot-token").value = ""; $("bot-pin").value = ""; refreshBackup(); }
+  catch (e) { $("backup-error").textContent = String(e); }
+  $("bot-setup-go").disabled = false;
+}
+$("bot-setup-go").addEventListener("click", () => setupBot($("bot-token").value, $("bot-pin").value));
+$("bot-repair").addEventListener("click", () => {
+  // A new code needs the token and PIN again: back to the setup fields.
+  $("bot-pair").hidden = true; $("bot-setup").hidden = false;
+});
+
+// Restore from Telegram: token and words first, then the forward.
+let restoringTg = false;
+$("go-restore-tg").addEventListener("click", () => {
+  $("rt-error").textContent = ""; $("rt-done").hidden = true; $("rt-progress").hidden = true; $("rt-progress").textContent = "";
+  show("restore-tg");
+});
+$("rt-back").addEventListener("click", () => { if (!restoringTg) show("open"); });
+$("rt-start").addEventListener("click", async () => {
+  $("rt-error").textContent = ""; $("rt-done").hidden = true; $("rt-start").disabled = true; restoringTg = true;
+  $("rt-progress").hidden = false; $("rt-progress").textContent = "Waiting for the parts you forward to the bot (up to ten minutes)…";
+  try {
+    const line = await invoke("restore_telegram", { token: $("rt-token").value, words: $("rt-words").value, name: $("rt-name").value });
+    $("rt-token").value = ""; $("rt-words").value = "";
+    $("rt-done").textContent = line; $("rt-done").hidden = false;
+    await loadWallets();
+  } catch (e) { $("rt-error").textContent = String(e); }
+  restoringTg = false; $("rt-start").disabled = false;
+});
 async function refreshBalance() {
   try {
     $("balance").textContent = await invoke("balance");
@@ -82,7 +153,10 @@ async function loadWallets(select_filename) {
 async function init() {
   $("version").textContent = "v" + (await invoke("version"));
   await loadWallets();
-  await listen("say", (event) => { $("say").textContent = event.payload; });
+  await listen("say", (event) => {
+    $("say").textContent = event.payload;
+    if (restoringTg) $("rt-progress").textContent += `\n${event.payload}`;
+  });
   show("open");
 }
 
@@ -275,7 +349,7 @@ $("hide-words").addEventListener("click", () => { $("words-again").innerHTML = "
 $("close-wallet").addEventListener("click", () => { $("words-again").innerHTML = ""; $("words-again").hidden = true; $("hide-words").hidden = true; });
 $("refresh-status").addEventListener("click", refreshStatus);
 $("close-wallet").addEventListener("click", async () => {
-  watching = null; if (syncTimer) { clearInterval(syncTimer); syncTimer = null; } $("syncing").hidden = true;
+  watching = null; stopPairWatch(); if (syncTimer) { clearInterval(syncTimer); syncTimer = null; } $("syncing").hidden = true;
   await invoke("close");
   opened = null; $("context").textContent = "";
   show("open");

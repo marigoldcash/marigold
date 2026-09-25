@@ -9,7 +9,7 @@ pub struct Wallet;
 
 /// Written into a restored wallet's vault by 'wallet restore'; removed once
 /// the first open with a node has rotated every note.
-const ROTATE_ON_OPEN: &str = "rotate-on-open";
+use crate::backup::ROTATE_ON_OPEN;
 
 impl Wallet {
     /// The restore marker of the open wallet, if it has one.
@@ -922,13 +922,13 @@ impl Wallet {
         tprintln!(ctx, "");
         tpara!(
             ctx,
-            "Restore it with 'wallet restore <file>' on any machine. It needs this passphrase \
-            and nothing else — not your 24 words, not your wallet password, though the wallet \
-            password is still what opens the wallet afterwards. \
+            "Restore it with 'wallet restore <file>' on any machine. It opens with your 24 words \
+            and nothing else — never with your wallet password, though the password is still what \
+            opens the wallet afterwards. \
             "
         );
         tprintln!(ctx, "");
-        tprintln!(ctx, "{}", style("This one file is enough to spend your money. Treat it as cash.").red());
+        tprintln!(ctx, "{}", style("This file plus your 24 words are enough to spend your money. Treat it as cash.").red());
         tprintln!(ctx, "");
         Ok(())
     }
@@ -955,7 +955,7 @@ impl Wallet {
         }
         let entries = archive::unpack(&bytes, &Secret::from(pass.as_bytes().to_vec()))?;
 
-        let name = Self::wallet_name_in(&entries)?;
+        let name = crate::backup::wallet_name_in(&entries)?;
         let (active, retired) = Self::note_counts(&entries);
         let total: usize = entries.iter().map(|e| e.data.len()).sum();
 
@@ -1028,34 +1028,13 @@ impl Wallet {
         new_name: Option<String>,
         guard: &WalletGuard<'_>,
     ) -> Result<()> {
-        use crate::backup as archive;
-        let original = Self::wallet_name_in(&entries)?;
-        let name = new_name.unwrap_or_else(|| original.clone());
-        if name.to_lowercase() == "wallet" {
-            return Err(Error::custom("a wallet cannot be named 'wallet'"));
-        }
-        // Renaming a wallet is a file move and nothing else — no path is stored
-        // inside any of these files — so restoring under a new name is the same
-        // operation done a moment earlier.
-        let entries = if name == original { entries } else { archive::rename_entries(entries, &original, &name)? };
-
         let folder: String = ctx
             .wallet()
             .settings()
             .get(WalletSettings::Folder)
             .unwrap_or_else(|| kaspa_wallet_core::storage::local::default_storage_folder().to_string());
         let folder = workflow_store::fs::resolve_path(&folder)?;
-
-        let written = archive::extract(&entries, &folder)?;
-        // A backup is a copy of the keys, and any other copy of it can spend
-        // the same notes. The first open of the restored wallet rotates every
-        // note to fresh keys (POOL-SPEC.md P5.6), which needs the wallet open
-        // and a node: this marker asks for it (threat pass, 2026-09-20).
-        let marker = folder.join(kaspa_wallet_core::storage::local::wallet_dir_name(&name)).join("notes").join(ROTATE_ON_OPEN);
-        if let Some(dir) = marker.parent() {
-            std::fs::create_dir_all(dir).ok();
-        }
-        std::fs::write(&marker, b"restored from a backup; rotate every note on the first open\n").ok();
+        let crate::tgbackup::Restored { written, original, name } = crate::tgbackup::install_restored(entries, &folder, new_name)?;
 
         tprintln!(ctx, "");
         tprintln!(ctx, "Restored {written} files into {}", style(folder.display().to_string()).bold());
@@ -1153,21 +1132,6 @@ impl Wallet {
     }
 
     /// The wallet's name, read off the one top-level `.wallet` entry.
-    fn wallet_name_in(entries: &[crate::backup::ArchiveEntry]) -> Result<String> {
-        // `<name>.wallet/<name>.keys` — one level down, and the directory
-        // name is the authority since the keys file is named after it.
-        let mut found = entries.iter().filter_map(|e| {
-            let (dir, file) = e.path.split_once('/')?;
-            let name = dir.strip_suffix(".wallet")?;
-            (file == format!("{name}.keys")).then(|| name.to_string())
-        });
-        let name = found.next().ok_or_else(|| Error::custom("that archive holds no wallet file"))?;
-        if found.next().is_some() {
-            return Err(Error::custom("that archive holds more than one wallet file"));
-        }
-        Ok(name)
-    }
-
     /// Work out where to write. A folder gets a dated filename; anything else
     /// is taken literally.
     ///

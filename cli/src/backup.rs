@@ -259,6 +259,26 @@ pub(crate) fn write_owner_only(path: &std::path::Path, bytes: &[u8]) -> std::io:
     options.open(path)?.write_all(bytes)
 }
 
+/// The marker a restore leaves in the vault folder: rotate every note on the
+/// first open (POOL-SPEC.md P5.6).
+pub const ROTATE_ON_OPEN: &str = "rotate-on-open";
+
+/// The wallet an archive holds: `<name>.wallet/<name>.keys` — one level down,
+/// and the directory name is the authority since the keys file is named
+/// after it.
+pub fn wallet_name_in(entries: &[ArchiveEntry]) -> Result<String> {
+    let mut found = entries.iter().filter_map(|e| {
+        let (dir, file) = e.path.split_once('/')?;
+        let name = dir.strip_suffix(".wallet")?;
+        (file == format!("{name}.keys")).then(|| name.to_string())
+    });
+    let name = found.next().ok_or_else(|| Error::custom("that archive holds no wallet file"))?;
+    if found.next().is_some() {
+        return Err(Error::custom("that archive holds more than one wallet file"));
+    }
+    Ok(name)
+}
+
 /// The key an automatic Telegram backup is sealed with: the wallet's 24
 /// words, normalised, through a domain-separated hash. Nothing has to be
 /// asked or remembered beyond the words, which open everything anyway.

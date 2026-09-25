@@ -212,6 +212,8 @@ To bring the wallet back on any machine:
 wallet restore telegram [<name>]
 ```
 
+The desktop wallet has the same on its **Backup** tab: where the backups go, on or off, the last full copy and the change sets since; "Back up now"; the bot's setup (token and PIN, then the pairing code to send it) when there is none yet; and "Save a backup file", which writes the same encrypted file into Downloads. Its opening screen has "Restore one from Telegram": token and words first, then the forward. Both wallets run the bot and the automatic backup while the wallet is open.
+
 It asks for the bot's token hidden (a token typed on the command line would sit in the terminal and its history); then forward the bot everything it posted in the last week: open the chat the backups are in, select the backup files, forward, pick the bot. Order does not matter, and extra files do no harm — the wallet takes the newest checkpoint and the deltas after it and ignores the rest. It goes on a few seconds after the last part, fetches each, asks for **the 24 words** (a backup from before September 2026 opens with its passphrase instead) — merges the checkpoint and the deltas in order (it refuses if a delta in the middle is missing and says which), and runs the ordinary restore. A pre-checkpoint archive sealed with a passphrase (from before 2026-09-24) restores the same way with its passphrase. A bot cannot read a chat's history, which is why the parts have to be forwarded to it. The Telegram bot API is the whole dependency; nothing is stored on any server of ours.
 
 ## 12. Notes-only wallets

@@ -7,7 +7,8 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use kaspa_cli_lib::serve::{Session, SessionOptions, open_session};
+use kaspa_cli_lib::serve::{Session, SessionOptions, WalletService, open_session};
+use kaspa_cli_lib::tgbackup::{AutoState, BackupStatus};
 use kaspa_consensus_core::network::NetworkId;
 use kaspa_wallet_core::prelude::*;
 use kaspa_wallet_core::utils::{sompi_to_kaspa_string, try_kaspa_str_to_sompi};
@@ -23,6 +24,65 @@ struct App {
     shutdown: Arc<AtomicBool>,
     /// "own", "local", "public" or an address: what the open screen chose.
     access: std::sync::Mutex<String>,
+    /// The wallet's Telegram bot, answered while the wallet is open — as the
+    /// terminal wallet does — so the phone works and a pairing can happen.
+    bot: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// The automatic backup's tick.
+    ticker: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
+    backup_state: Arc<std::sync::Mutex<AutoState>>,
+}
+
+/// Starts the bot (when one is set up) and the backup tick for an open wallet.
+async fn start_background(app: &App, service: Arc<WalletService>) {
+    stop_background(app).await;
+    if let Some(cfg) = service.telegram_config() {
+        let path = service.telegram_path();
+        *app.bot.lock().await = Some(tokio::spawn(kaspa_cli_lib::telegram::run_bot(service.clone(), path, cfg)));
+    }
+    let state = app.backup_state.clone();
+    *app.ticker.lock().await = Some(tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(20)).await;
+            service.backup_tick(&state).await;
+        }
+    }));
+}
+
+async fn stop_background(app: &App) {
+    if let Some(bot) = app.bot.lock().await.take() {
+        bot.abort();
+    }
+    if let Some(ticker) = app.ticker.lock().await.take() {
+        ticker.abort();
+    }
+}
+
+/// Closes the open wallet properly: the last backup change goes out, the bot
+/// and the tick stop, a node inside the app is stopped.
+async fn close_session(app: &App) {
+    stop_background(app).await;
+    if let Some(session) = app.session.lock().await.take() {
+        session.service.backup_flush().await;
+        session.close().await;
+    }
+}
+
+/// The terminal paints its remarks; the window shows them plain.
+fn strip_ansi(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' && chars.peek() == Some(&'[') {
+            for d in chars.by_ref() {
+                if d.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 #[derive(Serialize)]
@@ -193,7 +253,7 @@ async fn open(app: AppHandle, state: State<'_, App>, wallet: String, password: S
     };
     let say_app = app.clone();
     let say: kaspa_cli_lib::serve::Say = Arc::new(move |line: String| {
-        let _ = say_app.emit("say", line);
+        let _ = say_app.emit("say", strip_ansi(&line));
     });
     let options = SessionOptions {
         wallet: wallet.clone(),
@@ -229,21 +289,110 @@ async fn open(app: AppHandle, state: State<'_, App>, wallet: String, password: S
         access,
         ticker: session.service.ticker().to_string(),
     };
-    let mut guard = state.session.lock().await;
-    if let Some(old) = guard.take() {
-        old.close().await;
-    }
-    *guard = Some(session);
+    close_session(state.inner()).await;
+    let service = session.service.clone();
+    *state.session.lock().await = Some(session);
     *state.access.lock().unwrap() = node;
+    start_background(state.inner(), service).await;
     Ok(opened)
 }
 
 #[tauri::command]
 async fn close(state: State<'_, App>) -> Result<(), String> {
-    if let Some(session) = state.session.lock().await.take() {
-        session.close().await;
-    }
+    close_session(state.inner()).await;
     Ok(())
+}
+
+#[tauri::command]
+async fn backup_status(state: State<'_, App>) -> Result<BackupStatus, String> {
+    with_service(&state, |s| async move { s.backup_status().await }).await
+}
+
+#[tauri::command]
+async fn backup_now(state: State<'_, App>) -> Result<String, String> {
+    with_service(&state, |s| async move { s.backup_now().await }).await
+}
+
+#[tauri::command]
+async fn backup_automatic(state: State<'_, App>, on: bool) -> Result<(), String> {
+    with_service(&state, |s| async move { s.backup_automatic(on).await }).await
+}
+
+/// Writes the encrypted backup file into the Downloads folder (or home) and
+/// says where; never over an existing file.
+#[tauri::command]
+async fn backup_file(app: AppHandle, state: State<'_, App>) -> Result<String, String> {
+    let (name, bytes) = with_service(&state, |s| async move { s.backup_file().await }).await?;
+    let dir = app.path().download_dir().or_else(|_| app.path().home_dir()).map_err(|e| e.to_string())?;
+    let path = dir.join(name);
+    if path.exists() {
+        return Err(format!("{} already exists; a backup never overwrites one", path.display()));
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    use std::io::Write;
+    let mut file = options.open(&path).map_err(|e| format!("cannot create {}: {e}", path.display()))?;
+    file.write_all(&bytes).map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+    file.sync_all().map_err(|e| e.to_string())?;
+    Ok(path.display().to_string())
+}
+
+/// Sets the wallet's bot up and starts answering it, so the pairing can happen.
+#[tauri::command]
+async fn telegram_setup(state: State<'_, App>, token: String, pin: String) -> Result<String, String> {
+    let code = with_service(&state, |s| async move { s.telegram_setup(&token, &pin) }).await?;
+    let service = state.session.lock().await.as_ref().map(|s| s.service.clone()).ok_or("no wallet is open")?;
+    start_background(state.inner(), service).await;
+    Ok(code)
+}
+
+/// Restores a wallet from the backups forwarded to its bot: the newest
+/// checkpoint and the deltas after it, opened with the 24 words. Progress
+/// goes out as "say" lines while the parts arrive.
+#[tauri::command]
+async fn restore_telegram(app: AppHandle, token: String, words: String, name: String) -> Result<String, String> {
+    use kaspa_cli_lib::backup as archive;
+    use kaspa_cli_lib::tgbackup;
+    if !archive::looks_like_words(&words) {
+        return Err("that is not 24 words".to_string());
+    }
+    let token = token.trim().to_string();
+    if !token.contains(':') || token.len() < 20 {
+        return Err("that does not look like a bot token".to_string());
+    }
+    let (_, folder, _) = probe().await?;
+    let folder = if let Some(rest) = folder.strip_prefix("~/") {
+        app.path().home_dir().map_err(|e| e.to_string())?.join(rest)
+    } else {
+        std::path::PathBuf::from(&folder)
+    };
+    let say_app = app.clone();
+    let progress = move |line: String| {
+        let _ = say_app.emit("say", line);
+    };
+    let sets = kaspa_cli_lib::telegram::collect_backup_sets(&token, Duration::from_secs(600), &progress).await?;
+    let mut archives = std::collections::BTreeMap::new();
+    for (backup, parts) in &sets {
+        let mut bytes = Vec::new();
+        for part in parts {
+            bytes.extend(kaspa_cli_lib::telegram::download_file(&token, &part.file_id).await?);
+        }
+        progress(format!("Received {backup} ({} bytes).", bytes.len()));
+        archives.insert(backup.clone(), bytes);
+    }
+    let key = archive::key_from_words(&words);
+    let (entries, checkpoint, deltas) = tgbackup::merge(&archives, &key).map_err(|e| e.to_string())?;
+    let new_name = if name.trim().is_empty() { None } else { Some(name.trim().to_string()) };
+    let restored = tgbackup::install_restored(entries, &folder, new_name).map_err(|e| e.to_string())?;
+    Ok(format!(
+        "Restored {} files as '{}' from checkpoint {checkpoint} with {deltas} change set(s) after it. Open it with the password it had when the backup was made; every note is rotated to fresh keys on its first open with a node.",
+        restored.written, restored.name
+    ))
 }
 
 async fn with_service<T, F, Fut>(state: &State<'_, App>, f: F) -> Result<T, String>
@@ -458,6 +607,9 @@ fn main() {
             session: tokio::sync::Mutex::new(None),
             shutdown: Arc::new(AtomicBool::new(false)),
             access: std::sync::Mutex::new(String::new()),
+            bot: tokio::sync::Mutex::new(None),
+            ticker: tokio::sync::Mutex::new(None),
+            backup_state: Arc::new(std::sync::Mutex::new(AutoState::default())),
         })
         .invoke_handler(tauri::generate_handler![
             version,
@@ -479,7 +631,13 @@ fn main() {
             words,
             request,
             wait_request,
-            qr
+            qr,
+            backup_status,
+            backup_now,
+            backup_automatic,
+            backup_file,
+            telegram_setup,
+            restore_telegram
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { .. } = event {
@@ -488,11 +646,7 @@ fn main() {
                 // clean, the way 'exit' does it in the terminal wallet.
                 let state: State<'_, App> = window.state();
                 state.shutdown.store(true, std::sync::atomic::Ordering::SeqCst);
-                tauri::async_runtime::block_on(async {
-                    if let Some(session) = state.session.lock().await.take() {
-                        session.close().await;
-                    }
-                });
+                tauri::async_runtime::block_on(close_session(state.inner()));
             }
         })
         .run(tauri::generate_context!())
