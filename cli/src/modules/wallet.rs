@@ -1163,11 +1163,12 @@ impl Wallet {
         Ok((entries, packed))
     }
 
-    /// 'backup telegram [now|on|off|status|<group id>]': automatic backups
-    /// through the wallet's bot (founder, 2026-09-24: "like an Apple Cloud
-    /// backup of an iPhone … always up to date"). They go to the bot's own
-    /// chat with the owner — the chat the payment codes arrive in — or to a
-    /// private group if one is given. The first run posts a checkpoint; from
+    /// 'backup telegram [now|on|off|status]': automatic backups through the
+    /// wallet's bot (founder, 2026-09-24: "like an Apple Cloud backup of an
+    /// iPhone … always up to date"). They go to the bot's own chat with the
+    /// owner — the chat the payment codes arrive in; a separate group was an
+    /// option for a day and dropped the same evening ("finding one group and
+    /// then posting it into another gets even me confused"). The first run posts a checkpoint; from
     /// then on the wallet keeps it current by itself while it is open — see
     /// `crate::tgbackup`. Everything is sealed under a key made from the
     /// wallet's 24 words, so nothing has to be asked or remembered.
@@ -1246,38 +1247,15 @@ impl Wallet {
             }
             // 'on' before any checkpoint is the first run.
             Some("on") | Some("now") | None => {}
-            Some(arg) => {
-                let given: i64 =
-                    arg.replace(',', "").parse().map_err(|_| Error::custom("the group id is a number, like 5181777138"))?;
-                // Telegram shows a group's id as a positive number, and its API
-                // wants it negative — plain groups as -<id>, large ones as
-                // -100<id>. Try the forms in turn and keep the one that answers.
-                let candidates: Vec<i64> =
-                    if given < 0 { vec![given] } else { vec![-given, format!("-100{given}").parse().unwrap_or(-given), given] };
-                let mut found = None;
-                for candidate in candidates {
-                    if crate::telegram::chat_reachable(&cfg.token, candidate).await {
-                        found = Some(candidate);
-                        break;
-                    }
-                }
-                let Some(id) = found else {
-                    tprintln!(ctx, "The bot cannot see a chat with that id. Is it a member of the group? (Add it, then try again.)");
-                    return Ok(());
-                };
-                first_time = first_time || cfg.backup_chat_id != Some(id);
-                cfg.backup_chat_id = Some(id);
-                cfg.save(&cfg_path).map_err(|e| Error::custom(format!("cannot save the bot settings: {e}")))?;
-                if index.paused {
-                    index.paused = false;
-                    index.save(&files.wallet_dir)?;
-                }
+            Some(other) => {
+                tprintln!(ctx, "'backup telegram {other}'? It takes 'now', 'on', 'off' or 'status'.");
+                return Ok(());
             }
         }
         if tgbackup::target_chat(&cfg).is_none() {
             tprintln!(
                 ctx,
-                "Nowhere to post yet: open the bot on your phone and pair it (it tells you how), or 'backup telegram <group id>' for a private group the bot is a member of."
+                "Nowhere to post yet: open the bot on your phone and pair it (it tells you how) — backups go into that chat."
             );
             return Ok(());
         }

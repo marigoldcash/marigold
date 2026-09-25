@@ -193,13 +193,12 @@ Copies the backup's files in, recovers `K` from the words, deep-verifies (report
 
 ## 11b. Automatic backups to Telegram, and the restore (2026-09-23/24)
 
-The wallet keeps an encrypted copy of itself in Telegram, and keeps it current by itself — the way a phone backs itself up to its maker's cloud, except that the only servers involved are Telegram's and they hold nothing they can read. It needs the wallet's bot (`mobile telegram <token>`, the token from @BotFather) paired with its owner; the backups then go to the bot's own chat with them, the same chat the payment codes arrive in. A private group the bot is a member of can be given instead.
+The wallet keeps an encrypted copy of itself in Telegram, and keeps it current by itself — the way a phone backs itself up to its maker's cloud, except that the only servers involved are Telegram's and they hold nothing they can read. It needs the wallet's bot (`mobile telegram <token>`, the token from @BotFather) paired with its owner; the backups go to the bot's own chat with them, the same chat the payment codes arrive in, and nowhere else — one chat, so a restore is "forward everything from the last dashed line to the end" to the very bot that posted it.
 
 ```
 backup telegram                 # the first time: posts a checkpoint and starts the automatic backups; later: a checkpoint now
-backup telegram status          # where they go, on/off, last checkpoint, deltas since, last post
+backup telegram status          # on/off, last checkpoint, deltas since, last post
 backup telegram off / on        # pause and resume the automatic posts
-backup telegram 5181777138      # send them to a group instead: its id as Telegram shows it, kept afterwards
 ```
 
 The first run posts a **checkpoint** — the keys file and every note file — straight away. From then on, while the wallet is open, it posts by itself: a **delta** holding only the files that changed since the last post (and the names of any removed), once the vault has been quiet for two minutes and at most every ten; a fresh checkpoint once a week, or sooner when the deltas since the last one outweigh half of it; and any change still unposted goes out at `close`. Nothing is asked: every archive is sealed under a key made from the wallet's 24 words, which the owner keeps anyway and which bring the whole wallet back on any machine. The wallet remembers what it last posted in `telegram-backup.json` beside the wallet file, which is how a delta knows what changed.
