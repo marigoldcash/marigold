@@ -75,7 +75,7 @@
 
   <section id="screen-restore-tg" class="screen" hidden>
     <h1>Restore from Telegram</h1>
-    <p class="hint">Your wallet's bot posted its backups into your chat with it. Give the bot's token and the wallet's 24 words, press Start, then forward the bot everything it posted in the last week: select the backup files in that chat, forward, pick the bot. The wallet takes the newest full copy and the changes after it, and ignores the rest.</p>
+    <p class="hint">Your wallet's bot posted its backups into your chat with it. Give the bot's token and the wallet's 24 words, press Start, then forward the bot everything from the last dashed line in that chat to the end: select those messages, forward, pick the bot. Forwarding more does no harm; the wallet takes the newest full copy and the changes after it.</p>
     <label>Bot token, from @BotFather
       <input id="rt-token" autocomplete="off" spellcheck="false" placeholder="123456789:AA…">
     </label>
@@ -194,7 +194,7 @@
       <div id="backup-actions" hidden>
         <button id="backup-now" class="primary">Back up now</button>
         <button id="backup-toggle" hidden>Pause automatic backups</button>
-        <p class="hint">After the first backup the wallet keeps the copy current by itself while it is open: a full copy every week, the changes within minutes of a payment, silently. To bring it back on another machine: "Restore one from Telegram" on the opening screen, then forward the bot everything it posted in the last week.</p>
+        <p class="hint">After the first backup the wallet keeps the copy current by itself while it is open: a full copy every week, the changes within minutes of a payment, silently. To bring it back on another machine: "Restore one from Telegram" on the opening screen, then forward the bot everything from the last dashed line in the chat to the end.</p>
       </div>
       <div id="bot-setup" hidden>
         <h2>Your Telegram bot</h2>

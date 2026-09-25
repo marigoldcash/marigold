@@ -38,6 +38,10 @@ pub const DELTA_EVERY_SECS: u64 = 600;
 /// forwards a few kilobytes either way (seen on the first live test).
 const DELTA_WEIGHT_LIMIT: f64 = 0.5;
 const DELTA_WEIGHT_FLOOR: u64 = 256 * 1024;
+/// Posted before every full copy, so the instruction for a restore is one
+/// sentence: forward everything from the last dashed line to the end
+/// (founder, 2026-09-24).
+pub const DIVIDER: &str = "────────────────────────────────";
 /// The entry inside a delta that says what it is.
 pub const DELTA_NOTE: &str = "__marigold_delta__.json";
 
@@ -201,22 +205,63 @@ struct DeltaNote {
     removed: Vec<String>,
 }
 
-/// The names: `marigold-<wallet>-<checkpoint>.full.mgb` and
-/// `marigold-<wallet>-<checkpoint>.d<seq>.mgb`, the part suffix after.
+/// The names people see in the chat (founder, 2026-09-24: the old ones were
+/// "huge and really technical" and would put anyone's grandmother off):
+///
+///   Marigold backup - test10 - 2026-09-24 01.17.46 - full.mgb
+///   Marigold backup - test10 - 2026-09-24 01.17.46 - change 3.mgb
+///
+/// with " (part 1 of 3)" before the extension when an archive is split. The
+/// checkpoint's stamp in the index stays `c20260924T011746`; the name carries
+/// the same moment in readable form, and both convert back and forth.
 pub fn checkpoint_name(wallet: &str, checkpoint: &str) -> String {
-    format!("marigold-{wallet}-{checkpoint}.full.mgb")
+    format!("Marigold backup - {wallet} - {} - full.mgb", pretty_stamp(checkpoint))
 }
 
 pub fn delta_name(wallet: &str, checkpoint: &str, seq: u32) -> String {
-    format!("marigold-{wallet}-{checkpoint}.d{seq:03}.mgb")
+    format!("Marigold backup - {wallet} - {} - change {seq}.mgb", pretty_stamp(checkpoint))
+}
+
+/// `c20260924T011746` → `2026-09-24 01.17.46`; a stamp of another shape is left as it is.
+fn pretty_stamp(stamp: &str) -> String {
+    let d: Vec<char> = stamp.trim_start_matches('c').chars().filter(|c| c.is_ascii_digit()).collect();
+    if d.len() != 14 {
+        return stamp.to_string();
+    }
+    let s: String = d.into_iter().collect();
+    format!("{}-{}-{} {}.{}.{}", &s[0..4], &s[4..6], &s[6..8], &s[8..10], &s[10..12], &s[12..14])
+}
+
+/// `2026-09-24 01.17.46` → `c20260924T011746`.
+fn stamp_from_pretty(pretty: &str) -> Option<String> {
+    let d: String = pretty.chars().filter(|c| c.is_ascii_digit()).collect();
+    (d.len() == 14).then(|| format!("c{}T{}", &d[0..8], &d[8..14]))
+}
+
+/// The moment a checkpoint name carries, for people: `2026-09-24 01:17`.
+pub fn checkpoint_moment(stamp: &str) -> String {
+    let p = pretty_stamp(stamp);
+    if p.len() >= 16 { format!("{} {}", &p[0..10], p[11..16].replace('.', ":")) } else { p }
 }
 
 /// Which backup a name is: (checkpoint stamp, None for the checkpoint itself
-/// or Some(seq) for a delta). A name from before checkpoints — one
-/// passphrase-sealed archive, `marigold-<wallet>-<time>.mgb` — counts as a
-/// checkpoint of its own, named by its whole stem.
+/// or Some(seq) for a delta). The readable names above; the first scheme
+/// (`marigold-<wallet>-c<stamp>.full.mgb` / `.d<seq>.mgb`, 2026-09-24
+/// morning); and a name from before checkpoints — one passphrase-sealed
+/// archive — which counts as a checkpoint of its own, named by its stem.
 pub fn parse_backup_name(name: &str) -> Option<(String, Option<u32>)> {
     let stem = name.strip_suffix(".mgb")?;
+    if let Some(rest) = stem.strip_prefix("Marigold backup - ") {
+        // `<wallet> - <pretty stamp> - full` or `… - change N`; the wallet
+        // name may itself hold " - ", so read from the right.
+        let (rest, kind) = rest.rsplit_once(" - ")?;
+        let (_, pretty) = rest.rsplit_once(" - ")?;
+        let stamp = stamp_from_pretty(pretty)?;
+        return match kind {
+            "full" => Some((stamp, None)),
+            k => k.strip_prefix("change ").and_then(|n| n.parse::<u32>().ok()).map(|seq| (stamp, Some(seq))),
+        };
+    }
     let stamp_of = |prefix: &str| prefix.rsplit_once("-c").map(|(_, digits)| format!("c{digits}"));
     if let Some(prefix) = stem.strip_suffix(".full") {
         return Some((stamp_of(prefix)?, None));
@@ -235,28 +280,22 @@ fn checkpoint_order(stamp: &str) -> (bool, String) {
     (stamp.starts_with('c') && stamp[1..].chars().all(|c| c.is_ascii_digit() || c == 'T'), stamp.to_string())
 }
 
-/// Posts one sealed archive as start message, parts and end message.
-async fn post(token: &str, chat_id: i64, name: &str, packed: &[u8], say: &(dyn Fn(String) + Send + Sync)) -> Result<()> {
-    let digest = sha256_hex(packed);
+/// Posts one sealed archive: a plain line saying what it is, then the file
+/// (or its parts). No hashes, no markers — the archive is sealed and checked
+/// on its own, and the chat should read like a person wrote it.
+async fn post(token: &str, chat_id: i64, name: &str, what: &str, packed: &[u8], say: &(dyn Fn(String) + Send + Sync)) -> Result<()> {
     let parts: Vec<&[u8]> = packed.chunks(BACKUP_PART_BYTES).collect();
     let count = parts.len();
-    send_plain(token, chat_id, &format!("----- Marigold backup {name}: {count} part(s), {} bytes, sha256 {digest}", packed.len()))
+    let in_parts = if count > 1 { format!(", in {count} files") } else { String::new() };
+    send_plain(token, chat_id, &format!("{what}{in_parts}. To bring the wallet back on another computer, forward this bot everything from the last dashed line to the end of this chat; it opens with your 24 words."))
         .await
         .map_err(Error::custom)?;
     for (i, chunk) in parts.iter().enumerate() {
         let index = i + 1;
-        send_document(
-            token,
-            chat_id,
-            &part_file_name(name, index, count),
-            chunk.to_vec(),
-            &format!("Part {index} of {count} of {name} · sha256 {}…", &digest[..16]),
-        )
-        .await
-        .map_err(Error::custom)?;
+        let caption = if count > 1 { format!("{what} (part {index} of {count})") } else { what.to_string() };
+        send_document(token, chat_id, &part_file_name(name, index, count), chunk.to_vec(), &caption).await.map_err(Error::custom)?;
         say(format!("part {index} of {count} sent ({})", archive::human_size(chunk.len())));
     }
-    send_plain(token, chat_id, &format!("----- End of Marigold backup {name}")).await.map_err(Error::custom)?;
     Ok(())
 }
 
@@ -291,7 +330,9 @@ pub async fn run_files(
             let packed = archive::pack(&entries, key)?;
             archive::unpack(&packed, key)?;
             say(format!("checkpoint {name}: {} files, {}", entries.len(), archive::human_size(packed.len())));
-            post(&cfg.token, chat_id, &name, &packed, say).await?;
+            let what = format!("Marigold backup of the wallet '{}': a full copy, {}", files.name, checkpoint_moment(&stamp));
+            send_plain(&cfg.token, chat_id, DIVIDER).await.map_err(Error::custom)?;
+            post(&cfg.token, chat_id, &name, &what, &packed, say).await?;
             index.checkpoint = stamp;
             index.checkpoint_at = now_secs();
             index.checkpoint_bytes = packed.len() as u64;
@@ -317,7 +358,12 @@ pub async fn run_files(
                 removed.len(),
                 archive::human_size(packed.len())
             ));
-            post(&cfg.token, chat_id, &name, &packed, say).await?;
+            let what = format!(
+                "Marigold backup of the wallet '{}': change {seq} after the full copy of {}",
+                files.name,
+                checkpoint_moment(&index.checkpoint)
+            );
+            post(&cfg.token, chat_id, &name, &what, &packed, say).await?;
             index.delta_seq = seq;
             index.delta_bytes += packed.len() as u64;
             for e in &changed {
@@ -639,6 +685,20 @@ mod tests {
 
     #[test]
     fn backup_names_parse() {
+        assert_eq!(checkpoint_name("test10", "c20260924T011746"), "Marigold backup - test10 - 2026-09-24 01.17.46 - full.mgb");
+        assert_eq!(
+            delta_name("my - wallet", "c20260924T011746", 3),
+            "Marigold backup - my - wallet - 2026-09-24 01.17.46 - change 3.mgb"
+        );
+        assert_eq!(
+            parse_backup_name("Marigold backup - test10 - 2026-09-24 01.17.46 - full.mgb"),
+            Some(("c20260924T011746".to_string(), None))
+        );
+        assert_eq!(
+            parse_backup_name("Marigold backup - my - wallet - 2026-09-24 01.17.46 - change 3.mgb"),
+            Some(("c20260924T011746".to_string(), Some(3)))
+        );
+        assert_eq!(checkpoint_moment("c20260924T011746"), "2026-09-24 01:17");
         assert_eq!(parse_backup_name("marigold-test10-c20260924T100000.full.mgb"), Some(("c20260924T100000".to_string(), None)));
         assert_eq!(parse_backup_name("marigold-my-wallet-c20260924T100000.d007.mgb"), Some(("c20260924T100000".to_string(), Some(7))));
         assert_eq!(

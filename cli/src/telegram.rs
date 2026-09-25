@@ -1066,11 +1066,32 @@ pub struct BackupPart {
 }
 
 /// The part file name: `<backup>.p<index>of<count>`.
+/// The file name of one part: the backup's own name when it fits in one
+/// file, `… (part 2 of 3).mgb` when it does not.
 pub fn part_file_name(backup: &str, index: usize, count: usize) -> String {
-    format!("{backup}.p{index:03}of{count:03}")
+    if count <= 1 {
+        return backup.to_string();
+    }
+    match backup.strip_suffix(".mgb") {
+        Some(stem) => format!("{stem} (part {index} of {count}).mgb"),
+        None => format!("{backup} (part {index} of {count})"),
+    }
 }
 
+/// (backup name, part index, part count) from a file name: the readable
+/// form above, the first scheme's `<backup>.p001of003`, or any other `.mgb`
+/// file, which is a whole backup on its own.
 pub fn parse_part_file_name(name: &str) -> Option<(String, usize, usize)> {
+    if let Some(stem) = name.strip_suffix(".mgb") {
+        if let Some((base, rest)) = stem.rsplit_once(" (part ")
+            && let Some(inner) = rest.strip_suffix(')')
+            && let Some((index, count)) = inner.split_once(" of ")
+            && let (Ok(index), Ok(count)) = (index.parse(), count.parse())
+        {
+            return Some((format!("{base}.mgb"), index, count));
+        }
+        return Some((name.to_string(), 1, 1));
+    }
     let (backup, rest) = name.rsplit_once(".p")?;
     let (index, count) = rest.split_once("of")?;
     Some((backup.to_string(), index.parse().ok()?, count.parse().ok()?))
@@ -1219,9 +1240,19 @@ mod backup_part_tests {
 
     #[test]
     fn backup_part_names_round_trip() {
-        let name = part_file_name("marigold-test10-2026-09-23T20-10-01.mgb", 7, 112);
-        assert_eq!(name, "marigold-test10-2026-09-23T20-10-01.mgb.p007of112");
-        assert_eq!(parse_part_file_name(&name), Some(("marigold-test10-2026-09-23T20-10-01.mgb".to_string(), 7, 112)));
+        let name = part_file_name("Marigold backup - test10 - 2026-09-24 01.17.46 - full.mgb", 7, 112);
+        assert_eq!(name, "Marigold backup - test10 - 2026-09-24 01.17.46 - full (part 7 of 112).mgb");
+        assert_eq!(
+            parse_part_file_name(&name),
+            Some(("Marigold backup - test10 - 2026-09-24 01.17.46 - full.mgb".to_string(), 7, 112))
+        );
+        let single = part_file_name("Marigold backup - test10 - 2026-09-24 01.17.46 - change 2.mgb", 1, 1);
+        assert_eq!(single, "Marigold backup - test10 - 2026-09-24 01.17.46 - change 2.mgb");
+        assert_eq!(parse_part_file_name(&single), Some((single.clone(), 1, 1)));
+        assert_eq!(
+            parse_part_file_name("marigold-test10-2026-09-23T20-10-01.mgb.p007of112"),
+            Some(("marigold-test10-2026-09-23T20-10-01.mgb".to_string(), 7, 112))
+        );
         assert_eq!(parse_part_file_name("random.pdf"), None);
         assert_eq!(parse_part_file_name("x.p1of"), None);
     }

@@ -1307,8 +1307,8 @@ impl Wallet {
         tpara!(
             ctx,
             "To bring it back on any machine: 'wallet restore telegram' (it asks for the bot's token), then \
-            forward the bot everything it posted in the last week — select the backup files in that chat, \
-            forward, pick the bot. It opens with your 24 words. \
+            forward the bot everything from the last dashed line in that chat to the end — select those \
+            messages, forward, pick the bot. It opens with your 24 words. \
             "
         );
         tprintln!(ctx, "");
@@ -1341,10 +1341,10 @@ impl Wallet {
         tprintln!(ctx, "");
         tpara!(
             ctx,
-            "Now forward the bot everything it posted in the last week: open the chat the backups are in, \
-            select the backup files, forward, pick the bot. The wallet takes the newest checkpoint and the \
-            deltas after it and ignores the rest. It waits up to ten minutes, and goes on a few seconds after \
-            the last part. \
+            "Now forward the bot everything from the last dashed line in the backup chat to the end: select \
+            those messages, forward, pick the bot. Forwarding more does no harm; the wallet takes the newest \
+            full copy and the changes after it. It waits up to ten minutes, and goes on a few seconds after \
+            the last file. \
             "
         );
         tprintln!(ctx, "");
