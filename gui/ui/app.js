@@ -39,6 +39,21 @@ function tab(name) {
   if (name === "backup") refreshBackup(); else stopPairWatch();
 }
 
+// The one-time question, once the bot is paired and nothing is backed up yet.
+async function offerBackup() {
+  try { const st = await invoke("backup_status"); $("offer-backup").hidden = !st.offer; } catch (_) {}
+}
+$("offer-yes").addEventListener("click", async () => {
+  $("offer-error").textContent = ""; $("offer-yes").disabled = true;
+  try { await invoke("backup_now"); $("offer-backup").hidden = true; $("say").textContent = "Backed up. The copy stays current by itself while the wallet is open."; }
+  catch (e) { $("offer-error").textContent = String(e); }
+  $("offer-yes").disabled = false;
+});
+$("offer-no").addEventListener("click", async () => {
+  try { await invoke("backup_decline"); } catch (_) {}
+  $("offer-backup").hidden = true; $("say").textContent = "Use the Backup tab later if you change your mind.";
+});
+
 // Backup: where it goes, whether it runs by itself, and the bot behind it.
 let pairTimer = null;
 function stopPairWatch() { if (pairTimer) { clearInterval(pairTimer); pairTimer = null; } }
@@ -49,6 +64,7 @@ async function refreshBackup() {
     const st = await invoke("backup_status");
     $("backup-status").textContent =
       `Backups go to: ${st.destination}\nAutomatic: ${st.automatic}\nLast full copy: ${when(st.checkpoint_at)}${st.checkpoint_at ? ` (${size(st.checkpoint_bytes)})` : ""}\nChange sets since: ${st.deltas}\nLast post: ${when(st.last_post_at)}`;
+    $("offer-backup").hidden = !st.offer;
     $("bot-setup").hidden = st.bot;
     $("bot-pair").hidden = !(st.bot && !st.paired);
     $("backup-actions").hidden = !(st.bot && st.paired);
@@ -221,7 +237,7 @@ $("open").addEventListener("click", async () => {
     $("password").value = "";
     $("context").textContent = `${opened.wallet} · ${opened.network} · ${opened.access}`;
     $("say").textContent = "";
-    show("home"); tab("balance"); startSyncWatch();
+    show("home"); tab("balance"); startSyncWatch(); offerBackup();
   } catch (e) { $("open-error").textContent = String(e); $("say").textContent = ""; }
   button.disabled = false;
 });

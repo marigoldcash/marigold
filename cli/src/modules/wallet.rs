@@ -259,6 +259,10 @@ impl Wallet {
                 if !needs_passphrase {
                     ctx.hold_tidying_secret(wallet_secret.clone());
                 }
+                // Once, when the bot is paired and nothing is backed up yet:
+                // the automatic backup, offered rather than waited for.
+                #[cfg(feature = "embedded-node")]
+                crate::tgbackup::offer_at_open(&ctx).await;
                 if auto_sweep_on && !needs_passphrase {
                     let threshold = meta
                         .as_ref()

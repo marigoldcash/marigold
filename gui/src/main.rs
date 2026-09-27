@@ -314,6 +314,11 @@ async fn backup_now(state: State<'_, App>) -> Result<String, String> {
 }
 
 #[tauri::command]
+async fn backup_decline(state: State<'_, App>) -> Result<(), String> {
+    with_service(&state, |s| async move { s.backup_decline().await }).await
+}
+
+#[tauri::command]
 async fn backup_automatic(state: State<'_, App>, on: bool) -> Result<(), String> {
     with_service(&state, |s| async move { s.backup_automatic(on).await }).await
 }
@@ -635,6 +640,7 @@ fn main() {
             backup_status,
             backup_now,
             backup_automatic,
+            backup_decline,
             backup_file,
             telegram_setup,
             restore_telegram

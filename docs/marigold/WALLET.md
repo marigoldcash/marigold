@@ -195,6 +195,8 @@ Copies the backup's files in, recovers `K` from the words, deep-verifies (report
 
 The wallet keeps an encrypted copy of itself in Telegram, and keeps it current by itself — the way a phone backs itself up to its maker's cloud, except that the only servers involved are Telegram's and they hold nothing they can read. It needs the wallet's bot (`mobile telegram <token>`, the token from @BotFather) paired with its owner; the backups go to the bot's own chat with them, the same chat the payment codes arrive in, and nowhere else — one chat, so a restore is "forward everything from the last dashed line to the end" to the very bot that posted it.
 
+Once the bot is paired and nothing has been backed up yet, the wallet asks — once, at the next `open` in the terminal, as a banner in the desktop wallet — "Back up this wallet automatically to your Telegram bot chat? (highly recommended)". Yes posts the first full copy and the automation runs from then on; "not now" is remembered and the commands below remain.
+
 ```
 backup telegram                 # the first time: posts a checkpoint and starts the automatic backups; later: a checkpoint now
 backup telegram status          # on/off, last checkpoint, deltas since, last post

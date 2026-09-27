@@ -746,7 +746,9 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
                     if let Err(e) = cfg.save(&cfg_path) {
                         log::error!("telegram: could not save the pairing: {e}");
                     }
-                    service.say(format!("telegram: paired with user {from}"));
+                    service.say(format!(
+                        "telegram: paired with user {from} — the wallet offers the automatic backup to this chat at its next open ('backup telegram' turns it on now)"
+                    ));
                     send_with_keyboard(
                         &token,
                         chat_id,

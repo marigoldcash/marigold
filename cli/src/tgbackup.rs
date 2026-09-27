@@ -82,6 +82,10 @@ pub struct BackupIndex {
     /// Set by 'backup telegram off'.
     #[serde(default)]
     pub paused: bool,
+    /// The one-time question ("back up automatically? highly recommended")
+    /// has been put, whatever the answer.
+    #[serde(default)]
+    pub asked: bool,
 }
 
 impl BackupIndex {
@@ -504,6 +508,9 @@ pub struct BackupStatus {
     pub pairing_code: Option<String>,
     /// "on", "off", or "not started".
     pub automatic: String,
+    /// The bot is paired, nothing has been backed up, and the one-time
+    /// question has not been put: the screen should ask it now.
+    pub offer: bool,
     pub checkpoint_at: u64,
     pub checkpoint_bytes: u64,
     pub deltas: u32,
@@ -520,6 +527,7 @@ pub fn status(files: &WalletFiles, cfg: Option<&TelegramConfig>) -> BackupStatus
     BackupStatus {
         destination,
         bot: cfg.is_some(),
+        offer: should_offer(&index, cfg),
         paired: cfg.is_some_and(|c| target_chat(c).is_some()),
         pairing_code: cfg.and_then(|c| if target_chat(c).is_none() && c.pairing_code_live() { c.pairing_code.clone() } else { None }),
         automatic: if index.paused {
@@ -535,6 +543,64 @@ pub fn status(files: &WalletFiles, cfg: Option<&TelegramConfig>) -> BackupStatus
         deltas: index.delta_seq,
         last_post_at: index.last_post_at,
     }
+}
+
+/// Whether to put the one-time question now (founder, 2026-09-27: "once the
+/// integration is up: do you want to back up your notes automatically to
+/// your Telegram robot chat? (highly recommended)").
+pub fn should_offer(index: &BackupIndex, cfg: Option<&TelegramConfig>) -> bool {
+    cfg.is_some_and(|c| target_chat(c).is_some()) && index.checkpoint.is_empty() && !index.asked && !index.paused
+}
+
+/// The question has been put; it is not put again.
+pub fn mark_asked(files: &WalletFiles) -> Result<()> {
+    let mut index = BackupIndex::load(&files.wallet_dir);
+    index.asked = true;
+    index.save(&files.wallet_dir)
+}
+
+/// At 'open' in the terminal: the one-time question, and the first checkpoint on a yes.
+pub async fn offer_at_open(cli: &Arc<KaspaCli>) {
+    let Some(secret) = cli.tidying_secret() else { return };
+    let Some(descriptor) = cli.store().descriptor() else { return };
+    let Ok(cfg_path) = telegram_config_path(cli) else { return };
+    let cfg = TelegramConfig::load(&cfg_path);
+    let Ok(files) = WalletFiles::of_wallet(&cli.wallet(), &descriptor.filename).await else { return };
+    let index = BackupIndex::load(&files.wallet_dir);
+    if !should_offer(&index, cfg.as_ref()) {
+        return;
+    }
+    tprintln!(cli, "");
+    tprintln!(
+        cli,
+        "Your Telegram bot is paired. The wallet can keep an encrypted copy of itself in that chat by itself — a full copy every week, the changes within minutes of a payment, silently — sealed with your 24 words."
+    );
+    let answer =
+        match cli.term().ask(false, "Back up this wallet automatically to your Telegram bot chat? (highly recommended) [Y/n]: ").await
+        {
+            Ok(a) => a.trim().to_lowercase(),
+            Err(_) => return,
+        };
+    let _ = mark_asked(&files);
+    if answer.starts_with('n') {
+        tprintln!(cli, "{}", crate::ui::dim("Run 'backup telegram' later if you change your mind."));
+        tprintln!(cli, "");
+        return;
+    }
+    tprintln!(cli, "Posting the first full copy…");
+    match run_with_words(cli, &secret, true).await {
+        Ok(line) => {
+            tprintln!(
+                cli,
+                "{}",
+                crate::ui::dim(format!("Telegram backup: {line}. From now on it stays current by itself while the wallet is open."))
+            );
+        }
+        Err(err) => {
+            tprintln!(cli, "{}", crate::ui::warn(format!("The backup did not go out: {err} — 'backup telegram' tries again.")))
+        }
+    }
+    tprintln!(cli, "");
 }
 
 pub fn set_paused(files: &WalletFiles, paused: bool) -> Result<()> {

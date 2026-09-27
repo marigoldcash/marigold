@@ -228,6 +228,12 @@ impl WalletService {
         crate::tgbackup::run_files(&files, &cfg, &key, true, &progress).await.map_err(|e| e.to_string())
     }
 
+    /// "Not now" to the one-time question: remembered, never asked again.
+    pub async fn backup_decline(&self) -> std::result::Result<(), String> {
+        let files = self.backup_files().await?;
+        crate::tgbackup::mark_asked(&files).map_err(|e| e.to_string())
+    }
+
     pub async fn backup_automatic(&self, on: bool) -> std::result::Result<(), String> {
         let files = self.backup_files().await?;
         crate::tgbackup::set_paused(&files, !on).map_err(|e| e.to_string())
