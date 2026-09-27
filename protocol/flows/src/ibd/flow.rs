@@ -130,6 +130,9 @@ impl IbdFlow {
                 negotiation_output.syncer_pruning_point,
             )
             .await?;
+        if !matches!(ibd_type, IbdType::DownloadHeadersProof) {
+            self.ctx.discard_disk_staging();
+        }
         match ibd_type {
             IbdType::Sync {
                 highest_known_syncer_chain_hash,
@@ -197,6 +200,7 @@ impl IbdFlow {
                     negotiation_output.syncer_virtual_selected_parent,
                     highest_known_syncer_chain_hash,
                     &relay_block,
+                    None,
                 )
                 .await?;
             }
@@ -206,12 +210,12 @@ impl IbdFlow {
                 // pruning point it is valid for; filled in by the stage below
                 // so a failure can keep it for the next attempt.
                 let mut slot: Option<(StagingConsensus, Option<Hash>)> = None;
-                let kept = self.ctx.take_kept_staging();
+                let kept = self.ctx.kept_or_disk_staging().await;
                 let outcome = self
                     .ibd_with_headers_proof(kept, &mut slot, negotiation_output.syncer_virtual_selected_parent, &relay_block)
                     .await;
                 match outcome {
-                    Ok(()) => {
+                    Ok(catch_up) => {
                         let (staging, _) = slot.take().expect("a successful header stage always used a staging");
                         spawn_blocking(|| staging.commit()).await.unwrap();
                         info!(
@@ -221,6 +225,25 @@ impl IbdFlow {
 
                         // This will reobtain the freshly committed staging consensus
                         session = self.ctx.consensus().session().await;
+                        if catch_up {
+                            // The headers were continued from a staging whose proof
+                            // ended at an older pruning point than the network's now.
+                            // The committed consensus has every header the syncer has,
+                            // so it moves to the syncer's pruning point the way a lagging
+                            // node does, and takes the bodies and the state there.
+                            info!(
+                                "Catching up to the network's pruning point {} from the one the download started with",
+                                negotiation_output.syncer_pruning_point
+                            );
+                            self.pruning_point_catchup(
+                                &session,
+                                &negotiation_output,
+                                &relay_block,
+                                negotiation_output.syncer_virtual_selected_parent,
+                            )
+                            .await?;
+                            self.sync_missing_trusted_bodies(&session).await?;
+                        }
                         // Next, sync a utxoset corresponding to the new pruning point from the syncer.
                         // Note that the new pruning point's anticone need not be downloaded separately as in other IBD types
                         // as it was just downloaded as part of the headers proof.
@@ -438,7 +461,7 @@ impl IbdFlow {
         // to ensure that we will locally have sufficient headers on top of the syncer's pruning point
         let syncer_pp = negotiation_output.syncer_pruning_point;
         let syncer_sink = negotiation_output.syncer_virtual_selected_parent;
-        self.sync_headers(consensus, syncer_sink, highest_known_syncer_chain_hash, relay_block).await?;
+        self.sync_headers(consensus, syncer_sink, highest_known_syncer_chain_hash, relay_block, None).await?;
 
         // This function's main effect is to confirm the syncer's pruning point can be finalized into the consensus, and to update
         // all the relevant stores
@@ -455,16 +478,19 @@ impl IbdFlow {
     }
 
     /// The header stage of a first sync. `kept` is a staging left by a failed
-    /// attempt; `slot` receives the staging this attempt used, with the pruning
-    /// point it is valid for once the proof has been checked, so the caller can
-    /// commit it, keep it, or cancel it.
+    /// attempt or a previous run; `slot` receives the staging this attempt
+    /// used, with the pruning point it is valid for once the proof has been
+    /// checked, so the caller can commit it, keep it, or cancel it. Returns
+    /// whether the committed consensus still has to catch up to the network's
+    /// pruning point: true when the download was continued from a staging
+    /// whose proof ended at an older one.
     async fn ibd_with_headers_proof(
         &mut self,
         kept: Option<KeptStaging>,
         slot: &mut Option<(StagingConsensus, Option<Hash>)>,
         syncer_virtual_selected_parent: Hash,
         relay_block: &Block,
-    ) -> Result<(), ProtocolError> {
+    ) -> Result<bool, ProtocolError> {
         info!("Starting IBD with headers proof with peer {}", self.router);
 
         // The proof first, against the current consensus: no staging is touched
@@ -479,25 +505,45 @@ impl IbdFlow {
                 return Err(e);
             }
         };
-        let (staging, resumed) = match kept.take() {
+        // The staging's own pruning point (the proof it was built on), and
+        // whether the network has moved past it while the download ran.
+        let (staging, resumed, staging_pruning_point) = match kept.take() {
             Some(k) if k.pruning_point == pruning_point => {
                 info!(
                     "Resuming the header download from the last attempt: the proof ends at the same pruning point {}",
                     pruning_point
                 );
-                (k.staging, true)
+                (k.staging, true, pruning_point)
             }
             Some(k) => {
-                info!(
-                    "The network's pruning point moved on ({} to {}); the headers kept from the last attempt are discarded",
-                    k.pruning_point, pruning_point
-                );
-                k.staging.cancel();
-                (self.ctx.consensus_manager.new_staging_consensus(), false)
+                // The pruning point advanced while the headers were coming in
+                // (it does every day or so; a download on a slow line can take
+                // longer — a tester lost a 99% stage this way, 2026-09-26). If
+                // the staging already holds the new pruning point's header the
+                // download simply carries on, and the committed consensus
+                // catches up to the new pruning point afterwards, as a lagging
+                // node does. Otherwise the headers are discarded as before.
+                let knows_new = k.staging.session().await.async_get_header(pruning_point).await.is_ok();
+                if knows_new {
+                    info!(
+                        "The network's pruning point moved on ({} to {}) while the headers were downloading; continuing the download, the node catches up to the new pruning point once the headers are in",
+                        k.pruning_point, pruning_point
+                    );
+                    let old = k.pruning_point;
+                    (k.staging, true, old)
+                } else {
+                    info!(
+                        "The network's pruning point moved on ({} to {}); the headers kept from the last attempt are discarded",
+                        k.pruning_point, pruning_point
+                    );
+                    k.staging.cancel();
+                    (self.ctx.consensus_manager.new_staging_consensus(), false, pruning_point)
+                }
             }
-            None => (self.ctx.consensus_manager.new_staging_consensus(), false),
+            None => (self.ctx.consensus_manager.new_staging_consensus(), false, pruning_point),
         };
-        *slot = Some((staging, Some(pruning_point)));
+        let catch_up = staging_pruning_point != pruning_point;
+        *slot = Some((staging, Some(staging_pruning_point)));
         let staging = &slot.as_ref().expect("just set").0;
         let staging_session = staging.session().await;
 
@@ -510,21 +556,27 @@ impl IbdFlow {
                         info!("Continuing the header download from {}", known);
                         known
                     }
-                    None => pruning_point,
+                    None => staging_pruning_point,
                 },
                 Err(e) => {
                     warn!("Could not find where the last attempt stopped ({}); downloading the headers again", e);
-                    pruning_point
+                    staging_pruning_point
                 }
             }
         } else {
             self.sync_pruning_point_anticone(&staging_session, proof, proof_metadata, pruning_point).await?;
             pruning_point
         };
-        self.sync_headers(&staging_session, syncer_virtual_selected_parent, highest_known, relay_block).await?;
-        staging_session.async_validate_pruning_points(syncer_virtual_selected_parent).await?;
+        // A continued download reports its percentage over the whole stage,
+        // from the pruning point, not from where it picked up: the figure
+        // went 99% → 11% otherwise (tester, 2026-09-26).
+        let progress_low = if resumed { Some(staging_session.async_get_header(staging_pruning_point).await?.daa_score) } else { None };
+        self.sync_headers(&staging_session, syncer_virtual_selected_parent, highest_known, relay_block, progress_low).await?;
+        if !catch_up {
+            staging_session.async_validate_pruning_points(syncer_virtual_selected_parent).await?;
+        }
         self.validate_staging_timestamps(&self.ctx.consensus().session().await, &staging_session).await?;
-        Ok(())
+        Ok(catch_up)
     }
 
     /// Requests and validates the peer's pruning proof against the current
@@ -777,15 +829,20 @@ impl IbdFlow {
         Ok(())
     }
 
+    /// `progress_low`: where the percentage counts from when it should not be
+    /// the point the download starts at — a continued stage counts from the
+    /// stage's own start.
     async fn sync_headers(
         &mut self,
         consensus: &ConsensusProxy,
         syncer_virtual_selected_parent: Hash,
         highest_known_syncer_chain_hash: Hash,
         relay_block: &Block,
+        progress_low: Option<u64>,
     ) -> Result<(), ProtocolError> {
         let highest_shared_header_score = consensus.async_get_header(highest_known_syncer_chain_hash).await?.daa_score;
-        let mut progress_reporter = ProgressReporter::new(highest_shared_header_score, relay_block.header.daa_score, "block headers");
+        let mut progress_reporter =
+            ProgressReporter::new(progress_low.unwrap_or(highest_shared_header_score), relay_block.header.daa_score, "block headers");
 
         self.router
             .enqueue(make_message!(

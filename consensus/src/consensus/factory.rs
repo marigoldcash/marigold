@@ -131,10 +131,8 @@ impl MultiConsensusManagementStore {
     // This function assumes metadata is already set
     pub fn staging_consensus_entry(&mut self) -> Option<ConsensusEntry> {
         let metadata = self.metadata.read().unwrap();
-        match metadata.staging_consensus_key {
-            Some(key) => Some(self.entries.read(key.into()).unwrap()),
-            None => None,
-        }
+        // A key whose entry is gone is a leftover, not a staging.
+        metadata.staging_consensus_key.and_then(|key| self.entries.read(key.into()).ok())
     }
 
     pub fn save_new_active_consensus(&mut self, entry: ConsensusEntry) -> StoreResult<()> {
@@ -193,10 +191,16 @@ impl MultiConsensusManagementStore {
     }
 
     fn iterate_inactive_entries(&self) -> impl Iterator<Item = Result<ConsensusEntry, Box<dyn Error>>> + '_ {
-        let current_consensus_key = self.metadata.read().unwrap().current_consensus_key;
+        // Neither the active consensus nor the staging one — the staging is
+        // kept across restarts for the header stage to continue from; the
+        // first drill deleted its directory here and left its key behind
+        // (2026-09-27).
+        let metadata = self.metadata.read().unwrap();
+        let current_consensus_key = metadata.current_consensus_key;
+        let staging_consensus_key = metadata.staging_consensus_key;
         self.iterator().filter(move |entry_result| {
             if let Ok(entry) = entry_result {
-                return Some(entry.key) != current_consensus_key;
+                return Some(entry.key) != current_consensus_key && Some(entry.key) != staging_consensus_key;
             }
 
             true
@@ -361,37 +365,21 @@ impl ConsensusFactory for Factory {
 
     fn new_staging_consensus(&self) -> (ConsensusInstance, DynConsensusCtl) {
         assert!(!self.notification_root.is_closed());
-
         let entry = self.management_store.write().new_staging_consensus_entry().unwrap();
-        let dir = self.db_root_dir.join(entry.directory_name);
-        let db = kaspa_database::prelude::ConnBuilder::default()
-            .with_db_path(dir)
-            .with_parallelism(self.db_parallelism)
-            .with_files_limit(self.fd_budget / 2) // active and staging consensuses should have equal budgets
-            .with_preset(self.rocksdb_preset)
-            .with_wal_dir(self.wal_dir.clone())
-            .with_cache_budget(self.cache_budget)
-            .build()
-            .unwrap();
+        self.open_staging(entry)
+    }
 
-        let session_lock = SessionLock::new();
-        let consensus = Arc::new(Consensus::new(
-            db.clone(),
-            Arc::new(self.config.to_builder().skip_adding_genesis().build()),
-            session_lock.clone(),
-            self.notification_root.clone(),
-            self.counters.clone(),
-            self.tx_script_cache_counters.clone(),
-            entry.creation_timestamp,
-            self.mining_rules.clone(),
-        ));
-
-        // The default for the body_missing_anticone_set is an empty vector, which corresponds precisely to the state before a consensus commit.
-        // The default value for the pruning_utxoset_stable_flag is true, but a staging consensus does not have a utxo and hence the flag is dropped explicitly.
-        consensus.set_pruning_utxoset_stable_flag(false);
-        consensus.set_pruning_smt_stable_flag(false);
-
-        (ConsensusInstance::new(session_lock, consensus.clone()), Arc::new(Ctl::new(self.management_store.clone(), db, consensus)))
+    fn existing_staging_consensus(&self) -> Option<(ConsensusInstance, DynConsensusCtl)> {
+        assert!(!self.notification_root.is_closed());
+        let entry = self.management_store.write().staging_consensus_entry()?;
+        if !self.db_root_dir.join(&entry.directory_name).exists() {
+            // An entry without its directory is a leftover of nothing; forget it.
+            let mut write_guard = self.management_store.write();
+            write_guard.delete_entry(entry).ok();
+            write_guard.cancel_staging_consensus().ok();
+            return None;
+        }
+        Some(self.open_staging(entry))
     }
 
     fn close(&self) {
@@ -400,9 +388,11 @@ impl ConsensusFactory for Factory {
     }
 
     fn delete_inactive_consensus_entries(&self) {
-        // Staging entry is deleted also by archival nodes since it represents non-final data
-        self.delete_staging_entry();
-
+        // The staging entry used to be deleted here too, at every start. It
+        // survives now: the header stage of a first sync continues from it
+        // after a restart (resumable sync, stage two, 2026-09-27). The IBD
+        // flow reopens it through `existing_staging_consensus` and cancels
+        // it — which deletes it — when it cannot be continued.
         if self.config.is_archival {
             return;
         }
@@ -472,5 +462,41 @@ mod tests {
         assert!(store.is_archival_node().unwrap());
         drop(store);
         drop(db);
+    }
+}
+
+impl Factory {
+    /// Opens (or creates) the database of a staging entry and builds the
+    /// consensus over it: shared by a fresh staging and a reopened one.
+    fn open_staging(&self, entry: ConsensusEntry) -> (ConsensusInstance, DynConsensusCtl) {
+        let dir = self.db_root_dir.join(entry.directory_name);
+        let db = kaspa_database::prelude::ConnBuilder::default()
+            .with_db_path(dir)
+            .with_parallelism(self.db_parallelism)
+            .with_files_limit(self.fd_budget / 2) // active and staging consensuses should have equal budgets
+            .with_preset(self.rocksdb_preset)
+            .with_wal_dir(self.wal_dir.clone())
+            .with_cache_budget(self.cache_budget)
+            .build()
+            .unwrap();
+
+        let session_lock = SessionLock::new();
+        let consensus = Arc::new(Consensus::new(
+            db.clone(),
+            Arc::new(self.config.to_builder().skip_adding_genesis().build()),
+            session_lock.clone(),
+            self.notification_root.clone(),
+            self.counters.clone(),
+            self.tx_script_cache_counters.clone(),
+            entry.creation_timestamp,
+            self.mining_rules.clone(),
+        ));
+
+        // The default for the body_missing_anticone_set is an empty vector, which corresponds precisely to the state before a consensus commit.
+        // The default value for the pruning_utxoset_stable_flag is true, but a staging consensus does not have a utxo and hence the flag is dropped explicitly.
+        consensus.set_pruning_utxoset_stable_flag(false);
+        consensus.set_pruning_smt_stable_flag(false);
+
+        (ConsensusInstance::new(session_lock, consensus.clone()), Arc::new(Ctl::new(self.management_store.clone(), db, consensus)))
     }
 }

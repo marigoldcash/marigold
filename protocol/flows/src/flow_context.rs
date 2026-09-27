@@ -281,6 +281,9 @@ pub struct FlowContextInner {
     /// discards it. It lives only as long as the process: a restart still
     /// starts the stage over.
     kept_staging: Mutex<Option<KeptStaging>>,
+    /// Whether the staging a previous run may have left on disk has been
+    /// looked at: adopted by the first header stage, or discarded.
+    disk_staging_checked: std::sync::atomic::AtomicBool,
     pub address_manager: Arc<Mutex<AddressManager>>,
     connection_manager: RwLock<Option<Arc<ConnectionManager>>>,
     mining_manager: MiningManagerProxy,
@@ -395,6 +398,7 @@ impl FlowContext {
                 consensus_manager,
                 orphans_pool: AsyncRwLock::new(OrphanBlocksPool::new(max_orphans)),
                 kept_staging: Mutex::new(None),
+                disk_staging_checked: std::sync::atomic::AtomicBool::new(false),
                 shared_block_requests: Arc::new(Mutex::new(HashMap::new())),
                 transactions_spread: AsyncRwLock::new(TransactionsSpread::new(hub.clone())),
                 shared_transaction_requests: Arc::new(Mutex::new(HashMap::new())),
@@ -462,6 +466,42 @@ impl FlowContext {
     /// Takes the staging kept from the last failed attempt, if any.
     pub fn take_kept_staging(&self) -> Option<KeptStaging> {
         self.kept_staging.lock().take()
+    }
+
+    /// The staging to continue from: one kept in this process, or — once —
+    /// the one a previous run left on disk, if its proof had been applied
+    /// (its pruning point is not genesis). Anything else on disk is deleted.
+    pub async fn kept_or_disk_staging(&self) -> Option<KeptStaging> {
+        if let Some(kept) = self.take_kept_staging() {
+            return Some(kept);
+        }
+        if self.disk_staging_checked.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            return None;
+        }
+        let staging = self.consensus_manager.existing_staging_consensus()?;
+        let pruning_point = staging.session().await.async_pruning_point().await;
+        if pruning_point == self.config.genesis.hash {
+            info!("A header download from before the last restart had not got past its proof; starting afresh");
+            staging.cancel();
+            return None;
+        }
+        info!(
+            "Found the headers downloaded before the last restart (proof ending at pruning point {}); continuing from them if the network agrees",
+            pruning_point
+        );
+        Some(KeptStaging { staging, pruning_point })
+    }
+
+    /// A sync that is not a first header stage has no use for a staging left
+    /// on disk: delete it, once.
+    pub fn discard_disk_staging(&self) {
+        if self.disk_staging_checked.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
+        if let Some(staging) = self.consensus_manager.existing_staging_consensus() {
+            info!("Deleting the header download a previous run left behind: this sync does not need it");
+            staging.cancel();
+        }
     }
 
     /// Keeps a staging for the next attempt. Anything kept before is cancelled:

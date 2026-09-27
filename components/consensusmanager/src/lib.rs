@@ -35,6 +35,12 @@ pub trait ConsensusFactory: Sync + Send {
     /// Create a new empty staging consensus
     fn new_staging_consensus(&self) -> (ConsensusInstance, DynConsensusCtl);
 
+    /// Reopen the staging consensus a previous run left behind, if any: the
+    /// header stage of a first sync continues from it after a restart.
+    fn existing_staging_consensus(&self) -> Option<(ConsensusInstance, DynConsensusCtl)> {
+        None
+    }
+
     /// Close the factory and cleanup any shared resources used by it
     fn close(&self);
 
@@ -141,6 +147,12 @@ impl ConsensusManager {
     pub fn new_staging_consensus(self: &Arc<Self>) -> StagingConsensus {
         let (consensus, ctl) = self.factory.new_staging_consensus();
         StagingConsensus::new(self.clone(), ConsensusInner::new(consensus, ctl))
+    }
+
+    /// The staging consensus a previous run left behind, reopened, if there is one.
+    pub fn existing_staging_consensus(self: &Arc<Self>) -> Option<StagingConsensus> {
+        let (consensus, ctl) = self.factory.existing_staging_consensus()?;
+        Some(StagingConsensus::new(self.clone(), ConsensusInner::new(consensus, ctl)))
     }
 
     pub fn register_consensus_reset_handler(&self, handler: Arc<dyn ConsensusResetHandler>) {

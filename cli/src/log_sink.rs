@@ -65,6 +65,23 @@ static PASS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0)
 /// restarts the step when the peer it reads from goes away.
 static RESTARTS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 static LAST_HEADERS_PERCENT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+/// Why the step last started over, from the node's own lines: 1 the
+/// network's pruning point moved on and the headers no longer fit, 2 the
+/// place the last attempt stopped at could not be found; 0 unknown (the
+/// peer went away and nothing was kept).
+static RESTART_REASON: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+/// How many times a header stage picked up where an earlier one stopped —
+/// in this process or before a restart.
+static RESUMES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+pub fn sync_resumes() -> u32 {
+    RESUMES.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// The reason for the last restart, cleared on reading.
+pub fn take_restart_reason() -> u32 {
+    RESTART_REASON.swap(0, std::sync::atomic::Ordering::Relaxed)
+}
 
 pub fn sync_restarts() -> u32 {
     RESTARTS.load(std::sync::atomic::Ordering::Relaxed)
@@ -200,8 +217,15 @@ impl log::Log for TerminalLogger {
         let message = record.args().to_string();
         // A resumed header stage counts from where it stopped, so its
         // percentage starts low again; that is not the step starting over.
-        if message.contains("Resuming the header download") {
+        if message.contains("Resuming the header download") || message.contains("continuing the download, the node catches up") {
             LAST_HEADERS_PERCENT.store(0, std::sync::atomic::Ordering::Relaxed);
+            RESUMES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        if message.contains("the headers kept from the last attempt are discarded") {
+            RESTART_REASON.store(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        if message.contains("Could not find where the last attempt stopped") {
+            RESTART_REASON.store(2, std::sync::atomic::Ordering::Relaxed);
         }
         if let Some(progress) = parse_progress(&message) {
             record_progress(progress);

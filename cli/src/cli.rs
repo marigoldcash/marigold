@@ -2847,6 +2847,8 @@ impl KaspaCli {
             #[cfg(feature = "embedded-node")]
             let mut restarts_seen = 0u32;
             #[cfg(feature = "embedded-node")]
+            let mut resumes_seen = 0u32;
+            #[cfg(feature = "embedded-node")]
             let backup_state = Arc::new(Mutex::new(crate::tgbackup::AutoState::default()));
             loop {
                 workflow_core::task::sleep(Duration::from_secs(5)).await;
@@ -2864,10 +2866,24 @@ impl KaspaCli {
                     let restarts = crate::log_sink::sync_restarts();
                     if restarts > restarts_seen {
                         restarts_seen = restarts;
+                        let why = match crate::log_sink::take_restart_reason() {
+                            1 => {
+                                "The network moved its pruning point while the headers were downloading, and the headers already in hand no longer fit, so the step starts again from the new point."
+                            }
+                            2 => "The sync could not find where the last attempt stopped, so the step starts again.",
+                            _ => {
+                                "The sync started this step over: the computer it was reading from stopped answering, so the step repeats from its start."
+                            }
+                        };
                         tprintln!(this, "");
-                        tprintln!(this, "{}", style("The sync started this step over: the computer it was reading from stopped answering, so the step repeats from its start.").yellow());
+                        tprintln!(this, "{}", style(why).yellow());
                         tprintln!(this, "{}", crate::ui::dim("Nothing is lost beyond the time. 'connect status' follows it."));
                         tprintln!(this, "");
+                    }
+                    let resumes = crate::log_sink::sync_resumes();
+                    if resumes > resumes_seen {
+                        resumes_seen = resumes;
+                        tprintln!(this, "{}", crate::ui::dim("The header download picked up where it had stopped."));
                     }
                 }
                 if !this.wallet.is_open() || !this.wallet.is_connected() {
