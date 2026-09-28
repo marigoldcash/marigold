@@ -1503,6 +1503,20 @@ impl KaspaCli {
 
         let account = match self.wallet.account() {
             Ok(account) => account,
+            Err(_) if self.wallet.is_open() => {
+                // A notes-only wallet: open, but with nothing for the coinbase
+                // to pay to (tester, 2026-09-28: "I created the wallet without
+                // a ledger account — this is what the error message should say").
+                tprintln!(
+                    self,
+                    "This wallet keeps notes only — there is no ledger account, and mined coins are paid to a ledger address."
+                );
+                tprintln!(
+                    self,
+                    "'account create bip32' adds one (from the same 24 words, nothing new to write down), then 'mine start'."
+                );
+                return Ok(());
+            }
             Err(_) => {
                 tprintln!(self, "Open a wallet first — mined coins have to be paid to an address.");
                 return Ok(());
