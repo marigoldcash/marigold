@@ -32,7 +32,10 @@ impl Telegram {
             return ctx.exec_within(&format!("wallet restore telegram {}", argv[1..].join(" "))).await;
         }
         let Some(descriptor) = ctx.wallet().store().descriptor() else {
-            tprintln!(ctx, "Open the wallet first — the bot is paired to one wallet. ('telegram restore' brings one back from its backups.)");
+            tprintln!(
+                ctx,
+                "Open the wallet first — the bot is paired to one wallet. ('telegram restore' brings one back from its backups.)"
+            );
             return Ok(());
         };
         let name = descriptor.filename.clone();
@@ -99,12 +102,20 @@ impl Telegram {
                     return Ok(());
                 };
                 if cfg.user_id.is_some() {
-                    tprintln!(ctx, "Already paired with Telegram user {}. 'telegram unlink' and 'telegram link' pair it afresh.", cfg.user_id.unwrap_or(0));
+                    tprintln!(
+                        ctx,
+                        "Already paired with Telegram user {}. 'telegram unlink' and 'telegram link' pair it afresh.",
+                        cfg.user_id.unwrap_or(0)
+                    );
                     return Ok(());
                 }
                 cfg.new_pairing_code();
                 cfg.save(&path).map_err(|e| Error::custom(e.to_string()))?;
-                tprintln!(ctx, "A fresh code, good for fifteen minutes. Open your bot in Telegram and send it:  /start {}", cfg.pairing_code.as_deref().unwrap_or(""));
+                tprintln!(
+                    ctx,
+                    "A fresh code, good for fifteen minutes. Open your bot in Telegram and send it:  /start {}",
+                    cfg.pairing_code.as_deref().unwrap_or("")
+                );
                 self.restart_bot(ctx).await;
                 Ok(())
             }
@@ -132,7 +143,10 @@ impl Telegram {
     async fn status(&self, ctx: &Arc<KaspaCli>, name: &str, cfg: Option<&crate::telegram::TelegramConfig>) -> Result<()> {
         tprintln!(ctx, "");
         let Some(cfg) = cfg else {
-            tpara!(ctx, "No Telegram bot yet. Make one with @BotFather in Telegram (/newbot, two minutes), then here: 'telegram link <token>'.");
+            tpara!(
+                ctx,
+                "No Telegram bot yet. Make one with @BotFather in Telegram (/newbot, two minutes), then here: 'telegram link <token>'."
+            );
             tprintln!(ctx, "");
             self.usage(ctx);
             tprintln!(ctx, "");
@@ -145,10 +159,19 @@ impl Telegram {
                     tprintln!(ctx, "{}", style("Locked after three wrong PINs — 'telegram unlock' clears it.").yellow());
                 }
             }
-            (None, true) => tprintln!(ctx, "Not paired yet. Open your bot in Telegram and send it:  /start {}", cfg.pairing_code.as_deref().unwrap_or("")),
+            (None, true) => tprintln!(
+                ctx,
+                "Not paired yet. Open your bot in Telegram and send it:  /start {}",
+                cfg.pairing_code.as_deref().unwrap_or("")
+            ),
             (None, false) => tprintln!(ctx, "Not paired yet, and the pairing code has lapsed — 'telegram code' makes a fresh one."),
         }
-        tprintln!(ctx, "Daily limit: {} {} — 'telegram limit <amount>' changes it.", sompi_to_kaspa_string(cfg.daily_limit_petals), ctx.ticker());
+        tprintln!(
+            ctx,
+            "Daily limit: {} {} — 'telegram limit <amount>' changes it.",
+            sompi_to_kaspa_string(cfg.daily_limit_petals),
+            ctx.ticker()
+        );
         tprintln!(ctx, "Telegram answers as long as the {name} wallet is running.");
         if let Ok(files) = crate::tgbackup::WalletFiles::of(ctx).await {
             let st = crate::tgbackup::status(&files, Some(cfg));
@@ -170,7 +193,11 @@ impl Telegram {
                     _ => "not started ('telegram backup' starts it)".to_string(),
                 },
                 when(st.checkpoint_at),
-                if st.checkpoint_at > 0 { format!(" ({})", crate::backup::human_size(st.checkpoint_bytes as usize)) } else { String::new() },
+                if st.checkpoint_at > 0 {
+                    format!(" ({})", crate::backup::human_size(st.checkpoint_bytes as usize))
+                } else {
+                    String::new()
+                },
                 st.deltas
             );
         }
@@ -219,8 +246,17 @@ impl Telegram {
         cfg.save(path).map_err(|e| Error::custom(e.to_string()))?;
         tprintln!(ctx, "");
         tprintln!(ctx, "{}", style("Linked.").green());
-        tprintln!(ctx, "Open your bot in Telegram and send it, within fifteen minutes:  /start {}", cfg.pairing_code.as_deref().unwrap_or(""));
-        tprintln!(ctx, "Daily limit {} {}; 'telegram limit <amount>' changes it.", sompi_to_kaspa_string(cfg.daily_limit_petals), ctx.ticker());
+        tprintln!(
+            ctx,
+            "Open your bot in Telegram and send it, within fifteen minutes:  /start {}",
+            cfg.pairing_code.as_deref().unwrap_or("")
+        );
+        tprintln!(
+            ctx,
+            "Daily limit {} {}; 'telegram limit <amount>' changes it.",
+            sompi_to_kaspa_string(cfg.daily_limit_petals),
+            ctx.ticker()
+        );
         tpara!(ctx, "{}", style("The Telegram account that pairs can then move money here. Turn on two-step verification in Telegram: accounts recover by SMS otherwise.").yellow());
         tprintln!(ctx, "");
         // The bot answers from this wallet while it is open, so the pairing
