@@ -193,15 +193,18 @@ Copies the backup's files in, recovers `K` from the words, deep-verifies (report
 
 ## 11b. Automatic backups to Telegram, and the restore (2026-09-23/24)
 
-The wallet keeps an encrypted copy of itself in Telegram, and keeps it current by itself — the way a phone backs itself up to its maker's cloud, except that the only servers involved are Telegram's and they hold nothing they can read. It needs the wallet's bot (`mobile telegram <token>`, the token from @BotFather) paired with its owner; the backups go to the bot's own chat with them, the same chat the payment codes arrive in, and nowhere else — one chat, so a restore is "forward everything from the last dashed line to the end" to the very bot that posted it.
+The wallet keeps an encrypted copy of itself in Telegram, and keeps it current by itself — the way a phone backs itself up to its maker's cloud, except that the only servers involved are Telegram's and they hold nothing they can read. It needs the wallet's bot (`telegram link <token>`, the token from @BotFather) paired with its owner; the backups go to the bot's own chat with them, the same chat the payment codes arrive in, and nowhere else — one chat, so a restore is "forward everything from the last dashed line to the end" to the very bot that posted it.
 
-Once the bot is paired and nothing has been backed up yet, the wallet asks — once, at the next `open` in the terminal, as a banner in the desktop wallet — "Back up this wallet automatically to your Telegram bot chat? (highly recommended)". Yes posts the first full copy and the automation runs from then on; "not now" is remembered and the commands below remain.
+Once the bot is paired and nothing has been backed up yet, the wallet asks — once, at the next `open` in the terminal, as a banner in the desktop wallet — "Back up this wallet automatically to your Telegram bot chat? (highly recommended)". Yes posts the first full copy and the automation runs from then on; "not now" is remembered ("Run 'telegram backup' later if you change your mind") and the commands below remain.
 
 ```
-backup telegram                 # the first time: posts a checkpoint and starts the automatic backups; later: a checkpoint now
-backup telegram status          # on/off, last checkpoint, deltas since, last post
-backup telegram off / on        # pause and resume the automatic posts
+telegram                        # where things stand: paired with whom, the daily limit, the backup state
+telegram backup                 # the first time: posts a checkpoint and starts the automatic backups; later: a checkpoint now
+telegram autobackup off / on    # pause and resume the automatic posts
+telegram link <token> · unlink · limit <amount> · pin · unlock · code
 ```
+
+`telegram` is the one command for the bot since 2.70 (2026-09-27); it replaced `mobile telegram …`, and the note mirror that the bot superseded is gone. The old spellings `backup telegram` and `wallet restore telegram` still work.
 
 The first run posts a **checkpoint** — the keys file and every note file — straight away. From then on, while the wallet is open, it posts by itself: a **delta** holding only the files that changed since the last post (and the names of any removed), once the vault has been quiet for two minutes and at most every ten; a fresh checkpoint once a week, or sooner when the deltas since the last one outweigh half of it; and any change still unposted goes out at `close`. Nothing is asked: every archive is sealed under a key made from the wallet's 24 words, which the owner keeps anyway and which bring the whole wallet back on any machine. The wallet remembers what it last posted in `telegram-backup.json` beside the wallet file, which is how a delta knows what changed.
 
@@ -210,7 +213,7 @@ Every backup message is delivered silently — no sound, no badge — so the cha
 To bring the wallet back on any machine:
 
 ```
-wallet restore telegram [<name>]
+telegram restore [<name>]
 ```
 
 The desktop wallet has the same on its **Backup** tab: where the backups go, on or off, the last full copy and the change sets since; "Back up now"; the bot's setup (token and PIN, then the pairing code to send it) when there is none yet; and "Save a backup file", which writes the same encrypted file into Downloads. Its opening screen has "Restore one from Telegram": token and words first, then the forward. Both wallets run the bot and the automatic backup while the wallet is open.

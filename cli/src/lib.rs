@@ -62,7 +62,7 @@ pub const HELP: &str = "marigold-cli {version} — the Marigold wallet, and the 
                                      mine in the background — no wallet needed
   marigold-cli serve <wallet> [--password-file <path>] [--mine <percent>]
                                      keep a wallet open as a service, answering
-                                     your Telegram bot ('mobile telegram' pairs it)
+                                     your Telegram bot ('telegram link' pairs it)
   marigold-cli --version             print the version
   marigold-cli --platform            what this build is and what it sees of this machine;
                                      paste it into a bug report

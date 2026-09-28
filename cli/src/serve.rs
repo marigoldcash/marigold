@@ -1,7 +1,7 @@
 //! The wallet as a service (PLAN P8.0h): `marigold-cli serve <wallet>`
 //! keeps a wallet open with no terminal, syncing its own copy of the network
 //! (or using a node already running), optionally mining, and — when
-//! `mobile telegram <token>` has been run — answering the person's own
+//! `telegram link <token>` has been run — answering the person's own
 //! Telegram bot. Hot posture: the wallet's secret stays in memory, the way
 //! the auto-mint already holds it. Foreground, stdout, SIGTERM.
 
@@ -39,7 +39,7 @@ pub const USAGE: &str =
   --network <id>          mainnet, testnet-10, ... (default: the wallet's setting)
 
 Runs in the foreground and logs to stdout; stop it with Ctrl-C or SIGTERM.
-With 'mobile telegram <token>' set up, the wallet answers your Telegram bot.";
+With 'telegram link <token>' set up, the wallet answers your Telegram bot.";
 
 struct Stop(Arc<AtomicBool>);
 
@@ -249,7 +249,7 @@ impl WalletService {
         Ok((format!("Marigold backup - {} - {stamp}.mgb", self.name), packed))
     }
 
-    /// Sets the wallet's bot up the way 'mobile telegram <token>' does, and
+    /// Sets the wallet's bot up the way 'telegram link <token>' does, and
     /// returns the pairing code to send it. A running bot has to be started
     /// (or restarted) by the caller, which owns that task.
     pub fn telegram_setup(&self, token: &str, pin: &str) -> std::result::Result<String, String> {
@@ -344,7 +344,7 @@ impl WalletService {
         let spent = if day == utc_day() { spent } else { 0 };
         if spent + petals > limit {
             return Err(format!(
-                "That would pass today's limit of {} {} ({} paid so far today). The limit resets at midnight UTC; 'mobile telegram limit' in the wallet changes it.",
+                "That would pass today's limit of {} {} ({} paid so far today). The limit resets at midnight UTC; 'telegram limit' in the wallet changes it.",
                 sompi_to_kaspa_string(limit),
                 self.ticker(),
                 sompi_to_kaspa_string(spent)
@@ -895,7 +895,7 @@ pub async fn serve(args: Vec<String>) -> Result<()> {
         Some(cfg) => {
             tokio::spawn(crate::telegram::run_bot(service.clone(), telegram_path.clone(), cfg));
         }
-        None => log::info!("No Telegram bot: run 'mobile telegram <token>' in the wallet to pair one"),
+        None => log::info!("No Telegram bot: run 'telegram link <token>' in the wallet to pair one"),
     }
 
     let mut started_once = false;

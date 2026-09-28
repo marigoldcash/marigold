@@ -347,7 +347,7 @@ pub(crate) async fn create(
             "\
             These words are the key to everything. On their own they bring back your ledger \
             balance; with a backup they bring back your notes — 'backup' writes one to a file, \
-            'backup telegram' keeps one current through your bot — and every backup opens with \
+            'telegram backup' keeps one current through your bot — and every backup opens with \
             these words and nothing else. Your wallet password never opens a backup: a password \
             is chosen to be remembered, and a backup may sit on someone else's server, where it \
             can be attacked at leisure. Nothing can derive a note, which is exactly what makes it \

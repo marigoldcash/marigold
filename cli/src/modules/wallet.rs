@@ -1181,15 +1181,12 @@ impl Wallet {
         use crate::telegram::TelegramConfig;
         use crate::tgbackup;
         if !ctx.wallet().is_open() {
-            tprintln!(ctx, "Open a wallet first — 'backup telegram' backs up the wallet you have open.");
+            tprintln!(ctx, "Open a wallet first — 'telegram backup' backs up the wallet you have open.");
             return Ok(());
         }
         let cfg_path = tgbackup::telegram_config_path(ctx)?;
         let Some(cfg) = TelegramConfig::load(&cfg_path) else {
-            tprintln!(
-                ctx,
-                "No Telegram bot is set up for this wallet. 'mobile telegram <token>' first, with a token from @BotFather."
-            );
+            tprintln!(ctx, "No Telegram bot is set up for this wallet. 'telegram link <token>' first, with a token from @BotFather.");
             return Ok(());
         };
         let files = tgbackup::WalletFiles::of(ctx).await?;
@@ -1219,7 +1216,7 @@ impl Wallet {
                     if index.paused {
                         "off"
                     } else if index.checkpoint.is_empty() {
-                        "not started — 'backup telegram' posts the first checkpoint and starts them"
+                        "not started — 'telegram backup' posts the first checkpoint and starts them"
                     } else {
                         "on"
                     }
@@ -1239,7 +1236,7 @@ impl Wallet {
                 index.save(&files.wallet_dir)?;
                 tprintln!(
                     ctx,
-                    "Automatic backups are off. 'backup telegram on' starts them again; 'backup telegram now' posts one anyway."
+                    "Automatic backups are off. 'telegram autobackup on' starts them again; 'telegram backup' posts one anyway."
                 );
                 return Ok(());
             }
@@ -1252,7 +1249,10 @@ impl Wallet {
             // 'on' before any checkpoint is the first run.
             Some("on") | Some("now") | None => {}
             Some(other) => {
-                tprintln!(ctx, "'backup telegram {other}'? It takes 'now', 'on', 'off' or 'status'.");
+                tprintln!(
+                    ctx,
+                    "'telegram {other}'? 'telegram backup', 'telegram autobackup on|off', or 'telegram' for where things stand."
+                );
                 return Ok(());
             }
         }
@@ -1271,7 +1271,7 @@ impl Wallet {
                 "From now on this wallet keeps a backup in {destination}, up to date by itself while the wallet is \
                 open: a full copy (a checkpoint) now and once a week, and the changes (a delta) within minutes \
                 of a payment. Everything is encrypted with a key made from your 24 words — nothing to remember, \
-                and the words bring it all back on any machine. 'backup telegram off' stops it. \
+                and the words bring it all back on any machine. 'telegram autobackup off' stops it. \
                 "
             );
             tprintln!(ctx, "");
@@ -1288,7 +1288,7 @@ impl Wallet {
         tprintln!(ctx, "");
         tpara!(
             ctx,
-            "To bring it back on any machine: 'wallet restore telegram' (it asks for the bot's token), then \
+            "To bring it back on any machine: 'telegram restore' (it asks for the bot's token), then \
             forward the bot everything from the last dashed line in that chat to the end — select those \
             messages, forward, pick the bot. It opens with your 24 words. \
             "

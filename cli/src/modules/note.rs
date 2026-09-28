@@ -70,11 +70,17 @@ impl Note {
             "vault" => self.vault(&ctx, argv).await,
             "help" => self.display_help(ctx, argv).await,
             // Money moves from the top level now: 'pay', 'receive', 'request',
-            // 'move', 'mobile', and 'import'/'export' under advanced. The old
+            // 'move', and 'import'/'export' under advanced. The old
             // spellings say so rather than fail.
-            "pay" | "request" | "move" | "mirror" | "import" | "export" | "balance" | "redeem" | "history" => {
+            "mirror" => {
+                tprintln!(
+                    ctx,
+                    "'note mirror' is gone: the phone is a remote control through your own Telegram bot now — 'telegram'.\r\n"
+                );
+                Ok(())
+            }
+            "pay" | "request" | "move" | "import" | "export" | "balance" | "redeem" | "history" => {
                 let now = match action.as_str() {
-                    "mirror" => "mobile",
                     "balance" => "balance",
                     "history" => "history",
                     "redeem" => "exchange",
@@ -923,221 +929,6 @@ impl Note {
 
     /// `note mirror` — the notes that are also on your phone.
     ///
-    /// A mirrored note stays in this vault, key and all: that is what makes it
-    /// a mirror rather than a move, and what lets `note mirror revoke` kill the
-    /// copies on a lost device. What changes is that nothing here will spend
-    /// it — every spend, fee-source and merge selector filters on `Active`, so
-    /// marking a note `Mirrored` takes it out of all of them at once.
-    pub(crate) async fn mirror(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
-        let ticker = ctx.ticker();
-        let store = ctx.wallet().store().as_note_key_store()?;
-        let mut mirrored: Vec<Arc<NoteKeyInfo>> = Vec::new();
-        let mut spendable: Vec<Arc<NoteKeyInfo>> = Vec::new();
-        let mut stream = store.iter().await?;
-        while let Some(info) = stream.try_next().await? {
-            match info.status {
-                NoteStatus::Mirrored => mirrored.push(info),
-                NoteStatus::Active => spendable.push(info),
-                _ => {}
-            }
-        }
-        let total = |notes: &[Arc<NoteKeyInfo>]| -> u64 { notes.iter().map(|i| DENOMINATION_PETALS[i.d as usize]).sum() };
-
-        let arg = argv.first().map(|s| s.as_str());
-        match arg {
-            None | Some("list") => {
-                if mirrored.is_empty() {
-                    tprintln!(ctx, "");
-                    tprintln!(ctx, "Nothing is on your phone.");
-                    tprintln!(ctx, "");
-                    tprintln!(ctx, "  'note mirror <amount>'   put that much on the phone");
-                    tprintln!(ctx, "  'note mirror export'     produce the encrypted block for your phone");
-                    tprintln!(ctx, "  'note mirror return'     take it all back");
-                    tprintln!(ctx, "  'note mirror revoke'     kill the copies on a lost phone");
-                    tprintln!(ctx, "");
-                    tprintln!(
-                        ctx,
-                        "{}",
-                        style("Notes on your phone stay here too — this wallet keeps the key, which is what lets you revoke.").dim()
-                    );
-                    tprintln!(ctx, "");
-                    return Ok(());
-                }
-                mirrored.sort_by_key(|a| std::cmp::Reverse(a.d));
-                tprintln!(ctx, "");
-                tprintln!(ctx, "On your phone: {} {ticker}", sompi_to_kaspa_string(total(&mirrored)));
-                for info in &mirrored {
-                    tprintln!(ctx, "  {} - {} {ticker}", info.sn, sompi_to_kaspa_string(DENOMINATION_PETALS[info.d as usize]));
-                }
-                tprintln!(ctx, "");
-                tprintln!(
-                    ctx,
-                    "{}",
-                    style("This wallet will not spend or merge these. 'note mirror revoke' if the phone is lost.").dim()
-                );
-                tprintln!(ctx, "");
-            }
-            Some("return") => {
-                if mirrored.is_empty() {
-                    tprintln!(ctx, "Nothing is on your phone.");
-                    return Ok(());
-                }
-                let amount = total(&mirrored);
-                let count = mirrored.len();
-                for info in &mirrored {
-                    store.mark_status(&info.sn, NoteStatus::Active).await?;
-                }
-                tprintln!(ctx, "Took back {count} note(s), {} {ticker}.", sompi_to_kaspa_string(amount));
-                tprintln!(ctx, "");
-                tprintln!(
-                    ctx,
-                    "{}",
-                    style("Do this only when the phone no longer holds them — a copy still on the phone can still be spent there.")
-                        .dim()
-                );
-                tprintln!(ctx, "Use 'note mirror revoke' instead if you are not sure.");
-            }
-            Some("export") => {
-                if mirrored.is_empty() {
-                    tprintln!(ctx, "Nothing is on your phone. 'note mirror <amount>' first.");
-                    return Ok(());
-                }
-                tprintln!(ctx, "");
-                tpara!(
-                    ctx,
-                    "This produces the encrypted block your phone reads. Choose a passphrase for it — \
-                    a DIFFERENT one from your wallet password. It never leaves this machine, and \
-                    whoever stores the block cannot read it without the passphrase. \
-                    ",
-                );
-                tprintln!(ctx, "");
-                tpara!(
-                    ctx,
-                    "Forgetting it costs nothing: these notes are still here. That is the point of \
-                    mirroring rather than moving — the copy is disposable. \
-                    ",
-                );
-                tprintln!(ctx, "");
-                let pass = ctx.term().ask(true, "Passphrase for the phone copy: ").await?.trim().to_string();
-                if pass.is_empty() {
-                    tprintln!(ctx, "No passphrase — nothing exported.");
-                    return Ok(());
-                }
-                let again = ctx.term().ask(true, "Again: ").await?.trim().to_string();
-                if pass != again {
-                    tprintln!(ctx, "Those did not match — nothing exported.");
-                    return Ok(());
-                }
-
-                let (wallet_secret, _) = ctx.ask_wallet_secret(None).await?;
-                let mut entries = Vec::with_capacity(mirrored.len());
-                for info in &mirrored {
-                    if let Some(entry) = store.load_key(&wallet_secret, &info.sn).await? {
-                        entries.push(entry);
-                    }
-                }
-                let pages = notepool::mirror_export_pages(&entries, &Secret::from(pass.as_bytes().to_vec()))?;
-                tprintln!(ctx, "");
-                tprintln!(
-                    ctx,
-                    "{} {ticker} in {} note(s), as {} block(s):",
-                    sompi_to_kaspa_string(total(&mirrored)),
-                    entries.len(),
-                    pages.len()
-                );
-                for (i, page) in pages.iter().enumerate() {
-                    tprintln!(ctx, "");
-                    tprintln!(ctx, "{}", style(format!("--- block {} of {} ---", i + 1, pages.len())).dim());
-                    ctx.term().writeln(page.clone());
-                }
-                tprintln!(ctx, "");
-                tprintln!(ctx, "{}", style("Every block is needed — one missing means the notes in it are unreadable.").dim());
-                tprintln!(ctx, "");
-            }
-            Some("revoke") => {
-                if mirrored.is_empty() {
-                    tprintln!(ctx, "Nothing is on your phone.");
-                    return Ok(());
-                }
-                let amount = total(&mirrored);
-                tprintln!(ctx, "");
-                tprintln!(ctx, "This rotates {} {ticker} onto fresh keys.", sompi_to_kaspa_string(amount));
-                tprintln!(ctx, "Every copy on the phone dies the moment it lands — including any a thief has.");
-                tprintln!(ctx, "The money comes back here.");
-                tprintln!(ctx, "");
-                let answer = ctx.term().ask(false, "Revoke? [y/N]: ").await?.trim().to_lowercase();
-                if !answer.starts_with('y') {
-                    tprintln!(ctx, "Left alone.");
-                    return Ok(());
-                }
-                let (wallet_secret, _) = ctx.ask_wallet_secret(None).await?;
-                let serials: Vec<Hash> = mirrored.iter().map(|i| i.sn).collect();
-                match notepool::rotate_notes(&ctx.wallet(), wallet_secret, serials).await {
-                    Ok(result) => {
-                        tprintln!(ctx, "");
-                        tprintln!(ctx, "Revoked. {} {ticker} is back on fresh keys here.", sompi_to_kaspa_string(amount));
-                        tprintln!(ctx, "{} note(s), transaction {}", result.own_notes.len(), result.transaction_id);
-                    }
-                    Err(err) => {
-                        tprintln!(ctx, "Could not revoke: {err}");
-                        tprintln!(ctx, "Nothing changed — the notes are still marked as being on the phone.");
-                    }
-                }
-            }
-            Some(amount) => {
-                let target = try_parse_required_nonzero_kaspa_as_sompi_u64(Some(&amount.to_string()))?;
-                // Largest first, never going over: mirroring more than asked
-                // would put more at risk than the user chose to carry.
-                spendable.sort_by_key(|a| std::cmp::Reverse(a.d));
-                let mut chosen = Vec::new();
-                let mut sum = 0u64;
-                for info in &spendable {
-                    let value = DENOMINATION_PETALS[info.d as usize];
-                    if sum + value <= target {
-                        sum += value;
-                        chosen.push(info.clone());
-                    }
-                }
-                if chosen.is_empty() {
-                    tprintln!(ctx, "");
-                    if spendable.is_empty() {
-                        tprintln!(ctx, "You hold no notes to put on the phone.");
-                    } else {
-                        let smallest = spendable.iter().map(|i| DENOMINATION_PETALS[i.d as usize]).min().unwrap_or(0);
-                        tprintln!(ctx, "No note here is small enough to make up {} {ticker}.", sompi_to_kaspa_string(target));
-                        tprintln!(ctx, "Your smallest is {} {ticker} — mint or split one first.", sompi_to_kaspa_string(smallest));
-                    }
-                    tprintln!(ctx, "");
-                    return Ok(());
-                }
-                for info in &chosen {
-                    store.mark_status(&info.sn, NoteStatus::Mirrored).await?;
-                }
-                tprintln!(ctx, "");
-                tprintln!(ctx, "On your phone: {} {ticker} in {} note(s).", sompi_to_kaspa_string(sum), chosen.len());
-                if sum < target {
-                    tprintln!(
-                        ctx,
-                        "{}",
-                        style(format!(
-                            "(you asked for {} — notes come in fixed sizes, so this is the closest without going over)",
-                            sompi_to_kaspa_string(target)
-                        ))
-                        .dim()
-                    );
-                }
-                tprintln!(ctx, "");
-                tprintln!(
-                    ctx,
-                    "{}",
-                    style("This wallet keeps the keys and will not spend these. If the phone is lost, 'note mirror revoke'.").dim()
-                );
-                tprintln!(ctx, "");
-            }
-        }
-        Ok(())
-    }
-
     /// `note list` — what you hold. Superseded notes are history, not
     /// holdings, and on an active wallet they pile up quickly; they live in
     /// `note history` instead.

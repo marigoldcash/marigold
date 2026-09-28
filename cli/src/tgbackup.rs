@@ -2,7 +2,7 @@
 //! "like an Apple Cloud backup of an iPhone … always up to date", and "we never
 //! have to forward more than a week's worth back to the wallet".
 //!
-//! After the first `backup telegram`, the wallet keeps its backup current by
+//! After the first `telegram backup`, the wallet keeps its backup current by
 //! itself while it is open — in the bot's own chat with its owner, the same
 //! chat the payment codes arrive in (founder, 2026-09-24: "the person will
 //! already have created the bot, so why not send the message direct"), or in
@@ -442,7 +442,7 @@ pub async fn auto_tick_for(
     let Ok(files) = WalletFiles::of_wallet(&wallet, &name).await else { return };
     let index = BackupIndex::load(&files.wallet_dir);
     // Nothing goes anywhere until the owner has asked once: the first
-    // 'backup telegram' posts the first checkpoint, and from then on the
+    // 'telegram backup' posts the first checkpoint, and from then on the
     // wallet keeps it current.
     if index.paused || index.checkpoint.is_empty() {
         return;
@@ -583,7 +583,7 @@ pub async fn offer_at_open(cli: &Arc<KaspaCli>) {
         };
     let _ = mark_asked(&files);
     if answer.starts_with('n') {
-        tprintln!(cli, "{}", crate::ui::dim("Run 'backup telegram' later if you change your mind."));
+        tprintln!(cli, "{}", crate::ui::dim("Run 'telegram backup' later if you change your mind."));
         tprintln!(cli, "");
         return;
     }
@@ -597,7 +597,7 @@ pub async fn offer_at_open(cli: &Arc<KaspaCli>) {
             );
         }
         Err(err) => {
-            tprintln!(cli, "{}", crate::ui::warn(format!("The backup did not go out: {err} — 'backup telegram' tries again.")))
+            tprintln!(cli, "{}", crate::ui::warn(format!("The backup did not go out: {err} — 'telegram backup' tries again.")))
         }
     }
     tprintln!(cli, "");

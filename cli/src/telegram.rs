@@ -435,9 +435,7 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
                 // A bad token is a configuration problem, not a hiccup: say
                 // so, and do not hammer Telegram about it.
                 if e.contains("401") {
-                    log::warn!(
-                        "telegram: the bot token is refused (401) — check 'mobile telegram' in the wallet; trying again in a minute"
-                    );
+                    log::warn!("telegram: the bot token is refused (401) — check 'telegram' in the wallet; trying again in a minute");
                     tokio::time::sleep(Duration::from_secs(60)).await;
                 } else {
                     log::warn!("telegram: {e}");
@@ -563,7 +561,7 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
                                             &token,
                                             chat_id,
                                             message_id,
-                                            "Wrong PIN, three times. Locked; 'mobile telegram unlock' in the wallet clears it.",
+                                            "Wrong PIN, three times. Locked; 'telegram unlock' in the wallet clears it.",
                                             None,
                                         )
                                         .await;
@@ -747,14 +745,14 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
                         log::error!("telegram: could not save the pairing: {e}");
                     }
                     service.say(format!(
-                        "telegram: paired with user {from} — the wallet offers the automatic backup to this chat at its next open ('backup telegram' turns it on now)"
+                        "telegram: paired with user {from} — the wallet offers the automatic backup to this chat at its next open ('telegram backup' turns it on now)"
                     ));
                     send_with_keyboard(
                         &token,
                         chat_id,
                         &format!(
                             "Paired. This chat now moves money in your wallet: keep 2FA on your Telegram account.\n\n\
-                             It can also hold your wallet's backup: 'backup telegram' in the wallet posts an encrypted copy here \
+                             It can also hold your wallet's backup: 'telegram backup' in the wallet posts an encrypted copy here \
                              and keeps it current by itself.\n\n{HELP}"
                         ),
                         &main_keyboard(),
@@ -765,13 +763,16 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
                         cfg.pairing_failures += 1;
                         if cfg.pairing_failures >= PAIRING_FAILURES_ALLOWED {
                             cfg.pairing_code = None;
-                            service.say("telegram: five wrong pairing codes — the code is dead; 'mobile telegram' in the wallet makes a new one".to_string());
+                            service.say(
+                                "telegram: five wrong pairing codes — the code is dead; 'telegram code' in the wallet makes a new one"
+                                    .to_string(),
+                            );
                         }
                         if let Err(e) = cfg.save(&cfg_path) {
                             log::error!("telegram: could not save: {e}");
                         }
                     }
-                    send(&token, chat_id, "This bot answers its owner. If that is you: in your wallet, 'mobile telegram' shows a code; send it here as /start &lt;code&gt;.").await;
+                    send(&token, chat_id, "This bot answers its owner. If that is you: in your wallet, 'telegram' shows a code; send it here as /start &lt;code&gt;.").await;
                 }
                 continue;
             }
@@ -784,7 +785,7 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
                 continue;
             }
             if locked {
-                send(&token, chat_id, "Locked after three wrong PINs. In your wallet, 'mobile telegram unlock' clears it.").await;
+                send(&token, chat_id, "Locked after three wrong PINs. In your wallet, 'telegram unlock' clears it.").await;
                 continue;
             }
 

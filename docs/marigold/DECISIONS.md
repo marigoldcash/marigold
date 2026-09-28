@@ -466,3 +466,9 @@ is priced like plumbing; notes are money and cost a penny to move.
 
 **Why.** That choice rested on the password opening backups: password plus a backup brought everything back, so the words were a second way in that most people never needed. Since today a backup opens with the words alone (the row above), the words are the one thing an owner must hold, and a wallet that never showed them would be a wallet nobody can restore. The two-word check is the cheapest moment to find a transcription error: a minute now against everything at recovery (founder: "ask for 2 random words afterwards to verify"). WALLET.md §3 step 6.
 
+## `telegram` is a first-level command; `mobile` and the note mirror are gone (2026-09-27)
+
+**Decision.** One command for the bot: `telegram` (where things stand), `telegram link <token>`, `unlink`, `backup`, `autobackup on|off`, `restore`, `limit <amount>`, `pin`, `unlock`, `code`. The `mobile` command and the note mirror (`note mirror <amount>|export|return|revoke`, the phone-holds-copies design of 2026-08) are removed from the wallet; the mirrored-note status stays in the core for old vaults. `backup telegram …` and `wallet restore telegram` remain as quiet aliases.
+
+**Why.** Founder: "I want to get rid of the whole note mirror section because it's superseded by the Telegram remote … make the Telegram command a first level citizen. It's important." Typing `mobile` produced a screen of commands that no longer described how a phone is used, and `mobile telegram` showed the daily limit with no way to find how to change it. The status line now says what the founder asked it to say — "Telegram answers as long as the *wallet* wallet is running" — and names the command for every setting it shows.
+
