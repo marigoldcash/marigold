@@ -173,6 +173,7 @@ Marigold roda em um blockchain de prova de trabalho que produz cerca de 10 bloco
 - **Lançamento:** lançamento justo desde o primeiro dia. Software disponível para todo mundo com antecedência. Todos começam em pé de igualdade.
 - **Emissão:** suave e gradual — a recompensa de mineração cai pela metade a cada três anos, sem quedas bruscas. Cerca de 21% é minerado no primeiro ano, e uns 90% até o décimo.
 - **Unidade base:** 1 MAGLD = 100.000.000 de pétalas.
+- **Menor cédula:** 0,01 MAGLD, e a taxa é uma cédula dessas. Se 1 MAGLD vier a valer mais do que cerca de um dólar, uma atualização da rede acrescenta uma cédula de 0,001 (ou menor) e a taxa passa a ser essa nova menor cédula; toda cédula existente fica como está.
 - **Custo para pagar:** 0,01 MAGLD — um centésimo de moeda — para qualquer pagamento do dia a dia, por maior que seja a quantia que você está mandando. A taxa é uma única cédula pequena entregue junto com o pagamento, então mover um café e mover um carro custa a mesma coisa. Só operações fora do comum, que empacotam dezenas de cédulas de uma vez, sobem para dois ou três centésimos.
 - **Taxas:** todas as taxas vão para os mineradores. Nada é queimado, nada é desviado. Uma economia de dinheiro vivo — em que cada pagamento é uma transação no blockchain — gera uma receita constante de taxas que as redes de reserva de valor não conseguem igualar.
 

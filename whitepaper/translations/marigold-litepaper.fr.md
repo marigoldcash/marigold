@@ -173,6 +173,7 @@ Marigold tourne sur une blockchain à preuve de travail qui produit environ 10 b
 - **Lancement :** lancement équitable dès le premier jour. Logiciel disponible pour tous à l'avance. Tout le monde part à égalité.
 - **Émission :** douce et progressive — la récompense de minage est divisée par deux tous les trois ans, sans chute brutale. Environ 21 % est miné la première année, ~90 % au bout de dix ans.
 - **Unité de base :** 1 MAGLD = 100 000 000 pétales.
+- **Plus petit billet :** 0,01 MAGLD, et les frais sont un billet de cette taille. Si 1 MAGLD venait à valoir plus d'un dollar environ, une mise à niveau du réseau ajoute un billet de 0,001 (ou plus petit) et les frais deviennent ce nouveau plus petit billet ; tous les billets existants restent tels quels.
 - **Coût d'un paiement :** 0,01 MAGLD — un centième de pièce — pour tout paiement courant, quel que soit le montant envoyé. Les frais sont un unique petit billet remis avec le paiement : déplacer un café ou une voiture coûte donc la même chose. Seules les opérations inhabituellement lourdes, qui regroupent des dizaines de billets d'un coup, montent à deux ou trois centièmes.
 - **Frais :** tous les frais vont aux mineurs. Rien n'est brûlé, rien n'est détourné. Une économie d'argent liquide — où chaque paiement est une transaction sur la chaîne — produit un revenu de frais régulier que les chaînes de réserve de valeur ne peuvent pas égaler.
 

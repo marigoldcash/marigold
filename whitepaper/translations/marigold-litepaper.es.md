@@ -173,6 +173,7 @@ Marigold funciona sobre una blockchain de prueba de trabajo que produce unos 10 
 - **Lanzamiento:** lanzamiento justo desde el primer día. Software disponible para todo el mundo por adelantado. Todos empiezan en igualdad de condiciones.
 - **Emisión:** suave y gradual — la recompensa de minería se reduce a la mitad cada tres años, sin caídas bruscas. Cerca del 21% se mina en el primer año, y alrededor del 90% para el décimo.
 - **Unidad base:** 1 MAGLD = 100.000.000 pétalos.
+- **Billete más pequeño:** 0,01 MAGLD, y la comisión es un billete de esos. Si 1 MAGLD llegara a valer más de un dólar aproximadamente, una actualización de la red añade un billete de 0,001 (o menor) y la comisión pasa a ser ese nuevo billete más pequeño; todos los billetes existentes quedan como están.
 - **Coste de pagar:** 0,01 MAGLD — una centésima de moneda — por cualquier pago cotidiano, envíes lo que envíes. La comisión es un único billete pequeño que se entrega junto con el pago, así que mover un café y mover un auto cuestan lo mismo. Solo las operaciones inusualmente grandes, que agrupan docenas de billetes a la vez, suben a dos o tres centésimas.
 - **Comisiones:** todas las comisiones van a los mineros. No se quema nada, no se desvía nada. Una economía de efectivo — donde cada pago es una transacción en la cadena — produce unos ingresos por comisiones constantes que las cadenas de reserva de valor no pueden igualar.
 

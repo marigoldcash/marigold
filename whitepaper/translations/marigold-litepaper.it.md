@@ -173,6 +173,7 @@ Marigold gira su una blockchain proof-of-work che produce circa 10 blocchi al se
 - **Lancio:** equo dal primo giorno. Software a disposizione di tutti in anticipo. Si parte tutti alla pari.
 - **Emissione:** regolare e graduale — la ricompensa di mining si dimezza ogni tre anni, senza cali improvvisi. Circa il 21% viene minato nel primo anno, il ~90% entro il decimo.
 - **Unità base:** 1 MAGLD = 100.000.000 petali.
+- **Banconota più piccola:** 0,01 MAGLD, e la commissione è una banconota così. Se 1 MAGLD arrivasse a valere più di un dollaro circa, un aggiornamento della rete aggiunge una banconota da 0,001 (o più piccola) e la commissione diventa quella nuova banconota più piccola; ogni banconota esistente resta com'è.
 - **Costo di un pagamento:** 0,01 MAGLD — un centesimo di moneta — per qualsiasi pagamento quotidiano, qualunque sia la cifra che mandi. La commissione è una sola piccola banconota che passa insieme al pagamento, quindi spostare un caffè e spostare un'auto costa uguale. Solo le operazioni insolitamente grandi, che mettono insieme decine di banconote in un colpo, salgono a due o tre centesimi.
 - **Commissioni:** vanno tutte ai miner. Niente viene bruciato, niente viene dirottato. Un'economia di contante — dove ogni pagamento è una transazione sulla catena — produce un flusso costante di commissioni che le catene pensate come riserva di valore non possono eguagliare.
 

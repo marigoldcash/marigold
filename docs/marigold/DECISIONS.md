@@ -472,3 +472,9 @@ is priced like plumbing; notes are money and cost a penny to move.
 
 **Why.** Founder: "I want to get rid of the whole note mirror section because it's superseded by the Telegram remote … make the Telegram command a first level citizen. It's important." Typing `mobile` produced a screen of commands that no longer described how a phone is used, and `mobile telegram` showed the daily limit with no way to find how to change it. The status line now says what the founder asked it to say — "Telegram answers as long as the *wallet* wallet is running" — and names the command for every setting it shows.
 
+## The ladder extends downward when 1 MAGLD passes about a dollar (2026-09-29)
+
+**Decision.** On record now, not decided in a hurry later: should 1 MAGLD come to be worth more than about a dollar, a 0.001 note (or smaller) is added — a reserved denomination tag, a hard fork by construction — and the fee stamp becomes the new smallest note. Every existing tag and note stays as it is. Written into the whitepaper (§8), the litepaper's economics list in all eight languages, POOL-SPEC beside the reserved tags, and the FAQ.
+
+**Why.** Tester Charly, 2026-09-29: at bitcoin-like value the 0.01 note is hundreds of dollars and the fee with it. Founder: at even a tenth of that success a coffee would carry a $6 fee, "obviously not possible", so the next rung must come, and the intention should be documented today. The ladder does not start at a petal because every denomination is a separate note to key and rotate; the cost of nine rungs on every payment is not worth paying before the cent-note is real money.
+

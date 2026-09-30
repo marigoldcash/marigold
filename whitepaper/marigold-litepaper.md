@@ -173,6 +173,7 @@ Marigold runs on a proof-of-work blockchain that produces approximately 10 block
 - **Launch:** Fair launch from day one. Software available to everyone in advance. Everyone starts on equal footing.
 - **Emission:** Smooth and gradual — the mining reward halves every three years without sudden drops. About 21% is mined in year one, ~90% by year ten.
 - **Base unit:** 1 MAGLD = 100,000,000 petals.
+- **Smallest note:** 0.01 MAGLD, and the fee is one such note. Should 1 MAGLD come to be worth more than about a dollar, a 0.001 note (or smaller) is added by a network upgrade and the fee becomes that new smallest note; every existing note stays as it is.
 - **Cost to pay:** 0.01 MAGLD — one hundredth of a coin — for any everyday payment, however much you are sending. The fee is a single small note handed over with the payment, so a coffee and a car cost the same to move. Only unusually large operations, bundling dozens of notes at once, step up to two or three hundredths.
 - **Fees:** All fees go to miners. Nothing is burned, nothing is diverted. A cash economy — where every payment is an on-chain transaction — produces steady fee income that store-of-value chains cannot match.
 

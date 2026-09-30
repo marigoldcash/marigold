@@ -173,6 +173,7 @@ Marigold läuft auf einer Proof-of-Work-Blockchain, die ungefähr 10 Blöcke pro
 - **Start:** Fairer Start ab Tag eins. Die Software steht vorab allen zur Verfügung. Alle fangen unter gleichen Bedingungen an.
 - **Ausgabe:** Gleichmäßig und allmählich — die Mining-Belohnung halbiert sich alle drei Jahre, ohne plötzliche Einbrüche. Etwa 21 % werden im ersten Jahr geschürft, rund 90 % bis zum zehnten.
 - **Kleinste Einheit:** 1 MAGLD = 100.000.000 Blütenblätter.
+- **Kleinster Schein:** 0,01 MAGLD, und die Gebühr ist ein solcher Schein. Sollte 1 MAGLD einmal mehr als etwa einen Dollar wert sein, kommt per Netzwerk-Upgrade ein 0,001-Schein (oder ein kleinerer) hinzu, und die Gebühr wird dieser neue kleinste Schein; jeder bestehende Schein bleibt, wie er ist.
 - **Was eine Zahlung kostet:** 0,01 MAGLD — ein Hundertstel Coin — für jede alltägliche Zahlung, egal wie viel du schickst. Die Gebühr ist ein einzelner kleiner Schein, den du mit der Zahlung übergibst, deshalb kostet ein Kaffee dasselbe wie ein Auto. Nur ungewöhnlich große Operationen, die Dutzende Scheine auf einmal bündeln, steigen auf zwei oder drei Hundertstel.
 - **Gebühren:** Alle Gebühren gehen an die Miner. Nichts wird verbrannt, nichts umgeleitet. Eine Bargeldwirtschaft — in der jede Zahlung eine Transaktion auf der Chain ist — bringt stetige Gebühreneinnahmen, mit denen Chains als reiner Wertspeicher nicht mithalten können.
 
