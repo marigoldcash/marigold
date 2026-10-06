@@ -709,6 +709,14 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
             let Some(from) = message.get("from").and_then(|f| f.get("id")).and_then(|v| v.as_i64()) else { continue };
             let Some(chat_id) = message.get("chat").and_then(|c| c.get("id")).and_then(|v| v.as_i64()) else { continue };
             let message_id = message.get("message_id").and_then(|v| v.as_i64()).unwrap_or(0);
+            // A pairing from before the chat was recorded learns it from the
+            // first message its user sends, so backups have somewhere to go.
+            if cfg.user_id == Some(from) && cfg.chat_id.is_none() {
+                cfg.chat_id = Some(chat_id);
+                if let Err(e) = cfg.save(&cfg_path) {
+                    log::warn!("telegram: could not record the chat: {e}");
+                }
+            }
             // A backup part forwarded to a bot that is being answered by an
             // open wallet would be swallowed here, and the restore on the new
             // machine would then find nothing (seen 2026-09-24). Say so.
