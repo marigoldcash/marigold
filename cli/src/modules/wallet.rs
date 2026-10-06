@@ -1243,7 +1243,10 @@ impl Wallet {
             Some("on") if !index.checkpoint.is_empty() => {
                 index.paused = false;
                 index.save(&files.wallet_dir)?;
-                tprintln!(ctx, "Automatic backups are on: a checkpoint every week, a delta within minutes of a change.");
+                tprintln!(
+                    ctx,
+                    "Automatic backups are on: a full copy every day, the changes within minutes, the last two copies kept in the chat."
+                );
                 return Ok(());
             }
             // 'on' before any checkpoint is the first run.
@@ -1269,7 +1272,7 @@ impl Wallet {
             tpara!(
                 ctx,
                 "From now on this wallet keeps a backup in {destination}, up to date by itself while the wallet is \
-                open: a full copy (a checkpoint) now and once a week, and the changes (a delta) within minutes \
+                open: a full copy (a checkpoint) now and once a day, and the changes (a delta) within minutes \
                 of a payment. Everything is encrypted with a key made from your 24 words — nothing to remember, \
                 and the words bring it all back on any machine. 'telegram autobackup off' stops it. \
                 "

@@ -26,8 +26,14 @@ use kaspa_wallet_core::wallet::Wallet;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-/// A checkpoint at least this often.
-pub const CHECKPOINT_EVERY_SECS: u64 = 7 * 24 * 3600;
+/// A checkpoint at least this often. Daily rather than weekly since
+/// 2026-10-06: Telegram lets a bot delete its own messages for two days only
+/// (measured), so keeping just the last two full copies in the chat means
+/// the third-newest must be deleted while it is still under two days old —
+/// which a daily copy allows and a weekly one never would.
+pub const CHECKPOINT_EVERY_SECS: u64 = 23 * 3600;
+/// How many full copies (with the changes after each) stay in the chat.
+pub const KEEP_CHECKPOINTS: usize = 2;
 /// A delta only when the vault has been quiet this long since its last change.
 pub const QUIET_SECS: u64 = 120;
 /// And at most this often.
@@ -86,10 +92,23 @@ pub struct BackupIndex {
     /// Set by 'backup telegram off'.
     #[serde(default)]
     pub paused: bool,
+    /// The messages posted per full copy — the dashed line, the sentence,
+    /// the files, and the deltas' messages after it — so the oldest can be
+    /// taken down once more than `KEEP_CHECKPOINTS` are in the chat.
+    #[serde(default)]
+    pub posted: Vec<PostedGroup>,
     /// The one-time question ("back up automatically? highly recommended")
     /// has been put, whatever the answer.
     #[serde(default)]
     pub asked: bool,
+}
+
+/// One full copy's messages in the chat, deltas included.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PostedGroup {
+    pub checkpoint: String,
+    pub chat_id: i64,
+    pub message_ids: Vec<i64>,
 }
 
 impl BackupIndex {
@@ -321,20 +340,57 @@ fn checkpoint_order(stamp: &str) -> (bool, String) {
 /// Posts one sealed archive: a plain line saying what it is, then the file
 /// (or its parts). No hashes, no markers — the archive is sealed and checked
 /// on its own, and the chat should read like a person wrote it.
-async fn post(token: &str, chat_id: i64, name: &str, what: &str, packed: &[u8], say: &(dyn Fn(String) + Send + Sync)) -> Result<()> {
+async fn post(
+    token: &str,
+    chat_id: i64,
+    name: &str,
+    what: &str,
+    packed: &[u8],
+    say: &(dyn Fn(String) + Send + Sync),
+) -> Result<Vec<i64>> {
     let parts: Vec<&[u8]> = packed.chunks(BACKUP_PART_BYTES).collect();
     let count = parts.len();
     let in_parts = if count > 1 { format!(", in {count} files") } else { String::new() };
-    send_plain(token, chat_id, &format!("{what}{in_parts}. To bring the wallet back on another computer, forward this bot everything from the last dashed line to the end of this chat; it opens with your 24 words."))
-        .await
-        .map_err(Error::custom)?;
+    let mut ids = Vec::with_capacity(count + 1);
+    ids.push(
+        send_plain(token, chat_id, &format!("{what}{in_parts}. To bring the wallet back on another computer, forward this bot everything from the last dashed line to the end of this chat; it opens with your 24 words."))
+            .await
+            .map_err(Error::custom)?,
+    );
     for (i, chunk) in parts.iter().enumerate() {
         let index = i + 1;
         let caption = if count > 1 { format!("{what} (part {index} of {count})") } else { what.to_string() };
-        send_document(token, chat_id, &part_file_name(name, index, count), chunk.to_vec(), &caption).await.map_err(Error::custom)?;
+        ids.push(
+            send_document(token, chat_id, &part_file_name(name, index, count), chunk.to_vec(), &caption)
+                .await
+                .map_err(Error::custom)?,
+        );
         say(format!("part {index} of {count} sent ({})", archive::human_size(chunk.len())));
     }
-    Ok(())
+    Ok(ids)
+}
+
+/// Keeps the newest `KEEP_CHECKPOINTS` full copies in the chat and takes the
+/// older ones down. Telegram refuses deletions older than two days; a copy
+/// that old — the wallet was closed for days — stays, and the owner is told.
+async fn tidy_old_copies(token: &str, index: &mut BackupIndex, say: &(dyn Fn(String) + Send + Sync)) {
+    while index.posted.len() > KEEP_CHECKPOINTS {
+        let old = index.posted.remove(0);
+        let mut refused = 0usize;
+        for id in &old.message_ids {
+            if crate::telegram::delete_message(token, old.chat_id, *id).await.is_err() {
+                refused += 1;
+            }
+        }
+        if refused == 0 {
+            say(format!("the full copy of {} and its changes were taken down from the chat", checkpoint_moment(&old.checkpoint)));
+        } else {
+            say(format!(
+                "the full copy of {} stays in the chat: Telegram lets a bot take messages down for two days only",
+                checkpoint_moment(&old.checkpoint)
+            ));
+        }
+    }
 }
 
 /// One backup run: decides checkpoint or delta (or that nothing changed),
@@ -369,8 +425,11 @@ pub async fn run_files(
             archive::unpack(&packed, key)?;
             say(format!("checkpoint {name}: {} files, {}", entries.len(), archive::human_size(packed.len())));
             let what = format!("Marigold backup of the wallet '{}': a full copy, {}", files.name, checkpoint_moment(&stamp));
-            send_plain(&cfg.token, chat_id, DIVIDER).await.map_err(Error::custom)?;
-            post(&cfg.token, chat_id, &name, &what, &packed, say).await?;
+            let divider = send_plain(&cfg.token, chat_id, DIVIDER).await.map_err(Error::custom)?;
+            let mut ids = vec![divider];
+            ids.extend(post(&cfg.token, chat_id, &name, &what, &packed, say).await?);
+            index.posted.push(PostedGroup { checkpoint: stamp.clone(), chat_id, message_ids: ids });
+            tidy_old_copies(&cfg.token, &mut index, say).await;
             index.checkpoint = stamp;
             index.checkpoint_at = now_secs();
             index.checkpoint_bytes = packed.len() as u64;
@@ -401,7 +460,10 @@ pub async fn run_files(
                 files.name,
                 checkpoint_moment(&index.checkpoint)
             );
-            post(&cfg.token, chat_id, &name, &what, &packed, say).await?;
+            let ids = post(&cfg.token, chat_id, &name, &what, &packed, say).await?;
+            if let Some(group) = index.posted.last_mut() {
+                group.message_ids.extend(ids);
+            }
             index.delta_seq = seq;
             index.delta_bytes += packed.len() as u64;
             for e in &changed {
@@ -607,7 +669,7 @@ pub async fn offer_at_open(cli: &Arc<KaspaCli>) {
     tprintln!(cli, "");
     tprintln!(
         cli,
-        "Your Telegram bot is paired. The wallet can keep an encrypted copy of itself in that chat by itself — a full copy every week, the changes within minutes of a payment, silently — sealed with your 24 words."
+        "Your Telegram bot is paired. The wallet can keep an encrypted copy of itself in that chat by itself — a full copy every day, the changes within minutes of a payment, silently, the last two copies kept — sealed with your 24 words."
     );
     let answer =
         match cli.term().ask(false, "Back up this wallet automatically to your Telegram bot chat? (highly recommended) [Y/n]: ").await

@@ -478,3 +478,9 @@ is priced like plumbing; notes are money and cost a penny to move.
 
 **Why.** Tester Charly, 2026-09-29: at bitcoin-like value the 0.01 note is hundreds of dollars and the fee with it. Founder: at even a tenth of that success a coffee would carry a $6 fee, "obviously not possible", so the next rung must come, and the intention should be documented today. The ladder does not start at a petal because every denomination is a separate note to key and rotate; the cost of nine rungs on every payment is not worth paying before the cent-note is real money.
 
+## Two full copies in the chat, a daily cadence, and codes taken down (2026-10-06)
+
+**Decision.** The chat keeps the last two full copies (with the deltas after each); the wallet deletes the third-newest when a new one is posted. The full copy is daily rather than weekly. The bot deletes the payment codes it posts once they have done their work: a request when paid or lapsed, a hand-over when its notes are taken or come back from a lock, within two days of posting.
+
+**Why.** Founder: keep two full copies, and bearer value should not sit in the chat history. Telegram has no auto-delete timer for bot chats, and a bot may delete its own messages only for two days after posting — measured against the release bot's chat: a fresh message deletes, every older one answers "message can't be deleted for everyone". So retention has to act inside that window: with a weekly copy the third-newest is two weeks old and untouchable; with a daily copy it is about two days old and deletable. A copy left over from a wallet closed for days stays, and the wallet says so rather than pretend. An untaken plain hand-over is never deleted by time: its code may be the only copy of that money.
+

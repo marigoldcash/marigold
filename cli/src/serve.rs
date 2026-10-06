@@ -118,6 +118,8 @@ pub struct Paid {
     pub value_petals: u64,
     pub fee_petals: u64,
     pub notes: usize,
+    /// The serials handed over, for whoever wants to know when they are taken.
+    pub serials: Vec<kaspa_consensus_core::Hash>,
 }
 
 enum Node {
@@ -439,7 +441,21 @@ impl WalletService {
             value_petals: result.value_petals,
             fee_petals: result.transfer.fee_petals,
             notes: result.handover.notes.len().saturating_sub(1),
+            serials: result.handover.notes.iter().map(|(sn, _)| *sn).collect(),
         })
+    }
+
+    /// Whether none of these handed-over notes is still waiting to be taken:
+    /// taken (superseded), came back from a lock (active again), or gone.
+    pub async fn handover_settled(&self, serials: &[kaspa_consensus_core::Hash]) -> bool {
+        let Ok(store) = self.wallet.store().as_note_key_store() else { return false };
+        let Ok(mut stream) = store.iter().await else { return false };
+        while let Ok(Some(info)) = stream.try_next().await {
+            if serials.contains(&info.sn) && info.status == NoteStatus::HandedOver {
+                return false;
+            }
+        }
+        true
     }
 
     /// What a request code asks for, once it has been checked: the pinned
@@ -474,7 +490,13 @@ impl WalletService {
         self.record("paid", amount, result.fee_petals, self.tag("request").as_str(), &result.transaction_id.to_string());
         let receipt =
             notepool::PaymentReceipt { transaction_id: result.transaction_id, request_pk: request.pk, amount_petals: amount };
-        Ok(Paid { code: receipt.to_text(), value_petals: amount, fee_petals: result.fee_petals, notes: result.external_serials.len() })
+        Ok(Paid {
+            code: receipt.to_text(),
+            value_petals: amount,
+            fee_petals: result.fee_petals,
+            notes: result.external_serials.len(),
+            serials: vec![],
+        })
     }
 
     /// 'pay' to a share key under a lock (P8.0g): the receiver's to take until
@@ -499,6 +521,7 @@ impl WalletService {
             value_petals: result.value_petals,
             fee_petals: result.transfer.fee_petals,
             notes: result.handover.notes.len().saturating_sub(1),
+            serials: result.handover.notes.iter().map(|(sn, _)| *sn).collect(),
         })
     }
 

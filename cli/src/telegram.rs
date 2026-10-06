@@ -212,21 +212,45 @@ async fn delete(token: &str, chat_id: i64, message_id: i64) {
 /// The code as a QR picture, under the message that carries it as text.
 /// Telegram takes the file as a multipart upload; a failure is logged and
 /// the text, already sent, stands on its own.
-async fn send_qr(token: &str, chat_id: i64, code: &str, caption: &str) {
-    let Some(png) = crate::qrpng::qr_png(code) else { return };
-    let part = match reqwest::multipart::Part::bytes(png).file_name("code.png").mime_str("image/png") {
-        Ok(part) => part,
-        Err(_) => return,
-    };
+/// Posts the code as a QR picture; the message id comes back so the picture
+/// can be taken down again once the code has done its work.
+async fn send_qr(token: &str, chat_id: i64, code: &str, caption: &str) -> Option<i64> {
+    let png = crate::qrpng::qr_png(code)?;
+    let part = reqwest::multipart::Part::bytes(png).file_name("code.png").mime_str("image/png").ok()?;
     let form =
         reqwest::multipart::Form::new().text("chat_id", chat_id.to_string()).text("caption", caption.to_string()).part("photo", part);
     let url = format!("https://api.telegram.org/bot{token}/sendPhoto");
     match reqwest::Client::new().post(url).multipart(form).send().await {
-        Ok(resp) if resp.status().is_success() => {}
-        Ok(resp) => log::warn!("telegram: sendPhoto answered {}", resp.status()),
-        Err(e) => log::warn!("telegram: sendPhoto: {e}"),
+        Ok(resp) if resp.status().is_success() => {
+            let body = resp.text().await.ok()?;
+            let v: serde_json::Value = serde_json::from_str(&body).ok()?;
+            v.get("result").and_then(|r| r.get("message_id")).and_then(|m| m.as_i64())
+        }
+        Ok(resp) => {
+            log::warn!("telegram: sendPhoto answered {}", resp.status());
+            None
+        }
+        Err(e) => {
+            log::warn!("telegram: sendPhoto: {e}");
+            None
+        }
     }
 }
+
+/// Takes a code's messages down once it has done its work: a request when it
+/// is paid or has lapsed, a hand-over when the notes have been taken (or came
+/// back from a lock). Bearer value should not sit in the chat history
+/// (founder, 2026-10-06). Within Telegram's two-day window only: a hand-over
+/// still untaken after that keeps its code, which may be the only copy.
+async fn tidy_code(token: &str, chat_id: i64, messages: &[Option<i64>]) {
+    for id in messages.iter().flatten() {
+        if let Err(e) = delete_message(token, chat_id, *id).await {
+            log::info!("telegram: could not take a code message down: {e}");
+        }
+    }
+}
+
+const CODE_TIDY_WINDOW: Duration = Duration::from_secs(47 * 3600);
 
 /// Every plain reply carries the buttons: Telegram shows a reply keyboard
 /// only with a message that brings it, and a person who never typed /help
@@ -407,6 +431,27 @@ fn pin_line_locked(petals: u64, buf: &str, ticker: &str) -> String {
 
 /// Long-poll the bot and act for the paired user. Runs until the service
 /// stops; a Telegram hiccup is logged and retried, never fatal.
+/// Watches a hand-over's notes and takes the code's messages down once they
+/// have been taken (or came back from a lock), within the two-day window.
+fn watch_handover(
+    service: Arc<WalletService>,
+    token: String,
+    chat_id: i64,
+    messages: [Option<i64>; 2],
+    serials: Vec<kaspa_consensus_core::Hash>,
+) {
+    tokio::spawn(async move {
+        let started = std::time::Instant::now();
+        while started.elapsed() < CODE_TIDY_WINDOW {
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            if service.handover_settled(&serials).await {
+                tidy_code(&token, chat_id, &messages).await;
+                return;
+            }
+        }
+    });
+}
+
 /// When the bot loop last came round, as seconds since the epoch: a loop
 /// that is alive polls every twenty seconds at most, so a stamp older than
 /// a couple of minutes means a hung task, which housekeeping restarts.
@@ -519,7 +564,7 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
                                                     None => "for whatever the payer chooses".to_string(),
                                                 };
                                                 edit(&token, chat_id, message_id, &format!("A request {what}. Give them this code; they type <b>pay</b> and the code. I will say when it is paid.\n\n<code>{}</code>", html_escape(&code)), None).await;
-                                                send_qr(&token, chat_id, &code, "The same request, to scan").await;
+                                                let qr_id = send_qr(&token, chat_id, &code, "The same request, to scan").await;
                                                 let (service, token, sent_code) = (service.clone(), token.clone(), code);
                                                 tokio::spawn(async move {
                                                     match service.await_request(&sent_code, Duration::from_secs(3600)).await {
@@ -527,6 +572,9 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
                                                         Ok(None) => {}
                                                         Err(e) => log::warn!("telegram: request watch: {e}"),
                                                     }
+                                                    // Paid, or lapsed (a request lives twenty minutes): the code
+                                                    // is spent either way.
+                                                    tidy_code(&token, chat_id, &[Some(message_id), qr_id]).await;
                                                 });
                                             }
                                             Err(e) => {
@@ -627,7 +675,7 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
                                             None,
                                         )
                                         .await;
-                                        send_qr(&token, chat_id, &paid.code, "The receipt, to scan").await;
+                                        let _ = send_qr(&token, chat_id, &paid.code, "The receipt, to scan").await;
                                     }
                                     Ok(paid) if share_key.is_some() => {
                                         service.note_spent(petals);
@@ -656,7 +704,14 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
                                             None,
                                         )
                                         .await;
-                                        send_qr(&token, chat_id, &paid.code, "The same code, to scan").await;
+                                        let qr_id = send_qr(&token, chat_id, &paid.code, "The same code, to scan").await;
+                                        watch_handover(
+                                            service.clone(),
+                                            token.clone(),
+                                            chat_id,
+                                            [Some(message_id), qr_id],
+                                            paid.serials.clone(),
+                                        );
                                     }
                                     Ok(paid) => {
                                         service.note_spent(petals);
@@ -687,7 +742,14 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
                                             None,
                                         )
                                         .await;
-                                        send_qr(&token, chat_id, &paid.code, "The same code, to scan").await;
+                                        let qr_id = send_qr(&token, chat_id, &paid.code, "The same code, to scan").await;
+                                        watch_handover(
+                                            service.clone(),
+                                            token.clone(),
+                                            chat_id,
+                                            [Some(message_id), qr_id],
+                                            paid.serials.clone(),
+                                        );
                                     }
                                     Err(e) => {
                                         edit(&token, chat_id, message_id, &format!("Could not pay: {}", html_escape(&e)), None).await
@@ -1041,13 +1103,23 @@ pub async fn chat_reachable(token: &str, chat_id: i64) -> bool {
 /// A backup message: delivered silently — no sound, no badge — so a chat
 /// that also carries payment codes stays quiet while the wallet keeps its
 /// backup current (founder, 2026-09-24: "messages can be sent silent").
-pub async fn send_plain(token: &str, chat_id: i64, text: &str) -> Result<(), String> {
+pub async fn send_plain(token: &str, chat_id: i64, text: &str) -> Result<i64, String> {
     let params = [("chat_id", chat_id.to_string()), ("text", text.to_string()), ("disable_notification", "true".to_string())];
-    call(token, "sendMessage", &params).await.map(|_| ())
+    let v = call(token, "sendMessage", &params).await?;
+    Ok(v.get("result").and_then(|r| r.get("message_id")).and_then(|m| m.as_i64()).unwrap_or(0))
+}
+
+/// Deletes one of the bot's own messages. Telegram allows it for two days
+/// after posting and refuses afterwards ("message can't be deleted"), in a
+/// private chat as much as anywhere — measured 2026-10-06 — so whatever
+/// tidying the wallet does has to happen inside that window.
+pub async fn delete_message(token: &str, chat_id: i64, message_id: i64) -> Result<(), String> {
+    let params = [("chat_id", chat_id.to_string()), ("message_id", message_id.to_string())];
+    call(token, "deleteMessage", &params).await.map(|_| ())
 }
 
 /// Uploads one file as a document with a caption, silently (see `send_plain`).
-pub async fn send_document(token: &str, chat_id: i64, file_name: &str, bytes: Vec<u8>, caption: &str) -> Result<(), String> {
+pub async fn send_document(token: &str, chat_id: i64, file_name: &str, bytes: Vec<u8>, caption: &str) -> Result<i64, String> {
     let part = reqwest::multipart::Part::bytes(bytes)
         .file_name(file_name.to_string())
         .mime_str("application/octet-stream")
@@ -1061,7 +1133,9 @@ pub async fn send_document(token: &str, chat_id: i64, file_name: &str, bytes: Ve
     let response =
         reqwest::Client::new().post(url).multipart(form).send().await.map_err(|e| e.to_string().replace(token, "<token>"))?;
     if response.status().is_success() {
-        Ok(())
+        let body = response.text().await.map_err(|e| e.to_string())?;
+        let v: serde_json::Value = serde_json::from_str(&body).map_err(|e| e.to_string())?;
+        Ok(v.get("result").and_then(|r| r.get("message_id")).and_then(|m| m.as_i64()).unwrap_or(0))
     } else {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
