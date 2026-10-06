@@ -1128,6 +1128,28 @@ impl KaspaCli {
             node.signal_connected().await?;
         }
         self.embedded_node_adopted.store(true, Ordering::SeqCst);
+        // The node is new and knows nothing of this wallet: the addresses
+        // and the note serials it has to report on were registered with the
+        // previous node's listener, at account activation. Without this
+        // reload the wallet sat on its own synced node with every
+        // notification going nowhere — the ledger and the notes froze while
+        // mining went on, and 'mine status' alone moved (tester Charly,
+        // 2026-10-06, Windows and Raspberry Pi; a restart of the wallet
+        // showed the true balance). A reload reactivates the accounts, which
+        // rescans and subscribes again on the node the wallet is on now.
+        if self.wallet.is_open() {
+            let guard = self.wallet.guard();
+            let guard = guard.lock().await;
+            if let Err(err) = self.wallet.reload(true, &guard).await {
+                tprintln!(
+                    self,
+                    "{}",
+                    crate::ui::warn(format!(
+                        "The wallet could not re-read the ledger on its own node ({err}); 'reload' does it by hand."
+                    ))
+                );
+            }
+        }
         Ok(())
     }
 
@@ -1711,6 +1733,10 @@ impl KaspaCli {
     async fn restart_embedded_node(self: &Arc<Self>) -> Result<Option<Rpc>> {
         let node = self.embedded_node.lock().unwrap().take();
         self.embedded_node_adopted.store(false, Ordering::SeqCst);
+        // Forget the sync state too: the fresh node's first "synced" report
+        // must count as the edge that reloads the wallet, not as more of the
+        // same.
+        self.sync_state.lock().unwrap().take();
         crate::log_sink::clear_sync_progress();
         if let Some(node) = node {
             node.stop().await?;
