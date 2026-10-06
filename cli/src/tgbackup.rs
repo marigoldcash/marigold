@@ -54,11 +54,17 @@ pub const DELTA_NOTE: &str = "__marigold_delta__.json";
 /// Where backups go: the group if one was set, else the chat the bot was
 /// paired in.
 pub fn target_chat(cfg: &TelegramConfig) -> Option<i64> {
-    // A bot paired before the chat was recorded (the field came later) has
-    // the user and no chat; a private chat's id is the user's id, so that is
-    // where its backups go. The founder's own wallet was such a one: "Paired
-    // with Telegram user …" and, two lines down, "nowhere to post" (2026-10-06).
-    cfg.backup_chat_id.or(cfg.chat_id).or(cfg.user_id)
+    // This wallet's own group first; then the bot's private chat — unless
+    // another wallet of this computer's holds it (one chat, one vault). A bot
+    // paired before the chat was recorded has the user and no chat; a private
+    // chat's id is the user's id, so that is where its backups go.
+    if let Some(home) = cfg.home_chat_id.or(cfg.backup_chat_id) {
+        return Some(home);
+    }
+    if cfg.private_chat_taken {
+        return None;
+    }
+    cfg.chat_id.or(cfg.user_id)
 }
 
 fn now_secs() -> u64 {
@@ -412,7 +418,21 @@ pub async fn run_files(
     force_checkpoint: bool,
     say: &(dyn Fn(String) + Send + Sync),
 ) -> Result<String> {
-    let chat_id = target_chat(cfg).ok_or_else(|| Error::custom("nowhere to post: pair the bot first, or give a group id"))?;
+    let chat_id = target_chat(cfg).ok_or_else(|| {
+        if cfg.private_chat_taken {
+            Error::custom("the bot's chat already keeps another wallet; this one needs a group of its own — make one, add the bot, then 'telegram home <group id>'")
+        } else {
+            Error::custom("nowhere to post: pair the bot first")
+        }
+    })?;
+    // One chat, one vault: the first post claims the chat for this wallet.
+    if let Some(folder) = files.wallet_dir.parent() {
+        crate::telegram::homes::claim(folder, &cfg.token, chat_id, &files.name).map_err(|why| {
+            Error::custom(format!(
+                "{why}; this wallet needs a group of its own — make one, add the bot, then 'telegram home <group id>'"
+            ))
+        })?;
+    }
     let mut index = BackupIndex::load(&files.wallet_dir);
     let entries = files.entries()?;
     let plan = if force_checkpoint { Plan::Checkpoint } else { plan(&index, &entries) };

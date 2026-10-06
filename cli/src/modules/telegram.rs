@@ -44,8 +44,12 @@ impl Telegram {
         match sub {
             None | Some("status") => self.status(ctx, &name, existing.as_ref()).await,
             Some("link") => self.link(ctx, argv.get(1).map(|s| s.as_str()), existing, &path).await,
+            Some("home") => self.home(ctx, &name, argv.get(1).map(|s| s.as_str()), existing, &path).await,
             Some("unlink") => {
                 ctx.stop_telegram_bot();
+                if let (Some(cfg), Some(folder)) = (existing.as_ref(), path.parent().and_then(|p| p.parent())) {
+                    crate::telegram::homes::release(folder, &cfg.token, &name);
+                }
                 if path.exists() {
                     std::fs::remove_file(&path).map_err(|e| Error::custom(e.to_string()))?;
                     tprintln!(ctx, "Unlinked. The bot no longer reaches this wallet; the backups already in its chat stay there.");
@@ -135,6 +139,10 @@ impl Telegram {
         tprintln!(ctx, "  telegram autobackup on|off  pause or resume the automatic backup");
         tprintln!(ctx, "  telegram restore [<name>]   bring a wallet back from the backups you forward to the bot");
         tprintln!(ctx, "  telegram limit <amount>     the daily spending limit from the phone");
+        tprintln!(
+            ctx,
+            "  telegram home <group id>    this wallet's own group, when the bot serves several wallets ('none' to drop it)"
+        );
         tprintln!(ctx, "  telegram pin                change the PIN the bot asks for");
         tprintln!(ctx, "  telegram unlock             clear the lockout after three wrong PINs");
         tprintln!(ctx, "  telegram code               a fresh pairing code");
@@ -172,6 +180,15 @@ impl Telegram {
             sompi_to_kaspa_string(cfg.daily_limit_petals),
             ctx.ticker()
         );
+        match (cfg.home_chat_id.or(cfg.backup_chat_id), cfg.private_chat_taken) {
+            (Some(home), _) => tprintln!(ctx, "This wallet's home: the group {home} — the bot answers it and keeps its backups there."),
+            (None, true) => tprintln!(
+                ctx,
+                "{}",
+                style("The bot's chat already keeps another wallet of this computer's. This one needs a group of its own: make one, add the bot, then 'telegram home <group id>'.").yellow()
+            ),
+            (None, false) => {}
+        }
         if ctx.telegram_bot_alive() && crate::telegram::bot_poll_age().is_none_or(|age| age <= 150) {
             tprintln!(ctx, "Telegram answers as long as the {name} wallet is running — it is answering now.");
         } else {
@@ -208,6 +225,96 @@ impl Telegram {
         }
         tprintln!(ctx, "");
         Ok(())
+    }
+
+    /// 'telegram home <group id>': this wallet's own group on a bot that
+    /// serves several wallets — one chat, one vault (founder, 2026-10-06).
+    async fn home(
+        &self,
+        ctx: &Arc<KaspaCli>,
+        name: &str,
+        arg: Option<&str>,
+        existing: Option<crate::telegram::TelegramConfig>,
+        path: &std::path::Path,
+    ) -> Result<()> {
+        let Some(mut cfg) = existing else {
+            tprintln!(ctx, "No bot yet — 'telegram link <token>' first.");
+            return Ok(());
+        };
+        let Some(folder) = path.parent().and_then(|p| p.parent()).map(|p| p.to_path_buf()) else { return Ok(()) };
+        match arg {
+            None => {
+                match cfg.home_chat_id.or(cfg.backup_chat_id) {
+                    Some(home) => tprintln!(ctx, "This wallet's home is the group {home}."),
+                    None if cfg.private_chat_taken => tprintln!(
+                        ctx,
+                        "No home yet, and the bot's chat keeps another wallet: 'telegram home <group id>' with a group the bot is a member of."
+                    ),
+                    None => tprintln!(
+                        ctx,
+                        "This wallet lives in the bot's own chat. 'telegram home <group id>' moves it to a group of its own — needed only when one bot serves several wallets."
+                    ),
+                }
+                Ok(())
+            }
+            Some("none") | Some("off") => {
+                if let Some(home) = cfg.home_chat_id.take() {
+                    crate::telegram::homes::release(&folder, &cfg.token, name);
+                    cfg.backup_chat_id = None;
+                    cfg.save(path).map_err(|e| Error::custom(e.to_string()))?;
+                    tprintln!(
+                        ctx,
+                        "The group {home} is no longer this wallet's home. Backups go to the bot's chat again — if no other wallet keeps it."
+                    );
+                    self.restart_bot(ctx).await;
+                } else {
+                    tprintln!(ctx, "This wallet has no home group.");
+                }
+                Ok(())
+            }
+            Some(given) => {
+                let id: i64 =
+                    given.replace(',', "").parse().map_err(|_| Error::custom("the group id is a number, as Telegram shows it"))?;
+                // Telegram shows a group's id as a positive number and its API
+                // wants it negative — plain groups as -<id>, large ones as -100<id>.
+                let candidates: Vec<i64> = if id < 0 { vec![id] } else { vec![-id, format!("-100{id}").parse().unwrap_or(-id), id] };
+                let mut found = None;
+                for candidate in candidates {
+                    if crate::telegram::chat_reachable(&cfg.token, candidate).await {
+                        found = Some(candidate);
+                        break;
+                    }
+                }
+                let Some(home) = found else {
+                    tprintln!(ctx, "The bot cannot see a chat with that id. Is it a member of the group? Add it, then try again.");
+                    return Ok(());
+                };
+                if let Err(why) = crate::telegram::homes::claim(&folder, &cfg.token, home, name) {
+                    tprintln!(ctx, "{}", style(format!("Not this one: {why}. Each wallet needs a group of its own.")).yellow());
+                    return Ok(());
+                }
+                cfg.home_chat_id = Some(home);
+                cfg.backup_chat_id = None;
+                cfg.save(path).map_err(|e| Error::custom(e.to_string()))?;
+                tprintln!(
+                    ctx,
+                    "{}",
+                    style(format!(
+                        "The group {home} is this wallet's home now: the bot answers it there and keeps its backups there."
+                    ))
+                    .green()
+                );
+                tprintln!(
+                    ctx,
+                    "{}",
+                    crate::ui::dim(
+                        "Make the bot an admin of the group and it can tidy old backups there at any age; a plain member only within two days."
+                    )
+                );
+                self.restart_bot(ctx).await;
+                Ok(())
+            }
+        }
     }
 
     async fn ask_pin(ctx: &Arc<KaspaCli>) -> Result<Option<String>> {

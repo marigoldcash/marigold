@@ -484,3 +484,9 @@ is priced like plumbing; notes are money and cost a penny to move.
 
 **Why.** Founder: keep two full copies, and bearer value should not sit in the chat history. Telegram has no auto-delete timer for bot chats, and a bot may delete its own messages only for two days after posting — measured against the release bot's chat: a fresh message deletes, every older one answers "message can't be deleted for everyone". So retention has to act inside that window: with a weekly copy the third-newest is two weeks old and untouchable; with a daily copy it is about two days old and deletable. A copy left over from a wallet closed for days stays, and the wallet says so rather than pretend. An untaken plain hand-over is never deleted by time: its code may be the only copy of that money.
 
+## One bot for several wallets: a home group per extra wallet, one chat one vault (2026-10-06)
+
+**Decision.** A bot token may serve several wallets of one computer, opened one at a time (tier 1). The bot's private chat belongs to the first wallet that backed up into it, recorded in `telegram-homes.json` beside the wallets; a second wallet on the same bot must be given a group of its own (`telegram home <group id>`) before it backs up anywhere, and the bot answers that wallet in that group. Two wallets open at once with one token are told that another copy of the bot is answering and back off. A hub holding several wallets at once (tier 2) waits until someone needs it.
+
+**Why.** Founder: a bot per wallet is no solution — Telegram allows twenty bots per account — and "the wallet needs to be aware that one vault is already being backed up to a chat and that a new group is required": mixed backups of two wallets in one chat would break the one-sentence restore. Telegram allows one poller per token, which is what makes "one wallet at a time" the natural first tier and a hub the second.
+

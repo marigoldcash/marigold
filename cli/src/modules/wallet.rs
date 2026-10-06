@@ -1260,10 +1260,17 @@ impl Wallet {
             }
         }
         if tgbackup::target_chat(&cfg).is_none() {
-            tprintln!(
-                ctx,
-                "Nowhere to post yet: open the bot on your phone and pair it (it tells you how) — backups go into that chat."
-            );
+            if cfg.private_chat_taken {
+                tprintln!(
+                    ctx,
+                    "The bot's chat already keeps another wallet of this computer's. This wallet needs a group of its own: make one, add the bot, then 'telegram home <group id>'."
+                );
+            } else {
+                tprintln!(
+                    ctx,
+                    "Nowhere to post yet: open the bot on your phone and pair it (it tells you how) — backups go into that chat."
+                );
+            }
             return Ok(());
         }
         if first_time {

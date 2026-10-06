@@ -202,7 +202,10 @@ telegram                        # where things stand: paired with whom, the dail
 telegram backup                 # the first time: posts a checkpoint and starts the automatic backups; later: a checkpoint now
 telegram autobackup off / on    # pause and resume the automatic posts
 telegram link <token> · unlink · limit <amount> · pin · unlock · code
+telegram home <group id>        # one bot, several wallets: this wallet's own group (see below)
 ```
+
+**One bot, several wallets (2026-10-06).** Telegram allows twenty bots per account, so a wallet per bot does not scale; one bot can serve several wallets of the same computer, opened one at a time (a bot token has one poller — two wallets open at once with the same bot are told so and take turns). The rule is one chat, one vault: the bot's private chat belongs to whichever wallet first backed up into it (recorded in `telegram-homes.json` beside the wallets), and a second wallet linked to the same bot is told, when it pairs or when it tries to back up, that it needs a group of its own — make a group, add the bot, then `telegram home <group id>`. From then on that wallet's backups go to its group, the bot answers that wallet there, the restore instruction stays "forward everything from the last dashed line in this chat", and the two-copies tidying works unchanged. A bot that is an admin of the group may tidy at any age, not just within two days. `telegram home none` drops the group again.
 
 `telegram` is the one command for the bot since 2.70 (2026-09-27); it replaced `mobile telegram …`, and the note mirror that the bot superseded is gone. The old spellings `backup telegram` and `wallet restore telegram` still work.
 

@@ -27,9 +27,21 @@ pub struct TelegramConfig {
     #[serde(default)]
     pub chat_id: Option<i64>,
     /// The chat 'backup telegram' posts to — a private group the bot is a
-    /// member of, given once and kept.
+    /// member of, given once and kept. Superseded by `home_chat_id`; read for
+    /// settings written before it.
     #[serde(default)]
     pub backup_chat_id: Option<i64>,
+    /// This wallet's own chat with the bot, when the bot serves several
+    /// wallets: a group the owner made for it ('telegram home <group id>').
+    /// Its backups go there and the bot answers it there; the bot's private
+    /// chat belongs to whichever wallet claimed it first (founder,
+    /// 2026-10-06: one bot per wallet runs into Telegram's twenty-bot limit).
+    #[serde(default)]
+    pub home_chat_id: Option<i64>,
+    /// The bot's private chat already keeps another wallet of this
+    /// computer's, so it is not this wallet's to post into.
+    #[serde(default)]
+    pub private_chat_taken: bool,
     /// "argon2" for a PIN hashed with Argon2id; absent for the first
     /// wallets' plain SHA-256, kept verifiable until the PIN is set again.
     #[serde(default)]
@@ -54,6 +66,61 @@ pub struct TelegramConfig {
 
 /// How long a pairing code stays valid.
 pub const PAIRING_CODE_LIFETIME: Duration = Duration::from_secs(15 * 60);
+
+/// Which wallet of this computer's a bot's chat belongs to — one chat, one
+/// vault, so two wallets on one bot never mix their backups in one place
+/// (founder, 2026-10-06). Kept beside the wallets, in
+/// `<folder>/telegram-homes.json`, as `"<token fingerprint>/<chat id>": "<wallet>"`.
+pub mod homes {
+    use std::collections::BTreeMap;
+    use std::path::{Path, PathBuf};
+
+    fn path(folder: &Path) -> PathBuf {
+        folder.join("telegram-homes.json")
+    }
+
+    /// The first bytes of the token's hash: enough to tell bots apart, and
+    /// nothing a reader of the file could use.
+    pub fn fingerprint(token: &str) -> String {
+        use sha2::{Digest, Sha256};
+        let mut h = Sha256::new();
+        h.update(b"marigold-telegram-home");
+        h.update(token.as_bytes());
+        faster_hex::hex_string(&h.finalize()[..8])
+    }
+
+    fn load(folder: &Path) -> BTreeMap<String, String> {
+        std::fs::read_to_string(path(folder)).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+    }
+
+    /// The wallet that owns this chat of this bot, if any.
+    pub fn owner(folder: &Path, token: &str, chat_id: i64) -> Option<String> {
+        load(folder).get(&format!("{}/{chat_id}", fingerprint(token))).cloned()
+    }
+
+    /// Records the chat as this wallet's. Refused when another wallet holds it.
+    pub fn claim(folder: &Path, token: &str, chat_id: i64, wallet: &str) -> Result<(), String> {
+        let mut map = load(folder);
+        let key = format!("{}/{chat_id}", fingerprint(token));
+        match map.get(&key) {
+            Some(other) if other != wallet => return Err(format!("that chat already keeps the wallet '{other}'")),
+            _ => {}
+        }
+        map.insert(key, wallet.to_string());
+        let text = serde_json::to_string_pretty(&map).map_err(|e| e.to_string())?;
+        crate::backup::write_owner_only(&path(folder), text.as_bytes()).map_err(|e| e.to_string())
+    }
+
+    /// Lets go of every chat this wallet holds on this bot ('telegram unlink').
+    pub fn release(folder: &Path, token: &str, wallet: &str) {
+        let mut map = load(folder);
+        let prefix = format!("{}/", fingerprint(token));
+        map.retain(|k, v| !(k.starts_with(&prefix) && v == wallet));
+        if let Ok(text) = serde_json::to_string_pretty(&map) {
+            let _ = crate::backup::write_owner_only(&path(folder), text.as_bytes());
+        }
+    }
+}
 /// Wrong pairing codes tolerated before the code is thrown away.
 pub const PAIRING_FAILURES_ALLOWED: u32 = 5;
 
@@ -108,6 +175,8 @@ impl TelegramConfig {
             daily_limit_petals,
             chat_id: None,
             backup_chat_id: None,
+            home_chat_id: None,
+            private_chat_taken: false,
             pin_kdf: Some("argon2".to_string()),
             pairing_made: 0,
             pairing_failures: 0,
@@ -452,6 +521,18 @@ fn watch_handover(
     });
 }
 
+/// Whether the bot answers in this chat for this wallet: its private chat
+/// (unless another wallet holds it) and its home group.
+fn chat_allowed(cfg: &TelegramConfig, chat_id: i64) -> bool {
+    if cfg.home_chat_id == Some(chat_id) {
+        return true;
+    }
+    if cfg.private_chat_taken {
+        return false;
+    }
+    cfg.chat_id.is_none_or(|paired| paired == chat_id)
+}
+
 /// When the bot loop last came round, as seconds since the epoch: a loop
 /// that is alive polls every twenty seconds at most, so a stamp older than
 /// a couple of minutes means a hung task, which housekeeping restarts.
@@ -503,6 +584,11 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
                 if e.contains("401") {
                     log::warn!("telegram: the bot token is refused (401) — check 'telegram' in the wallet; trying again in a minute");
                     tokio::time::sleep(Duration::from_secs(60)).await;
+                } else if e.contains("Conflict") || e.contains("terminated by other getUpdates") {
+                    // Two pollers on one token: another wallet open with the
+                    // same bot, here or on another machine. Only one answers.
+                    service.say("telegram: another copy of this bot is answering — another wallet open with the same bot? Only one can at a time; trying again in a minute".to_string());
+                    tokio::time::sleep(Duration::from_secs(60)).await;
                 } else {
                     log::warn!("telegram: {e}");
                     tokio::time::sleep(Duration::from_secs(5)).await;
@@ -525,7 +611,7 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
                 let chat_id = msg.get("chat").and_then(|c| c.get("id")).and_then(|v| v.as_i64()).unwrap_or(0);
                 let message_id = msg.get("message_id").and_then(|v| v.as_i64()).unwrap_or(0);
                 let key = cb.get("data").and_then(|d| d.as_str()).and_then(|d| d.strip_prefix("k:")).unwrap_or("").to_string();
-                if cfg.user_id != Some(from) || locked || cfg.chat_id.is_some_and(|paired| paired != chat_id) {
+                if cfg.user_id != Some(from) || locked || !chat_allowed(&cfg, chat_id) {
                     continue;
                 }
                 match &mut pending {
@@ -832,8 +918,29 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
                     cfg.user_id = Some(from);
                     cfg.chat_id = Some(chat_id);
                     cfg.pairing_code = None;
+                    // One chat, one vault: a private chat that already keeps
+                    // another wallet of this computer's is not this one's.
+                    let folder = cfg_path.parent().and_then(|p| p.parent()).map(|p| p.to_path_buf());
+                    let taken_by = folder
+                        .as_deref()
+                        .and_then(|f| homes::owner(f, &token, chat_id))
+                        .filter(|owner| owner != service.wallet_name());
+                    cfg.private_chat_taken = taken_by.is_some();
                     if let Err(e) = cfg.save(&cfg_path) {
                         log::error!("telegram: could not save the pairing: {e}");
+                    }
+                    if let Some(other) = &taken_by {
+                        service.say(format!(
+                            "telegram: paired with user {from}. This chat already keeps the wallet '{other}'; this wallet needs a group of its own for its backups — make one, add the bot, then 'telegram home <group id>'"
+                        ));
+                        send_with_keyboard(
+                            &token,
+                            chat_id,
+                            &format!("Paired. This chat already keeps the wallet '{}'. For this wallet's backups, make a group, add me to it, and run <b>telegram home &lt;group id&gt;</b> in the wallet; I answer this wallet there.\n\n{HELP}", html_escape(other)),
+                            &main_keyboard(),
+                        )
+                        .await;
+                        continue;
                     }
                     service.say(format!(
                         "telegram: paired with user {from} — the wallet offers the automatic backup to this chat at its next open ('telegram backup' turns it on now)"
@@ -871,7 +978,7 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
                 log::warn!("telegram: ignored a message from user {from}, not the paired one");
                 continue;
             }
-            if cfg.chat_id.is_some_and(|paired| paired != chat_id) {
+            if !chat_allowed(&cfg, chat_id) {
                 log::warn!("telegram: ignored a message from chat {chat_id}, not the paired chat");
                 continue;
             }
