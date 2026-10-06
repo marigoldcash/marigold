@@ -21,6 +21,8 @@ pub async fn everyday(ctx: &Arc<KaspaCli>) -> Vec<&'static str> {
         "close",
         "connect",
         "disconnect",
+        "telegram",
+        "about",
         "guide",
         "help",
         "advanced",
