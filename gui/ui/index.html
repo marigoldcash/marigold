@@ -75,7 +75,7 @@
 
   <section id="screen-restore-tg" class="screen" hidden>
     <h1>Restore from Telegram</h1>
-    <p class="hint">Your wallet's bot posted its backups into your chat with it. Give the bot's token and the wallet's 24 words, press Start, then forward the bot everything from the last dashed line in that chat to the end: select those messages, forward, pick the bot. Forwarding more does no harm; the wallet takes the newest full copy and the changes after it.</p>
+    <p class="hint">Your wallet's bot posted its backups into your chat with it. Give the bot's token and the 24 words of the wallet you want back, press Start, then forward the bot everything from the last dashed line in that chat to the end: select those messages, forward, pick the bot. Forwarding more does no harm; the wallet takes the newest full copy and the changes after it. A backup holds every wallet of that computer; do this once per wallet, with its own words.</p>
     <label>Bot token, from @BotFather
       <input id="rt-token" autocomplete="off" spellcheck="false" placeholder="123456789:AA…">
     </label>
@@ -196,11 +196,23 @@
     <div id="tab-backup" class="tab-panel" hidden>
       <h1>Backup</h1>
       <pre id="backup-status" class="figures small">…</pre>
-      <p class="hint">Every backup opens with your 24 words and with nothing else — never with your password. A copy on someone else's server is noise to everyone but you.</p>
+      <p class="hint">A backup holds every wallet on this computer, each sealed with its own 24 words and with nothing else — never with a password. A copy on someone else's server is noise to everyone but you.</p>
+      <div id="cover-box" hidden>
+        <h2>Wallets waiting for their words</h2>
+        <p class="hint">The backups cover every wallet on this computer since October 2026, and these were made before: each gets its backup key the first time it is opened with its password — or type its 24 words here, once. They are checked against the wallet; nothing is kept but a public key.</p>
+        <label>Wallet
+          <select id="cover-name"></select>
+        </label>
+        <label>Its 24 words
+          <textarea id="cover-words" rows="3" autocomplete="off" spellcheck="false"></textarea>
+        </label>
+        <button id="cover-go">Cover it</button>
+        <p id="cover-error" class="error"></p>
+      </div>
       <div id="backup-actions" hidden>
         <button id="backup-now" class="primary">Back up now</button>
         <button id="backup-toggle" hidden>Pause automatic backups</button>
-        <p class="hint">After the first backup the wallet keeps the copy current by itself while it is open: a full copy every day, the changes within minutes of a payment, silently, and only the last two full copies stay in the chat. To bring it back on another machine: "Restore one from Telegram" on the opening screen, then forward the bot everything from the last dashed line in the chat to the end.</p>
+        <p class="hint">After the first backup the wallet keeps the copy current by itself while it is open: a full copy every day, the changes within minutes of a payment, silently, and only the last two full copies stay in the chat. To bring a wallet back on another machine: "Restore one from Telegram" on the opening screen, then forward the bot everything from the last dashed line in the chat to the end; each wallet opens with its own words.</p>
       </div>
       <div id="bot-setup" hidden>
         <h2>Your Telegram bot</h2>
@@ -220,7 +232,7 @@
         <button id="bot-repair">Make a new code</button>
       </div>
       <h2>A backup file</h2>
-      <p class="hint">The same encrypted copy as a file, for a USB stick or a drive of your own. It goes into your Downloads folder.</p>
+      <p class="hint">The same encrypted copy of every wallet as a file, for a USB stick or a drive of your own. It goes into your Downloads folder.</p>
       <button id="backup-file">Save a backup file</button>
       <p id="backup-error" class="error"></p>
       <p id="backup-done" class="ok" hidden></p>

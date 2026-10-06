@@ -259,10 +259,29 @@ impl Wallet {
                 if !needs_passphrase {
                     ctx.hold_tidying_secret(wallet_secret.clone());
                 }
+                // The wallet's backup key — the public half of a pair its 24
+                // words name — written on the first open since the backups
+                // started covering every wallet (2026-10-06).
+                if let Some(descriptor) = ctx.store().descriptor() {
+                    match crate::bundle::ensure_recipient(&ctx.wallet(), &descriptor.filename, &wallet_secret).await {
+                        Ok(true) => {
+                            tprintln!(
+                                ctx,
+                                "{}",
+                                crate::ui::dim("This wallet now has its backup key: the backups cover it from now on.")
+                            )
+                        }
+                        Ok(false) => {}
+                        Err(err) => tprintln!(ctx, "{}", crate::ui::warn(format!("Could not write the backup key: {err}"))),
+                    }
+                }
                 // Once, when the bot is paired and nothing is backed up yet:
                 // the automatic backup, offered rather than waited for.
                 #[cfg(feature = "embedded-node")]
                 crate::tgbackup::offer_at_open(&ctx).await;
+                // Wallets of this folder still without a backup key.
+                #[cfg(feature = "embedded-node")]
+                crate::tgbackup::cover_at_open(&ctx).await;
                 if auto_sweep_on && !needs_passphrase {
                     let threshold = meta
                         .as_ref()
@@ -818,9 +837,9 @@ impl Wallet {
                 ("forget <name>", "Hide a wallet from the open picker (it is NOT deleted; 'wallet show <name>' undoes it)"),
                 ("show <name>", "Un-hide a wallet previously hidden with 'wallet forget'"),
                 ("hint", "Change the wallet phishing hint"),
-                ("backup [<file-or-folder>]", "Write the whole wallet — keys, notes and all — to one encrypted file"),
+                ("backup [<file-or-folder>]", "Write every wallet on this computer — keys, notes and all — to one encrypted file, each sealed with its own 24 words"),
                 ("backup verify <file>", "Check that a backup file still opens and what is inside it"),
-                ("restore <file> [<name>]", "Rebuild a wallet from a backup file"),
+                ("restore <file> [<name>]", "Rebuild wallets from a backup file"),
             ],
             None,
         )?;
@@ -846,16 +865,8 @@ impl Wallet {
         }
         let descriptor = ctx.store().descriptor().ok_or_else(|| Error::custom("no wallet is open"))?;
         let name = descriptor.filename.clone();
-
-        // vault_folder() is the resolved on-disk path, so its parent is the
-        // real storage folder — no second guess at where '~' points.
-        // <storage>/<name>.wallet/notes -> <storage>/<name>.wallet
-        let vault_folder = ctx.wallet().store().as_note_key_store()?.vault_folder().await?;
-        let wallet_dir = vault_folder.parent().ok_or_else(|| Error::custom("cannot work out the wallet folder"))?.to_path_buf();
-        let wallet_file = wallet_dir.join(kaspa_wallet_core::storage::local::keys_file_name(&name));
-        if !wallet_file.exists() {
-            return Err(Error::custom(format!("{} is missing — nothing to back up", wallet_file.display())));
-        }
+        let files = crate::bundle::WalletFiles::of(ctx).await?;
+        let folder = crate::bundle::Folder::around(&files)?;
 
         let target = Self::backup_target(argv.first().map(|s| s.as_str()))?;
         if target.exists() {
@@ -866,49 +877,75 @@ impl Wallet {
         tprintln!(ctx, "");
         tpara!(
             ctx,
-            "This writes your whole wallet — the keys, every note, the lot — into one file, \
-            encrypted with a key made from your 24 words. It is safe to keep somewhere you do \
-            not control: a cloud drive, a chat with yourself, a stranger's USB stick. \
+            "This writes every wallet on this computer — the keys, every note, the lot — into one file, \
+            each wallet sealed with its own 24 words. It is safe to keep somewhere you do not control: \
+            a cloud drive, a chat with yourself, a stranger's USB stick. \
             "
         );
         tprintln!(ctx, "");
         tpara!(
             ctx,
-            "The 24 words are the only thing that opens it — not your wallet password. A password \
+            "A wallet's 24 words are the only thing that opens its part — not its password. A password \
             people type every day is chosen to be remembered, and a file on someone else's server \
             can be attacked at leisure; the words cannot be guessed. Keep them on paper. \
             "
         );
         tprintln!(ctx, "");
+        let uncovered = folder.uncovered();
+        if !uncovered.is_empty() {
+            tprintln!(
+                ctx,
+                "{}",
+                crate::ui::warn(format!(
+                    "Not in this file: {} — no backup key yet. Open each once with its password, or 'telegram cover' to type its words.",
+                    uncovered.join(", ")
+                ))
+            );
+            tprintln!(ctx, "");
+        }
 
         // The words come from the vault under the wallet password, which the
         // session already holds from 'open'; a password never seals a backup
         // (founder, 2026-09-24: "24 words are a MUST for backups").
         let (secret, _) = ctx.ask_wallet_secret_for_tidying(None).await?;
         let words = ctx.wallet().store().as_note_key_store()?.recovery_words(&secret).await?;
-        let passphrase = archive::key_from_words(&words);
-        let (entries, packed) = Self::pack_wallet(&name, &wallet_file, &vault_folder, &passphrase)?;
+        crate::bundle::ensure_recipient(&ctx.wallet(), &name, &secret).await?;
+        let files = crate::bundle::WalletFiles::of(ctx).await?;
+        let (entries, packed, names) = crate::bundle::bundle_checked(&files, &words)?;
         let file_count = entries.len();
         Self::write_private(&target, &packed)?;
 
-        // Read it back and open it. A backup that was never opened is a guess,
-        // and this is the cheapest moment to find out it is a bad one.
+        // Read it back and open this wallet's part. A backup that was never
+        // opened is a guess, and this is the cheapest moment to find out it
+        // is a bad one.
         let reread = archive::read_file(&target)?;
-        let restored = archive::unpack(&reread, &passphrase)?;
-        if restored.len() != file_count {
+        if reread != packed {
             return Err(Error::custom("the backup did not read back correctly — do not rely on it"));
         }
-        for (a, b) in entries.iter().zip(restored.iter()) {
-            if a.path != b.path || a.data != b.data {
-                return Err(Error::custom("the backup did not read back correctly — do not rely on it"));
-            }
+        let items = archive::parse_bundle(&reread)?;
+        let mine = items.iter().find(|i| i.name == name).ok_or_else(|| Error::custom("this wallet is missing from its own backup"))?;
+        let own = archive::unseal_with(&words, &mine.blob)?;
+        let own_count = entries.iter().filter(|e| e.path.starts_with(&format!("{name}.wallet/"))).count();
+        if own.len() != own_count {
+            return Err(Error::custom("the backup did not read back correctly — do not rely on it"));
         }
 
         let (active, retired) = Self::note_counts(&entries);
         tprintln!(ctx, "");
         tprintln!(ctx, "Wrote {}", style(target.display().to_string()).bold());
-        tprintln!(ctx, "{} files, {} — opened again to check it.", file_count.separated_string(), archive::human_size(packed.len()));
-        tprintln!(ctx, "{} note keys you can spend, {} retired.", active.separated_string(), retired.separated_string());
+        tprintln!(
+            ctx,
+            "{} files of {}, {} — this wallet's part opened again to check it.",
+            file_count.separated_string(),
+            crate::bundle::wallets_phrase(&names),
+            archive::human_size(packed.len())
+        );
+        tprintln!(
+            ctx,
+            "{} note keys you can spend, {} retired, all wallets together.",
+            active.separated_string(),
+            retired.separated_string()
+        );
         if retired > active.saturating_mul(4) {
             tprintln!(ctx, "");
             // Retired keys are the bulk of every mature vault, and leaving them
@@ -926,13 +963,17 @@ impl Wallet {
         tprintln!(ctx, "");
         tpara!(
             ctx,
-            "Restore it with 'wallet restore <file>' on any machine. It opens with your 24 words \
-            and nothing else — never with your wallet password, though the password is still what \
-            opens the wallet afterwards. \
+            "Restore it with 'wallet restore <file>' on any machine. Each wallet opens with its own 24 words \
+            and nothing else — never with its password, though the password is still what opens the \
+            wallet afterwards. \
             "
         );
         tprintln!(ctx, "");
-        tprintln!(ctx, "{}", style("This file plus your 24 words are enough to spend your money. Treat it as cash.").red());
+        tprintln!(
+            ctx,
+            "{}",
+            style("This file plus a wallet's words are enough to spend that wallet's money. Treat it as cash.").red()
+        );
         tprintln!(ctx, "");
         Ok(())
     }
@@ -952,19 +993,62 @@ impl Wallet {
         let path = std::path::PathBuf::from(path);
         let bytes = archive::read_file(&path)?;
 
-        let pass = ctx.term().ask(true, "Passphrase for this backup: ").await?.trim().to_string();
-        if pass.is_empty() {
-            tprintln!(ctx, "No passphrase — nothing checked.");
+        if archive::is_bundle(&bytes) {
+            let items = archive::parse_bundle(&bytes)?;
+            let names: Vec<String> = items.iter().map(|i| i.name.clone()).collect();
+            tprintln!(ctx, "");
+            tprintln!(ctx, "The file is a Marigold backup of {}.", crate::bundle::wallets_phrase(&names));
+            tprintln!(ctx, "{}", crate::ui::dim("Each wallet's part opens with its own 24 words; Enter skips a wallet."));
+            let mut checked = 0;
+            for item in &items {
+                let answer = ctx.term().ask(true, &format!("The 24 words of '{}': ", item.name)).await?.trim().to_string();
+                if answer.is_empty() {
+                    continue;
+                }
+                match archive::unseal_with(&answer, &item.blob) {
+                    Ok(entries) => {
+                        let (active, retired) = Self::note_counts(&entries);
+                        let total: usize = entries.iter().map(|e| e.data.len()).sum();
+                        tprintln!(
+                            ctx,
+                            "{}",
+                            style(format!(
+                                "'{}': the words are right and its part is intact — {} files, {} notes spendable, {} retired, {} inside.",
+                                item.name,
+                                entries.len().separated_string(),
+                                active.separated_string(),
+                                retired.separated_string(),
+                                archive::human_size(total)
+                            ))
+                            .green()
+                        );
+                        checked += 1;
+                    }
+                    Err(err) => tprintln!(ctx, "{}", style(format!("'{}': {err}", item.name)).red()),
+                }
+            }
+            tprintln!(ctx, "");
+            if checked == 0 {
+                tprintln!(ctx, "Nothing checked.");
+            } else {
+                tprintln!(ctx, "'wallet restore {}' would rebuild them.", path.display());
+            }
+            tprintln!(ctx, "");
             return Ok(());
         }
-        let entries = archive::unpack(&bytes, &Secret::from(pass.as_bytes().to_vec()))?;
+
+        let Some(key) = Self::ask_restore_key(ctx).await? else {
+            tprintln!(ctx, "Nothing given — nothing checked.");
+            return Ok(());
+        };
+        let entries = archive::unpack(&bytes, &key)?;
 
         let name = crate::backup::wallet_name_in(&entries)?;
         let (active, retired) = Self::note_counts(&entries);
         let total: usize = entries.iter().map(|e| e.data.len()).sum();
 
         tprintln!(ctx, "");
-        tprintln!(ctx, "{}", style("The passphrase is right and the file is intact.").green());
+        tprintln!(ctx, "{}", style("The words are right and the file is intact.").green());
         tprintln!(ctx, "");
         tprintln!(ctx, "  Wallet:  {name}");
         tprintln!(ctx, "  Files:   {}", entries.len().separated_string());
@@ -992,14 +1076,101 @@ impl Wallet {
         };
         let path = std::path::PathBuf::from(path);
         let bytes = archive::read_file(&path)?;
+        self.restore_collected(ctx, crate::bundle::single(bytes), argv.get(1).cloned(), guard).await
+    }
 
-        let answer = Self::ask_restore_key(ctx).await?;
-        let Some(key) = answer else {
-            tprintln!(ctx, "Nothing given — nothing restored.");
-            return Ok(());
+    /// The questions and the merge behind both restores: a bundle asks for
+    /// each wallet's words (Enter skips one), an archive from before bundles
+    /// for its one key; then every wallet opened is put in place.
+    async fn restore_collected(
+        &self,
+        ctx: &Arc<KaspaCli>,
+        collected: std::collections::BTreeMap<String, Vec<u8>>,
+        new_name: Option<String>,
+        guard: &WalletGuard<'_>,
+    ) -> Result<()> {
+        use crate::bundle::{self, Unlock};
+        let names = bundle::bundle_wallets(&collected)?;
+        let merged = if names.is_empty() {
+            let Some(key) = Self::ask_restore_key(ctx).await? else {
+                tprintln!(ctx, "Nothing given — nothing restored.");
+                return Ok(());
+            };
+            bundle::merge(&collected, Unlock::Legacy(&key))?
+        } else {
+            tprintln!(ctx, "");
+            tprintln!(ctx, "This backup holds {}.", bundle::wallets_phrase(&names));
+            tprintln!(
+                ctx,
+                "{}",
+                crate::ui::dim(
+                    "Each opens with its own 24 words. Enter skips a wallet — its part stays in the backup for another time."
+                )
+            );
+            let mut words = std::collections::BTreeMap::new();
+            for name in &names {
+                if words.contains_key(name) {
+                    continue;
+                }
+                loop {
+                    let answer = ctx.term().ask(true, &format!("The 24 words of '{name}': ")).await?.trim().to_string();
+                    if answer.is_empty() {
+                        break;
+                    }
+                    let fits = bundle::wallets_for_words(&collected, &answer)?;
+                    if fits.contains(name) {
+                        words.insert(name.clone(), answer);
+                        break;
+                    }
+                    match fits.first() {
+                        Some(other) => {
+                            tprintln!(ctx, "{}", crate::ui::dim(format!("Those are the words of '{other}' — used for it.")));
+                            words.insert(other.clone(), answer);
+                            break;
+                        }
+                        None => tprintln!(
+                            ctx,
+                            "{}",
+                            crate::ui::warn(format!(
+                                "Those are not the words of '{name}', nor of any wallet in this backup — try again, or Enter to skip it."
+                            ))
+                        ),
+                    }
+                }
+            }
+            if words.is_empty() {
+                tprintln!(ctx, "No words — nothing restored.");
+                return Ok(());
+            }
+            bundle::merge(&collected, Unlock::Words(&words))?
         };
-        let entries = archive::unpack(&bytes, &key)?;
-        self.restore_entries(ctx, entries, argv.get(1).cloned(), guard).await
+        if merged.stamp.starts_with('c') {
+            tprintln!(
+                ctx,
+                "Restoring the full copy of {} with {} change set(s) after it.",
+                bundle::checkpoint_moment(&merged.stamp),
+                merged.deltas
+            );
+        }
+        let several = merged.wallets.len() > 1;
+        if several && new_name.is_some() {
+            tprintln!(
+                ctx,
+                "{}",
+                crate::ui::dim("Several wallets: each keeps its own name; the name given applies when one is restored.")
+            );
+        }
+        for (wallet, entries) in merged.wallets {
+            if several {
+                tprintln!(ctx, "");
+                tprintln!(ctx, "{}", style(format!("'{wallet}': {} files", entries.len())).bold());
+            }
+            let name = if several { None } else { new_name.clone() };
+            if let Err(err) = self.restore_entries(ctx, entries, name, guard).await {
+                tprintln!(ctx, "{}", crate::ui::warn(format!("'{wallet}' was not restored: {err}")));
+            }
+        }
+        Ok(())
     }
 
     /// The key that opens a backup: the wallet's 24 words. A backup from
@@ -1135,53 +1306,20 @@ impl Wallet {
         (active, retired)
     }
 
-    /// The wallet's name, read off the one top-level `.wallet` entry.
-    /// Work out where to write. A folder gets a dated filename; anything else
-    /// is taken literally.
-    ///
-    /// The default name carries no wallet name, because the filename is the one
-    /// part of a backup that whoever stores it can read.
-    /// The open wallet — its keys file and every note file — as archive
-    /// entries and the sealed archive, checked to read back before anything
-    /// is done with it.
-    fn pack_wallet(
-        name: &str,
-        wallet_file: &std::path::Path,
-        vault_folder: &std::path::Path,
-        passphrase: &Secret,
-    ) -> Result<(Vec<crate::backup::ArchiveEntry>, Vec<u8>)> {
-        use crate::backup as archive;
-        let dir = kaspa_wallet_core::storage::local::wallet_dir_name(name);
-        let mut entries = vec![archive::ArchiveEntry {
-            path: format!("{dir}/{}", kaspa_wallet_core::storage::local::keys_file_name(name)),
-            data: std::fs::read(wallet_file).map_err(|e| Error::custom(format!("cannot read the wallet file: {e}")))?,
-        }];
-        if vault_folder.exists() {
-            archive::collect_tree(vault_folder, &format!("{dir}/notes"), &mut entries)?;
-        }
-        let packed = archive::pack(&entries, passphrase)?;
-        let restored = archive::unpack(&packed, passphrase)?;
-        if restored.len() != entries.len() || entries.iter().zip(restored.iter()).any(|(a, b)| a.path != b.path || a.data != b.data) {
-            return Err(Error::custom("the backup did not read back correctly — do not rely on it"));
-        }
-        Ok((entries, packed))
-    }
-
     /// 'backup telegram [now|on|off|status]': automatic backups through the
     /// wallet's bot (founder, 2026-09-24: "like an Apple Cloud backup of an
     /// iPhone … always up to date"). They go to the bot's own chat with the
-    /// owner — the chat the payment codes arrive in; a separate group was an
-    /// option for a day and dropped the same evening ("finding one group and
-    /// then posting it into another gets even me confused"). The first run posts a checkpoint; from
-    /// then on the wallet keeps it current by itself while it is open — see
-    /// `crate::tgbackup`. Everything is sealed under a key made from the
-    /// wallet's 24 words, so nothing has to be asked or remembered.
+    /// owner — the chat the payment codes arrive in — or to the wallet's home
+    /// group. The first run posts a checkpoint; from then on the wallet keeps
+    /// it current by itself while it is open — see `crate::tgbackup`. Every
+    /// wallet on the computer is in it, each sealed with its own 24 words, so
+    /// nothing has to be asked or remembered.
     #[cfg(feature = "embedded-node")]
     async fn backup_telegram(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
         use crate::telegram::TelegramConfig;
         use crate::tgbackup;
         if !ctx.wallet().is_open() {
-            tprintln!(ctx, "Open a wallet first — 'telegram backup' backs up the wallet you have open.");
+            tprintln!(ctx, "Open a wallet first — 'telegram backup' runs from an open wallet.");
             return Ok(());
         }
         let cfg_path = tgbackup::telegram_config_path(ctx)?;
@@ -1189,8 +1327,8 @@ impl Wallet {
             tprintln!(ctx, "No Telegram bot is set up for this wallet. 'telegram link <token>' first, with a token from @BotFather.");
             return Ok(());
         };
-        let files = tgbackup::WalletFiles::of(ctx).await?;
-        let mut index = tgbackup::BackupIndex::load(&files.wallet_dir);
+        let files = crate::bundle::WalletFiles::of(ctx).await?;
+        let mut settings = tgbackup::WalletBackupSettings::load(&files.wallet_dir);
         let when = |secs: u64| -> String {
             if secs == 0 {
                 return "never".to_string();
@@ -1200,49 +1338,65 @@ impl Wallet {
                 .unwrap_or_default()
         };
         let where_to = |cfg: &TelegramConfig| -> String {
-            match (cfg.backup_chat_id, cfg.chat_id) {
+            match (cfg.home_chat_id.or(cfg.backup_chat_id), tgbackup::target_chat(cfg)) {
                 (Some(id), _) => format!("the group {id}"),
                 (None, Some(_)) => "the bot's chat with you".to_string(),
                 (None, None) => "nowhere yet".to_string(),
             }
         };
-        let first_time = index.checkpoint.is_empty();
+        let first_time = !settings.started;
         match argv.first().map(|s| s.as_str()) {
             Some("status") => {
+                let st = tgbackup::status(&files, Some(&cfg));
                 tprintln!(ctx, "Backups go to {}.", where_to(&cfg));
                 tprintln!(
                     ctx,
                     "Automatic backups: {}.",
-                    if index.paused {
+                    if settings.paused {
                         "off"
-                    } else if index.checkpoint.is_empty() {
-                        "not started — 'telegram backup' posts the first checkpoint and starts them"
+                    } else if !settings.started {
+                        "not started — 'telegram backup' posts the first full copy and starts them"
                     } else {
                         "on"
                     }
                 );
                 tprintln!(
                     ctx,
-                    "Last checkpoint: {} ({}); {} delta(s) after it; last post {}.",
-                    when(index.checkpoint_at),
-                    crate::backup::human_size(index.checkpoint_bytes as usize),
-                    index.delta_seq,
-                    when(index.last_post_at)
+                    "Last full copy: {} ({}); {} delta(s) after it; last post {}.",
+                    when(st.checkpoint_at),
+                    crate::backup::human_size(st.checkpoint_bytes as usize),
+                    st.deltas,
+                    when(st.last_post_at)
                 );
+                tprintln!(
+                    ctx,
+                    "Covered: {}.",
+                    if st.wallets.is_empty() { "no wallet yet".to_string() } else { st.wallets.join(", ") }
+                );
+                if !st.uncovered.is_empty() {
+                    tprintln!(
+                        ctx,
+                        "{}",
+                        crate::ui::warn(format!(
+                            "Waiting for their words: {} — open each once with its password, or 'telegram cover'.",
+                            st.uncovered.join(", ")
+                        ))
+                    );
+                }
                 return Ok(());
             }
             Some("off") => {
-                index.paused = true;
-                index.save(&files.wallet_dir)?;
+                settings.paused = true;
+                settings.save(&files.wallet_dir)?;
                 tprintln!(
                     ctx,
                     "Automatic backups are off. 'telegram autobackup on' starts them again; 'telegram backup' posts one anyway."
                 );
                 return Ok(());
             }
-            Some("on") if !index.checkpoint.is_empty() => {
-                index.paused = false;
-                index.save(&files.wallet_dir)?;
+            Some("on") if settings.started => {
+                settings.paused = false;
+                settings.save(&files.wallet_dir)?;
                 tprintln!(
                     ctx,
                     "Automatic backups are on: a full copy every day, the changes within minutes, the last two copies kept in the chat."
@@ -1260,17 +1414,10 @@ impl Wallet {
             }
         }
         if tgbackup::target_chat(&cfg).is_none() {
-            if cfg.private_chat_taken {
-                tprintln!(
-                    ctx,
-                    "The bot's chat already keeps another wallet of this computer's. This wallet needs a group of its own: make one, add the bot, then 'telegram home <group id>'."
-                );
-            } else {
-                tprintln!(
-                    ctx,
-                    "Nowhere to post yet: open the bot on your phone and pair it (it tells you how) — backups go into that chat."
-                );
-            }
+            tprintln!(
+                ctx,
+                "Nowhere to post yet: open the bot on your phone and pair it (it tells you how) — backups go into that chat."
+            );
             return Ok(());
         }
         if first_time {
@@ -1278,40 +1425,58 @@ impl Wallet {
             tprintln!(ctx, "");
             tpara!(
                 ctx,
-                "From now on this wallet keeps a backup in {destination}, up to date by itself while the wallet is \
-                open: a full copy (a checkpoint) now and once a day, and the changes (a delta) within minutes \
-                of a payment. Everything is encrypted with a key made from your 24 words — nothing to remember, \
-                and the words bring it all back on any machine. 'telegram autobackup off' stops it. \
+                "From now on this wallet keeps a backup of every wallet on this computer in {destination}, up to date \
+                by itself while it is open: a full copy now and once a day, and the changes within minutes of a \
+                payment. Each wallet is sealed with its own 24 words — nothing to remember, and a wallet's words \
+                bring it back on any machine. 'telegram autobackup off' stops it. \
                 "
             );
             tprintln!(ctx, "");
         }
         let (secret, _) = ctx.ask_wallet_secret_for_tidying(None).await?;
+        crate::bundle::ensure_recipient(&ctx.wallet(), &files.name, &secret).await?;
         let words = ctx.wallet().store().as_note_key_store()?.recovery_words(&secret).await?;
-        let key = crate::backup::key_from_words(&words);
-        tprintln!(ctx, "Posting a checkpoint…");
+        tgbackup::mark_started(&files)?;
+        tprintln!(ctx, "Posting a full copy…");
         let ctx_ = ctx.clone();
         let say = move |line: String| tprintln!(ctx_, "  {line}");
-        let outcome = tgbackup::run(ctx, &key, true, &say).await?;
+        let outcome = tgbackup::run(ctx, &words, true, &say).await?;
         tprintln!(ctx, "");
         tprintln!(ctx, "{}", style(format!("Telegram backup: {outcome}.")).green());
+        let folder = crate::bundle::Folder::around(&files)?;
+        let uncovered = folder.uncovered();
+        if !uncovered.is_empty() {
+            tprintln!(
+                ctx,
+                "{}",
+                crate::ui::warn(format!(
+                    "Not in it yet: {} — no backup key. Open each once with its password, or 'telegram cover' to type its words.",
+                    uncovered.join(", ")
+                ))
+            );
+        }
         tprintln!(ctx, "");
         tpara!(
             ctx,
-            "To bring it back on any machine: 'telegram restore' (it asks for the bot's token), then \
+            "To bring a wallet back on any machine: 'telegram restore' (it asks for the bot's token), then \
             forward the bot everything from the last dashed line in that chat to the end — select those \
-            messages, forward, pick the bot. It opens with your 24 words. \
+            messages, forward, pick the bot. Each wallet opens with its own 24 words. \
             "
         );
         tprintln!(ctx, "");
-        tprintln!(ctx, "{}", style("Those messages plus your words are enough to spend your money. Keep that chat private.").red());
+        tprintln!(
+            ctx,
+            "{}",
+            style("Those messages plus a wallet's words are enough to spend its money. Keep that chat private.").red()
+        );
         tprintln!(ctx, "");
         Ok(())
     }
 
     /// 'wallet restore telegram [<name>]': collects the backups forwarded to
     /// the bot — the newest checkpoint and the deltas after it, or one older
-    /// passphrase-sealed archive — merges them and restores the wallet.
+    /// passphrase-sealed archive — merges them and restores every wallet
+    /// whose words are given.
     #[cfg(feature = "embedded-node")]
     async fn restore_telegram(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>, guard: &WalletGuard<'_>) -> Result<()> {
         use crate::backup as archive;
@@ -1336,7 +1501,7 @@ impl Wallet {
             "Now forward the bot everything from the last dashed line in the backup chat to the end: select \
             those messages, forward, pick the bot. Forwarding more does no harm; the wallet takes the newest \
             full copy and the changes after it. It waits up to ten minutes, and goes on a few seconds after \
-            the last file. \
+            the last file. A backup holds every wallet of that computer; each opens with its own 24 words. \
             "
         );
         tprintln!(ctx, "");
@@ -1352,20 +1517,14 @@ impl Wallet {
             tprintln!(ctx, "Received {name} ({}).", archive::human_size(bytes.len()));
             archives.insert(name.clone(), bytes);
         }
-        let Some(key) = Self::ask_restore_key(ctx).await? else {
-            tprintln!(ctx, "Nothing given — nothing restored.");
-            return Ok(());
-        };
-        let (entries, checkpoint, deltas) = crate::tgbackup::merge(&archives, &key)?;
-        tprintln!(
-            ctx,
-            "Restoring the full copy of {} with {deltas} change set(s) after it: {} files.",
-            crate::tgbackup::checkpoint_moment(&checkpoint),
-            entries.len()
-        );
-        self.restore_entries(ctx, entries, new_name, guard).await
+        self.restore_collected(ctx, archives, new_name, guard).await
     }
 
+    /// Work out where to write. A folder gets a dated filename; anything else
+    /// is taken literally.
+    ///
+    /// The default name carries no wallet name, because the filename is the one
+    /// part of a backup that whoever stores it can read.
     fn backup_target(arg: Option<&str>) -> Result<std::path::PathBuf> {
         let stamp = chrono::Local::now().format("%Y%m%d-%H%M").to_string();
         let generated = format!("marigold-backup-{stamp}.mgb");

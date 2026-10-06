@@ -59,6 +59,12 @@ impl Telegram {
                 Ok(())
             }
             Some("backup") => ctx.exec_within("wallet backup telegram now").await,
+            Some("cover") => {
+                let files = crate::bundle::WalletFiles::of(ctx).await?;
+                let folder = crate::bundle::Folder::around(&files)?;
+                crate::tgbackup::cover_wizard(ctx, &folder, true).await;
+                Ok(())
+            }
             Some("autobackup") => match argv.get(1).map(|s| s.as_str()) {
                 Some("on") => ctx.exec_within("wallet backup telegram on").await,
                 Some("off") => ctx.exec_within("wallet backup telegram off").await,
@@ -135,7 +141,11 @@ impl Telegram {
         tprintln!(ctx, "  telegram                    where things stand");
         tprintln!(ctx, "  telegram link <token>       pair your own bot (a token from @BotFather)");
         tprintln!(ctx, "  telegram unlink             forget the bot");
-        tprintln!(ctx, "  telegram backup             back the wallet up to the bot's chat now, and keep it current from then on");
+        tprintln!(
+            ctx,
+            "  telegram backup             back every wallet on this computer up to the bot's chat now, and keep it current from then on"
+        );
+        tprintln!(ctx, "  telegram cover              type the 24 words of a wallet that has no backup key yet, once");
         tprintln!(ctx, "  telegram autobackup on|off  pause or resume the automatic backup");
         tprintln!(ctx, "  telegram restore [<name>]   bring a wallet back from the backups you forward to the bot");
         tprintln!(ctx, "  telegram limit <amount>     the daily spending limit from the phone");
@@ -185,7 +195,7 @@ impl Telegram {
             (None, true) => tprintln!(
                 ctx,
                 "{}",
-                style("The bot's chat already keeps another wallet of this computer's. This one needs a group of its own: make one, add the bot, then 'telegram home <group id>'.").yellow()
+                style("The bot's chat already answers for another wallet of this computer's; the backups cover this one there all the same. For the bot to answer this wallet too, make a group, add the bot, then 'telegram home <group id>'.").yellow()
             ),
             (None, false) => {}
         }
@@ -195,7 +205,7 @@ impl Telegram {
             tprintln!(ctx, "{}", style("The bot is not answering at the moment; starting it again.").yellow());
             self.restart_bot(ctx).await;
         }
-        if let Ok(files) = crate::tgbackup::WalletFiles::of(ctx).await {
+        if let Ok(files) = crate::bundle::WalletFiles::of(ctx).await {
             let st = crate::tgbackup::status(&files, Some(cfg));
             let when = |secs: u64| -> String {
                 if secs == 0 {
@@ -222,6 +232,20 @@ impl Telegram {
                 },
                 st.deltas
             );
+            if !st.wallets.is_empty() {
+                tprintln!(ctx, "Covered: {}.", st.wallets.join(", "));
+            }
+            if !st.uncovered.is_empty() {
+                tprintln!(
+                    ctx,
+                    "{}",
+                    style(format!(
+                        "Waiting for their words: {} — open each once with its password, or 'telegram cover'.",
+                        st.uncovered.join(", ")
+                    ))
+                    .yellow()
+                );
+            }
         }
         tprintln!(ctx, "");
         Ok(())
@@ -248,7 +272,7 @@ impl Telegram {
                     Some(home) => tprintln!(ctx, "This wallet's home is the group {home}."),
                     None if cfg.private_chat_taken => tprintln!(
                         ctx,
-                        "No home yet, and the bot's chat keeps another wallet: 'telegram home <group id>' with a group the bot is a member of."
+                        "No home yet, and the bot's chat answers for another wallet: 'telegram home <group id>' with a group the bot is a member of, for it to answer this one too. The backups cover this wallet either way."
                     ),
                     None => tprintln!(
                         ctx,
@@ -262,10 +286,7 @@ impl Telegram {
                     crate::telegram::homes::release(&folder, &cfg.token, name);
                     cfg.backup_chat_id = None;
                     cfg.save(path).map_err(|e| Error::custom(e.to_string()))?;
-                    tprintln!(
-                        ctx,
-                        "The group {home} is no longer this wallet's home. Backups go to the bot's chat again — if no other wallet keeps it."
-                    );
+                    tprintln!(ctx, "The group {home} is no longer this wallet's home. Backups go to the bot's chat again.");
                     self.restart_bot(ctx).await;
                 } else {
                     tprintln!(ctx, "This wallet has no home group.");

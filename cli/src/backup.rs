@@ -37,9 +37,17 @@
 //!
 //! Paths are relative and always `/`-separated, so an archive written on one
 //! platform restores on another.
+//!
+//! Since 2026-10-06 a backup covers every wallet in the folder, each sealed
+//! to a key pair derived from its own 24 words — see "Sealed to a wallet's
+//! own words" below. The passphrase form above is what a backup from before
+//! then is, and `unpack` still reads it.
 
 use crate::imports::*;
-use kaspa_wallet_core::encryption::{decrypt_salted_or_legacy, encrypt_salted};
+use kaspa_bip32::secp256k1;
+use kaspa_wallet_core::encryption::{
+    decrypt_salted_or_legacy, decrypt_xchacha20poly1305_raw_key, encrypt_salted, encrypt_xchacha20poly1305_raw_key,
+};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
@@ -60,8 +68,9 @@ pub struct ArchiveEntry {
     pub data: Vec<u8>,
 }
 
-/// Serialize entries, deflate, encrypt, and prepend the outer header.
-pub fn pack(entries: &[ArchiveEntry], passphrase: &Secret) -> Result<Vec<u8>> {
+/// Serialize entries and deflate them: the plaintext every sealed form of
+/// an archive carries, whether it is behind a passphrase or a public key.
+fn pack_body(entries: &[ArchiveEntry]) -> Result<Vec<u8>> {
     let mut body = Vec::new();
     body.extend_from_slice(&(entries.len() as u32).to_le_bytes());
     for entry in entries {
@@ -79,8 +88,46 @@ pub fn pack(entries: &[ArchiveEntry], passphrase: &Secret) -> Result<Vec<u8>> {
     // anything: ciphertext has no structure left to compress.
     let mut encoder = flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::best());
     encoder.write_all(&body).map_err(|e| Error::custom(format!("compressing the archive failed: {e}")))?;
-    let compressed = encoder.finish().map_err(|e| Error::custom(format!("compressing the archive failed: {e}")))?;
+    encoder.finish().map_err(|e| Error::custom(format!("compressing the archive failed: {e}")))
+}
 
+/// Inflate and parse a body. Past the AEAD the bytes are authenticated, so a
+/// malformed read means a bug on the writing side rather than a hostile file.
+/// Still bounds-checked: "authenticated" is not "correct".
+fn unpack_body(compressed: &[u8]) -> Result<Vec<ArchiveEntry>> {
+    let mut body = Vec::new();
+    flate2::read::DeflateDecoder::new(compressed)
+        .read_to_end(&mut body)
+        .map_err(|e| Error::custom(format!("the archive decrypted but would not decompress: {e}")))?;
+
+    let mut cursor = 0usize;
+    let mut take = |n: usize| -> Result<&[u8]> {
+        let end = cursor.checked_add(n).ok_or_else(|| Error::custom("the archive is malformed"))?;
+        if end > body.len() {
+            return Err(Error::custom("the archive is truncated"));
+        }
+        let slice_start = cursor;
+        cursor = end;
+        Ok(&body[slice_start..end])
+    };
+
+    let count = u32::from_le_bytes(take(4)?.try_into().unwrap()) as usize;
+    let mut entries = Vec::with_capacity(count.min(4096));
+    for _ in 0..count {
+        let path_len = u16::from_le_bytes(take(2)?.try_into().unwrap()) as usize;
+        let path = String::from_utf8(take(path_len)?.to_vec()).map_err(|_| Error::custom("the archive holds a non-UTF-8 path"))?;
+        let data_len = u32::from_le_bytes(take(4)?.try_into().unwrap()) as usize;
+        let data = take(data_len)?.to_vec();
+        entries.push(ArchiveEntry { path, data });
+    }
+    Ok(entries)
+}
+
+/// Serialize entries, deflate, encrypt under a passphrase, and prepend the
+/// outer header. The original single-wallet form; `seal_to` is what the
+/// automatic backups use now.
+pub fn pack(entries: &[ArchiveEntry], passphrase: &Secret) -> Result<Vec<u8>> {
+    let compressed = pack_body(entries)?;
     let sealed = encrypt_salted(&compressed, passphrase)?;
     let mut out = Vec::with_capacity(ARCHIVE_MAGIC.len() + 1 + sealed.len());
     out.extend_from_slice(ARCHIVE_MAGIC);
@@ -105,36 +152,276 @@ pub fn unpack(archive: &[u8], passphrase: &Secret) -> Result<Vec<ArchiveEntry>> 
     let sealed = &archive[ARCHIVE_MAGIC.len() + 1..];
     let (plain, _legacy) =
         decrypt_salted_or_legacy(sealed, passphrase).map_err(|_| Error::custom("wrong passphrase, or the archive is damaged"))?;
+    unpack_body(plain.as_ref())
+}
 
-    let mut body = Vec::new();
-    flate2::read::DeflateDecoder::new(plain.as_ref())
-        .read_to_end(&mut body)
-        .map_err(|e| Error::custom(format!("the archive decrypted but would not decompress: {e}")))?;
+// ---------------------------------------------------------------------------
+// Sealed to a wallet's own words
+//
+// Every wallet's 24 words also name a key pair: the private half is a hash of
+// the words, the public half sits in the clear in `<name>.wallet/backup.pub`.
+// A backup of that wallet is sealed to the public half with a fresh ephemeral
+// key (ECDH on secp256k1, then XChaCha20-Poly1305), so the machine can back
+// up every wallet it holds — open or not — and only that wallet's words open
+// its part. The private half is never written anywhere.
+//
+// ```text
+// blob:   [ "MGBR" 4 ][ v u8 = 1 ][ ephemeral pubkey 33 ][ recipient fingerprint 8 ]
+//         [ nonce 24 | XChaCha20-Poly1305( deflate(body) ‖ tag ) ]
+// bundle: [ "MGBB" 4 ][ v u8 = 1 ][ count u32 LE ]
+//         count × [ name_len u16 LE | wallet name utf8 | blob_len u32 LE | blob ]
+// ```
+//
+// The bundle names its wallets in the clear on purpose: at restore time the
+// person has to know which words to type, and "the file holds reserve,
+// savings and marigold" is nothing a wallet's directory listing does not
+// already say. Balances and keys stay inside the AEAD as before.
+// ---------------------------------------------------------------------------
 
-    // Past here the bytes are authenticated, so a malformed read means a bug
-    // on the writing side rather than a hostile file. Still bounds-checked:
-    // "authenticated" is not "correct".
-    let mut cursor = 0usize;
-    let mut take = |n: usize| -> Result<&[u8]> {
-        let end = cursor.checked_add(n).ok_or_else(|| Error::custom("the archive is malformed"))?;
-        if end > body.len() {
-            return Err(Error::custom("the archive is truncated"));
+const SEALED_MAGIC: &[u8; 4] = b"MGBR";
+const SEALED_VERSION: u8 = 1;
+const BUNDLE_MAGIC: &[u8; 4] = b"MGBB";
+const BUNDLE_VERSION: u8 = 1;
+const RECIPIENT_DOMAIN: &[u8] = b"marigold-backup-recipient-v1";
+const SEAL_DOMAIN: &[u8] = b"marigold-backup-seal-v1";
+
+/// The file in a wallet directory holding the public half, as 66 hex characters.
+pub const RECIPIENT_FILE: &str = "backup.pub";
+
+/// A wallet's name and its sealed part of a bundle.
+pub struct BundleItem {
+    pub name: String,
+    pub blob: Vec<u8>,
+}
+
+fn normalise_words(words: &str) -> String {
+    words.split_whitespace().map(|w| w.to_lowercase()).collect::<Vec<_>>().join(" ")
+}
+
+/// The private half of a wallet's backup key pair, from its words. Derived
+/// whenever it is needed and dropped right after; never stored.
+pub fn recipient_secret(words: &str) -> secp256k1::SecretKey {
+    use sha2::{Digest, Sha256};
+    let normalised = normalise_words(words);
+    // A hash lands outside the curve order with probability ~2^-128; the
+    // counter keeps the function total without making the common case differ.
+    for counter in 0u8..=255 {
+        let mut h = Sha256::new();
+        h.update(RECIPIENT_DOMAIN);
+        h.update(normalised.as_bytes());
+        if counter > 0 {
+            h.update([counter]);
         }
-        let slice_start = cursor;
-        cursor = end;
-        Ok(&body[slice_start..end])
-    };
-
-    let count = u32::from_le_bytes(take(4)?.try_into().unwrap()) as usize;
-    let mut entries = Vec::with_capacity(count.min(4096));
-    for _ in 0..count {
-        let path_len = u16::from_le_bytes(take(2)?.try_into().unwrap()) as usize;
-        let path = String::from_utf8(take(path_len)?.to_vec()).map_err(|_| Error::custom("the archive holds a non-UTF-8 path"))?;
-        let data_len = u32::from_le_bytes(take(4)?.try_into().unwrap()) as usize;
-        let data = take(data_len)?.to_vec();
-        entries.push(ArchiveEntry { path, data });
+        if let Ok(sk) = secp256k1::SecretKey::from_slice(&h.finalize()) {
+            return sk;
+        }
     }
-    Ok(entries)
+    unreachable!("256 consecutive hashes outside the secp256k1 order")
+}
+
+/// The public half, which is what a backup is sealed to.
+pub fn recipient_public(words: &str) -> secp256k1::PublicKey {
+    recipient_secret(words).public_key(secp256k1::SECP256K1)
+}
+
+/// Eight bytes that name a recipient without being it: written into every
+/// blob so a restore can say "those words belong to a different wallet"
+/// instead of "decryption failed".
+pub fn recipient_fingerprint(pk: &secp256k1::PublicKey) -> [u8; 8] {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(pk.serialize());
+    digest[..8].try_into().unwrap()
+}
+
+/// Where a wallet directory keeps its public half.
+pub fn recipient_pub_path(wallet_dir: &Path) -> PathBuf {
+    wallet_dir.join(RECIPIENT_FILE)
+}
+
+/// Record a wallet's public half next to its files. Idempotent; the words
+/// decide the key, so writing it twice writes the same bytes.
+pub fn write_recipient(wallet_dir: &Path, words: &str) -> Result<secp256k1::PublicKey> {
+    let pk = recipient_public(words);
+    let hex = faster_hex::hex_string(&pk.serialize());
+    std::fs::create_dir_all(wallet_dir).map_err(|e| Error::custom(format!("cannot create {}: {e}", wallet_dir.display())))?;
+    let path = recipient_pub_path(wallet_dir);
+    std::fs::write(&path, format!("{hex}\n")).map_err(|e| Error::custom(format!("cannot write {}: {e}", path.display())))?;
+    Ok(pk)
+}
+
+/// The public half a wallet directory holds, if it has one yet.
+pub fn read_recipient(wallet_dir: &Path) -> Option<secp256k1::PublicKey> {
+    let text = std::fs::read_to_string(recipient_pub_path(wallet_dir)).ok()?;
+    let mut bytes = [0u8; 33];
+    faster_hex::hex_decode(text.trim().as_bytes(), &mut bytes).ok()?;
+    secp256k1::PublicKey::from_slice(&bytes).ok()
+}
+
+/// Covers a wallet that is not open with its words, typed once: the vault key
+/// is the words' entropy, so decrypting any one of its note files proves the
+/// words are this wallet's; then the public half is written. A wallet without
+/// a note cannot be checked and is refused — opening it once covers it.
+pub fn cover_with_words(wallet_dir: &Path, words: &str) -> Result<()> {
+    let mnemonic = kaspa_bip32::Mnemonic::new(normalise_words(words), kaspa_bip32::Language::English)
+        .map_err(|_| Error::custom("those are not 24 wallet words"))?;
+    let k: [u8; 32] =
+        mnemonic.entropy().as_slice().try_into().map_err(|_| Error::custom("a wallet has 24 words; these encode a shorter key"))?;
+    let mut probe = Vec::new();
+    collect_tree(&wallet_dir.join("notes"), "", &mut probe).ok();
+    let Some(note) = probe.iter().find(|e| e.path.ends_with(".note")) else {
+        return Err(Error::custom(
+            "this wallet holds no note yet, so the words cannot be checked against it — open it once with its password instead",
+        ));
+    };
+    if decrypt_xchacha20poly1305_raw_key(&note.data, &k).is_err() {
+        return Err(Error::custom("those are not this wallet's words"));
+    }
+    write_recipient(wallet_dir, words)?;
+    Ok(())
+}
+
+/// The symmetric key one ephemeral/recipient pair agrees on.
+fn seal_key(shared: &secp256k1::ecdh::SharedSecret, ephemeral: &secp256k1::PublicKey) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(SEAL_DOMAIN);
+    h.update(shared.secret_bytes());
+    h.update(ephemeral.serialize());
+    h.finalize().into()
+}
+
+/// Seal entries so that only the words behind `recipient` open them.
+pub fn seal_to(recipient: &secp256k1::PublicKey, entries: &[ArchiveEntry]) -> Result<Vec<u8>> {
+    use rand::RngCore;
+    let ephemeral_secret = loop {
+        let mut bytes = [0u8; 32];
+        rand::thread_rng().fill_bytes(&mut bytes);
+        if let Ok(sk) = secp256k1::SecretKey::from_slice(&bytes) {
+            break sk;
+        }
+    };
+    let ephemeral = ephemeral_secret.public_key(secp256k1::SECP256K1);
+    let shared = secp256k1::ecdh::SharedSecret::new(recipient, &ephemeral_secret);
+    let key = seal_key(&shared, &ephemeral);
+    let compressed = pack_body(entries)?;
+    let ciphertext = encrypt_xchacha20poly1305_raw_key(&compressed, &key)?;
+
+    let mut out = Vec::with_capacity(4 + 1 + 33 + 8 + ciphertext.len());
+    out.extend_from_slice(SEALED_MAGIC);
+    out.push(SEALED_VERSION);
+    out.extend_from_slice(&ephemeral.serialize());
+    out.extend_from_slice(&recipient_fingerprint(recipient));
+    out.extend_from_slice(&ciphertext);
+    Ok(out)
+}
+
+/// Whether bytes are a sealed blob.
+pub fn is_sealed(blob: &[u8]) -> bool {
+    blob.starts_with(SEALED_MAGIC)
+}
+
+fn sealed_parts(blob: &[u8]) -> Result<(secp256k1::PublicKey, [u8; 8], &[u8])> {
+    if !is_sealed(blob) {
+        return Err(Error::custom("that is not a sealed Marigold backup"));
+    }
+    let version = *blob.get(4).ok_or_else(|| Error::custom("the backup is truncated"))?;
+    if version != SEALED_VERSION {
+        return Err(Error::custom(format!(
+            "this backup is version {version}; this wallet reads version {SEALED_VERSION}. Use a newer wallet to restore it."
+        )));
+    }
+    if blob.len() < 4 + 1 + 33 + 8 {
+        return Err(Error::custom("the backup is truncated"));
+    }
+    let ephemeral = secp256k1::PublicKey::from_slice(&blob[5..38]).map_err(|_| Error::custom("the backup header is damaged"))?;
+    let fingerprint: [u8; 8] = blob[38..46].try_into().unwrap();
+    Ok((ephemeral, fingerprint, &blob[46..]))
+}
+
+/// The fingerprint of the wallet a blob was sealed to.
+pub fn sealed_recipient(blob: &[u8]) -> Result<[u8; 8]> {
+    sealed_parts(blob).map(|(_, fp, _)| fp)
+}
+
+/// Whether these words are the ones a blob was sealed to. Cheap, and it
+/// lets a restore tell "wrong wallet's words" from "damaged file".
+pub fn words_fit(words: &str, blob: &[u8]) -> bool {
+    match sealed_recipient(blob) {
+        Ok(fp) => fp == recipient_fingerprint(&recipient_public(words)),
+        Err(_) => false,
+    }
+}
+
+/// Open a sealed blob with the wallet's words.
+pub fn unseal_with(words: &str, blob: &[u8]) -> Result<Vec<ArchiveEntry>> {
+    let (ephemeral, fingerprint, ciphertext) = sealed_parts(blob)?;
+    let secret = recipient_secret(words);
+    let public = secret.public_key(secp256k1::SECP256K1);
+    if recipient_fingerprint(&public) != fingerprint {
+        return Err(Error::custom("those are not this wallet's 24 words"));
+    }
+    let shared = secp256k1::ecdh::SharedSecret::new(&ephemeral, &secret);
+    let key = seal_key(&shared, &ephemeral);
+    let plain = decrypt_xchacha20poly1305_raw_key(ciphertext, &key).map_err(|_| Error::custom("the backup is damaged"))?;
+    unpack_body(plain.as_ref())
+}
+
+/// Several wallets' sealed parts in one file.
+pub fn pack_bundle(items: &[BundleItem]) -> Result<Vec<u8>> {
+    let mut out = Vec::new();
+    out.extend_from_slice(BUNDLE_MAGIC);
+    out.push(BUNDLE_VERSION);
+    out.extend_from_slice(&(items.len() as u32).to_le_bytes());
+    for item in items {
+        let name = item.name.as_bytes();
+        if name.len() > u16::MAX as usize {
+            return Err(Error::custom(format!("wallet name too long to bundle: {}", item.name)));
+        }
+        out.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        out.extend_from_slice(name);
+        out.extend_from_slice(&(item.blob.len() as u32).to_le_bytes());
+        out.extend_from_slice(&item.blob);
+    }
+    Ok(out)
+}
+
+/// Whether bytes are a bundle.
+pub fn is_bundle(bytes: &[u8]) -> bool {
+    bytes.starts_with(BUNDLE_MAGIC)
+}
+
+/// Split a bundle into its wallets. Nothing here is encrypted, so this is
+/// bounds-checking and nothing more; each blob still has to be unsealed.
+pub fn parse_bundle(bytes: &[u8]) -> Result<Vec<BundleItem>> {
+    if !is_bundle(bytes) {
+        return Err(Error::custom("that file is not a Marigold backup bundle"));
+    }
+    let version = *bytes.get(4).ok_or_else(|| Error::custom("the bundle is truncated"))?;
+    if version != BUNDLE_VERSION {
+        return Err(Error::custom(format!(
+            "this bundle is version {version}; this wallet reads version {BUNDLE_VERSION}. Use a newer wallet to restore it."
+        )));
+    }
+    let mut cursor = 5usize;
+    let mut take = |n: usize| -> Result<&[u8]> {
+        let end = cursor.checked_add(n).ok_or_else(|| Error::custom("the bundle is malformed"))?;
+        if end > bytes.len() {
+            return Err(Error::custom("the bundle is truncated"));
+        }
+        let start = cursor;
+        cursor = end;
+        Ok(&bytes[start..end])
+    };
+    let count = u32::from_le_bytes(take(4)?.try_into().unwrap()) as usize;
+    let mut items = Vec::with_capacity(count.min(64));
+    for _ in 0..count {
+        let name_len = u16::from_le_bytes(take(2)?.try_into().unwrap()) as usize;
+        let name = String::from_utf8(take(name_len)?.to_vec()).map_err(|_| Error::custom("the bundle holds a non-UTF-8 name"))?;
+        let blob_len = u32::from_le_bytes(take(4)?.try_into().unwrap()) as usize;
+        let blob = take(blob_len)?.to_vec();
+        items.push(BundleItem { name, blob });
+    }
+    Ok(items)
 }
 
 /// Collect a directory tree into archive entries under `prefix`.
@@ -446,6 +733,100 @@ mod tests {
         assert!(extract(&[entry("../escaped.wallet", b"x")], &root).is_err());
         assert!(extract(&[entry("marigold.wallet/../../escaped", b"x")], &root).is_err());
         assert!(!root.parent().unwrap().join("escaped.wallet").exists());
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    const WORDS: &str = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art";
+    const OTHER: &str = "zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo vote";
+
+    #[test]
+    fn the_key_pair_follows_the_words_not_their_spelling() {
+        let a = recipient_public(WORDS);
+        let b = recipient_public(&WORDS.to_uppercase().replace(' ', "   "));
+        assert_eq!(a, b);
+        assert_ne!(a, recipient_public(OTHER));
+    }
+
+    #[test]
+    fn sealed_opens_with_its_words_only() {
+        let entries = vec![entry("reserve.wallet/reserve.keys", b"keys"), entry("reserve.wallet/notes/manifest.tsv", b"sn\tpk\n")];
+        let blob = seal_to(&recipient_public(WORDS), &entries).unwrap();
+        assert!(is_sealed(&blob));
+        assert!(words_fit(WORDS, &blob));
+        assert!(!words_fit(OTHER, &blob));
+        let out = unseal_with(WORDS, &blob).unwrap();
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[1].data, b"sn\tpk\n");
+        let err = match unseal_with(OTHER, &blob) {
+            Ok(_) => panic!("another wallet's words opened the blob"),
+            Err(err) => err.to_string(),
+        };
+        assert!(err.contains("not this wallet's"), "{err}");
+        assert!(!blob.windows(5).any(|w| w == b"sn\tpk"), "the manifest is readable in the blob");
+    }
+
+    #[test]
+    fn two_seals_of_the_same_bytes_differ() {
+        let entries = vec![entry("reserve.wallet/reserve.keys", b"keys")];
+        let pk = recipient_public(WORDS);
+        assert_ne!(seal_to(&pk, &entries).unwrap(), seal_to(&pk, &entries).unwrap());
+    }
+
+    #[test]
+    fn a_flipped_bit_in_a_sealed_blob_is_caught() {
+        let mut blob = seal_to(&recipient_public(WORDS), &[entry("reserve.wallet/reserve.keys", b"keys")]).unwrap();
+        let last = blob.len() - 1;
+        blob[last] ^= 0x01;
+        assert!(unseal_with(WORDS, &blob).is_err());
+    }
+
+    #[test]
+    fn a_bundle_round_trips_and_names_its_wallets() {
+        let one = seal_to(&recipient_public(WORDS), &[entry("marigold.wallet/marigold.keys", b"one")]).unwrap();
+        let two = seal_to(&recipient_public(OTHER), &[entry("reserve.wallet/reserve.keys", b"two")]).unwrap();
+        let bundle = pack_bundle(&[
+            BundleItem { name: "marigold".into(), blob: one.clone() },
+            BundleItem { name: "reserve".into(), blob: two.clone() },
+        ])
+        .unwrap();
+        assert!(is_bundle(&bundle));
+        assert!(!is_sealed(&bundle));
+        let items = parse_bundle(&bundle).unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].name, "marigold");
+        assert_eq!(items[0].blob, one);
+        assert_eq!(items[1].name, "reserve");
+        assert_eq!(unseal_with(OTHER, &items[1].blob).unwrap()[0].data, b"two");
+        assert!(unseal_with(WORDS, &items[1].blob).is_err());
+        assert!(parse_bundle(&bundle[..bundle.len() - 3]).is_err());
+    }
+
+    #[test]
+    fn covering_a_closed_wallet_checks_the_words_against_a_note() {
+        let root = scratch("cover");
+        let dir = root.join("reserve.wallet");
+        std::fs::create_dir_all(dir.join("notes").join("active")).unwrap();
+        // No note yet: nothing to check against, so refused.
+        assert!(cover_with_words(&dir, WORDS).is_err());
+        let k: [u8; 32] =
+            kaspa_bip32::Mnemonic::new(WORDS, kaspa_bip32::Language::English).unwrap().entropy().as_slice().try_into().unwrap();
+        let note = encrypt_xchacha20poly1305_raw_key(b"a note", &k).unwrap();
+        std::fs::write(dir.join("notes").join("active").join("100_ab.note"), note).unwrap();
+        assert!(cover_with_words(&dir, OTHER).is_err());
+        assert!(read_recipient(&dir).is_none());
+        cover_with_words(&dir, WORDS).unwrap();
+        assert_eq!(read_recipient(&dir), Some(recipient_public(WORDS)));
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn the_public_half_is_written_and_read_back() {
+        let root = scratch("recipient");
+        let dir = root.join("reserve.wallet");
+        assert!(read_recipient(&dir).is_none());
+        let pk = write_recipient(&dir, WORDS).unwrap();
+        assert_eq!(read_recipient(&dir), Some(pk));
+        assert_eq!(std::fs::read_to_string(recipient_pub_path(&dir)).unwrap().trim().len(), 66);
         std::fs::remove_dir_all(&root).ok();
     }
 

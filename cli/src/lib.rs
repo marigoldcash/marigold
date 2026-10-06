@@ -1,6 +1,7 @@
 extern crate self as kaspa_cli;
 
 pub mod backup;
+pub mod bundle;
 mod cli;
 #[cfg(feature = "embedded-node")]
 pub mod embedded;

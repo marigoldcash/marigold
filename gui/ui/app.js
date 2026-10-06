@@ -45,7 +45,7 @@ async function offerBackup() {
 }
 $("offer-yes").addEventListener("click", async () => {
   $("offer-error").textContent = ""; $("offer-yes").disabled = true;
-  try { await invoke("backup_now"); $("offer-backup").hidden = true; $("say").textContent = "Backed up. The copy stays current by itself while the wallet is open."; }
+  try { await invoke("backup_now"); $("offer-backup").hidden = true; $("say").textContent = "Backed up. The copy of every wallet on this computer stays current by itself while the wallet is open."; }
   catch (e) { $("offer-error").textContent = String(e); }
   $("offer-yes").disabled = false;
 });
@@ -63,7 +63,13 @@ async function refreshBackup() {
   try {
     const st = await invoke("backup_status");
     $("backup-status").textContent =
-      `Backups go to: ${st.destination}\nAutomatic: ${st.automatic}\nLast full copy: ${when(st.checkpoint_at)}${st.checkpoint_at ? ` (${size(st.checkpoint_bytes)})` : ""}\nChange sets since: ${st.deltas}\nLast post: ${when(st.last_post_at)}`;
+      `Backups go to: ${st.destination}\nAutomatic: ${st.automatic}\nLast full copy: ${when(st.checkpoint_at)}${st.checkpoint_at ? ` (${size(st.checkpoint_bytes)})` : ""}\nChange sets since: ${st.deltas}\nLast post: ${when(st.last_post_at)}\nWallets covered: ${st.wallets.length ? st.wallets.join(", ") : "none yet"}`;
+    $("cover-box").hidden = !st.uncovered.length;
+    if (st.uncovered.length) {
+      const sel = $("cover-name"); const keep = sel.value;
+      sel.innerHTML = st.uncovered.map((n) => `<option>${n}</option>`).join("");
+      if (st.uncovered.includes(keep)) sel.value = keep;
+    }
     $("offer-backup").hidden = !st.offer;
     $("bot-setup").hidden = st.bot;
     $("bot-pair").hidden = !(st.bot && !st.paired);
@@ -84,13 +90,24 @@ $("backup-now").addEventListener("click", async () => {
   catch (e) { $("backup-error").textContent = String(e); }
   $("backup-now").disabled = false;
 });
+$("cover-go").addEventListener("click", async () => {
+  $("cover-error").textContent = ""; $("cover-go").disabled = true;
+  try {
+    const name = $("cover-name").value;
+    await invoke("backup_cover", { name, words: $("cover-words").value });
+    $("cover-words").value = "";
+    $("backup-done").textContent = `'${name}' is covered from the next backup on.`; $("backup-done").hidden = false;
+    refreshBackup();
+  } catch (e) { $("cover-error").textContent = String(e); }
+  $("cover-go").disabled = false;
+});
 $("backup-toggle").addEventListener("click", async () => {
   $("backup-error").textContent = "";
   try { await invoke("backup_automatic", { on: !$("backup-toggle").dataset.on }); refreshBackup(); } catch (e) { $("backup-error").textContent = String(e); }
 });
 $("backup-file").addEventListener("click", async () => {
   $("backup-error").textContent = ""; $("backup-done").hidden = true; $("backup-file").disabled = true;
-  try { const path = await invoke("backup_file"); $("backup-done").textContent = `Saved to ${path}. It opens with your 24 words.`; $("backup-done").hidden = false; }
+  try { const path = await invoke("backup_file"); $("backup-done").textContent = `Saved to ${path}. Each wallet opens with its own 24 words.`; $("backup-done").hidden = false; }
   catch (e) { $("backup-error").textContent = String(e); }
   $("backup-file").disabled = false;
 });

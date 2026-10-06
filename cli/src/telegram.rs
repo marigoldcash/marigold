@@ -931,12 +931,12 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
                     }
                     if let Some(other) = &taken_by {
                         service.say(format!(
-                            "telegram: paired with user {from}. This chat already keeps the wallet '{other}'; this wallet needs a group of its own for its backups — make one, add the bot, then 'telegram home <group id>'"
+                            "telegram: paired with user {from}. This chat already answers for the wallet '{other}'; for the bot to answer this wallet too, make a group, add the bot, then 'telegram home <group id>'. The backups cover this wallet in that chat either way."
                         ));
                         send_with_keyboard(
                             &token,
                             chat_id,
-                            &format!("Paired. This chat already keeps the wallet '{}'. For this wallet's backups, make a group, add me to it, and run <b>telegram home &lt;group id&gt;</b> in the wallet; I answer this wallet there.\n\n{HELP}", html_escape(other)),
+                            &format!("Paired. This chat already answers for the wallet '{}'. For me to answer this wallet too, make a group, add me to it, and run <b>telegram home &lt;group id&gt;</b> in the wallet. The backups here cover this wallet either way.\n\n{HELP}", html_escape(other)),
                             &main_keyboard(),
                         )
                         .await;

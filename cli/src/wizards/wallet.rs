@@ -338,6 +338,14 @@ pub(crate) async fn create(
 
     let store = wallet.store().as_note_key_store()?;
     store.vault_restore_from_words(&vault_words, &wallet_secret).await?;
+    // The public half of the wallet's backup key pair, which its words name:
+    // written in the clear beside the wallet so a backup can seal this
+    // wallet's part to it whether or not the wallet is open.
+    if let Ok(vault_folder) = store.vault_folder().await
+        && let Some(wallet_dir) = vault_folder.parent()
+    {
+        crate::backup::write_recipient(wallet_dir, &vault_words)?;
+    }
     if generated {
         tprintln!(ctx, "");
         crate::ui::recovery_words(ctx, &vault_words);

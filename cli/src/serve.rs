@@ -210,8 +210,8 @@ impl WalletService {
         TelegramConfig::load(&self.telegram_path())
     }
 
-    async fn backup_files(&self) -> std::result::Result<crate::tgbackup::WalletFiles, String> {
-        crate::tgbackup::WalletFiles::of_wallet(&self.wallet, &self.name).await.map_err(|e| e.to_string())
+    async fn backup_files(&self) -> std::result::Result<crate::bundle::WalletFiles, String> {
+        crate::bundle::WalletFiles::of_wallet(&self.wallet, &self.name).await.map_err(|e| e.to_string())
     }
 
     /// What the backup screen shows.
@@ -220,18 +220,28 @@ impl WalletService {
         Ok(crate::tgbackup::status(&files, self.telegram_config().as_ref()))
     }
 
-    /// A checkpoint now — and the automatic backups from then on.
+    /// A full copy now — and the automatic backups from then on.
     pub async fn backup_now(&self) -> std::result::Result<String, String> {
-        let files = self.backup_files().await?;
         let cfg = self.telegram_config().ok_or("no Telegram bot is set up for this wallet yet")?;
         if crate::tgbackup::target_chat(&cfg).is_none() {
             return Err("the bot is not paired yet: open it in Telegram and send it the pairing code first".to_string());
         }
-        crate::tgbackup::set_paused(&files, false).map_err(|e| e.to_string())?;
-        let key = crate::tgbackup::key_for(&self.wallet, &self.secret).await.map_err(|e| e.to_string())?;
+        crate::bundle::ensure_recipient(&self.wallet, &self.name, &self.secret).await.map_err(|e| e.to_string())?;
+        let files = self.backup_files().await?;
+        crate::tgbackup::mark_started(&files).map_err(|e| e.to_string())?;
+        let words = crate::bundle::words_for(&self.wallet, &self.secret).await.map_err(|e| e.to_string())?;
+        let folder = crate::bundle::Folder::around(&files).map_err(|e| e.to_string())?;
         let say = self.say.clone();
         let progress = move |line: String| say(format!("Backup: {line}"));
-        crate::tgbackup::run_files(&files, &cfg, &key, true, &progress).await.map_err(|e| e.to_string())
+        crate::tgbackup::run_folder(&folder, &cfg, Some((&self.name, &words)), true, &progress).await.map_err(|e| e.to_string())
+    }
+
+    /// A wallet of this folder that has no backup key yet, covered with its
+    /// words typed once (checked against the wallet; nothing kept but a public key).
+    pub async fn backup_cover(&self, name: &str, words: &str) -> std::result::Result<(), String> {
+        let files = self.backup_files().await?;
+        let folder = crate::bundle::Folder::around(&files).map_err(|e| e.to_string())?;
+        crate::bundle::cover(&folder, name, words).map_err(|e| e.to_string())
     }
 
     /// "Not now" to the one-time question: remembered, never asked again.
@@ -245,14 +255,16 @@ impl WalletService {
         crate::tgbackup::set_paused(&files, !on).map_err(|e| e.to_string())
     }
 
-    /// The sealed archive for a backup file, and the name to give it.
+    /// The sealed bundle for a backup file — every wallet on this computer,
+    /// each under its own words — and the name to give it.
     pub async fn backup_file(&self) -> std::result::Result<(String, Vec<u8>), String> {
+        crate::bundle::ensure_recipient(&self.wallet, &self.name, &self.secret).await.map_err(|e| e.to_string())?;
         let files = self.backup_files().await?;
-        let key = crate::tgbackup::key_for(&self.wallet, &self.secret).await.map_err(|e| e.to_string())?;
-        let (_, packed) = crate::tgbackup::pack_checked(&files, &key).map_err(|e| e.to_string())?;
+        let words = crate::bundle::words_for(&self.wallet, &self.secret).await.map_err(|e| e.to_string())?;
+        let (_, packed, names) = crate::bundle::bundle_checked(&files, &words).map_err(|e| e.to_string())?;
         // Named the way the Telegram backups are: readable, and sorted by date.
         let stamp = chrono::Local::now().format("%Y-%m-%d %H.%M");
-        Ok((format!("Marigold backup - {} - {stamp}.mgb", self.name), packed))
+        Ok((format!("Marigold backup - {} - {stamp}.mgb", crate::bundle::names_label(&names)), packed))
     }
 
     /// Sets the wallet's bot up the way 'telegram link <token>' does, and
@@ -873,6 +885,12 @@ pub async fn open_session(options: &SessionOptions, shutdown: Arc<AtomicBool>, s
             }
             Err(_) => log::warn!("--mine ignored: this wallet keeps notes only, and mining pays to a ledger address"),
         }
+    }
+
+    // The wallet's backup key, written on the first open since the backups
+    // started covering every wallet (2026-10-06).
+    if let Err(err) = crate::bundle::ensure_recipient(&wallet, &options.wallet, &options.password).await {
+        log::warn!("could not write the backup key of '{}': {err}", options.wallet);
     }
 
     let service = WalletService::new(

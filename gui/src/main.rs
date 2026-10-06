@@ -227,6 +227,12 @@ async fn create_wallet(name: String, password: String, words: Option<String>) ->
     wallet.store().flush(&secret).await.map_err(|e| e.to_string())?;
     let store = wallet.store().as_note_key_store().map_err(|e| e.to_string())?;
     store.vault_restore_from_words(&vault_words, &secret).await.map_err(|e| e.to_string())?;
+    // The public half of the wallet's backup key pair, beside the wallet.
+    if let Ok(vault_folder) = store.vault_folder().await
+        && let Some(wallet_dir) = vault_folder.parent()
+    {
+        kaspa_cli_lib::backup::write_recipient(wallet_dir, &vault_words).map_err(|e| e.to_string())?;
+    }
     Ok(Created { filename: descriptor.filename, words: vault_words })
 }
 
@@ -328,6 +334,12 @@ async fn backup_decline(state: State<'_, App>) -> Result<(), String> {
     with_service(&state, |s| async move { s.backup_decline().await }).await
 }
 
+/// A wallet of this folder without a backup key yet, covered with its 24 words typed once.
+#[tauri::command]
+async fn backup_cover(state: State<'_, App>, name: String, words: String) -> Result<(), String> {
+    with_service(&state, |s| async move { s.backup_cover(&name, &words).await }).await
+}
+
 #[tauri::command]
 async fn backup_automatic(state: State<'_, App>, on: bool) -> Result<(), String> {
     with_service(&state, |s| async move { s.backup_automatic(on).await }).await
@@ -367,12 +379,14 @@ async fn telegram_setup(state: State<'_, App>, token: String, pin: String) -> Re
 }
 
 /// Restores a wallet from the backups forwarded to its bot: the newest
-/// checkpoint and the deltas after it, opened with the 24 words. Progress
-/// goes out as "say" lines while the parts arrive.
+/// checkpoint and the deltas after it. A backup holds every wallet of its
+/// computer, each sealed with its own 24 words; the words given open one of
+/// them, and the answer names the others. Progress goes out as "say" lines
+/// while the parts arrive.
 #[tauri::command]
 async fn restore_telegram(app: AppHandle, token: String, words: String, name: String) -> Result<String, String> {
     use kaspa_cli_lib::backup as archive;
-    use kaspa_cli_lib::tgbackup;
+    use kaspa_cli_lib::bundle::{self, Unlock};
     if !archive::looks_like_words(&words) {
         return Err("that is not 24 words".to_string());
     }
@@ -400,13 +414,41 @@ async fn restore_telegram(app: AppHandle, token: String, words: String, name: St
         progress(format!("Received {backup} ({} bytes).", bytes.len()));
         archives.insert(backup.clone(), bytes);
     }
-    let key = archive::key_from_words(&words);
-    let (entries, checkpoint, deltas) = tgbackup::merge(&archives, &key).map_err(|e| e.to_string())?;
+    let names = bundle::bundle_wallets(&archives).map_err(|e| e.to_string())?;
+    let merged = if names.is_empty() {
+        bundle::merge(&archives, Unlock::Legacy(&archive::key_from_words(&words)))
+    } else {
+        let fits = bundle::wallets_for_words(&archives, &words).map_err(|e| e.to_string())?;
+        let Some(mine) = fits.first() else {
+            return Err(format!(
+                "those words open none of the wallets in this backup ({}) — each wallet opens with its own 24 words",
+                names.join(", ")
+            ));
+        };
+        let mut map = std::collections::BTreeMap::new();
+        map.insert(mine.clone(), words.clone());
+        bundle::merge(&archives, Unlock::Words(&map))
+    }
+    .map_err(|e| e.to_string())?;
     let new_name = if name.trim().is_empty() { None } else { Some(name.trim().to_string()) };
-    let restored = archive::install_restored(entries, &folder, new_name).map_err(|e| e.to_string())?;
+    let mut done = Vec::new();
+    let mut restored_names = Vec::new();
+    for (wallet, entries) in merged.wallets {
+        let restored = archive::install_restored(entries, &folder, new_name.clone()).map_err(|e| e.to_string())?;
+        restored_names.push(wallet);
+        done.push(format!("Restored {} files as '{}'", restored.written, restored.name));
+    }
+    let others: Vec<String> = names.into_iter().filter(|n| !restored_names.contains(n)).collect();
     Ok(format!(
-        "Restored {} files as '{}' from checkpoint {checkpoint} with {deltas} change set(s) after it. Open it with the password it had when the backup was made; every note is rotated to fresh keys on its first open with a node.",
-        restored.written, restored.name
+        "{} from the full copy of {} with {} change set(s) after it. Open it with the password it had when the backup was made; every note is rotated to fresh keys on its first open with a node.{}",
+        done.join("; "),
+        bundle::checkpoint_moment(&merged.stamp),
+        merged.deltas,
+        if others.is_empty() {
+            String::new()
+        } else {
+            format!(" The backup also holds {}: run this again with its own words.", bundle::wallets_phrase(&others))
+        }
     ))
 }
 
@@ -651,6 +693,7 @@ fn main() {
             backup_now,
             backup_automatic,
             backup_decline,
+            backup_cover,
             backup_file,
             telegram_setup,
             restore_telegram
