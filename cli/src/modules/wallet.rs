@@ -1347,7 +1347,12 @@ impl Wallet {
             return Ok(());
         };
         let (entries, checkpoint, deltas) = crate::tgbackup::merge(&archives, &key)?;
-        tprintln!(ctx, "Restoring checkpoint {checkpoint} with {deltas} delta(s) after it: {} files.", entries.len());
+        tprintln!(
+            ctx,
+            "Restoring the full copy of {} with {deltas} change set(s) after it: {} files.",
+            crate::tgbackup::checkpoint_moment(&checkpoint),
+            entries.len()
+        );
         self.restore_entries(ctx, entries, new_name, guard).await
     }
 

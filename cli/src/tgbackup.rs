@@ -227,25 +227,55 @@ pub fn delta_name(wallet: &str, checkpoint: &str, seq: u32) -> String {
 }
 
 /// `c20260924T011746` → `2026-09-24 01.17.46`; a stamp of another shape is left as it is.
+/// The checkpoint id is UTC, so that the newest full copy sorts newest on
+/// any machine; what people read is their own machine's time, with the
+/// offset written in so it stays unambiguous and parses back to the same
+/// id (tester Charly, 2026-10-06: the names were UTC with no label).
+/// `c20260924T011746` → `2026-09-24 03.17.46 +0200` on a machine two hours
+/// east of UTC; a stamp of another shape is left as it is.
 fn pretty_stamp(stamp: &str) -> String {
-    let d: Vec<char> = stamp.trim_start_matches('c').chars().filter(|c| c.is_ascii_digit()).collect();
-    if d.len() != 14 {
-        return stamp.to_string();
+    match stamp_to_utc(stamp) {
+        Some(utc) => utc.with_timezone(&chrono::Local).format("%Y-%m-%d %H.%M.%S %z").to_string(),
+        None => stamp.to_string(),
     }
-    let s: String = d.into_iter().collect();
-    format!("{}-{}-{} {}.{}.{}", &s[0..4], &s[4..6], &s[6..8], &s[8..10], &s[10..12], &s[12..14])
 }
 
-/// `2026-09-24 01.17.46` → `c20260924T011746`.
+fn stamp_to_utc(stamp: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    let d: String = stamp.trim_start_matches('c').chars().filter(|c| c.is_ascii_digit()).collect();
+    if d.len() != 14 {
+        return None;
+    }
+    chrono::NaiveDateTime::parse_from_str(&d, "%Y%m%d%H%M%S").ok().map(|naive| naive.and_utc())
+}
+
+/// `2026-09-24 03.17.46 +0200` → `c20260924T011746`; a name from before the
+/// offset was written in (`2026-09-24 01.17.46`) was UTC and is read as such.
 fn stamp_from_pretty(pretty: &str) -> Option<String> {
-    let d: String = pretty.chars().filter(|c| c.is_ascii_digit()).collect();
-    (d.len() == 14).then(|| format!("c{}T{}", &d[0..8], &d[8..14]))
+    let pretty = pretty.trim();
+    let utc = match chrono::DateTime::parse_from_str(pretty, "%Y-%m-%d %H.%M.%S %z") {
+        Ok(with_offset) => with_offset.with_timezone(&chrono::Utc),
+        Err(_) => {
+            let d: String = pretty.chars().filter(|c| c.is_ascii_digit()).collect();
+            if d.len() != 14 {
+                return None;
+            }
+            chrono::NaiveDateTime::parse_from_str(&d, "%Y%m%d%H%M%S").ok()?.and_utc()
+        }
+    };
+    Some(utc.format("c%Y%m%dT%H%M%S").to_string())
 }
 
-/// The moment a checkpoint name carries, for people: `2026-09-24 01:17`.
+/// The moment a checkpoint carries, for people, in the machine's own time
+/// with the zone named: `2026-09-24 03:17 (UTC+02:00)`.
 pub fn checkpoint_moment(stamp: &str) -> String {
-    let p = pretty_stamp(stamp);
-    if p.len() >= 16 { format!("{} {}", &p[0..10], p[11..16].replace('.', ":")) } else { p }
+    match stamp_to_utc(stamp) {
+        Some(utc) => {
+            let local = utc.with_timezone(&chrono::Local);
+            let offset = local.format("%:z").to_string();
+            format!("{} (UTC{})", local.format("%Y-%m-%d %H:%M"), offset)
+        }
+        None => stamp.to_string(),
+    }
 }
 
 /// Which backup a name is: (checkpoint stamp, None for the checkpoint itself
@@ -719,20 +749,23 @@ mod tests {
 
     #[test]
     fn backup_names_parse() {
-        assert_eq!(checkpoint_name("test10", "c20260924T011746"), "Marigold backup - test10 - 2026-09-24 01.17.46 - full.mgb");
+        // The readable part is local time with the offset; whatever the zone, it parses back to the same id.
+        let full = checkpoint_name("test10", "c20260924T011746");
+        assert!(full.starts_with("Marigold backup - test10 - 2026-09-24 ") && full.ends_with(" - full.mgb"), "{full}");
+        assert_eq!(parse_backup_name(&full), Some(("c20260924T011746".to_string(), None)));
+        let delta = delta_name("my - wallet", "c20260924T011746", 3);
+        assert_eq!(parse_backup_name(&delta), Some(("c20260924T011746".to_string(), Some(3))));
+        // A name written two hours east of UTC, read anywhere.
         assert_eq!(
-            delta_name("my - wallet", "c20260924T011746", 3),
-            "Marigold backup - my - wallet - 2026-09-24 01.17.46 - change 3.mgb"
+            parse_backup_name("Marigold backup - test10 - 2026-09-24 03.17.46 +0200 - full.mgb"),
+            Some(("c20260924T011746".to_string(), None))
         );
+        // A name from before the offset was written in was UTC.
         assert_eq!(
             parse_backup_name("Marigold backup - test10 - 2026-09-24 01.17.46 - full.mgb"),
             Some(("c20260924T011746".to_string(), None))
         );
-        assert_eq!(
-            parse_backup_name("Marigold backup - my - wallet - 2026-09-24 01.17.46 - change 3.mgb"),
-            Some(("c20260924T011746".to_string(), Some(3)))
-        );
-        assert_eq!(checkpoint_moment("c20260924T011746"), "2026-09-24 01:17");
+        assert!(checkpoint_moment("c20260924T011746").contains("(UTC"));
         assert_eq!(parse_backup_name("marigold-test10-c20260924T100000.full.mgb"), Some(("c20260924T100000".to_string(), None)));
         assert_eq!(parse_backup_name("marigold-my-wallet-c20260924T100000.d007.mgb"), Some(("c20260924T100000".to_string(), Some(7))));
         assert_eq!(
