@@ -78,6 +78,15 @@ impl Connect {
             tprintln!(ctx, "Your own copy keeps syncing in the background; the wallet moves back to it once it has caught up.");
         }
 
+        // A wallet bound to a node that is gone — one stopped for a restart
+        // that then failed — has no socket to dial with, and answered "This
+        // wallet cannot connect from here" (tester Charly, 2026-10-06). Give
+        // it one and carry on.
+        #[cfg(feature = "embedded-node")]
+        if ctx.wallet().try_wrpc_client().is_none() && !ctx.embedded_node_in_use() {
+            ctx.bind_unconnected_client().await;
+        }
+
         if let Some(wrpc_client) = ctx.wallet().try_wrpc_client().as_ref() {
             let network_id = ctx.wallet().network_id()?;
 

@@ -1391,14 +1391,19 @@ impl KaspaCli {
                         ))
                         .green()
                     );
-                    match this.restart_embedded_node().await {
+                    match this.restart_embedded_node(rpc).await {
                         Ok(Some(fresh)) => {
                             rpc = fresh;
                             continue;
                         }
                         Ok(None) => break,
                         Err(err) => {
-                            tprintln!(this, "{}", style(format!("The restart did not work ({err}); carrying on as it is.")).yellow());
+                            // The old node is stopped by now; there is nothing
+                            // to carry on with. The wallet is still on the
+                            // public computer it was using meanwhile.
+                            tprintln!(this, "{}", style(format!("The restart did not work ({err}).")).yellow());
+                            tprintln!(this, "{}", style("The wallet stays on the public computer for now. 'connect' starts your own copy again; its database is complete, so that is quick.").yellow());
+                            break;
                         }
                     }
                 }
@@ -1730,7 +1735,12 @@ impl KaspaCli {
     /// database, quietly: no talk of a discarded first sync, because the
     /// sync is exactly what has just finished.
     #[cfg(feature = "embedded-node")]
-    async fn restart_embedded_node(self: &Arc<Self>) -> Result<Option<Rpc>> {
+    /// `old`: the caller's handle on the node being restarted. It is dropped
+    /// here, before the new node opens the database: the RPC service holds
+    /// the consensus and through it the database, and a handle still alive
+    /// kept rocksdb's lock, so the new node found the database "in use by
+    /// another program" — this one (tester Charly, 2026-10-06).
+    async fn restart_embedded_node(self: &Arc<Self>, old: Rpc) -> Result<Option<Rpc>> {
         let node = self.embedded_node.lock().unwrap().take();
         self.embedded_node_adopted.store(false, Ordering::SeqCst);
         // Forget the sync state too: the fresh node's first "synced" report
@@ -1738,10 +1748,22 @@ impl KaspaCli {
         // same.
         self.sync_state.lock().unwrap().take();
         crate::log_sink::clear_sync_progress();
+        // Only a wallet bound to the stopping node is moved off it; one on a
+        // public computer meanwhile stays there — rebinding it blind left the
+        // tester's wallet DISCONNECTED when the restart failed.
+        let wallet_on_it = self.wallet.try_rpc_api().map(|api| Arc::ptr_eq(&api, old.rpc_api())).unwrap_or(false);
+        drop(old);
         if let Some(node) = node {
             node.stop().await?;
             drop(node);
-            self.release_embedded_node_memory().await;
+            if wallet_on_it {
+                self.release_embedded_node_memory().await;
+            } else {
+                #[cfg(all(target_os = "linux", target_env = "gnu"))]
+                unsafe {
+                    libc::malloc_trim(0);
+                }
+            }
         }
         self.spawn_embedded_node().await
     }
@@ -1764,7 +1786,7 @@ impl KaspaCli {
     /// Put the wallet on a wRPC client that is connected to nothing, so
     /// 'connect' has something to dial with.
     #[cfg(feature = "embedded-node")]
-    async fn bind_unconnected_client(self: &Arc<Self>) {
+    pub async fn bind_unconnected_client(self: &Arc<Self>) {
         let network_id = self.wallet.network_id().ok();
         if let Ok(client) = KaspaRpcClient::new(WrpcEncoding::Borsh, None, None, network_id, None) {
             let client = Arc::new(client);

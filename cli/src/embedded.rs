@@ -209,9 +209,25 @@ impl EmbeddedNode {
         // did not (a wallet in a container against the founder's mining wallet
         // on the host, 2026-09-18), so ask the kernel who holds the database
         // lock and say so, rather than find out the hard way.
+        // Our own previous node — one restarted in place — may still be
+        // letting go of its database: the handles drop a moment after it is
+        // stopped. That is a wait of a few seconds, not a refusal; a tester's
+        // restart was refused with "in use by another program (process N)"
+        // where N was the wallet itself (2026-10-06).
+        let own_pid = std::process::id();
+        let mut waited = std::time::Duration::ZERO;
+        while let Some((_, pid)) = database_locked_elsewhere(appdir)
+            && pid == own_pid
+            && waited < std::time::Duration::from_secs(20)
+        {
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            waited += std::time::Duration::from_millis(250);
+        }
         if let Some((lock, pid)) = database_locked_elsewhere(appdir) {
             // A holder outside this container's view shows as process 0.
-            let who = if pid == 0 {
+            let who = if pid == own_pid {
+                "this very program's previous node, which has not let go of it yet — try again in a moment".to_string()
+            } else if pid == 0 {
                 "another program on this machine, outside this container".to_string()
             } else {
                 format!("another program on this machine (process {pid})")
