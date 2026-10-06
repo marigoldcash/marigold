@@ -26,7 +26,7 @@ struct App {
     access: std::sync::Mutex<String>,
     /// The wallet's Telegram bot, answered while the wallet is open — as the
     /// terminal wallet does — so the phone works and a pairing can happen.
-    bot: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
+    bot: tokio::sync::Mutex<Option<tokio::task::AbortHandle>>,
     /// The automatic backup's tick.
     ticker: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
     backup_state: Arc<std::sync::Mutex<AutoState>>,
@@ -37,7 +37,17 @@ async fn start_background(app: &App, service: Arc<WalletService>) {
     stop_background(app).await;
     if let Some(cfg) = service.telegram_config() {
         let path = service.telegram_path();
-        *app.bot.lock().await = Some(tokio::spawn(kaspa_cli_lib::telegram::run_bot(service.clone(), path, cfg)));
+        let bot = tokio::spawn(kaspa_cli_lib::telegram::run_bot(service.clone(), path, cfg));
+        let abort = bot.abort_handle();
+        let say = service.say_handle();
+        tokio::spawn(async move {
+            match bot.await {
+                Ok(()) => say("The Telegram bot stopped answering; close and open the wallet to start it again.".to_string()),
+                Err(err) if err.is_panic() => say("The Telegram bot crashed; close and open the wallet to start it again.".to_string()),
+                Err(_) => {}
+            }
+        });
+        *app.bot.lock().await = Some(abort);
     }
     let state = app.backup_state.clone();
     *app.ticker.lock().await = Some(tokio::spawn(async move {

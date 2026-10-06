@@ -407,6 +407,26 @@ fn pin_line_locked(petals: u64, buf: &str, ticker: &str) -> String {
 
 /// Long-poll the bot and act for the paired user. Runs until the service
 /// stops; a Telegram hiccup is logged and retried, never fatal.
+/// When the bot loop last came round, as seconds since the epoch: a loop
+/// that is alive polls every twenty seconds at most, so a stamp older than
+/// a couple of minutes means a hung task, which housekeeping restarts.
+static BOT_LAST_POLL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn note_bot_poll() {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    BOT_LAST_POLL.store(now, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Seconds since the bot loop last came round; None before it ever did.
+pub fn bot_poll_age() -> Option<u64> {
+    let last = BOT_LAST_POLL.load(std::sync::atomic::Ordering::Relaxed);
+    if last == 0 {
+        return None;
+    }
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    Some(now.saturating_sub(last))
+}
+
 pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: TelegramConfig) {
     let token = cfg.token.clone();
     let mut offset: i64 = 0;
@@ -424,6 +444,7 @@ pub async fn run_bot(service: Arc<WalletService>, cfg_path: PathBuf, mut cfg: Te
     register_commands(&token).await;
     let ticker = service.ticker();
     loop {
+        note_bot_poll();
         let params = [
             ("offset", offset.to_string()),
             ("timeout", "25".to_string()),

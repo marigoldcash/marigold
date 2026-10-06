@@ -172,7 +172,12 @@ impl Telegram {
             sompi_to_kaspa_string(cfg.daily_limit_petals),
             ctx.ticker()
         );
-        tprintln!(ctx, "Telegram answers as long as the {name} wallet is running.");
+        if ctx.telegram_bot_alive() && crate::telegram::bot_poll_age().is_none_or(|age| age <= 150) {
+            tprintln!(ctx, "Telegram answers as long as the {name} wallet is running — it is answering now.");
+        } else {
+            tprintln!(ctx, "{}", style("The bot is not answering at the moment; starting it again.").yellow());
+            self.restart_bot(ctx).await;
+        }
         if let Ok(files) = crate::tgbackup::WalletFiles::of(ctx).await {
             let st = crate::tgbackup::status(&files, Some(cfg));
             let when = |secs: u64| -> String {

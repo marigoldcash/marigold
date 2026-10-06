@@ -117,7 +117,7 @@ pub struct KaspaCli {
     /// wallet is open (PLAN P8.0h), so nothing has to be closed to use
     /// the phone. Aborted on close and on exit.
     #[cfg(feature = "embedded-node")]
-    telegram_bot: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    telegram_bot: Mutex<Option<tokio::task::AbortHandle>>,
     /// True while the UTXO set is being read in, which on a wallet that has
     /// been mined into is minutes of work with nothing to show for it.
     loading: Arc<AtomicBool>,
@@ -532,9 +532,39 @@ impl KaspaCli {
             Some(local_miner),
             "telegram",
         );
-        let handle = tokio::spawn(crate::telegram::run_bot(service, path, cfg));
-        self.telegram_bot.lock().unwrap().replace(handle);
+        let bot = tokio::spawn(crate::telegram::run_bot(service, path, cfg));
+        // A task that dies says so. Its end used to be silent: the wallet
+        // went on announcing "answering your bot" while nothing polled it,
+        // and taps on the phone went nowhere (founder, 2026-10-06).
+        self.telegram_bot.lock().unwrap().replace(bot.abort_handle());
+        let this = self.clone();
+        tokio::spawn(async move {
+            match bot.await {
+                Ok(()) => tprintln!(this, "{}", crate::ui::warn("The Telegram bot stopped answering; 'telegram' starts it again.")),
+                Err(err) if err.is_panic() => {
+                    let payload = err.into_panic();
+                    let why = payload
+                        .downcast_ref::<String>()
+                        .cloned()
+                        .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+                        .unwrap_or_else(|| "no reason given".to_string());
+                    tprintln!(this, "{}", crate::ui::warn(format!("The Telegram bot crashed ({why}); 'telegram' starts it again.")));
+                }
+                Err(_) => {} // aborted on purpose
+            }
+        });
         tprintln!(self, "{}", style("Answering your Telegram bot while this wallet is open.").dim());
+    }
+
+    /// Whether the bot task is alive right now.
+    #[cfg(feature = "embedded-node")]
+    pub fn telegram_bot_alive(&self) -> bool {
+        self.telegram_bot.lock().unwrap().as_ref().is_some_and(|h| !h.is_finished())
+    }
+
+    #[cfg(not(feature = "embedded-node"))]
+    pub fn telegram_bot_alive(&self) -> bool {
+        false
     }
 
     #[cfg(feature = "embedded-node")]
@@ -2912,6 +2942,8 @@ impl KaspaCli {
             let mut resumes_seen = 0u32;
             #[cfg(feature = "embedded-node")]
             let backup_state = Arc::new(Mutex::new(crate::tgbackup::AutoState::default()));
+            #[cfg(feature = "embedded-node")]
+            let mut bot_restarted_at: Option<Instant> = None;
             loop {
                 workflow_core::task::sleep(Duration::from_secs(5)).await;
                 if this.shutdown.load(Ordering::SeqCst) {
@@ -2920,6 +2952,23 @@ impl KaspaCli {
                 this.watch_memory(&mut memory_warned_at).await;
                 #[cfg(feature = "embedded-node")]
                 crate::tgbackup::auto_tick(&this, &backup_state).await;
+                // A bot task that died is started again — the wallet is open
+                // and the password is held, which is all it needs — but not
+                // more often than once a minute, so a bot that dies at once
+                // does not spin.
+                #[cfg(feature = "embedded-node")]
+                if this.wallet.is_open()
+                    && this.telegram_bot.lock().unwrap().is_some()
+                    && (!this.telegram_bot_alive() || crate::telegram::bot_poll_age().is_some_and(|age| age > 150))
+                    && bot_restarted_at.is_none_or(|t: Instant| t.elapsed() > Duration::from_secs(60))
+                    && let Some(secret) = this.tidying_secret()
+                {
+                    bot_restarted_at = Some(Instant::now());
+                    if this.telegram_bot_alive() {
+                        tprintln!(this, "{}", crate::ui::warn("The Telegram bot had stopped polling; starting it again."));
+                    }
+                    this.start_telegram_bot(secret).await;
+                }
                 #[cfg(feature = "embedded-node")]
                 {
                     // A first sync that lost its peer repeats the step from

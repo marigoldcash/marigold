@@ -194,6 +194,11 @@ impl WalletService {
         &self.name
     }
 
+    /// The service's own remark channel, for a watcher that outlives a call.
+    pub fn say_handle(&self) -> Say {
+        self.say.clone()
+    }
+
     /// The wallet's Telegram settings file.
     pub fn telegram_path(&self) -> std::path::PathBuf {
         TelegramConfig::path(&self.folder, &self.name)
