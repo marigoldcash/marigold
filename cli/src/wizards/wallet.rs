@@ -235,18 +235,14 @@ pub(crate) async fn create(
         tpara!(
             ctx,
             "\
-            Your note vault holds the keys to your bearer notes — your money. It has \
-            a 24-word recovery phrase, and this is the one to write down. You can \
-            supply your own 24 words or have them generated now.\
+            Your wallet holds the keys to your notes — your money — behind 24 words, \
+            and those are the ones to write down. You can supply your own 24 words \
+            or have them generated now.\
             ",
         );
         tprintln!(ctx, "");
         loop {
-            let input = term
-                .ask(false, "Enter your own 24-word vault recovery phrase, or press <enter> to generate one: ")
-                .await?
-                .trim()
-                .to_string();
+            let input = term.ask(false, "Enter your own 24 words, or press <enter> to generate them: ").await?.trim().to_string();
             if input.is_empty() {
                 break None;
             }
@@ -359,7 +355,7 @@ pub(crate) async fn create(
             these words and nothing else. Your wallet password never opens a backup: a password \
             is chosen to be remembered, and a backup may sit on someone else's server, where it \
             can be attacked at leisure. Nothing can derive a note, which is exactly what makes it \
-            cash. Paper, not a photo. 'note vault words' shows them again.\
+            cash. Paper, not a photo. 'words' shows them again.\
             ",
         );
         tprintln!(ctx, "");

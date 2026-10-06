@@ -136,7 +136,7 @@ impl Otp {
         }
 
         tprintln!(ctx, "");
-        tprintln!(ctx, "Turning this off needs a current code — or, if the phone is gone, your 24 vault words.");
+        tprintln!(ctx, "Turning this off needs a current code — or, if the phone is gone, your 24 words.");
         tprintln!(ctx, "");
 
         // The password is asked for first and without a code, because the
@@ -153,7 +153,7 @@ impl Otp {
             Ok(()) => true,
             Err(_) => {
                 tprintln!(ctx, "");
-                tprintln!(ctx, "No code. Prove the wallet is yours with your 24 vault words instead.");
+                tprintln!(ctx, "No code. Prove the wallet is yours with your 24 words instead.");
                 tprintln!(ctx, "");
                 self.prove_with_words(ctx, &wallet_secret).await?
             }
@@ -179,7 +179,7 @@ impl Otp {
     /// Check the 24 vault words against the vault. Returns whether they were
     /// right, and says nothing about *which* word was wrong.
     async fn prove_with_words(&self, ctx: &Arc<KaspaCli>, wallet_secret: &Secret) -> Result<bool> {
-        let words = ctx.term().ask(true, "Your 24 vault recovery words: ").await?;
+        let words = ctx.term().ask(true, "Your 24 words: ").await?;
         let words = words.trim().to_string();
         if words.is_empty() {
             return Ok(false);

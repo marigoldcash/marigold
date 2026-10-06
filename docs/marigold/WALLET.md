@@ -64,7 +64,7 @@ Walks an interactive wizard, in this exact order:
 3. A phishing-hint explainer paragraph, then `Create phishing hint (optional, press <enter> to skip):` — press enter to skip.
 4. `Enter wallet encryption password:` (masked) and `Re-enter wallet encryption password:` (masked) — must match.
 5. `Enter bip39 mnemonic passphrase (optional):` (masked) — only asked when keeping a ledger; press enter to skip (a *second*, optional secret on top of the wallet password; skip it unless you specifically want one).
-6. The wallet shows its **24 recovery words** in a numbered panel, explains that they are the key to everything — the ledger balance on their own, the notes together with a backup, and every backup opens with these words and never with the password — and, after `Press <enter> once you have written them down:`, asks for two of the words by number (`Word 7 of 24:`) as a check that the paper is right. An empty answer shows the words again; the check does not end until both are right. With `advanced on` the wizard first offers to take your own 24 words instead, in which case nothing is shown back or checked. `note vault words` prints them again at any time.
+6. The wallet shows its **24 recovery words** in a numbered panel, explains that they are the key to everything — the ledger balance on their own, the notes together with a backup, and every backup opens with these words and never with the password — and, after `Press <enter> once you have written them down:`, asks for two of the words by number (`Word 7 of 24:`) as a check that the paper is right. An empty answer shows the words again; the check does not end until both are right. With `advanced on` the wizard first offers to take your own 24 words instead, in which case nothing is shown back or checked. `words` prints them again at any time.
 
 The wizard then prints the wallet's storage path (and, with `advanced on`, the ledger address when keeping a ledger). The account's own 12-word phrase is deliberately not shown (it is derived from the vault key; `export mnemonic` produces it if another program ever needs it). The wallet is opened and activated in the same session — no separate `wallet open` needed.
 
@@ -100,37 +100,25 @@ note list
 
 `balance` shows totals by denomination; `note list` shows every held note's serial, denomination, provenance (`Cold`/`Hot`), and status (`Active`/`HandedOver`/ `Superseded`).
 
-**A newly-submitted note-pool transaction needs a confirming block before it shows up in on-chain queries** (`note vault verify`, another wallet's `receive`, etc.) — on a real network this happens automatically as blocks keep arriving; on this local testnet, mine at least one more block after any note operation before checking its on-chain effects from elsewhere.
+**A newly-submitted note-pool transaction needs a confirming block before it shows up in on-chain queries** (`wallet verify`, another wallet's `receive`, etc.) — on a real network this happens automatically as blocks keep arriving; on this local testnet, mine at least one more block after any note operation before checking its on-chain effects from elsewhere.
 
-## 6. The note vault: create, backup, verify, export
+## 6. Your notes: the words, a check, a paper copy
 
-The vault (PLAN P7.6) is the wallet's note key database — one encrypted file per note, backed by its own 24-word recovery key `K` (unrelated to the wallet's own BIP32 mnemonic from step 3; see DECISIONS.md's "Note vault, backup, and restore-rotation policy" for the full design).
-
-```
-note vault create
-```
-
-Run this **before** your first mint if you want to see the 24 words with the proper one-time warning (an already-auto-provisioned vault, from having minted first, just says "a note vault already exists").
+A wallet keeps its notes as one encrypted file each, under a key that is the entropy of the wallet's 24 words (PLAN P7.6; DECISIONS.md "Note vault, backup, and restore-rotation policy" has the design, under the old name — since 2026-10-06 nothing a person reads says "vault": the bucket of money is the wallet, the money in it is notes, and the software is the Marigold wallet, `marigold-cli` in the terminal and `marigold-wallet` on the desktop).
 
 ```
-note vault backup <dir>
+words                 # the wallet's 24 words, for paper (asks the password); 'wallet words' is the same
+wallet verify         # every note you hold checked against the live pool, no secret needed
+wallet verify deep    # also opens every note file and re-derives its key — the one check that catches a corrupted file
+wallet paper export <dir>    # a paper QR copy: encrypted pages written to <dir>, their own 12-word password printed once
+wallet paper import <page-file> ...   # reads the pages back (asks for that password), rotating every note as it lands
 ```
 
-Copies the vault's files to `<dir>` — pair this with the 24 words (written down separately, never stored alongside) for a full recovery. Do this after every batch of new notes; a vault copy only protects notes it was taken after receiving.
+The words are shown at creation and checked (step 3); `words` shows them again. They are the key to everything: the ledger balance on their own, the notes together with a backup (`backup`, section 11b) — and every backup opens with the words and never with the wallet password.
 
-```
-note vault verify
-note vault verify deep
-note vault verify backup <dir>
-```
+The paper export is deliberately self-contained: its pages are encrypted under a short password generated and printed once at export time, to be written on the printed page itself (its threat model is safe physical storage, not a secret kept apart — DECISIONS.md). Recovering from paper needs the pages and that password, never the wallet's files or words.
 
-Three checks: **light** (this wallet's own notes against the live pool, no secret needed), **deep** (decrypts and re-derives every note's key — the mandatory first step of an actual restore, and the only one that catches a corrupted vault file), and **backup `<dir>`** (light-verifies a standalone backup copy directly — no wallet open, no secret — "is this old backup still any good" without ever restoring it).
-
-```
-note vault export <dir>
-```
-
-Paper QR export: prints an encrypted QR (and writes the same page as hex text to `<dir>`) for every ~40 notes, plus a freshly-generated 12-word password printed once — write it on the printed page itself (its threat model is safe physical storage, not a secret kept apart from the vault — see DECISIONS.md). `note vault import <page-file> ...` reads the pages back (prompts for the password interactively) and imports each note as a bearer key, immediately rotating it.
+The old `note vault …` spellings say their new name and run (`words`, `verify`, `export`, `import`); `note vault create`, `backup <dir>` and `restore <dir>` are gone — a wallet has its notes and words from the moment it is made, and `backup`/`wallet restore <file>` replaced the loose-file copy.
 
 ## 7. Receive a payment (fresh-pk mode)
 
@@ -179,17 +167,17 @@ note redeem amount <amount>
 
 Either redeem specific notes by serial, or let the wallet pick enough notes to cover at least `<amount>`. Reports the redeemed value, fee, and net ledger balance gain.
 
-## 11. Restore from a vault backup — "24 words + the files"
-
-Simulates recovering a wallet from nothing but a vault backup and its 24 words. In a **fresh** wallet (no prior vault):
+## 11. Restore from a backup file — "24 words + the file"
 
 ```
-note vault restore <backup-dir> <word1> <word2> ... <word24>
+wallet restore <file> [<name>]
 ```
 
-Copies the backup's files in, recovers `K` from the words, deep-verifies (reports live/stale/corrupted), then — by default — offers the restore-time rotation: 2-5 randomly-composed batches, each its own transaction, rotating every recovered note to a fresh key (invalidating every old copy of this backup, including any that may have leaked). Each batch is attempted independently — one batch's failure doesn't stop the others.
+Rebuilds every wallet in a backup file whose 24 words are given (section 11b for the file's shape). Never overwrites: if anything it would write is already there it writes nothing and says which file stopped it; `<name>` restores a single wallet under another name, so it can sit beside one you already have.
 
-**Caveat found while validating this**: if the *source* wallet the backup came from is still active and mid-spend (e.g. you're testing restore against a backup you just took without pausing the original wallet), a rotation batch that happens to need a fee-stamp from a note the source wallet is simultaneously spending will fail with `already consumed by transaction ... in the mempool` (or, once that transaction confirms, `does not exist in the pool`) — a real instance of POOL-SPEC.md's same-key-in-two-wallets hazard, not a wallet defect. Mine a confirming block for the source wallet's pending transaction and re-run `note vault restore` (idempotent — it re-copies and re-verifies) to pick up wherever it left off.
+A restored wallet is a copy of the keys, and any other copy of that backup can spend the same notes. So the first time the restored wallet opens with a synced node it offers to **rotate every note to fresh keys** — recommended whenever another copy could exist, optional, never done without a yes (founder, 2026-10-06: someone testing a backup should not pay for a full rotation of a large holding). The question is put once; `n` leaves the notes as they are and `note rotate all` rotates them whenever wanted. Without a node the wallet opens offline and says the offer is waiting.
+
+**Caveat found while validating this**: if the *source* wallet the backup came from is still active and mid-spend, a rotation batch that needs a fee-stamp from a note the source wallet is simultaneously spending fails for that batch; the other batches still run and the failed one is reported. Pause the original first.
 
 ## 11b. Automatic backups to Telegram, and the restore (2026-09-23/24)
 
@@ -228,7 +216,7 @@ It asks for the bot's token hidden (a token typed on the command line would sit 
 
 ## 12. Notes-only wallets
 
-Answer `n` to `Keep a ledger account too?` and the wallet has a vault and nothing else: no account key, no ledger address ever derived, `list` shows no account and the prompt carries no account name. Everything under `note` works exactly as above — `request`, `pay`, `receive`/`export`, `note pos`, `note verify`, `note vault backup`/`restore`, `note history` — because none of it ever needed the ledger; it only used the account as a handle. `balance` shows notes alone. The ledger commands (`mint`, `redeem`, `transfer`, `sweep`, `estimate`, `address`, `utxos`, `message sign`) refuse with one line: *This wallet keeps notes only — there is no ledger account. 'account create bip32' adds one.* That command attaches the ledger at any later time, derived from the same 24 words, so there is no new secret and backups need nothing extra.
+Answer `n` to `Keep a ledger account too?` and the wallet has a vault and nothing else: no account key, no ledger address ever derived, `list` shows no account and the prompt carries no account name. Everything about notes works exactly as above — `request`, `pay`, `receive`/`export`, `note pos`, `words`, `wallet verify`, `wallet paper export`/`import`, `note history` — because none of it ever needed the ledger; it only used the account as a handle. `balance` shows notes alone. The ledger commands (`mint`, `redeem`, `transfer`, `sweep`, `estimate`, `address`, `utxos`, `message sign`) refuse with one line: *This wallet keeps notes only — there is no ledger account. 'account create bip32' adds one.* That command attaches the ledger at any later time, derived from the same 24 words, so there is no new secret and backups need nothing extra.
 
 Three things a notes-only wallet meets that a ledger wallet does not:
 

@@ -152,7 +152,7 @@ impl Lane {
                 tprintln!(ctx, "");
                 tprintln!(
                     ctx,
-                    "Made a key for lane {}. It lives in this wallet's vault and is recovered with the vault words.",
+                    "Made a key for lane {}. It lives with this wallet's notes and is recovered with the wallet's 24 words.",
                     tag_text.to_ascii_uppercase()
                 );
                 key

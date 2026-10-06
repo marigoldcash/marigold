@@ -303,8 +303,20 @@ impl Wallet {
                         tprintln!(ctx, "");
                         tpara!(
                             ctx,
-                            "This wallet was restored from a backup. Every note is now rotated to fresh keys, so no other copy of that backup can spend them. This costs the network fee per group of notes."
+                            "This wallet was restored from a backup. Rotating every note to fresh keys means no other copy of that backup can spend them — recommended if any other copy could exist. It costs the network fee per group of notes, and 'note rotate all' does it any time later."
                         );
+                        let answer = ctx.term().ask(false, "Rotate the notes now? [Y/n]: ").await?.trim().to_lowercase();
+                        if answer.starts_with('n') {
+                            std::fs::remove_file(&marker).ok();
+                            tprintln!(
+                                ctx,
+                                "{}",
+                                crate::ui::dim("Left as they are. 'note rotate all' rotates them whenever you want.")
+                            );
+                            tprintln!(ctx, "");
+                            ctx.request_open_housekeeping();
+                            return Ok(());
+                        }
                         let store = ctx.wallet().store().as_note_key_store()?;
                         let mut serials = Vec::new();
                         let mut stream = store.iter().await?;
@@ -325,7 +337,7 @@ impl Wallet {
                         tprintln!(
                             ctx,
                             "{}",
-                            style("This wallet was restored from a backup. Its notes are rotated to fresh keys the first time it opens with a synced node; until then any other copy of the backup can spend them.").yellow()
+                            style("This wallet was restored from a backup. The first time it opens with a synced node it offers to rotate its notes to fresh keys; until then any other copy of the backup can spend them.").yellow()
                         );
                     }
                 }
@@ -394,7 +406,7 @@ impl Wallet {
                 let Some(name) = argv.first().cloned() else {
                     tprintln!(
                         ctx,
-                        "usage: 'wallet destroy <name> [force]' — permanently deletes a wallet's file, note vault, and transaction history"
+                        "usage: 'wallet destroy <name> [force]' — permanently deletes a wallet's keys, notes, and transaction history"
                     );
                     return Ok(());
                 };
@@ -480,13 +492,13 @@ impl Wallet {
                 }
                 tprintln!(ctx, "");
                 tprintln!(ctx, "{}", style(format!("About to permanently destroy '{name}':")).red());
-                tprintln!(ctx, "  wallet file, note vault, and transaction history — deleted from disk");
+                tprintln!(ctx, "  keys, notes, and transaction history — deleted from disk");
                 if active_notes > 0 {
                     tprintln!(
                         ctx,
                         "{}",
                         style(format!(
-                            "  ⚠ its vault still holds {active_notes} ACTIVE note(s) worth {} {ticker} — without a backup, NOBODY can ever spend them again",
+                            "  ⚠ it still holds {active_notes} ACTIVE note(s) worth {} {ticker} — without a backup, NOBODY can ever spend them again",
                             kaspa_wallet_core::utils::sompi_to_kaspa_string(active_petals)
                         ))
                         .red()
@@ -783,6 +795,21 @@ impl Wallet {
                     tprintln!(ctx, "usage:\n'wallet hint <text>' or 'wallet hint remove' to remove the hint");
                 }
             }
+            "words" => return crate::modules::note::Note.vault_words(&ctx).await,
+            "verify" => return crate::modules::note::Note.vault_verify(&ctx, argv).await,
+            "paper" => {
+                return match argv.first().map(|s| s.as_str()) {
+                    Some("export") => crate::modules::note::Note.vault_export(&ctx, argv[1..].to_vec()).await,
+                    Some("import") => crate::modules::note::Note.vault_import(&ctx, argv[1..].to_vec()).await,
+                    _ => {
+                        tprintln!(
+                            ctx,
+                            "usage: 'wallet paper export <dir>' writes your notes as encrypted QR pages; 'wallet paper import <page-file> ...' reads them back"
+                        );
+                        Ok(())
+                    }
+                };
+            }
             "backup" => {
                 if argv.first().map(|s| s.as_str()) == Some("verify") {
                     return self.backup_verify(&ctx, argv[1..].to_vec()).await;
@@ -830,13 +857,16 @@ impl Wallet {
                 ("import [<name>]", "Create a wallet from an existing mnemonic (bip32 only)"),
                 ("open [<name>]", "Open an existing wallet (shorthand: 'open [<name>]'; no name shows a picker)"),
                 ("close", "Close an opened wallet (shorthand: 'close')"),
-                ("where", "Show where the wallet, note vault, and settings files live on disk"),
+                ("where", "Show where the wallet's keys, notes, and settings live on disk"),
                 ("destroy <name> [force]", "Permanently delete a wallet (refuses while it holds live notes, unless forced)"),
                 ("rename <name>", "Rename the wallet, file and all"),
                 ("autoconnect [on|off]", "Whether this wallet remembers its network and node, and offers to reconnect when opened"),
                 ("forget <name>", "Hide a wallet from the open picker (it is NOT deleted; 'wallet show <name>' undoes it)"),
                 ("show <name>", "Un-hide a wallet previously hidden with 'wallet forget'"),
                 ("hint", "Change the wallet phishing hint"),
+                ("words", "Show the wallet's 24 words, for paper (asks the password; 'words' alone does the same)"),
+                ("verify [deep]", "Check the notes you hold against the network ('deep' also opens every note file)"),
+                ("paper export <dir> | import <pages>", "A paper QR copy of your notes, under its own password printed once"),
                 ("backup [<file-or-folder>]", "Write every wallet on this computer — keys, notes and all — to one encrypted file, each sealed with its own 24 words"),
                 ("backup verify <file>", "Check that a backup file still opens and what is inside it"),
                 ("restore <file> [<name>]", "Rebuild wallets from a backup file"),

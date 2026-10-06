@@ -440,7 +440,7 @@ async fn restore_telegram(app: AppHandle, token: String, words: String, name: St
     }
     let others: Vec<String> = names.into_iter().filter(|n| !restored_names.contains(n)).collect();
     Ok(format!(
-        "{} from the full copy of {} with {} change set(s) after it. Open it with the password it had when the backup was made; every note is rotated to fresh keys on its first open with a node.{}",
+        "{} from the full copy of {} with {} change set(s) after it. Open it with the password it had when the backup was made. If any other copy of this backup could exist, rotate its notes to fresh keys once ('note rotate all' in the terminal wallet).{}",
         done.join("; "),
         bundle::checkpoint_moment(&merged.stamp),
         merged.deltas,

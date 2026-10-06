@@ -5,31 +5,12 @@ use kaspa_consensus_core::notepool::DENOMINATION_PETALS;
 use kaspa_wallet_core::account::notepool;
 use kaspa_wallet_core::account::notepool::{
     PaymentRequest, await_payment_request, create_payment_request, deep_verify, export_active_entries, light_verify,
-    light_verify_vault, paper_export_decode_page, paper_export_encode, paper_export_missing_pages, paper_export_peek_header,
-    plan_restore_rotation,
+    paper_export_decode_page, paper_export_encode, paper_export_missing_pages, paper_export_peek_header, plan_restore_rotation,
 };
 use kaspa_wallet_core::storage::local::notevault::NoteVault;
 use kaspa_wallet_core::storage::{NoteKeyEntry, NoteKeyInfo, NoteProvenance, NoteStatus};
-use std::path::Path;
 use std::time::Duration;
 use workflow_core::abortable::Abortable;
-
-/// Recursively copy a directory tree (native fs — the CLI is native-only, unlike
-/// `wallet-core` which must also build for wasm32). Used for `note vault
-/// backup`/`restore`'s "copy the files" half of "24 words + the files".
-fn copy_dir_recursive(from: &Path, to: &Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(to)?;
-    for entry in std::fs::read_dir(from)? {
-        let entry = entry?;
-        let target = to.join(entry.file_name());
-        if entry.file_type()?.is_dir() {
-            copy_dir_recursive(&entry.path(), &target)?;
-        } else {
-            std::fs::copy(entry.path(), &target)?;
-        }
-    }
-    Ok(())
-}
 
 /// Render a payload as a terminal QR code (dense unicode half-blocks). Falls back to
 /// nothing (text-only) if the payload somehow exceeds QR capacity — the text form
@@ -48,7 +29,7 @@ pub(crate) fn qr_string(text: &str) -> Option<String> {
 }
 
 #[derive(Default, Handler)]
-#[help("Expert note operations: list, mint, pos, rotate, unknown, vault, verify")]
+#[help("Expert note operations: list, mint, pos, rotate, unknown, verify")]
 pub struct Note;
 
 impl Note {
@@ -437,14 +418,10 @@ impl Note {
             return Ok(());
         }
         tprintln!(ctx, "");
-        tprintln!(ctx, "This wallet has no note vault yet — creating one now.");
+        tprintln!(ctx, "This wallet is not set up for notes yet — setting it up now, with its own 24 words.");
         let words = loop {
-            let input = ctx
-                .term()
-                .ask(false, "Enter your own 24-word vault recovery phrase, or press <enter> to generate one: ")
-                .await?
-                .trim()
-                .to_string();
+            let input =
+                ctx.term().ask(false, "Enter your own 24 words, or press <enter> to generate them: ").await?.trim().to_string();
             if input.is_empty() {
                 break None;
             }
@@ -463,14 +440,14 @@ impl Note {
         match words {
             Some(words) => {
                 store.vault_restore_from_words(&words, wallet_secret).await?;
-                tprintln!(ctx, "Note vault created from your recovery phrase.\r\n");
+                tprintln!(ctx, "Set up from your 24 words.\r\n");
             }
             None => {
                 let words = store.vault_create(wallet_secret).await?;
                 tprintln!(ctx, "");
                 crate::ui::recovery_words(ctx, &words);
                 tprintln!(ctx, "");
-                tprintln!(ctx, "Recovery requires BOTH these words AND the vault files ('note vault backup <dir>').");
+                tprintln!(ctx, "These words and a backup ('backup' writes one) are what bring your notes back; neither alone does.");
                 ctx.term().ask(false, "Press <enter> once you have written them down: ").await?;
             }
         }
@@ -687,7 +664,7 @@ impl Note {
         // Destination vault (ceremony if it doesn't exist yet).
         let dest_vault = NoteVault::new(&folder, &dest);
         if !dest_vault.exists().await? {
-            tprintln!(ctx, "'{dest}' has no note vault yet — creating one (its own 24-word recovery phrase):");
+            tprintln!(ctx, "'{dest}' is not set up for notes yet — setting it up, with its own 24 words:");
             let words = dest_vault.create(&dest_secret).await?;
             tprintln!(ctx, "");
             tprintln!(ctx, "{}", style(&words).cyan());
@@ -1013,48 +990,61 @@ impl Note {
         Ok(())
     }
 
+    /// The 'note vault …' spellings, from before the word went (2026-10-06:
+    /// a vault and a wallet were the same thing to everyone outside the code).
+    /// The living ones say their new name and run; the rest say what replaced them.
     async fn vault(&self, ctx: &Arc<KaspaCli>, mut argv: Vec<String>) -> Result<()> {
-        if argv.is_empty() {
-            return self.vault_help(ctx).await;
-        }
-        let sub = argv.remove(0);
+        let sub = if argv.is_empty() { String::new() } else { argv.remove(0) };
+        let now = |cmd: &str| crate::ui::dim(format!("'note vault {sub}' is now '{cmd}'."));
         match sub.as_str() {
-            "create" => self.vault_create(ctx).await,
-            "backup" => self.vault_backup(ctx, argv).await,
-            "verify" => self.vault_verify(ctx, argv).await,
-            "restore" => self.vault_restore(ctx, argv).await,
-            "words" => self.vault_words(ctx).await,
-            "export" => self.vault_export(ctx, argv).await,
-            "import" => self.vault_import(ctx, argv).await,
-            v => {
-                tprintln!(ctx, "unknown vault command: '{v}'\r\n");
-                self.vault_help(ctx).await
+            "words" => {
+                tprintln!(ctx, "{}", crate::ui::dim("'note vault words' is now 'wallet words', or just 'words'."));
+                self.vault_words(ctx).await
+            }
+            "verify" if argv.first().map(String::as_str) != Some("backup") => {
+                tprintln!(ctx, "{}", now("wallet verify"));
+                self.vault_verify(ctx, argv).await
+            }
+            "export" => {
+                tprintln!(ctx, "{}", now("wallet paper export"));
+                self.vault_export(ctx, argv).await
+            }
+            "import" => {
+                tprintln!(ctx, "{}", now("wallet paper import"));
+                self.vault_import(ctx, argv).await
+            }
+            "create" => {
+                tprintln!(ctx, "A wallet has its notes and its 24 words from the moment it is made — 'wallet words' shows them.\r\n");
+                Ok(())
+            }
+            "backup" | "verify" => {
+                tprintln!(
+                    ctx,
+                    "'note vault {sub}' is gone: 'wallet backup <file>' writes every wallet on this computer into one sealed file, and 'wallet backup verify <file>' checks one.\r\n"
+                );
+                Ok(())
+            }
+            "restore" => {
+                tprintln!(
+                    ctx,
+                    "'note vault restore' is gone: 'wallet restore <file>' rebuilds a wallet from a backup file, and offers to rotate its notes at the first open.\r\n"
+                );
+                Ok(())
+            }
+            _ => {
+                tprintln!(
+                    ctx,
+                    "'note vault' is gone. 'wallet words', 'wallet verify [deep]', 'wallet paper export <dir>' and 'wallet paper import <pages>' are the commands now.\r\n"
+                );
+                Ok(())
             }
         }
     }
 
-    async fn vault_help(&self, ctx: &Arc<KaspaCli>) -> Result<()> {
-        ctx.term().help(
-            &[
-                ("vault words", "Show the vault's 24 recovery words, for paper (asks the password)"),
-                ("vault create", "Run the vault's 24-word creation ceremony now (auto-runs on first note otherwise)"),
-                ("vault backup <dir>", "Copy the vault's files to <dir> (pair with the 24 words for a full recovery)"),
-                ("vault verify", "Light-verify this wallet's active notes against the live pool (no secret needed)"),
-                ("vault verify deep", "Deep-verify: decrypt and re-derive every active note's key"),
-                ("vault verify backup <dir>", "Light-verify a standalone backup directory without opening/restoring it"),
-                ("vault restore <dir> <24 words>", "Copy files from <dir>, recover K from the words, deep-verify, offer rotation"),
-                ("vault export <dir>", "Paper QR export: encrypted pages written to <dir>, password printed once"),
-                ("vault import <page-file> ...", "Import notes from a paper export's decoded pages (prompts for the password)"),
-            ],
-            None,
-        )?;
-        Ok(())
-    }
-
-    /// `note vault words` — the 24 words, for whoever wants them on paper.
-    /// The vault key is their entropy, so they exist whether or not the
-    /// wizard showed them.
-    async fn vault_words(&self, ctx: &Arc<KaspaCli>) -> Result<()> {
+    /// `wallet words` (or just `words`) — the 24 words, for whoever wants
+    /// them on paper. The notes' key is their entropy, so they exist whether
+    /// or not the wizard showed them.
+    pub(crate) async fn vault_words(&self, ctx: &Arc<KaspaCli>) -> Result<()> {
         let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(None).await?;
         let store = ctx.wallet().store().as_note_key_store()?;
         let words = store.recovery_words(&wallet_secret).await?;
@@ -1064,60 +1054,17 @@ impl Note {
         tpara!(
             ctx,
             "\
-            These words are another way back in: with them and a copy of the vault files \
-            ('note vault backup <dir>'), 'note vault restore' rebuilds the wallet without the \
-            password. Anyone holding them and the files can spend your money — paper, not a photo.\
+            These words are the key to everything: they bring back your ledger balance on their own, \
+            and with a backup ('backup' writes one, 'telegram backup' keeps one current) they bring \
+            back your notes — every backup opens with these words and never with the password. \
+            Anyone holding them and a backup can spend your money. Paper, not a photo.\
             ",
         );
         tprintln!(ctx, "");
         Ok(())
     }
 
-    async fn vault_create(&self, ctx: &Arc<KaspaCli>) -> Result<()> {
-        let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(None).await?;
-        let store = ctx.wallet().store().as_note_key_store()?;
-        if store.vault_exists().await? {
-            tprintln!(ctx, "a note vault already exists for this wallet\r\n");
-            return Ok(());
-        }
-        let words = store.vault_create(&wallet_secret).await?;
-        tprintln!(ctx, "WRITE THESE 24 WORDS DOWN NOW - they are shown only this once:");
-        tprintln!(ctx, "{words}");
-        tprintln!(ctx, "recovery needs BOTH these words AND a copy of the vault files ('note vault backup <dir>')\r\n");
-        Ok(())
-    }
-
-    async fn vault_backup(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
-        if argv.is_empty() {
-            tprintln!(ctx, "usage: 'note vault backup <dir>'\r\n");
-            return Ok(());
-        }
-        let store = ctx.wallet().store().as_note_key_store()?;
-        let folder = store.vault_folder().await?;
-        let target = std::path::PathBuf::from(&argv[0]);
-        copy_dir_recursive(&folder, &target).map_err(|e| Error::Custom(format!("backup copy failed: {e}")))?;
-        tprintln!(ctx, "copied vault files to {}\r\n", target.display());
-        Ok(())
-    }
-
-    async fn vault_verify(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
-        if argv.first().map(String::as_str) == Some("backup") {
-            if argv.len() < 2 {
-                tprintln!(ctx, "usage: 'note vault verify backup <dir>'\r\n");
-                return Ok(());
-            }
-            let vault = NoteVault::at(&argv[1]);
-            let rpc = ctx.wallet().rpc_api();
-            let report = light_verify_vault(&vault, &rpc).await?;
-            tprintln!(
-                ctx,
-                "backup at {}: {} live, {} stale (already spent/rotated since this backup was made)\r\n",
-                argv[1],
-                report.live.len(),
-                report.stale.len()
-            );
-            return Ok(());
-        }
+    pub(crate) async fn vault_verify(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
         if argv.first().map(String::as_str) == Some("deep") {
             let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(None).await?;
             let report = deep_verify(&ctx.wallet(), wallet_secret).await?;
@@ -1139,134 +1086,9 @@ impl Note {
         Ok(())
     }
 
-    async fn vault_restore(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
-        let ticker = ctx.ticker();
-        if argv.len() < 2 {
-            tprintln!(ctx, "usage: 'note vault restore <dir> <24 recovery words>'\r\n");
-            return Ok(());
-        }
-        let dir = argv[0].clone();
-        let words = argv[1..].join(" ");
-        if words.split_whitespace().count() != 24 {
-            tprintln!(
-                ctx,
-                "expected exactly 24 recovery words, got {} - check the words and try again\r\n",
-                words.split_whitespace().count()
-            );
-            return Ok(());
-        }
-        let wallet = ctx.wallet();
-        let store = ctx.wallet().store().as_note_key_store()?;
-        let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(None).await?;
-
-        // A vault already existing here usually means this wallet has its own K
-        // (and possibly its own notes under it) - copying a backup's `vault.key`
-        // over it would silently strand anything already stored under the old K.
-        // But it can also mean this is exactly the SAME restore run partway
-        // through: `note vault restore` copies the files and recovers K before
-        // attempting any rotation, so a rotation-batch failure (a real, expected
-        // possibility - see the batch-continuation note below) leaves a vault in
-        // place that looks identical to a genuine pre-existing one. Distinguish
-        // the two by checking whether these words unlock the vault that's already
-        // there: if so, this is a safe idempotent re-run, not a clobber.
-        if store.vault_exists().await? {
-            if !store.vault_words_match(&words, &wallet_secret).await? {
-                tprintln!(
-                    ctx,
-                    "this wallet already has a different note vault - restoring here would overwrite its vault.key and \
-                     strand any notes already stored under it. Restore into a fresh wallet instead.\r\n"
-                );
-                return Ok(());
-            }
-            tprintln!(ctx, "a vault from this same restore already exists here (recognized by these words) - resuming...");
-        }
-
-        let folder = store.vault_folder().await?;
-        copy_dir_recursive(Path::new(&dir), &folder).map_err(|e| Error::Custom(format!("restore copy failed: {e}")))?;
-        store.vault_restore_from_words(&words, &wallet_secret).await?;
-
-        tprintln!(ctx, "vault files copied in and key recovered from words - deep-verifying...");
-        let report = deep_verify(&wallet, wallet_secret.clone()).await?;
-        tprintln!(
-            ctx,
-            "recovered {} live note(s); {} stale; {} corrupted",
-            report.live.len(),
-            report.stale.len(),
-            report.corrupted.len()
-        );
-
-        // deep_verify is a read-only diagnostic - it doesn't touch local status
-        // itself. A serial it found stale (already spent elsewhere before this
-        // backup was made, or since) must be reconciled to Superseded here, or
-        // rotate_notes's fee-source selection will keep proposing it as a spare
-        // and repeatedly failing every batch that draws it, since locally it
-        // still looks Active.
-        for sn in &report.stale {
-            store.mark_status(sn, NoteStatus::Superseded).await?;
-        }
-
-        if report.live.is_empty() {
-            tprintln!(ctx, "");
-            return Ok(());
-        }
-
-        let batches = plan_restore_rotation(report.live.clone());
-        tprintln!(
-            ctx,
-            "restore-time rotation (default): {} note(s) in {} batch(es) - rotating invalidates every OLD backup copy of \
-             these notes, including any stolen one",
-            report.live.len(),
-            batches.len()
-        );
-        // A batch's own serials may already be gone by the time its turn comes up:
-        // an earlier batch's fee-stamp (P5.2's mechanism) freely draws on any other
-        // currently-Active note as its fee source, which rotates that note's value
-        // too (as the fee source's change) — a real, correct side effect ("rotation
-        // doubles as backup revocation", DECISIONS.md), not an error. Re-check
-        // liveness immediately before each batch and skip anything already handled.
-        for (i, batch) in batches.iter().enumerate() {
-            let mut still_active = Vec::with_capacity(batch.len());
-            for sn in batch {
-                if let Some(info) = store.load_info(sn).await?
-                    && info.status == NoteStatus::Active
-                {
-                    still_active.push(*sn);
-                }
-            }
-            if still_active.is_empty() {
-                tprintln!(
-                    ctx,
-                    "  batch {}/{}: already rotated as a side effect of an earlier batch's fee stamp - skipped",
-                    i + 1,
-                    batches.len()
-                );
-                continue;
-            }
-            // One batch can genuinely conflict without the others being at fault —
-            // e.g. a note that's also still held (and mid-spend) in whatever wallet
-            // this backup was copied from, a real instance of POOL-SPEC.md's
-            // same-key-in-two-wallets hazard. Report it and keep going: the other
-            // batches' notes aren't affected and still deserve to be rotated.
-            match notepool::rotate_notes(&wallet, wallet_secret.clone(), still_active).await {
-                Ok(result) => tprintln!(
-                    ctx,
-                    "  batch {}/{}: {} note(s), tx {} (fee {} {ticker})",
-                    i + 1,
-                    batches.len(),
-                    result.own_notes.len(),
-                    result.transaction_id,
-                    sompi_to_kaspa_string(result.fee_petals)
-                ),
-                Err(err) => tprintln!(ctx, "  batch {}/{}: failed - {err} (other batches still attempted)", i + 1, batches.len()),
-            }
-        }
-        tprintln!(ctx, "rotation complete - make a fresh backup now ('note vault backup <dir>'); every old copy is now invalid\r\n");
-        Ok(())
-    }
-
-    async fn vault_export(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
+    pub(crate) async fn vault_export(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
         if argv.is_empty() {
-            tprintln!(ctx, "usage: 'note vault export <dir>'\r\n");
+            tprintln!(ctx, "usage: 'wallet paper export <dir>'\r\n");
             return Ok(());
         }
         let dir = std::path::PathBuf::from(&argv[0]);
@@ -1300,9 +1122,9 @@ impl Note {
         Ok(())
     }
 
-    async fn vault_import(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
+    pub(crate) async fn vault_import(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
         if argv.is_empty() {
-            tprintln!(ctx, "usage: 'note vault import <page-file> [<page-file> ...]'\r\n");
+            tprintln!(ctx, "usage: 'wallet paper import <page-file> [<page-file> ...]'\r\n");
             return Ok(());
         }
         let mut pages: Vec<Vec<u8>> = Vec::with_capacity(argv.len());
@@ -1346,7 +1168,6 @@ impl Note {
                 ("pos <amount>", "One POS checkout: fresh landing-pad pk, wait for payment, auto-sweep"),
                 ("rotate all | <serial> ...", "Rotate notes to fresh keys on-chain (revokes old backups/stolen copies)"),
                 ("unknown", "Notes a synced node says it has not got, and what that means"),
-                ("vault <cmd>", "Note vault: create/backup/verify/restore/export/import (see 'note vault')"),
                 ("verify [clear]", "Check your notes against the pool — proves the balance is real"),
             ],
             None,

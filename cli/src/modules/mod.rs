@@ -68,6 +68,7 @@ pub mod track;
 pub mod transfer;
 pub mod utxos;
 pub mod wallet;
+pub mod words;
 
 // this module is registered manually within
 // applications that support metrics
@@ -86,7 +87,7 @@ pub fn register_handlers(cli: &Arc<KaspaCli>) -> Result<()> {
             about, account, address, advanced, auto, backup, balance, close, connect, create, details, disconnect, estimate, exchange,
             exit, export, guide, help, history, import, rpc, list, mint, mv, pay, receive, request, miner, message, monitor, lane,
             mute, network, node, note, open, otp, ping, pskb, quit, reload, select, server, settings, sweep, track, transfer,
-            telegram, utxos, wallet,
+            telegram, utxos, wallet, words,
             // halt,
             // theme,  start, stop
         ]
