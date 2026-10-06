@@ -22,7 +22,6 @@ use kaspa_wallet_core::storage::NoteStatus;
 use kaspa_wallet_core::storage::local::journal::{Journal, JournalEntry};
 use kaspa_wallet_core::utils::sompi_to_kaspa_string;
 use kaspa_wallet_core::wallet::Wallet;
-use separator::Separatable;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -400,15 +399,16 @@ impl WalletService {
             && let Some(balance) = account.balance()
         {
             let pending = balance.pending;
-            // Two decimals: the ledger is coins to a person, and eight
-            // places of petals read as noise on the balance screen (founder,
-            // 2026-09-24). Notes are always whole denominations, so they need
-            // nothing rounding.
+            // Two places, the terminal's way: stopped at the hundredth, never
+            // rounded up — a balance must not show more than can be spent,
+            // and the bot and the terminal must agree (tester Charly saw 0.80
+            // against 0.79, 2026-10-06). Notes are whole denominations and
+            // need no rounding.
             lines.push(format!(
                 "Ledger: {} {}{}",
-                two_decimals(balance.mature),
+                crate::ui::ledger_amount(balance.mature),
                 self.ticker(),
-                if pending > 0 { format!(" ({} pending)", two_decimals(pending)) } else { String::new() }
+                if pending > 0 { format!(" ({} pending)", crate::ui::ledger_amount(pending)) } else { String::new() }
             ));
         }
         if !self.wallet.is_connected() {
@@ -952,23 +952,4 @@ pub async fn serve(args: Vec<String>) -> Result<()> {
         }
     }
     Ok(())
-}
-
-/// Petals as coins to two places, rounded half up, thousands separated.
-fn two_decimals(petals: u64) -> String {
-    let hundredths = (petals + 500_000) / 1_000_000;
-    format!("{}.{:02}", (hundredths / 100).separated_string(), hundredths % 100)
-}
-
-#[cfg(test)]
-mod balance_format_tests {
-    use super::two_decimals;
-
-    #[test]
-    fn two_places_rounded() {
-        assert_eq!(two_decimals(13_17619344), "13.18");
-        assert_eq!(two_decimals(13_17499999), "13.17");
-        assert_eq!(two_decimals(0), "0.00");
-        assert_eq!(two_decimals(1_234_567_00000000), "1,234,567.00");
-    }
 }
