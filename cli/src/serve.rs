@@ -889,8 +889,12 @@ pub async fn open_session(options: &SessionOptions, shutdown: Arc<AtomicBool>, s
 
     // The wallet's backup key, written on the first open since the backups
     // started covering every wallet (2026-10-06).
-    if let Err(err) = crate::bundle::ensure_recipient(&wallet, &options.wallet, &options.password).await {
-        log::warn!("could not write the backup key of '{}': {err}", options.wallet);
+    match crate::bundle::ensure_recipient(&wallet, &options.wallet, &options.password).await {
+        Ok(crate::bundle::Covered::NewWords(_)) => {
+            log::info!("wallet '{}' had no 24 words; made now — 'words' shows them", options.wallet)
+        }
+        Ok(_) => {}
+        Err(err) => log::warn!("could not write the backup key of '{}': {err}", options.wallet),
     }
 
     let service = WalletService::new(

@@ -355,18 +355,35 @@ pub async fn words_for(wallet: &Arc<Wallet>, secret: &Secret) -> Result<String> 
     Ok(store.recovery_words(secret).await?)
 }
 
+/// What `ensure_recipient` found.
+pub enum Covered {
+    /// The wallet had its key already.
+    Already,
+    /// Written now from the wallet's existing words.
+    Written,
+    /// The wallet had no 24 words at all — made before notes had them — so
+    /// they were made now, and the caller shows them: nobody has seen them.
+    NewWords(String),
+}
+
 /// Writes the open wallet's public half if it has none yet. Called at every
 /// open, so a wallet from before 2026-10-06 is covered the first time it is
-/// opened. Returns whether it was written now.
-pub async fn ensure_recipient(wallet: &Arc<Wallet>, name: &str, secret: &Secret) -> Result<bool> {
+/// opened; a wallet from before the 24 words existed gets its words first
+/// (founder, 2026-10-07: "there is no 24 words to see, just create them").
+pub async fn ensure_recipient(wallet: &Arc<Wallet>, name: &str, secret: &Secret) -> Result<Covered> {
     let files = WalletFiles::of_wallet(wallet, name).await?;
     if files.recipient.is_some() {
-        return Ok(false);
+        return Ok(Covered::Already);
     }
-    let words = words_for(wallet, secret).await?;
+    let store = wallet.store().as_note_key_store()?;
+    let (words, new) = if store.vault_exists().await? {
+        (store.recovery_words(secret).await?, false)
+    } else {
+        (store.vault_create(secret).await?, true)
+    };
     archive::write_recipient(&files.wallet_dir, &words)?;
     let _ = std::fs::remove_file(files.wallet_dir.join(SKIP_FILE));
-    Ok(true)
+    Ok(if new { Covered::NewWords(words) } else { Covered::Written })
 }
 
 /// Covers a closed wallet with its words, typed once: checked against one of
@@ -385,15 +402,27 @@ pub fn cover(folder: &Folder, name: &str, words: &str) -> Result<()> {
 /// are read from the wallet's own files the way an open wallet reads them,
 /// shown, and the public half written. For the wallets made before the words
 /// were shown at creation (founder, 2026-10-06: "this being a test net, I did
-/// not write them down from the beginning"). Returns the words for display.
-pub async fn cover_with_password(folder: &Folder, name: &str, secret: &Secret) -> Result<String> {
+/// not write them down from the beginning"). A wallet from before the words
+/// existed at all gets them made now. Returns the words and whether they are new.
+pub async fn cover_with_password(folder: &Folder, name: &str, secret: &Secret) -> Result<(String, bool)> {
+    use kaspa_wallet_core::storage::local::{Storage, WalletStorage, notevault::NoteVault, wallet_file_name};
     let wallet =
         folder.wallet(name).ok_or_else(|| Error::custom(format!("there is no wallet '{name}' in {}", folder.path.display())))?;
-    let vault = kaspa_wallet_core::storage::local::notevault::NoteVault::at(&wallet.vault_folder);
-    let words = vault.recovery_words(secret).await.map_err(|_| Error::custom("that is not this wallet's password"))?;
+    // The password is checked against the wallet's own file first: making
+    // the words under a wrong password would lock the wallet's notes away
+    // from its real one.
+    let storage = Storage::try_new_with_folder(&folder.path.to_string_lossy(), &wallet_file_name(name))?;
+    let keys = WalletStorage::try_load(&storage).await?;
+    keys.payload(secret).map_err(|_| Error::custom("that is not this wallet's password"))?;
+    let vault = NoteVault::at(&wallet.vault_folder);
+    let (words, new) = if vault.exists().await? {
+        (vault.recovery_words(secret).await.map_err(|_| Error::custom("that is not this wallet's password"))?, false)
+    } else {
+        (vault.create(secret).await?, true)
+    };
     archive::write_recipient(&wallet.wallet_dir, &words)?;
     let _ = std::fs::remove_file(wallet.wallet_dir.join(SKIP_FILE));
-    Ok(words)
+    Ok((words, new))
 }
 
 /// 'never' for a wallet: it is left out of the question from now on.

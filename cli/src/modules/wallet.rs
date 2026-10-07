@@ -264,14 +264,7 @@ impl Wallet {
                 // started covering every wallet (2026-10-06).
                 if let Some(descriptor) = ctx.store().descriptor() {
                     match crate::bundle::ensure_recipient(&ctx.wallet(), &descriptor.filename, &wallet_secret).await {
-                        Ok(true) => {
-                            tprintln!(
-                                ctx,
-                                "{}",
-                                crate::ui::dim("This wallet now has its backup key: the backups cover it from now on.")
-                            )
-                        }
-                        Ok(false) => {}
+                        Ok(covered) => Self::announce_covered(&ctx, covered),
                         Err(err) => tprintln!(ctx, "{}", crate::ui::warn(format!("Could not write the backup key: {err}"))),
                     }
                 }
@@ -877,6 +870,31 @@ impl Wallet {
         Ok(())
     }
 
+    /// What `ensure_recipient` did, in a line — or, for a wallet that had no
+    /// 24 words until now, the words themselves: nobody has seen them yet.
+    fn announce_covered(ctx: &Arc<KaspaCli>, covered: crate::bundle::Covered) {
+        use crate::bundle::Covered;
+        match covered {
+            Covered::Already => {}
+            Covered::Written => {
+                tprintln!(ctx, "{}", crate::ui::dim("This wallet now has its backup key: the backups cover it from now on."))
+            }
+            Covered::NewWords(words) => {
+                tprintln!(ctx, "");
+                tpara!(
+                    ctx,
+                    "This wallet was made before wallets had 24 words. It has them now — they seal its backups and, \
+                    with a backup, bring its notes back. Keep them on paper or in your password manager, never as \
+                    a screenshot; 'words' shows them again. \
+                    "
+                );
+                tprintln!(ctx, "");
+                crate::ui::recovery_words(ctx, &words);
+                tprintln!(ctx, "");
+            }
+        }
+    }
+
     /// `wallet backup [<file-or-folder>]` — the whole wallet in one encrypted
     /// file: the wallet file, the vault key, every note key, the manifest.
     ///
@@ -939,7 +957,7 @@ impl Wallet {
         // (founder, 2026-09-24: "24 words are a MUST for backups").
         let (secret, _) = ctx.ask_wallet_secret_for_tidying(None).await?;
         let words = ctx.wallet().store().as_note_key_store()?.recovery_words(&secret).await?;
-        crate::bundle::ensure_recipient(&ctx.wallet(), &name, &secret).await?;
+        Self::announce_covered(ctx, crate::bundle::ensure_recipient(&ctx.wallet(), &name, &secret).await?);
         let files = crate::bundle::WalletFiles::of(ctx).await?;
         let (entries, packed, names) = crate::bundle::bundle_checked(&files, &words)?;
         let file_count = entries.len();
@@ -1464,7 +1482,7 @@ impl Wallet {
             tprintln!(ctx, "");
         }
         let (secret, _) = ctx.ask_wallet_secret_for_tidying(None).await?;
-        crate::bundle::ensure_recipient(&ctx.wallet(), &files.name, &secret).await?;
+        Self::announce_covered(ctx, crate::bundle::ensure_recipient(&ctx.wallet(), &files.name, &secret).await?);
         let words = ctx.wallet().store().as_note_key_store()?.recovery_words(&secret).await?;
         tgbackup::mark_started(&files)?;
         tprintln!(ctx, "Posting a full copy…");

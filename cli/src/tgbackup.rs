@@ -731,8 +731,19 @@ pub async fn cover_wizard(cli: &Arc<KaspaCli>, folder: &Folder, all: bool) {
                     continue;
                 }
                 match cover_with_password(folder, &wallet.name, &secret).await {
-                    Ok(words) => {
+                    Ok((words, new)) => {
                         tprintln!(cli, "");
+                        if new {
+                            tprintln!(
+                                cli,
+                                "{}",
+                                crate::ui::dim(format!(
+                                    "'{}' had no 24 words yet — it was made before wallets had them. These are its words now.",
+                                    wallet.name
+                                ))
+                            );
+                            tprintln!(cli, "");
+                        }
                         crate::ui::recovery_words(cli, &words);
                         tprintln!(cli, "");
                         tprintln!(
