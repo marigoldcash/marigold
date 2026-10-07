@@ -236,18 +236,24 @@ impl Balance {
                 .map(|d| d.as_secs())
                 .unwrap_or(0)
                 .saturating_sub(3600);
-            let income: u64 = entries
-                .iter()
-                .filter(|e| e.kind == "minted" && e.detail.contains("on its own") && e.at >= since)
-                .map(|e| e.petals)
-                .sum();
+            let recent: Vec<_> =
+                entries.iter().filter(|e| e.kind == "minted" && e.detail.contains("on its own") && e.at >= since).collect();
+            let income: u64 = recent.iter().map(|e| e.petals).sum();
             if income > 0 {
+                // The moment it was minted, not "the last hour": the wallet
+                // mints what mining earned while it was closed at the next
+                // open, and a figure read hours later read as a live rate
+                // (tester, 2026-10-07).
+                let last = recent.iter().map(|e| e.at).max().unwrap_or(0);
+                let when = chrono::DateTime::<chrono::Utc>::from_timestamp(last as i64, 0)
+                    .map(|t| t.with_timezone(&chrono::Local).format("%H:%M").to_string())
+                    .unwrap_or_default();
                 tprintln!(ctx, "");
                 tprintln!(
                     ctx,
                     "{}",
                     ui::dim(format!(
-                        "{} in the last hour: +{} {ticker}, minted into notes on its own.",
+                        "{} minted into notes on its own at {when}: +{} {ticker} (what mining earned until then).",
                         if ctx.mining_active() { "Mining income" } else { "Income" },
                         sompi_to_kaspa_string(income)
                     ))

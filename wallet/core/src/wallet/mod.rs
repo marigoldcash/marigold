@@ -1345,7 +1345,9 @@ impl Wallet {
         filter: Option<PrvKeyDataId>,
         _guard: &WalletGuard<'_>,
     ) -> Result<impl Stream<Item = Result<Arc<dyn Account>>>> {
-        let iter = self.inner.store.as_account_store().unwrap().iter(filter).await.unwrap();
+        // Not an unwrap: the hand-over to an own node after `close` reached
+        // this on a closed wallet and took the whole process down (2026-10-07).
+        let iter = self.inner.store.as_account_store()?.iter(filter).await?;
         let wallet = self.clone();
 
         let stream = iter.then(move |stored| {

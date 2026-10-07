@@ -686,6 +686,14 @@ impl KaspaCli {
             && self.wallet().try_wrpc_client().and_then(|c| c.url()).is_some_and(|url| crate::modules::connect::is_local_target(&url))
     }
 
+    /// On a node that is not on this machine at all — a public computer.
+    pub fn connected_to_public_node(&self) -> bool {
+        self.wallet().is_connected()
+            && self.wallet().try_wrpc_client().and_then(|c| c.url()).is_some_and(|url| {
+                !crate::modules::connect::is_local_target(&url) && !url.contains("127.0.0.1") && !url.contains("localhost")
+            })
+    }
+
     /// A background miner is there but not mining.
     pub fn remote_miner_idle(&self) -> bool {
         self.remote_miner.load(Ordering::SeqCst) && !self.remote_mining.load(Ordering::SeqCst)
@@ -1452,6 +1460,14 @@ impl KaspaCli {
                         // the only point at which the wallet knows it has one.
                         // A 'mine start' given while waiting starts now.
                         let pending = this.pending_mine_percent.lock().unwrap().take();
+                        // Closed meanwhile (tester, 2026-10-07: 'close' during the
+                        // sync, then the hand-over tried to mine and tidy a wallet
+                        // that was no longer there): the node is adopted, the rest waits.
+                        if !this.wallet.is_open() {
+                            tprintln!(this, "{}", style("Open a wallet to mine and to tidy on it.").dim());
+                            this.term().refresh_prompt();
+                            continue;
+                        }
                         match pending {
                             Some(percent) => {
                                 if let Err(err) = this.start_mining(Some(percent.to_string())).await {
@@ -1525,6 +1541,15 @@ impl KaspaCli {
                     style("Until then nothing is asked of the public computer, which would learn where your rewards go.").dim()
                 );
                 tprintln!(self, "'mine status' shows it waiting, 'mine stop' cancels; 'connect status' shows the sync.");
+            } else if self.wallet().is_connected() && !self.remote_miner_present() && self.connected_to_public_node() {
+                // On a public computer while no sync of our own is running: that
+                // is not "another program" (tester, 2026-10-07, told so while on
+                // rpc1); mining needs a sync here.
+                tprintln!(self, "You are using a public computer, and mining needs your own copy of the network on this machine.");
+                tprintln!(
+                    self,
+                    "'connect' starts that sync; 'mine start' given while it runs begins on its own once it has caught up."
+                );
             } else if self.wallet().is_connected() && !self.remote_miner_present() && !self.connected_to_local_node() {
                 // Connected, but not to a node of ours and not to the background
                 // miner: another wallet on this machine holds the network, and

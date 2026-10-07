@@ -1225,6 +1225,12 @@ pub async fn delete_message(token: &str, chat_id: i64, message_id: i64) -> Resul
     call(token, "deleteMessage", &params).await.map(|_| ())
 }
 
+/// A client for a 19 MB part either way: ten minutes is generous on any
+/// line that works at all, and a line that does not gets an answer.
+fn slow_client() -> reqwest::Client {
+    reqwest::Client::builder().timeout(Duration::from_secs(600)).build().unwrap_or_else(|_| reqwest::Client::new())
+}
+
 /// Uploads one file as a document with a caption, silently (see `send_plain`).
 pub async fn send_document(token: &str, chat_id: i64, file_name: &str, bytes: Vec<u8>, caption: &str) -> Result<i64, String> {
     let part = reqwest::multipart::Part::bytes(bytes)
@@ -1237,8 +1243,14 @@ pub async fn send_document(token: &str, chat_id: i64, file_name: &str, bytes: Ve
         .text("disable_notification", "true")
         .part("document", part);
     let url = format!("https://api.telegram.org/bot{token}/sendDocument");
-    let response =
-        reqwest::Client::new().post(url).multipart(form).send().await.map_err(|e| e.to_string().replace(token, "<token>"))?;
+    // A deadline: an upload that stalls must fail and say so, not hold
+    // 'close' for half an hour (tester on Windows, 2026-10-07).
+    let response = slow_client()
+        .post(url)
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|e| format!("the upload did not finish: {}", e.to_string().replace(token, "<token>")))?;
     if response.status().is_success() {
         let body = response.text().await.map_err(|e| e.to_string())?;
         let v: serde_json::Value = serde_json::from_str(&body).map_err(|e| e.to_string())?;
@@ -1260,7 +1272,7 @@ pub async fn download_file(token: &str, file_id: &str) -> Result<Vec<u8>, String
         .and_then(|v| v.as_str())
         .ok_or_else(|| "getFile gave no file path (a file over 20 MB cannot be fetched by a bot)".to_string())?;
     let url = format!("https://api.telegram.org/file/bot{token}/{path}");
-    let response = reqwest::Client::new().get(url).send().await.map_err(|e| e.to_string().replace(token, "<token>"))?;
+    let response = slow_client().get(url).send().await.map_err(|e| e.to_string().replace(token, "<token>"))?;
     if !response.status().is_success() {
         return Err(format!("the file download answered {}", response.status()));
     }

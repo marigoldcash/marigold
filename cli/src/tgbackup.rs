@@ -322,6 +322,11 @@ pub async fn run(cli: &Arc<KaspaCli>, words: &str, force_checkpoint: bool, say: 
     run_folder(&folder, &cfg, Some((&files.name, words)), force_checkpoint, say).await
 }
 
+/// One backup run at a time, process-wide: the housekeeping tick, 'close'
+/// and 'telegram backup' each start one, and two at once posted the same
+/// delta twice and raced on the index (tester, 2026-10-07).
+static RUN_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// The backup run on a folder: the shared core behind the terminal command,
 /// the housekeeping tick and the desktop wallet's screen. Decides checkpoint
 /// or delta (or that nothing changed), posts it, and brings the chat's index
@@ -334,6 +339,7 @@ pub async fn run_folder(
     say: &(dyn Fn(String) + Send + Sync),
 ) -> Result<String> {
     let chat_id = target_chat(cfg).ok_or_else(|| Error::custom("nowhere to post: pair the bot first"))?;
+    let _one_at_a_time = RUN_LOCK.lock().await;
     if let Some(open) = folder.open_wallet()
         && open.recipient.is_none()
     {
@@ -349,6 +355,7 @@ pub async fn run_folder(
     let outcome = match plan {
         Plan::Nothing => return Ok("nothing has changed since the last backup".to_string()),
         Plan::Checkpoint => {
+            say(format!("sealing {} files…", entries.len()));
             let (packed, names) = seal_folder(folder, &entries, check_words, None)?;
             let name = checkpoint_name(&names_label(&names), &stamp);
             say(format!(
@@ -683,7 +690,11 @@ pub async fn cover_wizard(cli: &Arc<KaspaCli>, folder: &Folder, all: bool) {
         return;
     }
     let names: Vec<String> = waiting.iter().map(|w| w.name.clone()).collect();
+    let covered: Vec<String> = folder.covered().iter().map(|w| w.name.clone()).collect();
     tprintln!(cli, "");
+    if !covered.is_empty() {
+        tprintln!(cli, "{}", crate::ui::dim(format!("Covered already: {}.", covered.join(", "))));
+    }
     tprintln!(
         cli,
         "The backups now cover every wallet on this computer, each sealed with its own 24 words. Since this change, {} no backup key yet: {}.",

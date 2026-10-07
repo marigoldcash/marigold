@@ -3062,6 +3062,7 @@ pub async fn merge_held_notes(wallet: &Arc<Wallet>, wallet_secret: Secret, limit
     // the pool" (founder report, 2026-09-06). Fee sourcing is deliberately
     // free to take any spare; the planner is what has to keep up.
     let mut spent: HashSet<Hash> = HashSet::new();
+    let mut skipped: Option<String> = None;
     // Re-plan after each pass so the merge carries up the ladder in one call:
     // ten 0.1s become a 1, and that new 1 may complete a group of ten 1s that
     // becomes a 10. Planning once would climb a single rung per run.
@@ -3080,11 +3081,20 @@ pub async fn merge_held_notes(wallet: &Arc<Wallet>, wallet_secret: Secret, limit
             if group.iter().any(|sn| spent.contains(sn)) {
                 continue;
             }
-            match rotate_notes(wallet, wallet_secret.clone(), group).await {
+            match rotate_notes(wallet, wallet_secret.clone(), group.clone()).await {
                 Ok(result) => {
                     merged += 1;
                     // Both the group and whatever spare paid its fee.
                     spent.extend(result.consumed_serials.iter().copied());
+                }
+                Err(err) if err.to_string().contains("could not be read") => {
+                    // One unreadable note file stopped every merge after it,
+                    // forever (tester, 2026-10-07). Leave that group aside,
+                    // say so once, and carry on with the rest.
+                    spent.extend(group.iter().copied());
+                    if skipped.is_none() {
+                        skipped = Some(err.to_string());
+                    }
                 }
                 Err(err) => return Ok((merged, Some(err.to_string()))),
             }
@@ -3093,7 +3103,7 @@ pub async fn merge_held_notes(wallet: &Arc<Wallet>, wallet_secret: Secret, limit
             break;
         }
     }
-    Ok((merged, None))
+    Ok((merged, skipped))
 }
 
 #[cfg(test)]

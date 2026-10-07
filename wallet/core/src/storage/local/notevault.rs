@@ -140,14 +140,33 @@ fn status_from_str(s: &str) -> Option<NoteStatus> {
 /// known. They were written at the process umask, world-readable on most
 /// machines (threat pass, 2026-09-20). Native only; the browser has no modes.
 async fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
-    #[cfg(all(unix, not(target_arch = "wasm32")))]
+    #[cfg(not(target_arch = "wasm32"))]
     {
         use std::io::Write;
-        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-        let mut file = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(path)?;
-        file.write_all(bytes)?;
-        // A file that already existed keeps the mode it had; say it again.
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+        // Written beside the target and renamed over it: a note file is a
+        // note's spending key, and a crash or a hard-closed console between
+        // create and write left an empty file that read "ciphertext shorter
+        // than the nonce prefix" ever after (tester on Windows, 2026-10-07).
+        let tmp = path.with_extension("note.tmp");
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        {
+            let mut file = options.open(&tmp)?;
+            file.write_all(bytes)?;
+            file.sync_all()?;
+        }
+        std::fs::rename(&tmp, path)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            // A file that already existed keeps the mode it had; say it again.
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+        }
         return Ok(());
     }
     #[allow(unreachable_code)]
@@ -601,7 +620,9 @@ impl NoteVault {
         let row = self.index.read().await.get(sn).cloned().ok_or_else(|| Error::Custom(format!("serial {sn} is not in the vault")))?;
         let path = self.subdir(status).join(note_file_name(sn, row.info.d));
         let bytes = fs::read(&path).await?;
-        let plaintext = decrypt_xchacha20poly1305_raw_key(&bytes, k)?;
+        let plaintext = decrypt_xchacha20poly1305_raw_key(&bytes, k).map_err(|e| {
+            Error::Custom(format!("the note file of {} could not be read ({e}) — 'wallet verify deep' lists such notes", sn.to_hex()))
+        })?;
         Ok(VaultNoteFile::try_from_slice(plaintext.as_ref())?)
     }
 

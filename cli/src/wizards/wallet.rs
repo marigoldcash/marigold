@@ -157,15 +157,25 @@ pub(crate) async fn create(
     let hint = hint.is_not_empty().then_some(hint).map(Hint::from);
     //if hint.is_empty() { None } else { Some(hint) };
 
-    let wallet_secret = Secret::new(term.ask(true, "Enter wallet encryption password: ").await?.trim().as_bytes().to_vec());
-    if wallet_secret.as_ref().is_empty() {
-        return Err(Error::WalletSecretRequired);
-    }
-    let wallet_secret_validate =
-        Secret::new(term.ask(true, "Re-enter wallet encryption password: ").await?.trim().as_bytes().to_vec());
-    if wallet_secret_validate.as_ref() != wallet_secret.as_ref() {
-        return Err(Error::WalletSecretMatch);
-    }
+    // An empty or mismatched password asks again rather than ending the
+    // wizard with everything typed so far lost (tester, 2026-10-07).
+    let wallet_secret = loop {
+        let first = Secret::new(term.ask(true, "Enter wallet encryption password: ").await?.trim().as_bytes().to_vec());
+        if first.as_ref().is_empty() {
+            tprintln!(ctx, "A password is needed — it is what opens the wallet every day. Please type one.");
+            continue;
+        }
+        if first.as_ref().len() < 8 {
+            tprintln!(ctx, "Eight characters at least, please.");
+            continue;
+        }
+        let again = Secret::new(term.ask(true, "Re-enter wallet encryption password: ").await?.trim().as_bytes().to_vec());
+        if again.as_ref() != first.as_ref() {
+            tprintln!(ctx, "They do not match — once more.");
+            continue;
+        }
+        break first;
+    };
 
     tprintln!(ctx, "");
     if import_with_mnemonic {
