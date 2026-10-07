@@ -1057,7 +1057,7 @@ impl Note {
             These words are the key to everything: they bring back your ledger balance on their own, \
             and with a backup ('backup' writes one, 'telegram backup' keeps one current) they bring \
             back your notes — every backup opens with these words and never with the password. \
-            Anyone holding them and a backup can spend your money. Paper, not a photo.\
+            Anyone holding them and a backup can spend your money. Paper or your password manager — never a screenshot.\
             ",
         );
         tprintln!(ctx, "");

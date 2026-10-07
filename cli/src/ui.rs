@@ -572,7 +572,17 @@ pub fn recovery_words(ctx: &Arc<KaspaCli>, words: &str) {
     }
     body.push(String::new());
 
-    panel(ctx, Some("your 24 recovery words — write them down now"), &body);
+    // Rules above and below, no frame at the sides: a frame's bars land in a
+    // terminal selection, and the founder gave up pasting the words into a
+    // password manager because of them (2026-10-06). Open at the sides, a
+    // drag across the rows copies numbers and words and nothing else.
+    let outer = width(ctx);
+    let label = format!("{H} {} ", accent("your 24 recovery words — write them down now"));
+    ctx.term().writeln(format!("{label}{}", H.to_string().repeat(outer.saturating_sub(display_width(&label)))));
+    for line in &body {
+        ctx.term().writeln(line.clone());
+    }
+    ctx.term().writeln(H.to_string().repeat(outer));
 }
 
 #[cfg(test)]

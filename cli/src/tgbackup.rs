@@ -694,31 +694,75 @@ pub async fn cover_wizard(cli: &Arc<KaspaCli>, folder: &Folder, all: bool) {
         cli,
         "{}",
         crate::ui::dim(
-            "A wallet gets its key the first time it is opened with its password — or type its 24 words now, once; they are checked against the wallet and nothing is kept but a public key. Enter skips it for now; 'never' leaves it out of the backups ('telegram cover' asks again)."
+            "A wallet gets its key the first time it is opened with its password — or now: type its 24 words (checked against the wallet; nothing is kept but a public key), or 'view' to give its password instead, see its words and have them used. Enter skips it for now; 'never' leaves it out of the backups ('telegram cover' asks again)."
         )
     );
     for wallet in waiting {
         tprintln!(cli, "");
-        let answer =
-            match cli.term().ask(true, &format!("The 24 words of '{}' (Enter to skip, 'never' to leave it out): ", wallet.name)).await
+        loop {
+            let answer = match cli
+                .term()
+                .ask(
+                    true,
+                    &format!("The 24 words of '{}' (Enter to skip, 'never' to leave it out, 'view' to see them): ", wallet.name),
+                )
+                .await
             {
                 Ok(a) => a.trim().to_string(),
                 Err(_) => return,
             };
-        if answer.is_empty() || matches!(answer.to_lowercase().as_str(), "n" | "no" | "skip" | "later") {
-            tprintln!(cli, "{}", crate::ui::dim(format!("'{}' is covered once you open it.", wallet.name)));
-            continue;
-        }
-        if answer.eq_ignore_ascii_case("never") {
-            match skip(folder, &wallet.name) {
-                Ok(()) => tprintln!(cli, "{}", crate::ui::dim(format!("'{}' is left out of the backups.", wallet.name))),
-                Err(err) => tprintln!(cli, "{}", crate::ui::warn(err.to_string())),
+            if answer.is_empty() || matches!(answer.to_lowercase().as_str(), "n" | "no" | "skip" | "later") {
+                tprintln!(cli, "{}", crate::ui::dim(format!("'{}' is covered once you open it.", wallet.name)));
+                break;
             }
-            continue;
-        }
-        match cover(folder, &wallet.name, &answer) {
-            Ok(()) => tprintln!(cli, "{}", style(format!("'{}' is covered from the next backup on.", wallet.name)).green()),
-            Err(err) => tprintln!(cli, "{}", crate::ui::warn(format!("'{}' is not covered: {err}", wallet.name))),
+            if answer.eq_ignore_ascii_case("never") {
+                match skip(folder, &wallet.name) {
+                    Ok(()) => tprintln!(cli, "{}", crate::ui::dim(format!("'{}' is left out of the backups.", wallet.name))),
+                    Err(err) => tprintln!(cli, "{}", crate::ui::warn(err.to_string())),
+                }
+                break;
+            }
+            if matches!(answer.to_lowercase().as_str(), "view" | "show" | "password") {
+                let secret = match cli.term().ask(true, &format!("The password of '{}': ", wallet.name)).await {
+                    Ok(p) => Secret::new(p.trim().as_bytes().to_vec()),
+                    Err(_) => return,
+                };
+                if secret.as_ref().is_empty() {
+                    continue;
+                }
+                match cover_with_password(folder, &wallet.name, &secret).await {
+                    Ok(words) => {
+                        tprintln!(cli, "");
+                        crate::ui::recovery_words(cli, &words);
+                        tprintln!(cli, "");
+                        tprintln!(
+                            cli,
+                            "{}",
+                            style(format!(
+                                "'{}' is covered from the next backup on. Those are its words — write them down.",
+                                wallet.name
+                            ))
+                            .green()
+                        );
+                        break;
+                    }
+                    Err(err) => {
+                        tprintln!(cli, "{}", crate::ui::warn(format!("{err} — try again, or Enter to skip.")));
+                        continue;
+                    }
+                }
+            }
+            match cover(folder, &wallet.name, &answer) {
+                Ok(()) => {
+                    tprintln!(cli, "{}", style(format!("'{}' is covered from the next backup on.", wallet.name)).green());
+                    break;
+                }
+                Err(err) => tprintln!(
+                    cli,
+                    "{}",
+                    crate::ui::warn(format!("'{}' is not covered: {err} — try again, 'view', or Enter to skip.", wallet.name))
+                ),
+            }
         }
     }
     tprintln!(cli, "");

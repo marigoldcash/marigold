@@ -355,7 +355,7 @@ pub(crate) async fn create(
             these words and nothing else. Your wallet password never opens a backup: a password \
             is chosen to be remembered, and a backup may sit on someone else's server, where it \
             can be attacked at leisure. Nothing can derive a note, which is exactly what makes it \
-            cash. Paper, not a photo. 'words' shows them again.\
+            cash. Keep them on paper or in your password manager — select the words and copy them — never as a screenshot or a photo, which end up in a photo library and its cloud. 'words' shows them again.\
             ",
         );
         tprintln!(ctx, "");

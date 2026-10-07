@@ -381,6 +381,21 @@ pub fn cover(folder: &Folder, name: &str, words: &str) -> Result<()> {
     Ok(())
 }
 
+/// Covers a closed wallet with its password instead of its words: the words
+/// are read from the wallet's own files the way an open wallet reads them,
+/// shown, and the public half written. For the wallets made before the words
+/// were shown at creation (founder, 2026-10-06: "this being a test net, I did
+/// not write them down from the beginning"). Returns the words for display.
+pub async fn cover_with_password(folder: &Folder, name: &str, secret: &Secret) -> Result<String> {
+    let wallet =
+        folder.wallet(name).ok_or_else(|| Error::custom(format!("there is no wallet '{name}' in {}", folder.path.display())))?;
+    let vault = kaspa_wallet_core::storage::local::notevault::NoteVault::at(&wallet.vault_folder);
+    let words = vault.recovery_words(secret).await.map_err(|_| Error::custom("that is not this wallet's password"))?;
+    archive::write_recipient(&wallet.wallet_dir, &words)?;
+    let _ = std::fs::remove_file(wallet.wallet_dir.join(SKIP_FILE));
+    Ok(words)
+}
+
 /// 'never' for a wallet: it is left out of the question from now on.
 pub fn skip(folder: &Folder, name: &str) -> Result<()> {
     let wallet = folder.wallet(name).ok_or_else(|| Error::custom(format!("there is no wallet '{name}'")))?;
