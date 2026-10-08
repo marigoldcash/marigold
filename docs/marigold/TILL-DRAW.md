@@ -4,7 +4,7 @@ Status: a proposal for the group, written at the founder's request after the min
 
 ## In one paragraph
 
-The question behind the mining debate is not "how do we keep ASICs out" but "how does the person who keeps a computer on still get something". No proof-of-work answers that: whoever brings better hardware takes the reward, and on a single algorithm the small miner ends with dust whichever hardware that is. The proposal is to pay that reward to a different kind of participant: the shop that takes Marigold at the till. A till is a Raspberry Pi running the wallet, sold to a verified business — verified because a till has to account for VAT anyway, so the shop is public already. Every verified till holds one ticket in a draw on the chain, seeded by the trustees' anchors so no miner can steer it, paid from a fixed slice of the block reward. The shop earns a little for being a place where the coin is spent, which is the one thing hashrate cannot buy, and the chain gets what every coin needs to hit the tarmac: places to spend it.
+The question behind the mining debate is not "how do we keep ASICs out" but "how does the person who keeps a computer on still get something". No proof-of-work answers that: whoever brings better hardware takes the reward, and on a single algorithm the small miner ends with dust whichever hardware that is. The proposal is to pay that reward to a different kind of participant: the shop that takes Marigold at the till. A till is a Raspberry Pi running the wallet, sold to a verified business — verified because a till has to account for VAT anyway, so the shop is public already. Every verified till holds one ticket in a draw on the chain, seeded by the trustees' anchors so no miner can steer it, paid from a fixed slice of the block reward. The shop earns a little for being a place where the coin is spent, which is the one thing hashrate cannot buy, and the chain gets what every coin needs to hit the tarmac: places to spend it. A third piece, a pot won by customers' payments at those tills, is the receipt lottery governments run for VAT, and it is the demand side of the same design.
 
 ## The problem, stated plainly
 
@@ -47,6 +47,20 @@ Customers stay bearer-anonymous; nothing changes for them. Merchants are public,
 ### Keep it a bonus
 
 A shop should take Marigold because customers pay with it; the draw is the thank-you. If the draw ever looks like the reason to buy a Pi, the Pi looks like an investment product, and that is a conversation with a regulator nobody wants. The slice stays modest and the language stays "a little on top".
+
+## The third piece: the pot, a receipt lottery for customers
+
+The demand side of the till draw. A tiny slice of every block reward, one percent say, is withheld into a **pot** that every node tracks as a number in consensus state, and it grows visibly ("the pot stands at 14,000 MAGLD"). Every payment at or above a threshold **made to a verified till** is a ticket. The ticket's number is the hash of the payment and the first finality anchor sealed after it, which nobody knows when they pay; it wins when that hash falls below a target tuned so the pot pays out about once a month across the whole network, or whenever the pot passes a cap, so it never grows without end. The pot goes to a key the payment carries for the purpose, in the block after the anchor. The customer stays anonymous, nobody knows who won but the winner, and the shop is public anyway and gets its own story.
+
+This is not an invention: it is the **receipt lottery**. Taiwan has run one since 1951, Portugal, Slovakia, Malta, Brazil and Italy run theirs, all for the same reason, to make customers ask for the receipt so the shop declares the sale. Governments invented it to collect VAT, and that is the framing: a compliance incentive with precedent, not a casino.
+
+Three design points carry it:
+
+- **Only at verified tills.** Without that condition the pot is spam bait: as it grows, paying oneself in a loop becomes worth the fees and the network fills with wash payments. With it, farming tickets needs a verified shop's cooperation, and a shop that books fake sales pays VAT on them, a real cost with a real auditor. The pot therefore pulls customers to shops that take Marigold and shops into the registry.
+- **The match is a hash with a seed from after the payment.** Not the amount and not a number known at payment time; both are grindable, one would keep paying until the amount matched. The anchor sealed after the payment is unknown to payer and miner alike.
+- **Flat and anonymous.** One ticket per qualifying payment, no holding, no identity, nothing locked. It costs a node one hash per qualifying payment, a counter, and one output when it pays.
+
+Two things to settle before proposing it. **Law:** a prize draw tied to a purchase is a promotional game in Swiss and EU law, allowed when the purchase is at the normal price and nobody sells tickets, which is this case; the association must never sell a ticket, or a Pi, as a chance to win, and a lawyer should read it once with the receipt-lottery precedents on the table. **Numbers:** the slice, the threshold, the target and the cap; a month's pot at one percent of the reward is a few thousand MAGLD at today's emission, and whether that is a draw people talk about or one they ignore is the question to decide.
 
 ## ASIC resistance: the options, and the case against each
 
@@ -93,7 +107,7 @@ If the group wants a reward for ordinary holders anyway, the version that reward
 
 ## Open questions
 
-1. The slice `S`, the draw interval `D`, the activity threshold `F`/`W`, the cap per business.
+1. The slice `S`, the draw interval `D`, the activity threshold `F`/`W`, the cap per business; for the pot, its slice, the payment threshold, the target and the cap.
 2. The registry rules: who verifies, how a till is revoked, how a shop appeals, what a stolen Pi means.
 3. Which country's fiscal-device rules to meet first, and what the Z-report-into-the-lane format is.
 4. Whether the draw starts on the testnet with the first Pi tills (a consensus change at a testnet reset) or waits for the mainnet parameters.
