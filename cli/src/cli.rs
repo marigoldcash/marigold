@@ -107,6 +107,11 @@ pub struct KaspaCli {
     /// its own node — see `start_mining`.
     #[cfg(feature = "embedded-node")]
     cpu_miner: Mutex<Option<Arc<crate::miner::Miner>>>,
+    /// Which wallet the running CPU miner pays, and its address: mining goes
+    /// on after that wallet is closed, and another wallet may be open by the
+    /// time anyone asks (tester, 2026-10-08).
+    #[cfg_attr(not(feature = "embedded-node"), allow(dead_code))]
+    mine_to: Mutex<Option<(String, String)>>,
     /// A miner program running in the background on this machine, on the
     /// node this wallet is connected to (PLAN P8.3c). Its miner is ours:
     /// 'mine' steers it and the own lane counts on it. `remote_mining` is
@@ -349,6 +354,7 @@ impl KaspaCli {
             embedded_node_adopted: Arc::new(AtomicBool::new(false)),
             #[cfg(feature = "embedded-node")]
             cpu_miner: Mutex::new(None),
+            mine_to: Mutex::new(None),
             remote_miner: Arc::new(AtomicBool::new(false)),
             remote_mining: Arc::new(AtomicBool::new(false)),
             #[cfg(feature = "embedded-node")]
@@ -1619,6 +1625,7 @@ impl KaspaCli {
 
         let (miner, solutions) = crate::miner::Miner::start(percent);
         self.cpu_miner.lock().unwrap().replace(miner.clone());
+        *self.mine_to.lock().unwrap() = Some((self.store().descriptor().map(|d| d.filename).unwrap_or_default(), address.to_string()));
 
         tprintln!(self, "");
         // "Mining started" followed by "there is no work yet" read as a
@@ -1665,6 +1672,7 @@ impl KaspaCli {
             return self.stop_remote_mining().await;
         }
         let miner = self.cpu_miner.lock().unwrap().take();
+        *self.mine_to.lock().unwrap() = None;
         match miner {
             Some(miner) => {
                 let found = miner.blocks_found();
@@ -1721,6 +1729,15 @@ impl KaspaCli {
                     miner.percent()
                 );
                 tprintln!(self, "Speed:  {}", crate::miner::format_hashrate(miner.hashrate()));
+                if let Some((wallet, address)) = self.mine_to.lock().unwrap().clone() {
+                    let open = self.store().descriptor().map(|d| d.filename).unwrap_or_default();
+                    if wallet == open {
+                        tprintln!(self, "Pays:   {address} — this wallet, '{wallet}'");
+                    } else {
+                        tprintln!(self, "Pays:   {address} — the wallet '{wallet}', which started the mining");
+                        tprintln!(self, "{}", style("Mining goes on for that wallet after it is closed; 'mine stop' then 'mine start' moves it to this one.").dim());
+                    }
+                }
                 if !self.wallet.utxo_processor().is_synced() {
                     tprintln!(
                         self,
