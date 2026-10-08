@@ -104,8 +104,14 @@ jobs:
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
+          # A secret that is not set arrives as an empty variable, and the Tauri
+          # CLI takes an empty APPLE_CERTIFICATE as a certificate to import
+          # (v2.80's macOS builds failed on exactly that). Only set ones stay.
+          for v in TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            [ -z "${!v}" ] && unset "$v"
+          done
           EXTRA=""
-          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+          if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
             echo '{"bundle":{"createUpdaterArtifacts":true}}' > updater-build.json
             EXTRA="--config updater-build.json"
             echo "updater artifacts: on"
