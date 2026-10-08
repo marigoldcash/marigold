@@ -30,6 +30,20 @@ pub(crate) async fn create(
         tprintln!(ctx);
         return Err(err.into());
     }
+    // A wallet that is open is closed first, the way 'close' does it: its
+    // unsaved changes flushed, its automation disarmed. Creating over it left
+    // the new prompt with the old balance and the old store dropped with
+    // changes pending — a panic (tester, 2026-10-08).
+    if ctx.wallet().is_open() {
+        let was = ctx.store().descriptor().map(|d| d.filename).unwrap_or_default();
+        #[cfg(feature = "embedded-node")]
+        crate::tgbackup::flush_before_close(ctx).await;
+        ctx.disarm_automation();
+        drop(guard);
+        ctx.wallet().close().await?;
+        tprintln!(ctx, "{}", crate::ui::dim(format!("Closed '{was}' first; 'open {was}' brings it back.")));
+        return Box::pin(create(ctx, None, name, import_with_mnemonic)).await;
+    }
     // Storage-location step: the wallet file is the user's money — its
     // location must be proposed up front, not revealed after the fact
     // (wallet-UX refinements, 2026-09-05).
@@ -95,8 +109,20 @@ pub(crate) async fn create(
             custom_filename = Some(input.clone());
             name = Some(input);
         } else {
+            // A typed name is accepted here, not shown again for a second
+            // Enter (tester, 2026-10-08: "asked for the wallet name a second
+            // time, which is confusing") — unless it is taken, which the next
+            // round says.
+            let bare = make_filename(&Some(input.clone()), &None);
+            if ctx.store().exists(Some(&bare)).await.unwrap_or(false) {
+                name = Some(input);
+                continue;
+            }
             custom_filename = None;
             name = Some(input);
+            let file = kaspa_wallet_core::storage::local::wallet_file_name(&bare);
+            tprintln!(ctx, "This wallet will be stored as: {}", style(format!("{folder}/{file}")).cyan());
+            break;
         }
     }
     let name = name.as_deref();
@@ -166,8 +192,14 @@ pub(crate) async fn create(
             continue;
         }
         if first.as_ref().len() < 8 {
-            tprintln!(ctx, "Eight characters at least, please.");
-            continue;
+            // The owner's call how to lock the door (tester, 2026-10-07); the
+            // backups never open with it, so a short one risks the files on
+            // this disk and nothing else.
+            tprintln!(
+                ctx,
+                "{}",
+                crate::ui::dim("Short, but your call — it protects the files on this computer; backups open with the 24 words.")
+            );
         }
         let again = Secret::new(term.ask(true, "Re-enter wallet encryption password: ").await?.trim().as_bytes().to_vec());
         if again.as_ref() != first.as_ref() {

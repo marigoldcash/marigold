@@ -1518,6 +1518,14 @@ impl KaspaCli {
         // wallet and was refused (2026-09-19).
         if !self.embedded_node_in_use() && !self.connected_to_local_node() {
             tprintln!(self, "");
+            if !self.wallet.is_open() {
+                // Said at once, not at the hand-over an hour later (tester,
+                // 2026-10-08: 'mine start' during the sync with no wallet open
+                // promised a start that could not happen).
+                tprintln!(self, "Open a wallet first — mined coins have to be paid to an address.");
+                tprintln!(self, "'mine start' given while the sync runs then begins on its own once it has caught up.");
+                return Ok(());
+            }
             if self.embedded_node_pending() {
                 // Said "mining starts once it is ready" and then did nothing
                 // when it was (tester, 2026-09-21). Keep the share and start
@@ -2310,6 +2318,11 @@ impl KaspaCli {
         if self.shutdown.load(Ordering::SeqCst) {
             return;
         }
+        // Requested while a wallet was open and run after it closed ('close'
+        // during a sync, tester 2026-10-08): nothing to tidy, nothing to say.
+        if !self.wallet.is_open() {
+            return;
+        }
         let loud = announce || self.auto_verbose();
         let ticker = self.ticker();
         // The commands wait for the sync; so does everything done on its
@@ -2841,6 +2854,12 @@ impl KaspaCli {
 
         self.own_lane_capture(None);
         self.auto_busy.store(false, Ordering::SeqCst);
+        // The prompt's figure moves with what was just minted or merged; it
+        // used to wait for the next command that happened to refresh it
+        // (tester, 2026-10-08: the prompt stood still while mining).
+        if self.wallet.is_open() {
+            self.refresh_prompt_total().await;
+        }
     }
 
     /// One loop owns all housekeeping, so nothing can race anything else:

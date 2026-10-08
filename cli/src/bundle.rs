@@ -77,6 +77,26 @@ impl WalletFiles {
         Ok(entries)
     }
 
+    /// Every file of the wallet as the folder lists it — path, where it is,
+    /// size and modification time — without reading any. A delta reads only
+    /// what this says has changed; a wallet of sixty thousand notes was read
+    /// whole for every post (tester on Windows, 2026-10-08: 22 minutes).
+    pub fn listing(&self) -> Result<Vec<Listed>> {
+        let dir = kaspa_wallet_core::storage::local::wallet_dir_name(&self.name);
+        let mut out = vec![Listed::of(
+            format!("{dir}/{}", kaspa_wallet_core::storage::local::keys_file_name(&self.name)),
+            self.wallet_file.clone(),
+        )];
+        let public = archive::recipient_pub_path(&self.wallet_dir);
+        if public.exists() {
+            out.push(Listed::of(format!("{dir}/{}", archive::RECIPIENT_FILE), public));
+        }
+        if self.vault_folder.exists() {
+            list_tree(&self.vault_folder, &format!("{dir}/notes"), &mut out)?;
+        }
+        Ok(out)
+    }
+
     /// The cheap change gate: sizes and modification times of the two files
     /// that change whenever anything does.
     pub fn gate(&self) -> String {
@@ -103,6 +123,65 @@ impl WalletFiles {
 
 /// The marker 'never' leaves in a wallet that is not to be covered.
 pub const SKIP_FILE: &str = "backup.skip";
+
+/// A file as the folder lists it, before it is read.
+#[derive(Clone)]
+pub struct Listed {
+    /// Relative, `/`-separated, as a backup names it.
+    pub path: String,
+    pub file: PathBuf,
+    /// `size:mtime` — what says "unchanged" without a read.
+    pub stamp: String,
+}
+
+impl Listed {
+    fn of(path: String, file: PathBuf) -> Self {
+        let stamp = stamp_of(&file);
+        Self { path, file, stamp }
+    }
+}
+
+fn stamp_of(file: &Path) -> String {
+    std::fs::metadata(file)
+        .ok()
+        .map(|m| {
+            let modified =
+                m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_nanos()).unwrap_or(0);
+            format!("{}:{modified}", m.len())
+        })
+        .unwrap_or_default()
+}
+
+/// Like `backup::collect_tree`, without the reading.
+fn list_tree(root: &Path, prefix: &str, out: &mut Vec<Listed>) -> Result<()> {
+    let mut dirs = vec![(root.to_path_buf(), prefix.to_string())];
+    while let Some((dir, rel)) = dirs.pop() {
+        let listing = std::fs::read_dir(&dir).map_err(|e| Error::custom(format!("cannot read {}: {e}", dir.display())))?;
+        for entry in listing {
+            let entry = entry.map_err(|e| Error::custom(format!("cannot read {}: {e}", dir.display())))?;
+            let name = entry.file_name().to_string_lossy().to_string();
+            let child_rel = if rel.is_empty() { name.clone() } else { format!("{rel}/{name}") };
+            let meta = entry.path().metadata().map_err(|e| Error::custom(format!("cannot read {}: {e}", entry.path().display())))?;
+            if meta.is_dir() {
+                dirs.push((entry.path(), child_rel));
+            } else {
+                out.push(Listed::of(child_rel, entry.path()));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Reads listed files into entries.
+pub fn read_listed(listed: &[Listed]) -> Result<Vec<ArchiveEntry>> {
+    listed
+        .iter()
+        .map(|l| {
+            let data = std::fs::read(&l.file).map_err(|e| Error::custom(format!("cannot read {}: {e}", l.file.display())))?;
+            Ok(ArchiveEntry { path: l.path.clone(), data })
+        })
+        .collect()
+}
 
 /// Every wallet in a folder, for one backup run.
 pub struct Folder {
@@ -162,6 +241,15 @@ impl Folder {
     /// Every covered wallet's gate in one string.
     pub fn gate(&self) -> String {
         self.covered().iter().map(|w| format!("{}={}", w.name, w.gate())).collect::<Vec<_>>().join(";")
+    }
+
+    /// Every covered wallet's files as listed, unread.
+    pub fn listing(&self) -> Result<Vec<Listed>> {
+        let mut all = Vec::new();
+        for wallet in self.covered() {
+            all.extend(wallet.listing()?);
+        }
+        Ok(all)
     }
 
     /// Every covered wallet's files.

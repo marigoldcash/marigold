@@ -86,7 +86,10 @@ fn pack_body(entries: &[ArchiveEntry]) -> Result<Vec<u8>> {
 
     // Compression before encryption, which is the only order that does
     // anything: ciphertext has no structure left to compress.
-    let mut encoder = flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::best());
+    // The default level: the note files are ciphertext, which no level
+    // compresses, and the manifest compresses about as well at 6 as at 9 —
+    // at a fraction of the time on a Raspberry Pi.
+    let mut encoder = flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::default());
     encoder.write_all(&body).map_err(|e| Error::custom(format!("compressing the archive failed: {e}")))?;
     encoder.finish().map_err(|e| Error::custom(format!("compressing the archive failed: {e}")))
 }

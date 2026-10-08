@@ -170,6 +170,19 @@ pub struct BackupIndex {
     /// (`reserve.wallet/…`), so one map covers the folder.
     #[serde(default)]
     pub files: BTreeMap<String, String>,
+    /// path → `size:mtime` as of the last post: a file whose stamp has not
+    /// moved is not read again.
+    #[serde(default)]
+    pub stamps: BTreeMap<String, String>,
+    /// The checkpoint's files before compression, and the deltas' since: the
+    /// "deltas outweigh half the checkpoint" rule compares these — it used to
+    /// compare plain deltas with the compressed checkpoint, and a wallet whose
+    /// manifest alone outweighed half the archive posted a full copy at every
+    /// change (tester, 2026-10-08: three 14 MB copies in a row).
+    #[serde(default)]
+    pub checkpoint_plain_bytes: u64,
+    #[serde(default)]
+    pub delta_plain_bytes: u64,
     /// The cheap change gate: every wallet's manifest and keys file, size
     /// and modification time, when the index was last brought up to date.
     #[serde(default)]
@@ -227,33 +240,36 @@ fn sha256_hex(data: &[u8]) -> String {
     faster_hex::hex_string(&h.finalize())
 }
 
-/// What the next post should be.
+/// What the next post should be, from the listing alone.
 pub enum Plan {
     Checkpoint,
-    Delta { changed: Vec<ArchiveEntry>, removed: Vec<String> },
+    /// Files whose stamp moved or that are new, and the paths that are gone.
+    Delta {
+        changed: Vec<Listed>,
+        removed: Vec<String>,
+    },
     Nothing,
 }
 
-pub fn plan(index: &BackupIndex, entries: &[ArchiveEntry]) -> Plan {
+/// `allow_checkpoint` is false at 'close': a full copy that has become due
+/// waits for the next open rather than hold the close; the changes go out
+/// as a delta.
+pub fn plan(index: &BackupIndex, listing: &[Listed], allow_checkpoint: bool) -> Plan {
     let now = now_secs();
-    if index.checkpoint.is_empty() || now.saturating_sub(index.checkpoint_at) > CHECKPOINT_EVERY_SECS {
+    if index.checkpoint.is_empty() {
         return Plan::Checkpoint;
     }
-    let current: BTreeMap<&str, String> = entries.iter().map(|e| (e.path.as_str(), sha256_hex(&e.data))).collect();
-    let changed: Vec<ArchiveEntry> =
-        entries.iter().filter(|e| index.files.get(&e.path) != current.get(e.path.as_str())).cloned().collect();
-    let removed: Vec<String> = index.files.keys().filter(|p| !current.contains_key(p.as_str())).cloned().collect();
-    if changed.is_empty() && removed.is_empty() {
-        return Plan::Nothing;
-    }
-    let delta_bytes: u64 = changed.iter().map(|e| e.data.len() as u64).sum();
-    if index.checkpoint_bytes > 0
-        && index.delta_bytes + delta_bytes > DELTA_WEIGHT_FLOOR
-        && (index.delta_bytes + delta_bytes) as f64 > index.checkpoint_bytes as f64 * DELTA_WEIGHT_LIMIT
-    {
+    if allow_checkpoint && now.saturating_sub(index.checkpoint_at) > CHECKPOINT_EVERY_SECS {
         return Plan::Checkpoint;
     }
-    Plan::Delta { changed, removed }
+    let present: std::collections::HashSet<&str> = listing.iter().map(|l| l.path.as_str()).collect();
+    let changed: Vec<Listed> = listing
+        .iter()
+        .filter(|l| !index.files.contains_key(&l.path) || index.stamps.get(&l.path) != Some(&l.stamp))
+        .cloned()
+        .collect();
+    let removed: Vec<String> = index.files.keys().filter(|p| !present.contains(p.as_str())).cloned().collect();
+    if changed.is_empty() && removed.is_empty() { Plan::Nothing } else { Plan::Delta { changed, removed } }
 }
 
 /// Posts one sealed archive: a plain line saying what it is, then the file
@@ -319,7 +335,7 @@ pub async fn run(cli: &Arc<KaspaCli>, words: &str, force_checkpoint: bool, say: 
     let cfg_path = telegram_config_path(cli)?;
     let cfg = TelegramConfig::load(&cfg_path).ok_or_else(|| Error::custom("no Telegram bot is set up for this wallet"))?;
     let folder = Folder::around(&files)?;
-    run_folder(&folder, &cfg, Some((&files.name, words)), force_checkpoint, say).await
+    run_folder(&folder, &cfg, Some((&files.name, words)), force_checkpoint, true, say).await
 }
 
 /// One backup run at a time, process-wide: the housekeeping tick, 'close'
@@ -329,13 +345,15 @@ static RUN_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// The backup run on a folder: the shared core behind the terminal command,
 /// the housekeeping tick and the desktop wallet's screen. Decides checkpoint
-/// or delta (or that nothing changed), posts it, and brings the chat's index
-/// up to date. `force_checkpoint` is the manual command.
+/// or delta (or that nothing changed), reads only what that needs, posts it,
+/// and brings the chat's index up to date. `force_checkpoint` is the manual
+/// command; `allow_checkpoint` is false at 'close'.
 pub async fn run_folder(
     folder: &Folder,
     cfg: &TelegramConfig,
     check_words: Option<(&str, &str)>,
     force_checkpoint: bool,
+    allow_checkpoint: bool,
     say: &(dyn Fn(String) + Send + Sync),
 ) -> Result<String> {
     let chat_id = target_chat(cfg).ok_or_else(|| Error::custom("nowhere to post: pair the bot first"))?;
@@ -346,20 +364,55 @@ pub async fn run_folder(
         return Err(Error::custom(format!("the wallet '{}' has no backup key yet — close and open it once", open.name)));
     }
     let mut index = BackupIndex::load(folder, &cfg.token, chat_id);
-    let entries = folder.entries()?;
-    if entries.is_empty() {
+    let started = std::time::Instant::now();
+    let listing = folder.listing()?;
+    if listing.is_empty() {
         return Err(Error::custom("no wallet in the folder has a backup key yet"));
     }
-    let plan = if force_checkpoint { Plan::Checkpoint } else { plan(&index, &entries) };
+    let plan = if force_checkpoint { Plan::Checkpoint } else { plan(&index, &listing, allow_checkpoint) };
     let stamp = chrono::Utc::now().format("c%Y%m%dT%H%M%S").to_string();
-    let outcome = match plan {
+
+    // A delta reads only the files whose stamp moved; a file touched but
+    // unchanged is dropped again by its digest. The weight rule — deltas
+    // since the last full copy outweigh half of it, plain bytes against
+    // plain bytes — may turn the delta into a full copy here.
+    let delta = match plan {
         Plan::Nothing => return Ok("nothing has changed since the last backup".to_string()),
-        Plan::Checkpoint => {
+        Plan::Checkpoint => None,
+        Plan::Delta { changed, removed } => {
+            say(format!("reading {} changed file(s)…", changed.len()));
+            let read = read_listed(&changed)?;
+            let mut really: Vec<ArchiveEntry> = Vec::new();
+            for (entry, listed) in read.into_iter().zip(changed.iter()) {
+                let digest = sha256_hex(&entry.data);
+                index.stamps.insert(listed.path.clone(), listed.stamp.clone());
+                if index.files.get(&entry.path) != Some(&digest) {
+                    index.files.insert(entry.path.clone(), digest);
+                    really.push(entry);
+                }
+            }
+            if really.is_empty() && removed.is_empty() {
+                index.gate = folder.gate();
+                index.save()?;
+                return Ok("nothing has changed since the last backup".to_string());
+            }
+            let plain: u64 = really.iter().map(|e| e.data.len() as u64).sum();
+            let outweighs = index.checkpoint_plain_bytes > 0
+                && index.delta_plain_bytes + plain > DELTA_WEIGHT_FLOOR
+                && (index.delta_plain_bytes + plain) as f64 > index.checkpoint_plain_bytes as f64 * DELTA_WEIGHT_LIMIT;
+            if allow_checkpoint && outweighs { None } else { Some((really, removed, plain)) }
+        }
+    };
+
+    let outcome = match delta {
+        None => {
+            say(format!("reading {} files…", listing.len()));
+            let entries = read_listed(&listing)?;
             say(format!("sealing {} files…", entries.len()));
             let (packed, names) = seal_folder(folder, &entries, check_words, None)?;
             let name = checkpoint_name(&names_label(&names), &stamp);
             say(format!(
-                "checkpoint {name}: {} files of {}, {}",
+                "full copy {name}: {} files of {}, {}",
                 entries.len(),
                 wallets_phrase(&names),
                 archive::human_size(packed.len())
@@ -374,13 +427,22 @@ pub async fn run_folder(
             index.checkpoint = stamp;
             index.checkpoint_at = now_secs();
             index.checkpoint_bytes = packed.len() as u64;
+            index.checkpoint_plain_bytes = entries.iter().map(|e| e.data.len() as u64).sum();
             index.delta_seq = 0;
             index.delta_bytes = 0;
+            index.delta_plain_bytes = 0;
             index.files = entries.iter().map(|e| (e.path.clone(), sha256_hex(&e.data))).collect();
+            index.stamps = listing.iter().map(|l| (l.path.clone(), l.stamp.clone())).collect();
             index.wallets = names.clone();
-            format!("full copy of {} posted: {} files, {}", wallets_phrase(&names), entries.len(), archive::human_size(packed.len()))
+            format!(
+                "full copy of {} posted: {} files, {} ({} s)",
+                wallets_phrase(&names),
+                entries.len(),
+                archive::human_size(packed.len()),
+                started.elapsed().as_secs()
+            )
         }
-        Plan::Delta { changed, removed } => {
+        Some((changed, removed, plain)) => {
             let seq = index.delta_seq + 1;
             let (packed, names) = seal_folder(folder, &changed, check_words, Some((&index.checkpoint, seq, &removed)))?;
             let label = if index.wallets.is_empty() { names_label(&names) } else { names_label(&index.wallets) };
@@ -403,18 +465,22 @@ pub async fn run_folder(
             }
             index.delta_seq = seq;
             index.delta_bytes += packed.len() as u64;
-            for e in &changed {
-                index.files.insert(e.path.clone(), sha256_hex(&e.data));
-            }
+            index.delta_plain_bytes += plain;
             for p in &removed {
                 index.files.remove(p);
+                index.stamps.remove(p);
             }
             for n in names {
                 if !index.wallets.contains(&n) {
                     index.wallets.push(n);
                 }
             }
-            format!("delta {seq} posted: {} file(s), {}", changed.len(), archive::human_size(packed.len()))
+            format!(
+                "delta {seq} posted: {} file(s), {} ({} s)",
+                changed.len(),
+                archive::human_size(packed.len()),
+                started.elapsed().as_secs()
+            )
         }
     };
     index.last_post_at = now_secs();
@@ -506,7 +572,7 @@ pub async fn auto_tick_for(
         let outcome = async {
             let words = words_for(&wallet, &secret).await?;
             let quiet = |_line: String| {};
-            run_folder(&folder, &cfg, Some((&name, &words)), false, &quiet).await
+            run_folder(&folder, &cfg, Some((&name, &words)), false, true, &quiet).await
         }
         .await;
         match outcome {
@@ -814,14 +880,19 @@ pub async fn flush_for(wallet: &Arc<Wallet>, cfg_path: &Path, name: &str, secret
     let Ok(folder) = Folder::around(&files) else { return };
     let settings = WalletBackupSettings::load(&files.wallet_dir);
     let index = BackupIndex::load(&folder, &cfg.token, chat_id);
+    // The wallet file is written at close, after this; a change still in
+    // memory — a new hint, a setting — went out at the close after next.
+    let _ = wallet.store().commit(secret).await;
     if settings.paused || !settings.started || index.gate == folder.gate() {
         return;
     }
     say(crate::ui::dim("Backing up the latest changes to Telegram before closing…"));
+    // Only the changes: a full copy that has become due waits for the next
+    // open (tester, 2026-10-08: a 22-minute 'close').
     let outcome = async {
         let words = words_for(wallet, secret).await?;
-        let quiet = |_line: String| {};
-        run_folder(&folder, &cfg, Some((name, &words)), false, &quiet).await
+        let progress = |line: String| say(crate::ui::dim(format!("  {line}")));
+        run_folder(&folder, &cfg, Some((name, &words)), false, false, &progress).await
     }
     .await;
     match outcome {

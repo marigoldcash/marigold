@@ -147,7 +147,14 @@ async fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
         // note's spending key, and a crash or a hard-closed console between
         // create and write left an empty file that read "ciphertext shorter
         // than the nonce prefix" ever after (tester on Windows, 2026-10-07).
-        let tmp = path.with_extension("note.tmp");
+        // A name of this write's own: two writers of one file at once — the
+        // housekeeping and 'balance' both bring the manifest up to date —
+        // shared one temporary name and the loser's rename failed with "file
+        // not found" (tester on Windows, 2026-10-08).
+        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let tmp = path.with_extension(format!("{}-{seq}.tmp", std::process::id()));
+        let named = |e: std::io::Error| Error::Custom(format!("{}: {e}", path.display()));
         let mut options = std::fs::OpenOptions::new();
         options.write(true).create(true).truncate(true);
         #[cfg(unix)]
@@ -156,16 +163,16 @@ async fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
             options.mode(0o600);
         }
         {
-            let mut file = options.open(&tmp)?;
-            file.write_all(bytes)?;
-            file.sync_all()?;
+            let mut file = options.open(&tmp).map_err(named)?;
+            file.write_all(bytes).map_err(named)?;
+            file.sync_all().map_err(named)?;
         }
-        std::fs::rename(&tmp, path)?;
+        std::fs::rename(&tmp, path).map_err(named)?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             // A file that already existed keeps the mode it had; say it again.
-            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).map_err(named)?;
         }
         return Ok(());
     }
@@ -609,10 +616,10 @@ impl NoteVault {
         let text = lines.into_iter().map(|(_, line)| line).collect::<Vec<_>>().join("\n");
         // Whole-file rewrite, so a crash between truncate and write used to
         // leave an empty manifest; written beside and moved into place.
-        let path = self.folder.join(MANIFEST_FILE);
-        let tmp = self.folder.join(format!("{MANIFEST_FILE}.tmp"));
-        write_private(&tmp, text.as_bytes()).await?;
-        fs::rename(&tmp, &path).await?;
+        // `write_private` writes beside and moves into place itself, under a
+        // name of its own, so two writers at once no longer trip over one
+        // shared temporary file.
+        write_private(&self.folder.join(MANIFEST_FILE), text.as_bytes()).await?;
         Ok(())
     }
 

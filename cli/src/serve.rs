@@ -233,7 +233,7 @@ impl WalletService {
         let folder = crate::bundle::Folder::around(&files).map_err(|e| e.to_string())?;
         let say = self.say.clone();
         let progress = move |line: String| say(format!("Backup: {line}"));
-        crate::tgbackup::run_folder(&folder, &cfg, Some((&self.name, &words)), true, &progress).await.map_err(|e| e.to_string())
+        crate::tgbackup::run_folder(&folder, &cfg, Some((&self.name, &words)), true, true, &progress).await.map_err(|e| e.to_string())
     }
 
     /// A wallet of this folder that has no backup key yet, covered with its

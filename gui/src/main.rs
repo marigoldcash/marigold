@@ -194,8 +194,8 @@ async fn create_wallet(name: String, password: String, words: Option<String>) ->
     use kaspa_wallet_core::storage::local::notevault::{account_mnemonic_from_vault_words, new_vault_words};
     let name = name.trim();
     let name = if name.is_empty() { "marigold" } else { name };
-    if password.chars().count() < 8 {
-        return Err("a password needs at least eight characters".to_string());
+    if password.is_empty() {
+        return Err("a password is needed — it is what opens the wallet every day".to_string());
     }
     let (wallet, _, network_id) = probe().await?;
     wallet.set_network_id(&network_id).map_err(|e| e.to_string())?;

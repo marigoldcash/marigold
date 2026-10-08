@@ -253,7 +253,7 @@ impl Balance {
                     ctx,
                     "{}",
                     ui::dim(format!(
-                        "{} minted into notes on its own at {when}: +{} {ticker} (what mining earned until then).",
+                        "{} minted into notes on its own at {when}: +{} {ticker}.",
                         if ctx.mining_active() { "Mining income" } else { "Income" },
                         sompi_to_kaspa_string(income)
                     ))
