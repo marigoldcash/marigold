@@ -40,5 +40,13 @@
     "category": "Finance",
     "shortDescription": "Marigold desktop wallet",
     "longDescription": "Digital cash in fixed notes: the Marigold wallet with screens instead of commands."
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "REPLACE-WITH-THE-PUBLIC-KEY-FROM-cargo-tauri-signer-generate",
+      "endpoints": [
+        "https://marigold.cash/desktop.json"
+      ]
+    }
   }
 }

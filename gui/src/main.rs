@@ -452,6 +452,55 @@ async fn restore_telegram(app: AppHandle, token: String, words: String, name: St
     ))
 }
 
+/// What the updater found at the compiled-in address, if newer than this build.
+#[derive(Serialize)]
+struct UpdateInfo {
+    version: String,
+    notes: String,
+}
+
+/// Asks the update server (the project's site) whether a newer desktop
+/// wallet is out. The answer is signed with the project's updater key, which
+/// is compiled in; an unsigned or wrongly signed answer is an error here and
+/// nothing is offered.
+#[tauri::command]
+async fn check_update(app: AppHandle) -> Result<Option<UpdateInfo>, String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let updater = app.updater().map_err(|e| e.to_string())?;
+    match updater.check().await {
+        Ok(Some(update)) => Ok(Some(UpdateInfo { version: update.version.clone(), notes: update.body.clone().unwrap_or_default() })),
+        Ok(None) => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// Installs the update the check offered: the wallet is closed first the way
+/// the Close button does it (its backup goes out), the installer is
+/// downloaded with progress on the "update-progress" event, verified against
+/// the compiled-in key, installed, and the app starts again.
+#[tauri::command]
+async fn install_update(app: AppHandle, state: State<'_, App>) -> Result<(), String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let updater = app.updater().map_err(|e| e.to_string())?;
+    let Some(update) = updater.check().await.map_err(|e| e.to_string())? else {
+        return Err("there is no newer version to install".to_string());
+    };
+    close_session(state.inner()).await;
+    let progress = app.clone();
+    let mut got: u64 = 0;
+    update
+        .download_and_install(
+            move |chunk, total| {
+                got += chunk as u64;
+                let _ = progress.emit("update-progress", serde_json::json!({ "got": got, "total": total }));
+            },
+            || {},
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    app.restart();
+}
+
 async fn with_service<T, F, Fut>(state: &State<'_, App>, f: F) -> Result<T, String>
 where
     F: FnOnce(Arc<kaspa_cli_lib::serve::WalletService>) -> Fut,
@@ -660,6 +709,8 @@ fn main() {
         unsafe { std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1") };
     }
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(App {
             session: tokio::sync::Mutex::new(None),
             shutdown: Arc::new(AtomicBool::new(false)),
@@ -696,7 +747,9 @@ fn main() {
             backup_cover,
             backup_file,
             telegram_setup,
-            restore_telegram
+            restore_telegram,
+            check_update,
+            install_update
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { .. } = event {

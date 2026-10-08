@@ -185,6 +185,7 @@ async function loadWallets(select_filename) {
 }
 async function init() {
   $("version").textContent = "v" + (await invoke("version"));
+  checkUpdate();
   await loadWallets();
   await listen("say", (event) => {
     $("say").textContent = event.payload;
@@ -389,3 +390,27 @@ $("close-wallet").addEventListener("click", async () => {
 });
 
 init();
+
+// The app updates itself: the site's update document is signed with the
+// project's key; a newer version shows the banner, and "Update now" downloads,
+// installs and restarts. A check that fails — no network, no document yet —
+// shows nothing; the daily notice in the terminal wallet covers that case.
+async function checkUpdate() {
+  try {
+    const info = await invoke("check_update");
+    if (!info) return;
+    $("update-version").textContent = info.version;
+    $("update-banner").hidden = false;
+  } catch (_) {}
+}
+$("update-go").addEventListener("click", async () => {
+  $("update-error").textContent = ""; $("update-go").disabled = true;
+  $("update-progress").hidden = false; $("update-progress").textContent = "Downloading…";
+  try { await invoke("install_update"); }
+  catch (e) { $("update-error").textContent = String(e); $("update-go").disabled = false; $("update-progress").hidden = true; }
+});
+listen("update-progress", (e) => {
+  const { got, total } = e.payload || {};
+  const mb = (n) => (n / 1048576).toFixed(1) + " MB";
+  $("update-progress").textContent = total ? `${mb(got)} of ${mb(total)} (${Math.floor(got * 100 / total)}%)` : `${mb(got)} so far`;
+});

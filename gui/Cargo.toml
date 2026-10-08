@@ -22,6 +22,10 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
+# The app updates itself: Tauri's updater verifies its minisign signature over the
+# installer, downloads, installs and restarts (DECISIONS.md 2026-10-08).
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.22"

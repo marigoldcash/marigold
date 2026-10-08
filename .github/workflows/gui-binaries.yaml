@@ -81,9 +81,25 @@ jobs:
         shell: bash
         run: command -v cargo-tauri >/dev/null 2>&1 || cargo install tauri-cli --version "^2" --locked
 
+      # With the updater key in the repository's secrets, the build also writes
+      # the updater artifacts: a minisign signature beside each installer and,
+      # on macOS, the app as a tarball — what the app's own updater verifies and
+      # installs (gui/tauri.conf.json plugins.updater). Without the key the
+      # installers are built as before and the updater stays silent.
       - name: Build the app and its installers
         working-directory: gui
-        run: cargo tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          EXTRA=""
+          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo '{"bundle":{"createUpdaterArtifacts":true}}' > updater-build.json
+            EXTRA="--config updater-build.json"
+            echo "updater artifacts: on"
+          fi
+          cargo tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} $EXTRA
 
       - name: Name the binary and the installers
         shell: bash
@@ -96,6 +112,11 @@ jobs:
           for f in $B/appimage/*.AppImage; do [ -f "$f" ] && cp "$f" out/marigold-wallet-$V-${{ matrix.name }}.AppImage; done
           for f in $B/dmg/*.dmg; do [ -f "$f" ] && cp "$f" out/marigold-wallet-$V-${{ matrix.name }}.dmg; done
           for f in $B/msi/*.msi; do [ -f "$f" ] && cp "$f" out/marigold-wallet-$V-${{ matrix.name }}.msi; done
+          # The updater's artifacts, when the build was signed.
+          for f in $B/appimage/*.AppImage.sig; do [ -f "$f" ] && cp "$f" out/marigold-wallet-$V-${{ matrix.name }}.AppImage.sig; done
+          for f in $B/msi/*.msi.sig; do [ -f "$f" ] && cp "$f" out/marigold-wallet-$V-${{ matrix.name }}.msi.sig; done
+          for f in $B/macos/*.app.tar.gz; do [ -f "$f" ] && cp "$f" out/marigold-wallet-$V-${{ matrix.name }}.app.tar.gz; done
+          for f in $B/macos/*.app.tar.gz.sig; do [ -f "$f" ] && cp "$f" out/marigold-wallet-$V-${{ matrix.name }}.app.tar.gz.sig; done
           ls -la out
 
       - uses: actions/upload-artifact@v4
