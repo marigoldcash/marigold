@@ -27,6 +27,7 @@ pub mod qrpng;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod release_check;
 pub mod result;
+pub mod selfupdate;
 #[cfg(feature = "embedded-node")]
 pub mod serve;
 pub mod space;

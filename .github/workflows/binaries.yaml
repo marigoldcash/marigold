@@ -168,4 +168,6 @@ jobs:
             echo "MARIGOLD_DOCKER_TOKEN is not set; the binaries are in this run's artifacts only." >&2
             exit 1
           fi
+          # The digests the trustees sign for the wallet's self-update (scripts/release-notice.sh --manifest).
+          (cd artifacts && sha256sum * > SHA256SUMS-cli.txt && cat SHA256SUMS-cli.txt)
           gh release upload --repo marigoldcash/marigold-wallet "${{ inputs.release_tag }}" artifacts/* --clobber

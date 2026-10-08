@@ -20,7 +20,9 @@
 
 use crate::imports::*;
 use kaspa_consensus_core::config::params::Params;
+use kaspa_consensus_core::finality_anchor::release_manifest::{ReleaseManifest, SignedReleaseManifest};
 use kaspa_consensus_core::finality_anchor::release_notice::{ReleaseNotice, SignedReleaseNotice};
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 /// Where every "download the latest wallet" line points. Compiled in on purpose: no
@@ -65,6 +67,49 @@ pub struct Document {
     pub latest: Option<String>,
     #[serde(default)]
     pub notices: Vec<NoticeEntry>,
+    /// The newest release's files and digests, signed by the trustees: what the
+    /// wallet may install over itself (`selfupdate`).
+    #[serde(default)]
+    pub release: Option<ManifestEntry>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ManifestEntry {
+    pub version: String,
+    pub issued_at: u64,
+    /// asset name → SHA-256 hex
+    #[serde(default)]
+    pub assets: BTreeMap<String, String>,
+    #[serde(default)]
+    pub signatures: Vec<SignatureEntry>,
+}
+
+impl ManifestEntry {
+    pub fn signed(&self) -> Option<SignedReleaseManifest> {
+        let mut assets = Vec::with_capacity(self.assets.len());
+        for (name, hex) in &self.assets {
+            let mut digest = [0u8; 32];
+            faster_hex::hex_decode(hex.trim().as_bytes(), &mut digest).ok()?;
+            assets.push((name.clone(), digest));
+        }
+        let manifest = ReleaseManifest::new(self.version.clone(), self.issued_at, assets);
+        let mut signatures = Vec::with_capacity(self.signatures.len());
+        for entry in &self.signatures {
+            let mut bytes = [0u8; 64];
+            faster_hex::hex_decode(entry.signature.trim().as_bytes(), &mut bytes).ok()?;
+            signatures.push((entry.trustee, bytes));
+        }
+        SignedReleaseManifest::assemble(manifest, signatures).ok()
+    }
+}
+
+/// The release manifest the trustees of this network signed, if the document
+/// carries one that verifies. A network without pinned keys can vouch for nothing.
+pub fn verified_manifest(document: &Document, network: Option<NetworkId>) -> Option<ReleaseManifest> {
+    let trustees = Params::from(network?).finality_anchor.trustees?;
+    let signed = document.release.as_ref()?.signed()?;
+    signed.verify(&trustees).ok()?;
+    Some(signed.manifest)
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -162,7 +207,7 @@ pub async fn fetch() -> std::result::Result<Document, String> {
 }
 
 /// The network this wallet is on: the connected one, else the one it is set to use.
-fn network_of(cli: &Arc<KaspaCli>) -> Option<NetworkId> {
+pub fn network_of(cli: &Arc<KaspaCli>) -> Option<NetworkId> {
     if let Ok(id) = cli.wallet().network_id() {
         return Some(id);
     }
@@ -195,7 +240,14 @@ pub fn start(cli: &Arc<KaspaCli>) {
                         let term = cli.term();
                         term.writeln("");
                         term.writeln(crate::ui::warn(format!("A newer wallet is out: {latest}. This one is {}.", Version::own())));
-                        term.writeln(format!("Download it at {}", crate::ui::value(DOWNLOAD_URL)));
+                        if crate::selfupdate::available() {
+                            term.writeln(format!(
+                                "Type {} to install it: the file is checked against the trustees' signatures, then the wallet restarts.",
+                                crate::ui::value("update")
+                            ));
+                        } else {
+                            term.writeln(format!("Download it at {}", crate::ui::value(DOWNLOAD_URL)));
+                        }
                         term.writeln("");
                     }
                     _ => {}
@@ -249,7 +301,7 @@ mod tests {
     }
 
     fn document(latest: &str, notices: Vec<NoticeEntry>) -> Document {
-        Document { latest: Some(latest.into()), notices }
+        Document { latest: Some(latest.into()), notices, release: None }
     }
 
     #[test]

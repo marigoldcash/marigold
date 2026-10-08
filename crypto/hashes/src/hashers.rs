@@ -61,6 +61,7 @@ blake3_hasher! {
 
     struct FinalityAnchorSigningHash => b"FinalityAnchor",
     struct ReleaseNoticeSigningHash => b"ReleaseNotice",
+    struct ReleaseManifestSigningHash => b"ReleaseManifest",
 }
 
 #[macro_export]

@@ -25,6 +25,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use kaspa_hashes::{FinalityAnchorSigningHash, HasherBase};
 use thiserror::Error;
 
+pub mod release_manifest;
 pub mod release_notice;
 
 /// The trustee quorum shape: n = 5 keys, any k = 3 of which must sign (POOL-SPEC.md

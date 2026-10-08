@@ -27,6 +27,7 @@ pub async fn everyday(ctx: &Arc<KaspaCli>) -> Vec<&'static str> {
         "guide",
         "help",
         "advanced",
+        "update",
         "exit",
     ];
     // ...or when the background miner on this machine is the wallet's to steer.

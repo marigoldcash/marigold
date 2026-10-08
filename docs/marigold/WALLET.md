@@ -51,6 +51,12 @@ connect
 
 The prompt changes from `N/C $` (not connected) to showing sync state, then a live balance once synced — starting `SYNC $`/`SYNC ... $` briefly against a fresh node.
 
+## 2b. Keeping the wallet current: `update` (2026-10-08)
+
+Once a day the wallet reads `https://marigold.cash/release.json`. When it names a newer release the wallet says so once, and since v2.79 the line ends with "Type `update` to install it". `update` fetches the document again, checks that the document's **release manifest** — the newest release's file names and SHA-256 digests — carries a quorum of the trustees' signatures (the same pinned keys that make finality anchors and release notices count; `consensus/core/src/finality_anchor/release_manifest.rs`), downloads this platform's file from the compiled-in release address (`github.com/marigoldcash/marigold-wallet/releases/download/v<version>/<asset>`), checks its digest against the signed one, and asks "Install <version> and restart now? [Y/n]". Yes closes an open wallet the way `close` does (its backup goes out), stops the sync, moves the running program aside as `marigold-cli.old`, puts the new one in its place and starts it again with the same arguments. No fetched document can send the wallet anywhere, and nothing is installed whose digest the trustees did not sign; a file that does not match is deleted and said so. Docker says `docker pull` instead; a build for a platform without a release file says so. `MARIGOLD_UPDATE_FORCE=1` installs the signed release even when it is not newer, for testing the path against a real release.
+
+The manifest is written by the release procedure: the binaries workflow attaches `SHA256SUMS-cli.txt` to the release, and `scripts/release-notice.sh --latest <v> --manifest SHA256SUMS-cli.txt` has each testnet trustee host sign it (`marigold-trustee-signer --sign-release-manifest`) and writes `release` into the document. The desktop wallet keeps the notice with a download link until the installers are signed for their platforms (Apple notarization, a Windows certificate — DECISIONS.md 2026-10-08).
+
 ## 3. Create a wallet
 
 ```

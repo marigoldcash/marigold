@@ -21,6 +21,7 @@ kaspa-wrpc-client.workspace = true
 borsh.workspace = true
 clap.workspace = true
 faster-hex.workspace = true
+serde_json.workspace = true
 log.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "rand-std"] }
 tokio = { workspace = true, features = ["rt", "macros", "rt-multi-thread", "net", "io-util", "time", "sync"] }

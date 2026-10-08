@@ -46,10 +46,17 @@ struct Args {
     #[arg(long, requires = "sign_release_notice")]
     network: Option<String>,
 
-    /// Unix seconds the release notice is issued at; every trustee must sign the
-    /// same value. Defaults to now.
-    #[arg(long, requires = "sign_release_notice")]
+    /// Unix seconds the release notice or manifest is issued at; every trustee must
+    /// sign the same value. Defaults to now.
+    #[arg(long)]
     issued_at: Option<u64>,
+
+    /// Sign a release manifest instead of running: a JSON file with the release
+    /// `version`, its `issued_at`, and `assets` as a map of file name to SHA-256 hex
+    /// (scripts/release-notice.sh writes it). Prints one JSON line with this trustee's
+    /// signature and exits. Needs --trustee-index and one of the key options.
+    #[arg(long, value_name = "FILE")]
+    sign_release_manifest: Option<PathBuf>,
 
     /// This trustee's BIP340 secret key, hex-encoded (64 chars). Prefer --key-file.
     #[arg(long, conflicts_with = "key_file")]
@@ -149,6 +156,34 @@ async fn main() {
         }
         _ => panic!("exactly one of --secret-key or --key-file is required"),
     };
+
+    if let Some(path) = &args.sign_release_manifest {
+        let text = std::fs::read_to_string(path).expect("cannot read the manifest file");
+        let value: serde_json::Value = serde_json::from_str(&text).expect("the manifest file is not JSON");
+        let version = value["version"].as_str().expect("manifest: version").to_string();
+        let issued_at = value["issued_at"].as_u64().or(args.issued_at).expect("manifest: issued_at");
+        let assets = value["assets"]
+            .as_object()
+            .expect("manifest: assets")
+            .iter()
+            .map(|(name, hex)| {
+                let mut digest = [0u8; 32];
+                faster_hex::hex_decode(hex.as_str().expect("manifest: digest").as_bytes(), &mut digest).expect("manifest: digest hex");
+                (name.clone(), digest)
+            })
+            .collect();
+        let manifest = kaspa_consensus_core::finality_anchor::release_manifest::ReleaseManifest::new(version, issued_at, assets);
+        let keypair = secp256k1::Keypair::from_seckey_slice(secp256k1::SECP256K1, &secret_key).expect("invalid secret key");
+        let signature = manifest.sign(&keypair);
+        println!(
+            "{{\"trustee\": {}, \"version\": \"{}\", \"issued_at\": {}, \"signature\": \"{}\"}}",
+            trustee_index,
+            manifest.version,
+            manifest.issued_at,
+            faster_hex::hex_string(&signature)
+        );
+        return;
+    }
 
     if let Some(min_version) = &args.sign_release_notice {
         let (major, release) = min_version
