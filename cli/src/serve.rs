@@ -236,6 +236,29 @@ impl WalletService {
         crate::tgbackup::run_folder(&folder, &cfg, Some((&self.name, &words)), true, true, &progress).await.map_err(|e| e.to_string())
     }
 
+    /// 'backup folder <path>' from the desktop: the folder is set and the
+    /// first full copy written; an empty path turns it off.
+    pub async fn backup_folder(&self, path: &str) -> std::result::Result<String, String> {
+        let files = self.backup_files().await?;
+        let path = path.trim();
+        if path.is_empty() {
+            crate::tgbackup::set_folder(&files, None).map_err(|e| e.to_string())?;
+            return Ok("Folder backups are off; the files already written stay.".to_string());
+        }
+        let dir = std::path::PathBuf::from(path);
+        std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+        let dir = dir.canonicalize().unwrap_or(dir);
+        crate::tgbackup::set_folder(&files, Some(&dir)).map_err(|e| e.to_string())?;
+        crate::bundle::ensure_recipient(&self.wallet, &self.name, &self.secret).await.map_err(|e| e.to_string())?;
+        let files = self.backup_files().await?;
+        let words = crate::bundle::words_for(&self.wallet, &self.secret).await.map_err(|e| e.to_string())?;
+        let folder = crate::bundle::Folder::around(&files).map_err(|e| e.to_string())?;
+        let say = self.say.clone();
+        let progress = move |line: String| say(format!("Backup: {line}"));
+        let dest = crate::tgbackup::Destination::Folder(dir);
+        crate::tgbackup::run_to(&folder, &dest, Some((&self.name, &words)), true, true, &progress).await.map_err(|e| e.to_string())
+    }
+
     /// A wallet of this folder that has no backup key yet, covered with its
     /// words typed once (checked against the wallet; nothing kept but a public key).
     pub async fn backup_cover(&self, name: &str, words: &str) -> std::result::Result<(), String> {

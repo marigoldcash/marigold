@@ -188,8 +188,18 @@ pub(crate) async fn create(
     let wallet_secret = loop {
         let first = Secret::new(term.ask(true, "Enter wallet encryption password: ").await?.trim().as_bytes().to_vec());
         if first.as_ref().is_empty() {
-            tprintln!(ctx, "A password is needed — it is what opens the wallet every day. Please type one.");
-            continue;
+            if !crate::EMPTY_WALLET_PASSWORD_ALLOWED {
+                tprintln!(ctx, "A password is needed — it is what opens the wallet every day. Please type one.");
+                continue;
+            }
+            // Testnet: no password at all is allowed; the money is worthless
+            // by design. The main network will ask for one (LAUNCH-PLAN.md).
+            tprintln!(
+                ctx,
+                "{}",
+                crate::ui::dim("No password: this wallet opens with Enter alone. The main network will ask for one.")
+            );
+            break first;
         }
         if first.as_ref().len() < 8 {
             // The owner's call how to lock the door (tester, 2026-10-07); the

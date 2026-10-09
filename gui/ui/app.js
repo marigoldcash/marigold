@@ -64,6 +64,8 @@ async function refreshBackup() {
     const st = await invoke("backup_status");
     $("backup-status").textContent =
       `Backups go to: ${st.destination}\nAutomatic: ${st.automatic}\nLast full copy: ${when(st.checkpoint_at)}${st.checkpoint_at ? ` (${size(st.checkpoint_bytes)})` : ""}\nChange sets since: ${st.deltas}\nLast post: ${when(st.last_post_at)}\nWallets covered: ${st.wallets.length ? st.wallets.join(", ") : "none yet"}`;
+    if (document.activeElement !== $("backup-folder")) $("backup-folder").value = st.folder || "";
+    $("backup-folder-state").textContent = st.folder ? `Last full copy there: ${when(st.folder_checkpoint_at)}; ${st.folder_deltas} change set(s) since; last written ${when(st.folder_last_post_at)}.` : "";
     $("cover-box").hidden = !st.uncovered.length;
     if (st.uncovered.length) {
       const sel = $("cover-name"); const keep = sel.value;
@@ -101,6 +103,12 @@ $("cover-go").addEventListener("click", async () => {
   } catch (e) { $("cover-error").textContent = String(e); }
   $("cover-go").disabled = false;
 });
+$("backup-folder-go").addEventListener("click", async () => {
+  $("backup-error").textContent = ""; $("backup-done").hidden = true; $("backup-folder-go").disabled = true;
+  try { const line = await invoke("backup_folder", { path: $("backup-folder").value }); $("backup-done").textContent = `Folder backup: ${line}.`; $("backup-done").hidden = false; refreshBackup(); }
+  catch (e) { $("backup-error").textContent = String(e); }
+  $("backup-folder-go").disabled = false;
+});
 $("backup-toggle").addEventListener("click", async () => {
   $("backup-error").textContent = "";
   try { await invoke("backup_automatic", { on: !$("backup-toggle").dataset.on }); refreshBackup(); } catch (e) { $("backup-error").textContent = String(e); }
@@ -130,6 +138,17 @@ $("go-restore-tg").addEventListener("click", () => {
   show("restore-tg");
 });
 $("rt-back").addEventListener("click", () => { if (!restoringTg) show("open"); });
+$("go-restore-dir").addEventListener("click", () => { $("rd-error").textContent = ""; $("rd-done").hidden = true; show("restore-dir"); });
+$("rd-back").addEventListener("click", () => show("open"));
+$("rd-start").addEventListener("click", async () => {
+  $("rd-error").textContent = ""; $("rd-done").hidden = true; $("rd-start").disabled = true;
+  try {
+    const line = await invoke("restore_folder", { path: $("rd-path").value, words: $("rd-words").value, name: $("rd-name").value });
+    $("rd-words").value = ""; $("rd-done").textContent = line; $("rd-done").hidden = false;
+    await loadWallets();
+  } catch (e) { $("rd-error").textContent = String(e); }
+  $("rd-start").disabled = false;
+});
 $("rt-start").addEventListener("click", async () => {
   $("rt-error").textContent = ""; $("rt-done").hidden = true; $("rt-start").disabled = true; restoringTg = true;
   $("rt-progress").hidden = false; $("rt-progress").textContent = "Waiting for the parts you forward to the bot (up to ten minutes)…";

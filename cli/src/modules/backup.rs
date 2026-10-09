@@ -1,7 +1,7 @@
 use crate::imports::*;
 
 #[derive(Default, Handler)]
-#[help("Write the whole wallet — keys, notes and all — to one encrypted file")]
+#[help("Every wallet on this computer into one encrypted file; 'backup folder <path>' keeps them current in a folder")]
 pub struct Backup;
 
 impl Backup {

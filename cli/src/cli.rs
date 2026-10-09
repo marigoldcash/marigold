@@ -3788,7 +3788,7 @@ impl KaspaCli {
         let mut attempts = 0;
         let wallet_secret = loop {
             let entered = self.term().ask(true, "Enter wallet password: ").await?.trim().as_bytes().to_vec();
-            if !entered.is_empty() {
+            if !entered.is_empty() || crate::EMPTY_WALLET_PASSWORD_ALLOWED {
                 break Secret::new(entered);
             }
             attempts += 1;

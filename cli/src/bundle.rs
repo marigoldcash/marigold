@@ -591,6 +591,25 @@ pub fn single(bytes: Vec<u8>) -> BTreeMap<String, Vec<u8>> {
     collected
 }
 
+/// Every backup file in a folder — a folder destination's, or one a person
+/// gathered by hand — as a collected set, named as the files are.
+pub fn collect_dir(dir: &Path) -> Result<BTreeMap<String, Vec<u8>>> {
+    let mut collected = BTreeMap::new();
+    let listing = std::fs::read_dir(dir).map_err(|e| Error::custom(format!("cannot read {}: {e}", dir.display())))?;
+    for entry in listing.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !name.ends_with(".mgb") || !entry.path().is_file() {
+            continue;
+        }
+        let bytes = archive::read_file(&entry.path())?;
+        collected.insert(name, bytes);
+    }
+    if collected.is_empty() {
+        return Err(Error::custom(format!("no backup files (.mgb) in {}", dir.display())));
+    }
+    Ok(collected)
+}
+
 /// The wallets the newest forwarded backup holds — empty for an archive from
 /// before bundles, which holds one wallet behind one key.
 pub fn bundle_wallets(collected: &BTreeMap<String, Vec<u8>>) -> Result<Vec<String>> {

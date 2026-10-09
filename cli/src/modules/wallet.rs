@@ -807,6 +807,15 @@ impl Wallet {
                 if argv.first().map(|s| s.as_str()) == Some("verify") {
                     return self.backup_verify(&ctx, argv[1..].to_vec()).await;
                 }
+                if argv.first().map(|s| s.as_str()) == Some("folder") {
+                    #[cfg(feature = "embedded-node")]
+                    return self.backup_folder(&ctx, argv[1..].to_vec()).await;
+                    #[cfg(not(feature = "embedded-node"))]
+                    {
+                        tprintln!(ctx, "Folder backups need the full wallet build.");
+                        return Ok(());
+                    }
+                }
                 if argv.first().map(|s| s.as_str()) == Some("telegram") {
                     #[cfg(feature = "embedded-node")]
                     return self.backup_telegram(&ctx, argv[1..].to_vec()).await;
@@ -862,7 +871,8 @@ impl Wallet {
                 ("paper export <dir> | import <pages>", "A paper QR copy of your notes, under its own password printed once"),
                 ("backup [<file-or-folder>]", "Write every wallet on this computer — keys, notes and all — to one encrypted file, each sealed with its own 24 words"),
                 ("backup verify <file>", "Check that a backup file still opens and what is inside it"),
-                ("restore <file> [<name>]", "Rebuild wallets from a backup file"),
+                ("backup folder <path> | off", "Keep the backups current in a folder on this computer as well — one a cloud service mirrors"),
+                ("restore <file or folder> [<name>]", "Rebuild wallets from a backup file, or from a folder of them"),
             ],
             None,
         )?;
@@ -1123,8 +1133,17 @@ impl Wallet {
             return Ok(());
         };
         let path = std::path::PathBuf::from(path);
-        let bytes = archive::read_file(&path)?;
-        self.restore_collected(ctx, crate::bundle::single(bytes), argv.get(1).cloned(), guard).await
+        // A folder — the one a 'backup folder' writes, or files gathered by
+        // hand — restores from its newest full copy and the changes after it,
+        // exactly as the forwarded chat does.
+        let collected = if path.is_dir() {
+            let collected = crate::bundle::collect_dir(&path)?;
+            tprintln!(ctx, "{} backup file(s) in {}.", collected.len(), path.display());
+            collected
+        } else {
+            crate::bundle::single(archive::read_file(&path)?)
+        };
+        self.restore_collected(ctx, collected, argv.get(1).cloned(), guard).await
     }
 
     /// The questions and the merge behind both restores: a bundle asks for
@@ -1519,6 +1538,93 @@ impl Wallet {
         );
         tprintln!(ctx, "");
         Ok(())
+    }
+
+    /// 'backup folder <path> | off | (nothing)': the backups also go to a folder
+    /// on this computer, as files named like the chat's messages, the last two
+    /// full copies kept — a folder a cloud service mirrors, typically
+    /// (founder, 2026-10-09). Setting it posts the first full copy at once;
+    /// from then on the tick and 'close' keep it current like the chat.
+    #[cfg(feature = "embedded-node")]
+    async fn backup_folder(&self, ctx: &Arc<KaspaCli>, argv: Vec<String>) -> Result<()> {
+        use crate::tgbackup;
+        if !ctx.wallet().is_open() {
+            tprintln!(ctx, "Open a wallet first — 'backup folder' runs from an open wallet.");
+            return Ok(());
+        }
+        let files = crate::bundle::WalletFiles::of(ctx).await?;
+        let settings = tgbackup::WalletBackupSettings::load(&files.wallet_dir);
+        let when = |secs: u64| -> String {
+            if secs == 0 {
+                return "never".to_string();
+            }
+            chrono::DateTime::<chrono::Utc>::from_timestamp(secs as i64, 0)
+                .map(|t| t.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M").to_string())
+                .unwrap_or_default()
+        };
+        match argv.first().map(|s| s.as_str()) {
+            None | Some("status") => {
+                match settings.folder.as_deref().filter(|p| !p.is_empty()) {
+                    Some(path) => {
+                        let st = tgbackup::status(&files, None);
+                        tprintln!(ctx, "Backups also go to the folder {path}.");
+                        tprintln!(
+                            ctx,
+                            "Last full copy there: {}; {} change(s) after it; last written {}.",
+                            when(st.folder_checkpoint_at),
+                            st.folder_deltas,
+                            when(st.folder_last_post_at)
+                        );
+                    }
+                    None => tprintln!(
+                        ctx,
+                        "No folder is set. 'backup folder <path>' keeps the backups current in one — a folder your cloud service mirrors is the idea."
+                    ),
+                }
+                Ok(())
+            }
+            Some("off") | Some("none") => {
+                tgbackup::set_folder(&files, None)?;
+                tprintln!(ctx, "Folder backups are off. The files already written stay where they are.");
+                Ok(())
+            }
+            Some(given) => {
+                let path = std::path::PathBuf::from(given);
+                std::fs::create_dir_all(&path).map_err(|e| Error::custom(format!("cannot create {}: {e}", path.display())))?;
+                let path = path.canonicalize().unwrap_or(path);
+                tgbackup::set_folder(&files, Some(&path))?;
+                tprintln!(ctx, "");
+                tpara!(
+                    ctx,
+                    "From now on the backups also go to {}: a full copy now and once a day, the changes within minutes \
+                    of a payment, the last two full copies kept, every wallet on this computer, each sealed with its own \
+                    24 words. If a cloud service mirrors that folder, the copy is off this computer the moment it is written. \
+                    'wallet restore <that folder>' brings it back anywhere. 'backup folder off' stops it. \
+                    ",
+                    path.display()
+                );
+                tprintln!(ctx, "");
+                let (secret, _) = ctx.ask_wallet_secret_for_tidying(None).await?;
+                Self::announce_covered(ctx, crate::bundle::ensure_recipient(&ctx.wallet(), &files.name, &secret).await?);
+                let words = ctx.wallet().store().as_note_key_store()?.recovery_words(&secret).await?;
+                let files = crate::bundle::WalletFiles::of(ctx).await?;
+                let folder = crate::bundle::Folder::around(&files)?;
+                tprintln!(ctx, "Writing a full copy…");
+                let ctx_ = ctx.clone();
+                let say = move |line: String| tprintln!(ctx_, "  {line}");
+                let dest = tgbackup::Destination::Folder(path);
+                let outcome = tgbackup::run_to(&folder, &dest, Some((&files.name, &words)), true, true, &say).await?;
+                tprintln!(ctx, "");
+                tprintln!(ctx, "{}", style(format!("Folder backup: {outcome}.")).green());
+                tprintln!(
+                    ctx,
+                    "{}",
+                    style("The files plus a wallet's words are enough to spend its money. Treat the folder as cash.").red()
+                );
+                tprintln!(ctx, "");
+                Ok(())
+            }
+        }
     }
 
     /// 'wallet restore telegram [<name>]': collects the backups forwarded to

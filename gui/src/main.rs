@@ -194,7 +194,7 @@ async fn create_wallet(name: String, password: String, words: Option<String>) ->
     use kaspa_wallet_core::storage::local::notevault::{account_mnemonic_from_vault_words, new_vault_words};
     let name = name.trim();
     let name = if name.is_empty() { "marigold" } else { name };
-    if password.is_empty() {
+    if password.is_empty() && !kaspa_cli_lib::EMPTY_WALLET_PASSWORD_ALLOWED {
         return Err("a password is needed — it is what opens the wallet every day".to_string());
     }
     let (wallet, _, network_id) = probe().await?;
@@ -338,6 +338,65 @@ async fn backup_decline(state: State<'_, App>) -> Result<(), String> {
 #[tauri::command]
 async fn backup_cover(state: State<'_, App>, name: String, words: String) -> Result<(), String> {
     with_service(&state, |s| async move { s.backup_cover(&name, &words).await }).await
+}
+
+/// The backups also go to a folder on this computer — one a cloud service
+/// mirrors; an empty path turns it off. Writes the first full copy at once.
+#[tauri::command]
+async fn backup_folder(state: State<'_, App>, path: String) -> Result<String, String> {
+    with_service(&state, |s| async move { s.backup_folder(&path).await }).await
+}
+
+/// Restores from a folder of backup files — the one a 'backup folder' keeps,
+/// mirrored to this computer — the way the Telegram restore does, with the
+/// words of the wallet wanted.
+#[tauri::command]
+async fn restore_folder(app: AppHandle, path: String, words: String, name: String) -> Result<String, String> {
+    use kaspa_cli_lib::backup as archive;
+    use kaspa_cli_lib::bundle::{self, Unlock};
+    if !archive::looks_like_words(&words) {
+        return Err("that is not 24 words".to_string());
+    }
+    let dir = std::path::PathBuf::from(path.trim());
+    if !dir.is_dir() {
+        return Err(format!("{} is not a folder", dir.display()));
+    }
+    let archives = bundle::collect_dir(&dir).map_err(|e| e.to_string())?;
+    let (_, folder, _) = probe().await?;
+    let folder = if let Some(rest) = folder.strip_prefix("~/") {
+        app.path().home_dir().map_err(|e| e.to_string())?.join(rest)
+    } else {
+        std::path::PathBuf::from(&folder)
+    };
+    let names = bundle::bundle_wallets(&archives).map_err(|e| e.to_string())?;
+    let merged = if names.is_empty() {
+        bundle::merge(&archives, Unlock::Legacy(&archive::key_from_words(&words)))
+    } else {
+        let fits = bundle::wallets_for_words(&archives, &words).map_err(|e| e.to_string())?;
+        let Some(mine) = fits.first() else {
+            return Err(format!("those words open none of the wallets in this backup ({}) — each wallet opens with its own 24 words", names.join(", ")));
+        };
+        let mut map = std::collections::BTreeMap::new();
+        map.insert(mine.clone(), words.clone());
+        bundle::merge(&archives, Unlock::Words(&map))
+    }
+    .map_err(|e| e.to_string())?;
+    let new_name = if name.trim().is_empty() { None } else { Some(name.trim().to_string()) };
+    let mut done = Vec::new();
+    let mut restored_names = Vec::new();
+    for (wallet, entries) in merged.wallets {
+        let restored = archive::install_restored(entries, &folder, new_name.clone()).map_err(|e| e.to_string())?;
+        restored_names.push(wallet);
+        done.push(format!("Restored {} files as '{}'", restored.written, restored.name));
+    }
+    let others: Vec<String> = names.into_iter().filter(|n| !restored_names.contains(n)).collect();
+    Ok(format!(
+        "{} from the full copy of {} with {} change set(s) after it. Open it with the password it had when the backup was made.{}",
+        done.join("; "),
+        bundle::checkpoint_moment(&merged.stamp),
+        merged.deltas,
+        if others.is_empty() { String::new() } else { format!(" The backup also holds {}: run this again with its own words.", bundle::wallets_phrase(&others)) }
+    ))
 }
 
 #[tauri::command]
@@ -745,6 +804,8 @@ fn main() {
             backup_automatic,
             backup_decline,
             backup_cover,
+            backup_folder,
+            restore_folder,
             backup_file,
             telegram_setup,
             restore_telegram,

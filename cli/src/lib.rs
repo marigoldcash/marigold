@@ -1,6 +1,14 @@
 extern crate self as kaspa_cli;
 
 pub mod backup;
+
+/// Whether a wallet may have no password at all. True on the testnet
+/// (founder, 2026-10-09: "remove any password requirements for the wallet and
+/// accept an empty password"): the money is worthless by design and testers
+/// open wallets all day. **Flip to false when the network leaves testnet-10 /
+/// TMAGLD** (LAUNCH-PLAN.md); every prompt that takes a wallet password reads
+/// this, so one change restores the requirement everywhere.
+pub const EMPTY_WALLET_PASSWORD_ALLOWED: bool = true;
 pub mod bundle;
 mod cli;
 #[cfg(feature = "embedded-node")]

@@ -37,7 +37,7 @@
     <p class="hint">Through a public computer, whoever runs it sees which notes your wallet asks about. A sync of your own needs a few gigabytes and some time.</p>
     <button id="open" class="primary">Open</button>
     <p id="open-error" class="error"></p>
-    <p class="hint">No wallet yet? <button id="go-create" class="link">Create one</button> · <button id="go-restore" class="link">Restore one from its 24 words</button> · <button id="go-restore-tg" class="link">Restore one from Telegram</button></p>
+    <p class="hint">No wallet yet? <button id="go-create" class="link">Create one</button> · <button id="go-restore" class="link">Restore one from its 24 words</button> · <button id="go-restore-tg" class="link">Restore one from Telegram</button> · <button id="go-restore-dir" class="link">Restore one from a backup folder</button></p>
   </section>
 
   <section id="screen-create" class="screen" hidden>
@@ -79,6 +79,23 @@
     </div>
   </section>
 
+  <section id="screen-restore-dir" class="screen" hidden>
+    <h1>Restore from a backup folder</h1>
+    <p class="hint">The folder a wallet kept its backups in — mirrored to this computer by your cloud service, or copied over. Give the folder and the 24 words of the wallet you want back; the newest full copy and the changes after it are used. A backup holds every wallet of that computer; do this once per wallet, with its own words.</p>
+    <label>Folder
+      <input id="rd-path" autocomplete="off" spellcheck="false" placeholder="/home/you/Dropbox/Marigold backups">
+    </label>
+    <label>The wallet's 24 words
+      <textarea id="rd-words" rows="3" autocomplete="off" spellcheck="false"></textarea>
+    </label>
+    <label>A name for the restored wallet — empty keeps the name it had
+      <input id="rd-name" autocomplete="off" placeholder="marigold">
+    </label>
+    <button id="rd-start" class="primary">Restore</button>
+    <button id="rd-back">Back</button>
+    <p id="rd-error" class="error"></p>
+    <p id="rd-done" class="ok" hidden></p>
+  </section>
   <section id="screen-restore-tg" class="screen" hidden>
     <h1>Restore from Telegram</h1>
     <p class="hint">Your wallet's bot posted its backups into your chat with it. Give the bot's token and the 24 words of the wallet you want back, press Start, then forward the bot everything from the last dashed line in that chat to the end: select those messages, forward, pick the bot. Forwarding more does no harm; the wallet takes the newest full copy and the changes after it. A backup holds every wallet of that computer; do this once per wallet, with its own words.</p>
@@ -237,6 +254,13 @@
         <p class="hint">The code lives fifteen minutes; this screen notices when the pairing is done. Turn on two-step verification in Telegram: that account can move money now.</p>
         <button id="bot-repair">Make a new code</button>
       </div>
+      <h2>A folder on this computer</h2>
+      <p class="hint">The same backups as files in a folder — one your cloud service mirrors (Dropbox, iCloud Drive, OneDrive, Nextcloud) — a full copy daily, the changes within minutes, the last two full copies kept. Empty turns it off; the files already written stay.</p>
+      <label>Folder
+        <input id="backup-folder" autocomplete="off" spellcheck="false" placeholder="/home/you/Dropbox/Marigold backups">
+      </label>
+      <button id="backup-folder-go">Keep backups there</button>
+      <p id="backup-folder-state" class="hint"></p>
       <h2>A backup file</h2>
       <p class="hint">The same encrypted copy of every wallet as a file, for a USB stick or a drive of your own. It goes into your Downloads folder.</p>
       <button id="backup-file">Save a backup file</button>

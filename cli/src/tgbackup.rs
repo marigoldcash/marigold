@@ -90,6 +90,12 @@ pub struct WalletBackupSettings {
     /// the chat current by itself while it is open.
     #[serde(default)]
     pub started: bool,
+    /// A folder on this computer the backups also go to — one a cloud
+    /// service mirrors, typically (founder, 2026-10-09). Set by 'backup
+    /// folder <path>'; the same full copies and changes as the chat, as
+    /// files, the last two full copies kept.
+    #[serde(default)]
+    pub folder: Option<String>,
     /// What this file held before the posting state moved to the folder
     /// (2026-10-06): a checkpoint means the backups were running, and the
     /// posted groups are adopted by the chat's index so they are still
@@ -205,6 +211,10 @@ pub struct PostedGroup {
     pub checkpoint: String,
     pub chat_id: i64,
     pub message_ids: Vec<i64>,
+    /// For a folder destination: the files this full copy and its changes
+    /// were written as, to be removed when the copy is taken down.
+    #[serde(default)]
+    pub files: Vec<String>,
 }
 
 impl BackupIndex {
@@ -215,15 +225,20 @@ impl BackupIndex {
     /// The chat's index; a chat without one yet inherits what the open
     /// wallet posted there under the per-wallet scheme.
     pub fn load(folder: &Folder, token: &str, chat_id: i64) -> Self {
-        let path = Self::path(&folder.path, token, chat_id);
-        let mut index: Self = std::fs::read_to_string(&path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
-        index.path = path;
+        let mut index = Self::load_at(Self::path(&folder.path, token, chat_id));
         if index.posted.is_empty()
             && let Some(open) = folder.open_wallet()
         {
             let mut settings = WalletBackupSettings::load(&open.wallet_dir);
             index.posted = settings.take_legacy_posted(&open.wallet_dir, chat_id);
         }
+        index
+    }
+
+    /// The index at a path: a folder destination's, beside the wallets.
+    pub fn load_at(path: PathBuf) -> Self {
+        let mut index: Self = std::fs::read_to_string(&path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+        index.path = path;
         index
     }
 
@@ -328,6 +343,110 @@ async fn tidy_old_copies(token: &str, index: &mut BackupIndex, say: &(dyn Fn(Str
     }
 }
 
+/// Where a backup goes: the bot's chat, or a folder on this computer that a
+/// cloud service mirrors. Both get the same full copies and changes, named
+/// the same, with the same two-copies retention; the chat gets them as
+/// messages, the folder as files written beside and renamed into place, so a
+/// mirroring service never sees a half-written one. A folder is better
+/// than one growing archive: a change is one small new file for the mirror
+/// to carry, a damaged file costs one change and not the lot, and a copy
+/// that has had its day is deleted rather than rewritten.
+pub enum Destination {
+    Telegram { cfg: TelegramConfig, chat_id: i64 },
+    Folder(PathBuf),
+}
+
+impl Destination {
+    pub fn telegram(cfg: &TelegramConfig) -> Option<Self> {
+        target_chat(cfg).map(|chat_id| Self::Telegram { cfg: cfg.clone(), chat_id })
+    }
+
+    /// One word, for "<label> backup: …" lines.
+    pub fn label(&self) -> String {
+        match self {
+            Self::Telegram { .. } => "Telegram".to_string(),
+            Self::Folder(_) => "Folder".to_string(),
+        }
+    }
+
+    /// In full, for "backing up to …" lines.
+    pub fn describe(&self) -> String {
+        match self {
+            Self::Telegram { .. } => "Telegram".to_string(),
+            Self::Folder(path) => format!("the folder {}", path.display()),
+        }
+    }
+
+    /// The index this destination keeps beside the wallets.
+    pub fn index(&self, folder: &Folder) -> BackupIndex {
+        match self {
+            Self::Telegram { cfg, chat_id } => BackupIndex::load(folder, &cfg.token, *chat_id),
+            Self::Folder(path) => {
+                use sha2::{Digest, Sha256};
+                let digest = Sha256::digest(path.to_string_lossy().as_bytes());
+                BackupIndex::load_at(folder.path.join(format!("folder-backup-{}.json", faster_hex::hex_string(&digest[..6]))))
+            }
+        }
+    }
+
+    fn chat_id(&self) -> i64 {
+        match self {
+            Self::Telegram { chat_id, .. } => *chat_id,
+            Self::Folder(_) => 0,
+        }
+    }
+
+    /// The dashed line before a full copy; a folder needs none.
+    async fn divider(&self) -> Result<Vec<i64>> {
+        match self {
+            Self::Telegram { cfg, chat_id } => Ok(vec![send_plain(&cfg.token, *chat_id, DIVIDER).await.map_err(Error::custom)?]),
+            Self::Folder(_) => Ok(Vec::new()),
+        }
+    }
+
+    /// One sealed archive out: message ids for a chat, the file name for a folder.
+    async fn post(
+        &self,
+        name: &str,
+        what: &str,
+        packed: &[u8],
+        say: &(dyn Fn(String) + Send + Sync),
+    ) -> Result<(Vec<i64>, Vec<String>)> {
+        match self {
+            Self::Telegram { cfg, chat_id } => Ok((post(&cfg.token, *chat_id, name, what, packed, say).await?, Vec::new())),
+            Self::Folder(path) => {
+                std::fs::create_dir_all(path).map_err(|e| Error::custom(format!("cannot create {}: {e}", path.display())))?;
+                let target = path.join(name);
+                let tmp = path.join(format!(".{name}.part"));
+                archive::write_owner_only(&tmp, packed).map_err(|e| Error::custom(format!("cannot write {}: {e}", tmp.display())))?;
+                std::fs::rename(&tmp, &target).map_err(|e| Error::custom(format!("cannot write {}: {e}", target.display())))?;
+                say(format!("written: {name} ({})", archive::human_size(packed.len())));
+                Ok((Vec::new(), vec![name.to_string()]))
+            }
+        }
+    }
+
+    /// Keeps the newest `KEEP_CHECKPOINTS` full copies and takes the older
+    /// ones down: messages deleted, files removed.
+    async fn tidy(&self, index: &mut BackupIndex, say: &(dyn Fn(String) + Send + Sync)) {
+        match self {
+            Self::Telegram { cfg, .. } => tidy_old_copies(&cfg.token, index, say).await,
+            Self::Folder(path) => {
+                while index.posted.len() > KEEP_CHECKPOINTS {
+                    let old = index.posted.remove(0);
+                    for file in &old.files {
+                        let _ = std::fs::remove_file(path.join(file));
+                    }
+                    say(format!(
+                        "the full copy of {} and its changes were removed from the folder",
+                        checkpoint_moment(&old.checkpoint)
+                    ));
+                }
+            }
+        }
+    }
+}
+
 /// One backup run from the terminal: the open wallet's folder, its words to
 /// check its own part by. Returns what was posted, for the line the caller prints.
 pub async fn run(cli: &Arc<KaspaCli>, words: &str, force_checkpoint: bool, say: &(dyn Fn(String) + Send + Sync)) -> Result<String> {
@@ -356,14 +475,27 @@ pub async fn run_folder(
     allow_checkpoint: bool,
     say: &(dyn Fn(String) + Send + Sync),
 ) -> Result<String> {
-    let chat_id = target_chat(cfg).ok_or_else(|| Error::custom("nowhere to post: pair the bot first"))?;
+    let dest = Destination::telegram(cfg).ok_or_else(|| Error::custom("nowhere to post: pair the bot first"))?;
+    run_to(folder, &dest, check_words, force_checkpoint, allow_checkpoint, say).await
+}
+
+/// The run itself, to whichever destination.
+pub async fn run_to(
+    folder: &Folder,
+    dest: &Destination,
+    check_words: Option<(&str, &str)>,
+    force_checkpoint: bool,
+    allow_checkpoint: bool,
+    say: &(dyn Fn(String) + Send + Sync),
+) -> Result<String> {
+    let chat_id = dest.chat_id();
     let _one_at_a_time = RUN_LOCK.lock().await;
     if let Some(open) = folder.open_wallet()
         && open.recipient.is_none()
     {
         return Err(Error::custom(format!("the wallet '{}' has no backup key yet — close and open it once", open.name)));
     }
-    let mut index = BackupIndex::load(folder, &cfg.token, chat_id);
+    let mut index = dest.index(folder);
     let started = std::time::Instant::now();
     let listing = folder.listing()?;
     if listing.is_empty() {
@@ -419,11 +551,11 @@ pub async fn run_folder(
             ));
             let what =
                 format!("Marigold backup of {} on this computer: a full copy, {}", wallets_phrase(&names), checkpoint_moment(&stamp));
-            let divider = send_plain(&cfg.token, chat_id, DIVIDER).await.map_err(Error::custom)?;
-            let mut ids = vec![divider];
-            ids.extend(post(&cfg.token, chat_id, &name, &what, &packed, say).await?);
-            index.posted.push(PostedGroup { checkpoint: stamp.clone(), chat_id, message_ids: ids });
-            tidy_old_copies(&cfg.token, &mut index, say).await;
+            let mut ids = dest.divider().await?;
+            let (posted, files) = dest.post(&name, &what, &packed, say).await?;
+            ids.extend(posted);
+            index.posted.push(PostedGroup { checkpoint: stamp.clone(), chat_id, message_ids: ids, files });
+            dest.tidy(&mut index, say).await;
             index.checkpoint = stamp;
             index.checkpoint_at = now_secs();
             index.checkpoint_bytes = packed.len() as u64;
@@ -459,9 +591,10 @@ pub async fn run_folder(
                 wallets_phrase(&names),
                 checkpoint_moment(&index.checkpoint)
             );
-            let ids = post(&cfg.token, chat_id, &name, &what, &packed, say).await?;
+            let (ids, files) = dest.post(&name, &what, &packed, say).await?;
             if let Some(group) = index.posted.last_mut() {
                 group.message_ids.extend(ids);
+                group.files.extend(files);
             }
             index.delta_seq = seq;
             index.delta_bytes += packed.len() as u64;
@@ -503,8 +636,34 @@ pub fn telegram_config_path(cli: &Arc<KaspaCli>) -> Result<PathBuf> {
 #[derive(Default)]
 pub struct AutoState {
     last_check: u64,
-    changed_since: u64,
+    /// When a change was first seen, per destination index path.
+    changed_since: BTreeMap<String, u64>,
     running: bool,
+}
+
+/// Where the open wallet's backups go right now: the bot's chat once the
+/// automatic backups were started and not paused, and the folder if one is set.
+pub fn destinations(settings: &WalletBackupSettings, cfg: Option<&TelegramConfig>) -> Vec<Destination> {
+    let mut out = Vec::new();
+    if settings.started
+        && !settings.paused
+        && let Some(cfg) = cfg
+        && let Some(dest) = Destination::telegram(cfg)
+    {
+        out.push(dest);
+    }
+    if let Some(path) = settings.folder.as_deref().filter(|p| !p.is_empty()) {
+        out.push(Destination::Folder(PathBuf::from(path)));
+    }
+    out
+}
+
+/// 'backup folder <path>': from now on the backups also go there; `None`
+/// stops it. The first full copy is the caller's to post.
+pub fn set_folder(files: &WalletFiles, path: Option<&Path>) -> Result<()> {
+    let mut settings = WalletBackupSettings::load(&files.wallet_dir);
+    settings.folder = path.map(|p| p.to_string_lossy().to_string());
+    settings.save(&files.wallet_dir)
 }
 
 /// Called from housekeeping every few seconds; cheap unless a post is due.
@@ -539,46 +698,50 @@ pub async fn auto_tick_for(
         }
         st.last_check = now;
     }
-    let Some(cfg) = TelegramConfig::load(&cfg_path) else { return };
-    let Some(chat_id) = target_chat(&cfg) else { return };
+    let cfg = TelegramConfig::load(&cfg_path);
     let Ok(files) = WalletFiles::of_wallet(&wallet, &name).await else { return };
     let Ok(folder) = Folder::around(&files) else { return };
     // Nothing goes anywhere until the owner has asked once: the first
     // 'telegram backup' posts the first checkpoint, and from then on the
-    // wallet keeps it current.
+    // wallet keeps it current. A folder is on from the moment it is set.
     let settings = WalletBackupSettings::load(&files.wallet_dir);
-    if settings.paused || !settings.started {
-        return;
-    }
-    let index = BackupIndex::load(&folder, &cfg.token, chat_id);
     let gate = folder.gate();
-    let due = {
+    let mut due: Vec<Destination> = Vec::new();
+    for dest in destinations(&settings, cfg.as_ref()) {
+        let index = dest.index(&folder);
+        let key = index.path.to_string_lossy().to_string();
         let mut st = state.lock().unwrap();
-        if gate == index.gate {
-            st.changed_since = 0;
+        let is_due = if gate == index.gate {
+            st.changed_since.remove(&key);
             now.saturating_sub(index.checkpoint_at) > CHECKPOINT_EVERY_SECS
         } else {
-            if st.changed_since == 0 {
-                st.changed_since = now;
-            }
-            now.saturating_sub(st.changed_since) >= QUIET_SECS && now.saturating_sub(index.last_post_at) >= DELTA_EVERY_SECS
+            let since = *st.changed_since.entry(key).or_insert(now);
+            now.saturating_sub(since) >= QUIET_SECS && now.saturating_sub(index.last_post_at) >= DELTA_EVERY_SECS
+        };
+        if is_due {
+            due.push(dest);
         }
-    };
-    if !due {
+    }
+    if due.is_empty() {
         return;
     }
     state.lock().unwrap().running = true;
     workflow_core::task::spawn(async move {
-        let outcome = async {
-            let words = words_for(&wallet, &secret).await?;
+        let words = match words_for(&wallet, &secret).await {
+            Ok(words) => words,
+            Err(err) => {
+                say(crate::ui::warn(format!("backup did not go out: {err}")));
+                state.lock().unwrap().running = false;
+                return;
+            }
+        };
+        for dest in due {
             let quiet = |_line: String| {};
-            run_folder(&folder, &cfg, Some((&name, &words)), false, true, &quiet).await
-        }
-        .await;
-        match outcome {
-            Ok(line) if line.starts_with("nothing") => {}
-            Ok(line) => say(crate::ui::dim(format!("Telegram backup: {line}."))),
-            Err(err) => say(crate::ui::warn(format!("Telegram backup did not go out: {err}"))),
+            match run_to(&folder, &dest, Some((&name, &words)), false, true, &quiet).await {
+                Ok(line) if line.starts_with("nothing") => {}
+                Ok(line) => say(crate::ui::dim(format!("{} backup: {line}.", dest.label()))),
+                Err(err) => say(crate::ui::warn(format!("{} backup did not go out: {err}", dest.label()))),
+            }
         }
         state.lock().unwrap().running = false;
     });
@@ -617,6 +780,11 @@ pub struct BackupStatus {
     /// Wallets in the folder still without a backup key: they need their
     /// words typed once, or one open with their password.
     pub uncovered: Vec<String>,
+    /// The folder the backups also go to, if one is set, and its state.
+    pub folder: Option<String>,
+    pub folder_checkpoint_at: u64,
+    pub folder_deltas: u32,
+    pub folder_last_post_at: u64,
 }
 
 pub fn status(files: &WalletFiles, cfg: Option<&TelegramConfig>) -> BackupStatus {
@@ -624,6 +792,10 @@ pub fn status(files: &WalletFiles, cfg: Option<&TelegramConfig>) -> BackupStatus
     let folder = Folder::around(files).ok();
     let index = match (cfg, &folder) {
         (Some(cfg), Some(folder)) => target_chat(cfg).map(|chat| BackupIndex::load(folder, &cfg.token, chat)).unwrap_or_default(),
+        _ => BackupIndex::default(),
+    };
+    let folder_index = match (&settings.folder, &folder) {
+        (Some(path), Some(folder)) if !path.is_empty() => Destination::Folder(PathBuf::from(path)).index(folder),
         _ => BackupIndex::default(),
     };
     let destination = match cfg.map(|c| (c.home_chat_id.or(c.backup_chat_id), target_chat(c))) {
@@ -651,6 +823,10 @@ pub fn status(files: &WalletFiles, cfg: Option<&TelegramConfig>) -> BackupStatus
         last_post_at: index.last_post_at,
         wallets: folder.as_ref().map(|f| f.covered().iter().map(|w| w.name.clone()).collect()).unwrap_or_default(),
         uncovered: folder.as_ref().map(|f| f.uncovered()).unwrap_or_default(),
+        folder: settings.folder.clone(),
+        folder_checkpoint_at: folder_index.checkpoint_at,
+        folder_deltas: folder_index.delta_seq,
+        folder_last_post_at: folder_index.last_post_at,
     }
 }
 
@@ -874,29 +1050,34 @@ pub async fn flush_before_close(cli: &Arc<KaspaCli>) {
 /// The flush for any front end; `say` receives what happened, or nothing
 /// when there was nothing to post.
 pub async fn flush_for(wallet: &Arc<Wallet>, cfg_path: &Path, name: &str, secret: &Secret, say: &(dyn Fn(String) + Send + Sync)) {
-    let Some(cfg) = TelegramConfig::load(cfg_path) else { return };
-    let Some(chat_id) = target_chat(&cfg) else { return };
+    let cfg = TelegramConfig::load(cfg_path);
     let Ok(files) = WalletFiles::of_wallet(wallet, name).await else { return };
     let Ok(folder) = Folder::around(&files) else { return };
     let settings = WalletBackupSettings::load(&files.wallet_dir);
-    let index = BackupIndex::load(&folder, &cfg.token, chat_id);
     // The wallet file is written at close, after this; a change still in
     // memory — a new hint, a setting — went out at the close after next.
     let _ = wallet.store().commit(secret).await;
-    if settings.paused || !settings.started || index.gate == folder.gate() {
+    let gate = folder.gate();
+    let pending: Vec<Destination> =
+        destinations(&settings, cfg.as_ref()).into_iter().filter(|d| d.index(&folder).gate != gate).collect();
+    if pending.is_empty() {
         return;
     }
-    say(crate::ui::dim("Backing up the latest changes to Telegram before closing…"));
-    // Only the changes: a full copy that has become due waits for the next
-    // open (tester, 2026-10-08: a 22-minute 'close').
-    let outcome = async {
-        let words = words_for(wallet, secret).await?;
+    let words = match words_for(wallet, secret).await {
+        Ok(words) => words,
+        Err(err) => {
+            say(crate::ui::warn(format!("backup did not go out: {err}")));
+            return;
+        }
+    };
+    for dest in pending {
+        say(crate::ui::dim(format!("Backing up the latest changes to {} before closing…", dest.describe())));
+        // Only the changes: a full copy that has become due waits for the next
+        // open (tester, 2026-10-08: a 22-minute 'close').
         let progress = |line: String| say(crate::ui::dim(format!("  {line}")));
-        run_folder(&folder, &cfg, Some((name, &words)), false, false, &progress).await
-    }
-    .await;
-    match outcome {
-        Ok(line) => say(crate::ui::dim(format!("Telegram backup: {line}."))),
-        Err(err) => say(crate::ui::warn(format!("Telegram backup did not go out: {err}"))),
+        match run_to(&folder, &dest, Some((name, &words)), false, false, &progress).await {
+            Ok(line) => say(crate::ui::dim(format!("{} backup: {line}.", dest.label()))),
+            Err(err) => say(crate::ui::warn(format!("{} backup did not go out: {err}", dest.label()))),
+        }
     }
 }
