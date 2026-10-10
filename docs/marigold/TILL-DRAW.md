@@ -30,11 +30,11 @@ A till is registered by a lane claim that carries a till key, made by a business
 
 **The countersignature is what makes a lane a till.** Anyone can pay the claim fee and claim a tag, so if the draw counted every till-shaped lane a ticket would cost 100 MAGLD and the draw would be farmed. A till claim is therefore a new claim version carrying the full id, the till key and the association's signature over both, with the association's key known to the chain the way the trustees' keys are. The shape tells a node the lane is till-shaped; the signature tells it the till is verified; only the signed ones hold tickets, and because the signature covers the tag, a number cannot be squatted ahead of the shop it was given to.
 
-### The draw
+### The shop draw
 
 Every `D` blocks (a number to decide; every anchor interval is natural) one registered till wins a payout, written into the block like a coinbase output. Every node computes the winner the same way, so it is a consensus rule and not a service:
 
-- **Tickets.** One per registered till that is *active*: it has paid at least `F` MAGLD in fees in the last `W` days. Not weighted by turnover. A reward that grows with turnover is a reward for a shop paying itself in a loop; one ticket each cannot be gamed by volume, and it keeps a shop's turnover off the public chain, where competitors would read it. Fees paid are the activity measure because a loop pays them to miners and gets back less.
+- **Tickets.** One per registered till that is *active*: the payments it took in the last `W` days carried at least `F` MAGLD in fees. The customers pay those fees, so this is fees the till has processed, not fees it has paid, and the chain can count them because every payment to a till names the till's lane id. Not weighted by turnover. A reward that grows with turnover is a reward for a shop paying itself in a loop; one ticket each cannot be gamed by volume, and it keeps a shop's turnover off the public chain, where competitors would read it. Fees are the activity measure because a loop pays them to miners and gets back less, and that is the rule for setting `F`: a till that fakes its activity with payments to itself must spend more in fees over the window than a ticket can expect to win in it, by a safe margin. A ticket's expectation is the slice paid out over the window divided by the number of active tills, so `F` is that figure times a safety factor, three say, computed from the previous window's count, which makes it a formula every node evaluates rather than a constant anyone has to revisit.
 - **Seed.** The latest finality anchor's signatures, not a block hash. A block hash is the miner's to grind: the miner of the seed block could try hashes until a friend wins. The anchors are signed by a trustee quorum and no miner can touch them, which makes them a randomness beacon we already have.
 - **Winner.** `H(seed ‖ draw index) mod (number of active tills)` over the registry sorted by key. Every node holds the registry already (it is the lane registry); the draw costs a hash and a lookup, which is nothing against verifying a block.
 - **Funding.** A fixed slice `S` of the block reward, withheld from every block's coinbase and paid out at the draw. The miners pay for it, and what they get in return is adoption: places to spend the coin they are paid in, which is what gives it any worth.
@@ -46,7 +46,7 @@ Every `D` blocks (a number to decide; every anchor interval is natural) one regi
 |---|---|---|
 | `S` | the slice of the block reward that funds the draw | 5 to 10 % |
 | `D` | blocks between draws | one per anchor interval |
-| `F`, `W` | fees a till must have paid in the window to hold a ticket | enough to rule out an idle Pi, small enough for a village shop |
+| `F`, `W` | fees the payments to a till must have carried in the window for it to hold a ticket | `F` a safe multiple of what a ticket can win in the window, so that faking activity costs more than it pays; `W` long enough that a quiet week does not drop a village shop |
 | cap | tills one business may register | one per premises, at most a handful |
 | `N` | active tills before the slice is withheld at all | a few dozen |
 
