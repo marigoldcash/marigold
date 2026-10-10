@@ -15,13 +15,12 @@
     "",
     "The PDF is English only, which is why every other language's button says so."
   ],
-
   "en": {
     "name": "English",
     "dir": "ltr",
     "title": "Marigold Litepaper — digital cash for everyday use",
-    "h1": "Digital cash for everyday use",
-    "tag": "The paper you can actually read on your phone.",
+    "h1": "The Litepaper",
+    "tag": "the non-technical explanation of how this works",
     "pdf": "Download PDF",
     "pdf_end": "Download the PDF",
     "footer1": "No token sale. No presale. Nothing to buy yet.",
@@ -43,13 +42,12 @@
       "What Marigold Is — and Is Not": "in one breath"
     }
   },
-
   "es": {
     "name": "Español",
     "dir": "ltr",
     "title": "Litepaper de Marigold — dinero digital para el día a día",
-    "h1": "Dinero digital para el día a día",
-    "tag": "El documento que de verdad puedes leer en el teléfono.",
+    "h1": "El Litepaper",
+    "tag": "la explicación no técnica de cómo funciona",
     "pdf": "Descargar PDF (en inglés)",
     "pdf_end": "Descargar el PDF (en inglés)",
     "footer1": "Sin venta de tokens. Sin preventa. Todavía no hay nada que comprar.",
@@ -71,13 +69,12 @@
       "What Marigold Is — and Is Not": "en una frase"
     }
   },
-
   "de": {
     "name": "Deutsch",
     "dir": "ltr",
     "title": "Marigold Litepaper — digitales Bargeld für den Alltag",
-    "h1": "Digitales Bargeld für den Alltag",
-    "tag": "Das Papier, das du wirklich auf dem Handy lesen kannst.",
+    "h1": "Das Litepaper",
+    "tag": "die nicht-technische Erklärung, wie das Ganze funktioniert",
     "pdf": "PDF herunterladen (englisch)",
     "pdf_end": "Das PDF herunterladen (englisch)",
     "footer1": "Kein Token-Verkauf. Kein Vorverkauf. Es gibt noch nichts zu kaufen.",
@@ -99,13 +96,12 @@
       "What Marigold Is — and Is Not": "in einem satz"
     }
   },
-
   "fr": {
     "name": "Français",
     "dir": "ltr",
     "title": "Litepaper Marigold — de l'argent liquide numérique pour tous les jours",
-    "h1": "De l'argent liquide numérique, au quotidien",
-    "tag": "Le document que vous pouvez vraiment lire sur votre téléphone.",
+    "h1": "Le Litepaper",
+    "tag": "l'explication non technique de son fonctionnement",
     "pdf": "Télécharger le PDF (en anglais)",
     "pdf_end": "Télécharger le PDF (en anglais)",
     "footer1": "Pas de vente de jetons. Pas de prévente. Il n'y a encore rien à acheter.",
@@ -127,13 +123,12 @@
       "What Marigold Is — and Is Not": "en une phrase"
     }
   },
-
   "it": {
     "name": "Italiano",
     "dir": "ltr",
     "title": "Litepaper di Marigold — contante digitale per tutti i giorni",
-    "h1": "Contante digitale per tutti i giorni",
-    "tag": "Il documento che puoi davvero leggere sul telefono.",
+    "h1": "Il Litepaper",
+    "tag": "la spiegazione non tecnica di come funziona",
     "pdf": "Scarica il PDF (in inglese)",
     "pdf_end": "Scarica il PDF (in inglese)",
     "footer1": "Nessuna vendita di token. Nessuna prevendita. Non c'è ancora nulla da comprare.",
@@ -155,13 +150,12 @@
       "What Marigold Is — and Is Not": "in una frase"
     }
   },
-
   "pt": {
     "name": "Português",
     "dir": "ltr",
     "title": "Litepaper da Marigold — dinheiro digital para o dia a dia",
-    "h1": "Dinheiro digital para o dia a dia",
-    "tag": "O documento que dá para ler de verdade no celular.",
+    "h1": "O Litepaper",
+    "tag": "a explicação não técnica de como isto funciona",
     "pdf": "Baixar o PDF (em inglês)",
     "pdf_end": "Baixar o PDF (em inglês)",
     "footer1": "Sem venda de tokens. Sem pré-venda. Ainda não há nada para comprar.",
@@ -183,13 +177,12 @@
       "What Marigold Is — and Is Not": "em uma frase"
     }
   },
-
   "ru": {
     "name": "Русский",
     "dir": "ltr",
     "title": "Лайтпейпер Marigold — цифровые наличные на каждый день",
-    "h1": "Цифровые наличные на каждый день",
-    "tag": "Документ, который действительно читается с телефона.",
+    "h1": "Лайтпейпер",
+    "tag": "нетехническое объяснение того, как это работает",
     "pdf": "Скачать PDF (на английском)",
     "pdf_end": "Скачать PDF (на английском)",
     "footer1": "Никаких продаж токенов. Никакого пресейла. Покупать пока нечего.",
@@ -211,13 +204,12 @@
       "What Marigold Is — and Is Not": "коротко"
     }
   },
-
   "zh": {
     "name": "中文",
     "dir": "ltr",
     "title": "Marigold 简明白皮书 — 日常可用的数字现金",
-    "h1": "日常可用的数字现金",
-    "tag": "一份真的能在手机上读完的文件。",
+    "h1": "轻白皮书",
+    "tag": "用非技术语言解释它是如何运作的",
     "pdf": "下载 PDF（英文）",
     "pdf_end": "下载 PDF（英文）",
     "footer1": "没有代币销售。没有预售。现在没有任何东西可买。",

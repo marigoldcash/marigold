@@ -367,10 +367,6 @@ def head_html(lang: str, c) -> str:
         f'<div class="head-text" data-lang="{lang}" lang="{html_lang(lang)}">\n'
         f'    <h1>{html.escape(c["h1"], quote=False)}</h1>\n'
         f'    <p class="tag">{html.escape(c["tag"], quote=False)}</p>\n'
-        f'    <div class="actions">\n'
-        f'      <a class="btn gold" href="marigold-litepaper.pdf" download>{html.escape(c["pdf"], quote=False)}</a>\n'
-        f'      <a class="btn line" href="https://marigold.cash/">marigold.cash</a>\n'
-        f'    </div>\n'
         f'  </div>\n'
     )
 

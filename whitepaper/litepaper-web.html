@@ -179,12 +179,6 @@
   footer a{color:var(--petal);text-decoration:none}
   .micro{font-family:"IBM Plex Mono",monospace;font-size:.55rem;letter-spacing:.3em;text-transform:uppercase;
          color:var(--micro);white-space:nowrap;overflow:hidden;text-align:center;padding:.5rem 0}
-  /* the shared footer (chrome.css) follows this page's night theme */
-  @media (prefers-color-scheme:dark){
-    :root:not([data-theme="light"]) .site-foot{color:rgba(239,231,211,.6);border-top-color:rgba(228,163,61,.25)}
-    :root:not([data-theme="light"]) .site-foot .fine{color:rgba(239,231,211,.45)}
-    :root:not([data-theme="light"]) .site-foot a:hover{color:var(--petal)}
-  }
 </style>
 </head>
 <body>
@@ -228,69 +222,37 @@
       <p class="wordmark"><a href="/">Marigold</a></p>
 
       <div class="head-text" data-lang="en" lang="en">
-    <h1>Digital cash for everyday use</h1>
-    <p class="tag">The paper you can actually read on your phone.</p>
-    <div class="actions">
-      <a class="btn gold" href="marigold-litepaper.pdf" download>Download PDF</a>
-      <a class="btn line" href="https://marigold.cash/">marigold.cash</a>
-    </div>
+    <h1>The Litepaper</h1>
+    <p class="tag">the non-technical explanation of how this works</p>
   </div>
 <!-- translations:head -->
 <div class="head-text" data-lang="es" lang="es">
-    <h1>Dinero digital para el día a día</h1>
-    <p class="tag">El documento que de verdad puedes leer en el teléfono.</p>
-    <div class="actions">
-      <a class="btn gold" href="marigold-litepaper.pdf" download>Descargar PDF (en inglés)</a>
-      <a class="btn line" href="https://marigold.cash/">marigold.cash</a>
-    </div>
+    <h1>El Litepaper</h1>
+    <p class="tag">la explicación no técnica de cómo funciona</p>
   </div>
 <div class="head-text" data-lang="de" lang="de">
-    <h1>Digitales Bargeld für den Alltag</h1>
-    <p class="tag">Das Papier, das du wirklich auf dem Handy lesen kannst.</p>
-    <div class="actions">
-      <a class="btn gold" href="marigold-litepaper.pdf" download>PDF herunterladen (englisch)</a>
-      <a class="btn line" href="https://marigold.cash/">marigold.cash</a>
-    </div>
+    <h1>Das Litepaper</h1>
+    <p class="tag">die nicht-technische Erklärung, wie das Ganze funktioniert</p>
   </div>
 <div class="head-text" data-lang="fr" lang="fr">
-    <h1>De l'argent liquide numérique, au quotidien</h1>
-    <p class="tag">Le document que vous pouvez vraiment lire sur votre téléphone.</p>
-    <div class="actions">
-      <a class="btn gold" href="marigold-litepaper.pdf" download>Télécharger le PDF (en anglais)</a>
-      <a class="btn line" href="https://marigold.cash/">marigold.cash</a>
-    </div>
+    <h1>Le Litepaper</h1>
+    <p class="tag">l'explication non technique de son fonctionnement</p>
   </div>
 <div class="head-text" data-lang="it" lang="it">
-    <h1>Contante digitale per tutti i giorni</h1>
-    <p class="tag">Il documento che puoi davvero leggere sul telefono.</p>
-    <div class="actions">
-      <a class="btn gold" href="marigold-litepaper.pdf" download>Scarica il PDF (in inglese)</a>
-      <a class="btn line" href="https://marigold.cash/">marigold.cash</a>
-    </div>
+    <h1>Il Litepaper</h1>
+    <p class="tag">la spiegazione non tecnica di come funziona</p>
   </div>
 <div class="head-text" data-lang="pt" lang="pt">
-    <h1>Dinheiro digital para o dia a dia</h1>
-    <p class="tag">O documento que dá para ler de verdade no celular.</p>
-    <div class="actions">
-      <a class="btn gold" href="marigold-litepaper.pdf" download>Baixar o PDF (em inglês)</a>
-      <a class="btn line" href="https://marigold.cash/">marigold.cash</a>
-    </div>
+    <h1>O Litepaper</h1>
+    <p class="tag">a explicação não técnica de como isto funciona</p>
   </div>
 <div class="head-text" data-lang="ru" lang="ru">
-    <h1>Цифровые наличные на каждый день</h1>
-    <p class="tag">Документ, который действительно читается с телефона.</p>
-    <div class="actions">
-      <a class="btn gold" href="marigold-litepaper.pdf" download>Скачать PDF (на английском)</a>
-      <a class="btn line" href="https://marigold.cash/">marigold.cash</a>
-    </div>
+    <h1>Лайтпейпер</h1>
+    <p class="tag">нетехническое объяснение того, как это работает</p>
   </div>
 <div class="head-text" data-lang="zh" lang="zh-Hans">
-    <h1>日常可用的数字现金</h1>
-    <p class="tag">一份真的能在手机上读完的文件。</p>
-    <div class="actions">
-      <a class="btn gold" href="marigold-litepaper.pdf" download>下载 PDF（英文）</a>
-      <a class="btn line" href="https://marigold.cash/">marigold.cash</a>
-    </div>
+    <h1>轻白皮书</h1>
+    <p class="tag">用非技术语言解释它是如何运作的</p>
   </div>
 <!-- /translations:head -->
 
@@ -299,7 +261,7 @@
       <p class="status">Litepaper · eight languages</p>
 
       <nav class="ways" aria-label="Pages">
-        <a class="take" href="/#start">Take a note</a>
+        <a href="/">Home</a>
         <a aria-current="page" href="/litepaper/">Litepaper</a>
         <a href="/whitepaper/">Whitepaper</a>
         <a href="/faq/">Questions</a>
@@ -1602,24 +1564,27 @@
     等到有真东西了，就会出现在这里。
   </div>
 <!-- /translations:foot -->
-</footer>
 <!-- chrome:footer -->
-<footer class="site-foot">
-  <ul class="links">
-    <li><a href="/#start">Take a note</a></li>
-    <li><a href="/litepaper/">Litepaper</a></li>
-    <li><a href="/whitepaper/">Whitepaper</a></li>
-    <li><a href="/faq/">Questions</a></li>
-    <li><a href="/companies/">Companies</a></li>
-    <li><a href="/about/">About</a></li>
-  </ul>
-  <ul class="links">
-    <li><a href="https://github.com/marigoldcash">GitHub</a></li>
-    <li><a href="https://t.me/marigoldcash_official">Telegram</a></li>
-    <li><a href="mailto:note@marigold.cash">note@marigold.cash</a></li>
-  </ul>
+<footer class="site-foot inband">
+  <div class="inner">
+    <ul class="links">
+      <li><a href="/">Home</a></li>
+      <li><a href="/#start">Take a note</a></li>
+      <li><a href="/litepaper/">Litepaper</a></li>
+      <li><a href="/whitepaper/">Whitepaper</a></li>
+      <li><a href="/faq/">Questions</a></li>
+      <li><a href="/companies/">Companies</a></li>
+      <li><a href="/about/">About</a></li>
+    </ul>
+    <ul class="links">
+      <li><a href="https://github.com/marigoldcash">GitHub</a></li>
+      <li><a href="https://t.me/marigoldcash_official">Telegram</a></li>
+      <li><a href="mailto:note@marigold.cash">note@marigold.cash</a></li>
+    </ul>
+  </div>
 </footer>
 <!-- /chrome:footer -->
+</footer>
 
 <script id="chrome-data" type="application/json">{"en": {"title": "Marigold Litepaper — digital cash for everyday use", "theme_label": "Switch between day and night", "lang_label": "Language"}, "es": {"title": "Litepaper de Marigold — dinero digital para el día a día", "theme_label": "Cambiar entre día y noche", "lang_label": "Idioma"}, "de": {"title": "Marigold Litepaper — digitales Bargeld für den Alltag", "theme_label": "Zwischen Tag und Nacht wechseln", "lang_label": "Sprache"}, "fr": {"title": "Litepaper Marigold — de l'argent liquide numérique pour tous les jours", "theme_label": "Basculer entre jour et nuit", "lang_label": "Langue"}, "it": {"title": "Litepaper di Marigold — contante digitale per tutti i giorni", "theme_label": "Passa da giorno a notte", "lang_label": "Lingua"}, "pt": {"title": "Litepaper da Marigold — dinheiro digital para o dia a dia", "theme_label": "Alternar entre dia e noite", "lang_label": "Idioma"}, "ru": {"title": "Лайтпейпер Marigold — цифровые наличные на каждый день", "theme_label": "Переключить день и ночь", "lang_label": "Язык"}, "zh": {"title": "Marigold 简明白皮书 — 日常可用的数字现金", "theme_label": "切换日间与夜间", "lang_label": "语言"}}</script>
 <script>
