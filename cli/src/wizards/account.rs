@@ -31,9 +31,6 @@ pub(crate) async fn create(
     }
 
     let wallet_secret = Secret::new(term.ask(true, "Enter wallet password: ").await?.trim().as_bytes().to_vec());
-    if wallet_secret.as_ref().is_empty() && !crate::EMPTY_WALLET_PASSWORD_ALLOWED {
-        return Err(Error::WalletSecretRequired);
-    }
 
     let payment_secret = if prv_key_data_info.is_encrypted() {
         let payment_secret = Secret::new(term.ask(true, "Enter payment password: ").await?.trim().as_bytes().to_vec());
@@ -102,9 +99,6 @@ pub(crate) async fn bip32_watch(ctx: &Arc<KaspaCli>, name: Option<&str>) -> Resu
     xpub_keys.push(xpub_key.trim().to_owned());
 
     let wallet_secret = Secret::new(term.ask(true, "Enter wallet password: ").await?.trim().as_bytes().to_vec());
-    if wallet_secret.as_ref().is_empty() && !crate::EMPTY_WALLET_PASSWORD_ALLOWED {
-        return Err(Error::WalletSecretRequired);
-    }
 
     let account_create_args_bip32_watch = AccountCreateArgsBip32Watch::new(name, xpub_keys);
     let account = wallet.create_account_bip32_watch(&wallet_secret, account_create_args_bip32_watch).await?;

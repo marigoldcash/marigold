@@ -1270,7 +1270,28 @@ fn required_fee_quanta(mass: u64, feerate: f64) -> u64 {
 /// returned as change) — or, when the wallet holds nothing else, withheld from the
 /// rotated value itself ("slack mode": the produced decomposition simply comes out
 /// one fee-quantum short, the bootstrap case for a first-ever bearer receive).
+/// Where a rotation's fee comes from when the only spare notes are large.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum FeeSource {
+    /// Housekeeping that can wait: refuse rather than shred a large note; the
+    /// fresh stamps land in a minute.
+    WaitForStamps,
+    /// Something a person is doing now — taking a note handed to them — must
+    /// not fail for want of a stamp: the fee comes out of the note's own value
+    /// (slack mode), exactly as it does into an empty wallet (GitHub #15).
+    SlackIfNoStamp,
+}
+
 pub async fn rotate_notes(wallet: &Arc<Wallet>, wallet_secret: Secret, serials: Vec<Hash>) -> Result<TransferResult> {
+    rotate_notes_with(wallet, wallet_secret, serials, FeeSource::WaitForStamps).await
+}
+
+pub async fn rotate_notes_with(
+    wallet: &Arc<Wallet>,
+    wallet_secret: Secret,
+    serials: Vec<Hash>,
+    fee_source: FeeSource,
+) -> Result<TransferResult> {
     if serials.is_empty() {
         return Err(Error::Custom("no serials given to rotate".to_string()));
     }
@@ -1335,11 +1356,21 @@ pub async fn rotate_notes(wallet: &Arc<Wallet>, wallet_secret: Secret, serials: 
         // two 10s gone, one stamp gone, nothing back). Housekeeping that can
         // wait should wait.
         if source_total >= fee_petals && source_total > fee_petals.saturating_mul(FEE_SOURCE_MAX_OVERSHOOT) {
-            return Err(Error::Custom(format!(
-                "no small note is confirmed yet to pay the {} petal fee — the smallest available is {} petals; \
-                 retry once the fee stamps have landed",
-                fee_petals, source_total
-            )));
+            match fee_source {
+                FeeSource::WaitForStamps => {
+                    return Err(Error::Custom(format!(
+                        "no small note is confirmed yet to pay the {} petal fee — the smallest available is {} petals; \
+                         retry once the fee stamps have landed",
+                        fee_petals, source_total
+                    )));
+                }
+                // As if there were no spare at all: the fee comes out of the
+                // rotated value, which the branch below handles.
+                FeeSource::SlackIfNoStamp => {
+                    source_infos.clear();
+                    source_total = 0;
+                }
+            }
         }
 
         let (produced_denoms, consumed_serial_count) = if source_total >= fee_petals {
@@ -1432,8 +1463,10 @@ pub async fn bearer_import(wallet: &Arc<Wallet>, wallet_secret: Secret, bearer: 
     let note_key_store = wallet.store().as_note_key_store()?;
     note_key_store.import_bearer_key(&wallet_secret, bearer.sn, bearer.sk, bearer.d).await?;
 
-    // The hot-key rule (POOL-SPEC.md P5.6): rotate immediately, not lazily.
-    let rotation = rotate_notes(wallet, wallet_secret, vec![bearer.sn]).await?;
+    // The hot-key rule (POOL-SPEC.md P5.6): rotate immediately, not lazily —
+    // and never fail for want of a fee stamp: a wallet holding only large
+    // notes takes the fee from the note itself, as an empty one does.
+    let rotation = rotate_notes_with(wallet, wallet_secret, vec![bearer.sn], FeeSource::SlackIfNoStamp).await?;
     Ok(BearerImportResult { imported_sn: bearer.sn, rotation })
 }
 

@@ -844,10 +844,14 @@ pub async fn open_session(options: &SessionOptions, shutdown: Arc<AtomicBool>, s
                 kaspa_wrpc_client::KaspaRpcClient::new(WrpcEncoding::Borsh, Some(&url), None, Some(network_id), None)
                     .map_err(|err| crate::error::Error::custom(format!("{url}: {err}")))?,
             );
+            // Fallback with a deadline, not retry without end: a node that is
+            // not there must say so in seconds, not hang the screen
+            // (desktop tester, 2026-10-09, GitHub #13).
             let options = ConnectOptions {
                 block_async_connect: true,
-                strategy: ConnectStrategy::Retry,
+                strategy: ConnectStrategy::Fallback,
                 url: Some(url.clone()),
+                connect_timeout: Some(std::time::Duration::from_secs(15)),
                 ..Default::default()
             };
             log::info!("Using the node at {url}");

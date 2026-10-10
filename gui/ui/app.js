@@ -30,7 +30,9 @@ function startSyncWatch() {
 
 function show(screen) {
   for (const s of document.querySelectorAll(".screen")) s.hidden = s.id !== `screen-${screen}`;
+  $("close-wallet").hidden = screen !== "app";
 }
+$("node").addEventListener("change", () => { $("node-local-hint").hidden = $("node").value !== "local"; });
 function tab(name) {
   for (const b of document.querySelectorAll(".tab")) b.classList.toggle("active", b.dataset.tab === name);
   for (const p of document.querySelectorAll(".tab-panel")) p.hidden = p.id !== `tab-${name}`;
@@ -231,7 +233,7 @@ $("create").addEventListener("click", async () => {
   if ($("create-password").value !== $("create-password2").value) { $("create-error").textContent = "The two passwords differ."; return; }
   $("create").disabled = true;
   try {
-    const made = await invoke("create_wallet", { name: $("create-name").value, password: $("create-password").value, words: restoring ? $("create-words").value : null });
+    const made = await invoke("create_wallet", { name: $("create-name").value, password: $("create-password").value, words: restoring ? $("create-words").value : null, allowEmpty: $("create-nopass").checked });
     await loadWallets(made.filename);
     if (restoring) { show("open"); }
     else {
@@ -389,18 +391,18 @@ async function watch(code) {
 }
 
 $("show-words").addEventListener("click", async () => {
+  if (!$("words-again").hidden) { hideWords(); return; }
   $("words-error").textContent = "";
   try {
     const text = await invoke("words", { password: $("words-password").value });
     $("words-password").value = "";
     const ol = $("words-again"); ol.innerHTML = "";
     for (const w of text.split(" ")) { const li = document.createElement("li"); li.textContent = w; ol.appendChild(li); }
-    ol.hidden = false; $("hide-words").hidden = false;
+    ol.hidden = false; $("show-words").textContent = "Hide my 24 words";
   } catch (e) { $("words-error").textContent = String(e); }
 });
-$("hide-words").addEventListener("click", () => { $("words-again").innerHTML = ""; $("words-again").hidden = true; $("hide-words").hidden = true; });
-$("close-wallet").addEventListener("click", () => { $("words-again").innerHTML = ""; $("words-again").hidden = true; $("hide-words").hidden = true; });
-$("refresh-status").addEventListener("click", refreshStatus);
+function hideWords() { $("words-again").innerHTML = ""; $("words-again").hidden = true; $("show-words").textContent = "Show my 24 words"; }
+$("close-wallet").addEventListener("click", hideWords);
 $("close-wallet").addEventListener("click", async () => {
   watching = null; stopPairWatch(); if (syncTimer) { clearInterval(syncTimer); syncTimer = null; } $("syncing").hidden = true;
   await invoke("close");

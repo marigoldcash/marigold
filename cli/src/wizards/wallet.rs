@@ -186,31 +186,35 @@ pub(crate) async fn create(
     // An empty or mismatched password asks again rather than ending the
     // wizard with everything typed so far lost (tester, 2026-10-07).
     let wallet_secret = loop {
-        let first = Secret::new(term.ask(true, "Enter wallet encryption password: ").await?.trim().as_bytes().to_vec());
-        if first.as_ref().is_empty() {
-            if !crate::EMPTY_WALLET_PASSWORD_ALLOWED {
-                tprintln!(ctx, "A password is needed — it is what opens the wallet every day. Please type one.");
+        let typed = term.ask(true, "Enter wallet encryption password: ").await?.trim().to_string();
+        let allow_empty = ctx.advanced() || crate::empty_password_allowed_by_env();
+        match crate::password_verdict(&typed, allow_empty) {
+            crate::PasswordVerdict::EmptyRefused => {
+                tprintln!(ctx, "A password is needed — at least {} characters; a PIN will do.", crate::MIN_WALLET_PASSWORD_CHARS);
+                tprintln!(
+                    ctx,
+                    "{}",
+                    crate::ui::dim(
+                        "A wallet without a password is an advanced choice: 'advanced on' first, or MARIGOLD_ALLOW_EMPTY_PASSWORD=1 for a script."
+                    )
+                );
                 continue;
             }
-            // Testnet: no password at all is allowed; the money is worthless
-            // by design. The main network will ask for one (LAUNCH-PLAN.md).
-            tprintln!(
-                ctx,
-                "{}",
-                crate::ui::dim("No password: this wallet opens with Enter alone. The main network will ask for one.")
-            );
-            break first;
+            crate::PasswordVerdict::TooShort => {
+                tprintln!(ctx, "At least {} characters, please — a PIN will do.", crate::MIN_WALLET_PASSWORD_CHARS);
+                continue;
+            }
+            crate::PasswordVerdict::EmptyAllowed => {
+                tprintln!(
+                    ctx,
+                    "{}",
+                    crate::ui::dim("No password: this wallet opens with Enter alone. Your choice, made in advanced mode.")
+                );
+                break Secret::new(Vec::new());
+            }
+            crate::PasswordVerdict::Fine => {}
         }
-        if first.as_ref().len() < 8 {
-            // The owner's call how to lock the door (tester, 2026-10-07); the
-            // backups never open with it, so a short one risks the files on
-            // this disk and nothing else.
-            tprintln!(
-                ctx,
-                "{}",
-                crate::ui::dim("Short, but your call — it protects the files on this computer; backups open with the 24 words.")
-            );
-        }
+        let first = Secret::new(typed.as_bytes().to_vec());
         let again = Secret::new(term.ask(true, "Re-enter wallet encryption password: ").await?.trim().as_bytes().to_vec());
         if again.as_ref() != first.as_ref() {
             tprintln!(ctx, "They do not match — once more.");

@@ -112,6 +112,13 @@ pub struct KaspaCli {
     /// time anyone asks (tester, 2026-10-08).
     #[cfg_attr(not(feature = "embedded-node"), allow(dead_code))]
     mine_to: Mutex<Option<(String, String)>>,
+    /// The ledger watch while mining: (accepted blocks, ledger total, since
+    /// when the total has stood still, when it was last re-read). A ledger
+    /// that does not move while blocks are accepted is a wallet that has lost
+    /// its node's notifications; re-reading it is what reopening does
+    /// (tester, 2026-10-09, GitHub #18).
+    #[cfg_attr(not(feature = "embedded-node"), allow(dead_code))]
+    ledger_watch: Mutex<(u64, u64, u64, u64)>,
     /// A miner program running in the background on this machine, on the
     /// node this wallet is connected to (PLAN P8.3c). Its miner is ours:
     /// 'mine' steers it and the own lane counts on it. `remote_mining` is
@@ -355,6 +362,7 @@ impl KaspaCli {
             #[cfg(feature = "embedded-node")]
             cpu_miner: Mutex::new(None),
             mine_to: Mutex::new(None),
+            ledger_watch: Mutex::new((0, 0, 0, 0)),
             remote_miner: Arc::new(AtomicBool::new(false)),
             remote_mining: Arc::new(AtomicBool::new(false)),
             #[cfg(feature = "embedded-node")]
@@ -1502,6 +1510,44 @@ impl KaspaCli {
         });
     }
 
+    /// Mining pays this wallet, blocks are being accepted, and the ledger has
+    /// not moved for five minutes: the wallet has lost its node's
+    /// notifications, and a reload — what reopening does — brings them back.
+    /// At most once in ten minutes, and said out loud.
+    #[cfg(feature = "embedded-node")]
+    async fn reread_ledger_if_stuck(self: &Arc<Self>) {
+        let Some(miner) = self.cpu_miner.lock().unwrap().clone() else { return };
+        let accepted = miner.blocks_accepted();
+        let total =
+            self.wallet.account().ok().and_then(|account| account.balance()).map(|b| b.mature.saturating_add(b.pending)).unwrap_or(0);
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let reload = {
+            let mut watch = self.ledger_watch.lock().unwrap();
+            let (last_accepted, last_total, since, last_reload) = *watch;
+            let moved = total != last_total;
+            let grew = accepted > last_accepted.saturating_add(2);
+            let since = if moved || !grew {
+                0
+            } else if since == 0 {
+                now
+            } else {
+                since
+            };
+            let reload = since > 0 && now.saturating_sub(since) >= 300 && now.saturating_sub(last_reload) >= 600;
+            *watch = (accepted, total, if reload { 0 } else { since }, if reload { now } else { last_reload });
+            reload
+        };
+        if !reload {
+            return;
+        }
+        tprintln!(self, "{}", style("Blocks are being accepted but the ledger has not moved: re-reading it from the node.").dim());
+        let guard = self.wallet.guard();
+        let guard = guard.lock().await;
+        if let Err(err) = self.wallet.reload(true, &guard).await {
+            tprintln!(self, "{}", crate::ui::warn(format!("The ledger could not be re-read ({err}); 'reload' does it by hand.")));
+        }
+    }
+
     /// `mine start [percent]` — lend the machine's spare CPU to the network.
     ///
     /// Asks for a percentage rather than a thread count because that is the
@@ -2340,6 +2386,8 @@ impl KaspaCli {
         if !self.wallet.is_open() {
             return;
         }
+        #[cfg(feature = "embedded-node")]
+        self.reread_ledger_if_stuck().await;
         let loud = announce || self.auto_verbose();
         let ticker = self.ticker();
         // The commands wait for the sync; so does everything done on its
@@ -3788,14 +3836,13 @@ impl KaspaCli {
         let mut attempts = 0;
         let wallet_secret = loop {
             let entered = self.term().ask(true, "Enter wallet password: ").await?.trim().as_bytes().to_vec();
-            if !entered.is_empty() || crate::EMPTY_WALLET_PASSWORD_ALLOWED {
+            // An empty answer may be the password: wallets made in advanced
+            // mode have none. The guaranteed decrypt failure says so if not.
+            if !entered.is_empty() || attempts > 0 {
                 break Secret::new(entered);
             }
             attempts += 1;
-            if attempts >= 3 {
-                return Err(Error::custom("no password entered"));
-            }
-            tprintln!(self, "Password was empty — try again (Ctrl+C to abort).");
+            tprintln!(self, "Password was empty — press Enter again if this wallet has none, or type it (Ctrl+C to abort).");
         };
 
         let payment_secret = if let Some(account) = account {

@@ -212,6 +212,17 @@ impl Balance {
                 unit.clone(),
                 ui::paint(ui::Ink::Moss, aside),
             ]);
+            if ctx.mining_active() {
+                // What the figures are while mining (tester, 2026-10-09): a
+                // reward arrives as a pending piece, counts once mature, and
+                // is minted into notes by the housekeeping once enough has.
+                rows.push(vec![
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                    ui::paint(ui::Ink::Moss, "a piece is one block reward; pending ones are still maturing and are not in the amount; once enough has matured the housekeeping mints it into notes and says so"),
+                ]);
+            }
         }
 
         ui::table(&ctx, &COLUMNS, &rows);

@@ -73,9 +73,6 @@ async fn export_multisig_account(ctx: Arc<KaspaCli>, account: Arc<MultiSig>) -> 
         Some(v) if v.is_empty() => Err(Error::WatchOnlyAccountNoKeyData),
         Some(prv_key_data_ids) => {
             let wallet_secret = Secret::new(ctx.term().ask(true, "Enter wallet password: ").await?.trim().as_bytes().to_vec());
-            if wallet_secret.as_ref().is_empty() && !crate::EMPTY_WALLET_PASSWORD_ALLOWED {
-                return Err(Error::WalletSecretRequired);
-            }
 
             tprintln!(ctx, "required signatures: {}", account.minimum_signatures());
             tprintln!(ctx, "");
@@ -123,9 +120,6 @@ async fn export_single_key_account(ctx: Arc<KaspaCli>, account: Arc<dyn Account>
     let prv_key_data_id = account.prv_key_data_id()?;
 
     let wallet_secret = Secret::new(ctx.term().ask(true, "Enter wallet password: ").await?.trim().as_bytes().to_vec());
-    if wallet_secret.as_ref().is_empty() && !crate::EMPTY_WALLET_PASSWORD_ALLOWED {
-        return Err(Error::WalletSecretRequired);
-    }
 
     let prv_key_data = ctx.store().as_prv_key_data_store()?.load_key_data(&wallet_secret, prv_key_data_id).await?;
     let Some(keydata) = prv_key_data else { return Err(Error::KeyDataNotFound) };

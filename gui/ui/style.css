@@ -47,3 +47,8 @@ button.link { background: none; border: none; padding: 0; margin: 0; color: var(
 .banner { margin: 0 0 10px; padding: 8px 12px; border: 1px solid var(--line); border-left: 3px solid var(--gold); border-radius: 6px; background: var(--panel); color: var(--petal); font-size: 13px; font-variant-numeric: tabular-nums; }
 .aside { border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; margin: 0 0 16px; }
 .qr.small-qr { width: 180px; }
+
+details.fine { margin: 6px 0; font-size: 13px; color: var(--moss); }
+details.fine summary { cursor: pointer; }
+label.check { display: flex; gap: 8px; align-items: baseline; font-size: 13px; }
+label.check input { width: auto; margin: 0; }

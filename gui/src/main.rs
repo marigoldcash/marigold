@@ -189,13 +189,22 @@ async fn probe() -> Result<(Arc<Wallet>, String, NetworkId), String> {
 /// same wallet is rebuilt from a written-down set (its notes still need the
 /// wallet's files, restored with the terminal wallet's `backup restore`).
 #[tauri::command]
-async fn create_wallet(name: String, password: String, words: Option<String>) -> Result<Created, String> {
+async fn create_wallet(name: String, password: String, words: Option<String>, allow_empty: Option<bool>) -> Result<Created, String> {
     use kaspa_wallet_core::storage::keydata::PrvKeyDataVariantKind;
     use kaspa_wallet_core::storage::local::notevault::{account_mnemonic_from_vault_words, new_vault_words};
     let name = name.trim();
     let name = if name.is_empty() { "marigold" } else { name };
-    if password.is_empty() && !kaspa_cli_lib::EMPTY_WALLET_PASSWORD_ALLOWED {
-        return Err("a password is needed — it is what opens the wallet every day".to_string());
+    match kaspa_cli_lib::password_verdict(&password, allow_empty.unwrap_or(false) || kaspa_cli_lib::empty_password_allowed_by_env()) {
+        kaspa_cli_lib::PasswordVerdict::EmptyRefused => {
+            return Err(format!(
+                "a password is needed — at least {} characters; a PIN will do. No password at all is the advanced box below.",
+                kaspa_cli_lib::MIN_WALLET_PASSWORD_CHARS
+            ));
+        }
+        kaspa_cli_lib::PasswordVerdict::TooShort => {
+            return Err(format!("at least {} characters, please — a PIN will do", kaspa_cli_lib::MIN_WALLET_PASSWORD_CHARS));
+        }
+        _ => {}
     }
     let (wallet, _, network_id) = probe().await?;
     wallet.set_network_id(&network_id).map_err(|e| e.to_string())?;
@@ -287,6 +296,8 @@ async fn open(app: AppHandle, state: State<'_, App>, wallet: String, password: S
         // the way out is a choice on this screen (founder, 2026-09-23).
         if text.contains("already in use") {
             "Looks like there is already a Marigold network running on this computer. Select \"A network running on this computer\" to connect to it.".to_string()
+        } else if node == "local" && (text.contains("cannot reach") || text.contains("Connection refused") || text.contains("timed out")) {
+            "No Marigold network is running on this computer right now. \"A network running on this computer\" is for a node already started here — by the terminal wallet's sync, by marigoldd, or by another Marigold program. Choose \"Sync here, inside the app\" or a public computer instead.".to_string()
         } else {
             text
         }
