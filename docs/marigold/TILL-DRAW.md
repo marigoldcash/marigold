@@ -30,7 +30,7 @@ A till is registered by a lane claim that carries a till key, made by a business
 
 **The countersignature is what makes a lane a till.** Anyone can pay the claim fee and claim a tag, so if the draw counted every till-shaped lane a ticket would cost 100 MAGLD and the draw would be farmed. A till claim is therefore a new claim version carrying the full id, the till key and the association's signature over both, with the association's key known to the chain the way the trustees' keys are. The shape tells a node the lane is till-shaped; the signature tells it the till is verified; only the signed ones hold tickets, and because the signature covers the tag, a number cannot be squatted ahead of the shop it was given to.
 
-### The shop draw
+## The shop draw
 
 Every `D` blocks (a number to decide; every anchor interval is natural) one registered till wins a payout, written into the block like a coinbase output. Every node computes the winner the same way, so it is a consensus rule and not a service:
 
@@ -52,10 +52,6 @@ Every `D` blocks (a number to decide; every anchor interval is natural) one regi
 
 With ten blocks a second and a modest slice, the pool per draw is a few coins; the point is that a shop in a village with twenty tills in the country wins often, and a shop among twenty thousand wins rarely but the twenty thousand tills are the adoption we wanted.
 
-### Privacy and compliance
-
-Customers stay bearer-anonymous; nothing changes for them. Merchants are public, which they are by law. The chain carries the till key, the lane tag and the fiscal-log hashes, never the turnover. A tax office sees a cash system that produces the VAT report by itself and keeps a record it cannot alter; that is the compliance argument, and it is stronger than any argument a coin can make about itself.
-
 ### Keep it a bonus
 
 A shop should take Marigold because customers pay with it; the draw is the thank-you. If the draw ever looks like the reason to buy a Pi, the Pi looks like an investment product, and that is a conversation with a regulator nobody wants. The slice stays modest and the language stays "a little on top".
@@ -75,6 +71,10 @@ Three design points carry it:
 Two details from the group discussion. **The threshold is on the fee, not the amount.** The threshold has two jobs, to keep a node's ticket set small and to stop a coin being paid in a hundred crumbs for a hundred tickets; a fee floor does the second on its own, since a loop of tiny payments costs more in fees than it can win. Set it so a normal purchase, a coffee, clears it and a purchase split into crumbs does not: on the testnet the normal fee of a single-note payment, so every real purchase counts. It is one number the trustees can carry in the anchor and move without a hard fork. **The payment names the till.** For a node to count a ticket the note transfer carries the till's lane id, a field in the transfer and the one place where the till reaches into the payment format; it is the same field that lets an auditor count a till's payments against its journal (the till, above). The pot activates with the draw, at the same `N` tills, and freezes but keeps its balance below it.
 
 Two things to settle before proposing it. **Law:** a prize draw tied to a purchase is a promotional game in Swiss and EU law, allowed when the purchase is at the normal price and nobody sells tickets, which is this case; the association must never sell a ticket, or a Pi, as a chance to win, and a lawyer should read it once with the receipt-lottery precedents on the table. **Numbers:** the slice, the threshold, the target and the cap; a month's pot at one percent of the reward is a few thousand MAGLD at today's emission, and whether that is a draw people talk about or one they ignore is the question to decide.
+
+## Privacy and compliance
+
+Customers stay bearer-anonymous; nothing changes for them. Merchants are public, which they are by law. The chain carries the till key, the lane tag and the fiscal-log hashes, never the turnover. A tax office sees a cash system that produces the VAT report by itself and keeps a record it cannot alter; that is the compliance argument, and it is stronger than any argument a coin can make about itself.
 
 ## ASIC resistance: the options, and the case against each
 
