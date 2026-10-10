@@ -23,6 +23,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/chrome.css">
 <script>
   /* Theme and language are settled before the first paint, so the page never
      flashes the wrong one. Both are plain attributes on <html>; the CSS does
@@ -144,12 +145,6 @@
   .langpick select option{background:#18291f;color:#efe7d3}
   .tgl:focus-visible,.langpick:focus-within,.btn:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
 
-  header{background:var(--band-bg);color:var(--band-fg);border-bottom:3px solid var(--gold);
-         padding:2.2rem 1.25rem 2.2rem;text-align:center}
-  header .rosette{width:84px;height:84px;display:block;margin:0 auto 1.1rem}
-  header .kicker{color:var(--gold);margin-bottom:.8rem}
-  header h1{font-weight:500;font-size:clamp(1.9rem,6vw,2.7rem);line-height:1.15;letter-spacing:.01em;text-wrap:balance}
-  header p.tag{color:var(--band-dim);margin-top:.7rem;font-size:1rem;font-style:italic}
   .actions{margin-top:1.5rem;display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap}
   .btn{display:inline-block;font-family:"IBM Plex Mono",monospace;font-size:.78rem;letter-spacing:.12em;
        text-transform:uppercase;text-decoration:none;padding:.7rem 1.25rem;border-radius:6px}
@@ -184,6 +179,12 @@
   footer a{color:var(--petal);text-decoration:none}
   .micro{font-family:"IBM Plex Mono",monospace;font-size:.55rem;letter-spacing:.3em;text-transform:uppercase;
          color:var(--micro);white-space:nowrap;overflow:hidden;text-align:center;padding:.5rem 0}
+  /* the shared footer (chrome.css) follows this page's night theme */
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme="light"]) .site-foot{color:rgba(239,231,211,.6);border-top-color:rgba(228,163,61,.25)}
+    :root:not([data-theme="light"]) .site-foot .fine{color:rgba(239,231,211,.45)}
+    :root:not([data-theme="light"]) .site-foot a:hover{color:var(--petal)}
+  }
 </style>
 </head>
 <body>
@@ -211,58 +212,22 @@
   </label>
 </nav>
 
-<header>
-  <svg class="rosette" viewBox="-60 -60 120 120" role="img" aria-label="Marigold flower">
-        <!-- engraved guide rings -->
-        <circle r="55" fill="none" stroke="rgba(228,163,61,.18)" stroke-width=".7"/>
-        <circle r="49" fill="none" stroke="rgba(228,163,61,.12)" stroke-width=".7"/>
-        <!-- outer petal ring -->
-        <g fill="#c9761f" stroke="#0f1813" stroke-width=".8">
-          <ellipse cx="0" cy="-38" rx="10.5" ry="17" transform="rotate(0)"/>
-          <ellipse cx="0" cy="-38" rx="10.5" ry="17" transform="rotate(30)"/>
-          <ellipse cx="0" cy="-38" rx="10.5" ry="17" transform="rotate(60)"/>
-          <ellipse cx="0" cy="-38" rx="10.5" ry="17" transform="rotate(90)"/>
-          <ellipse cx="0" cy="-38" rx="10.5" ry="17" transform="rotate(120)"/>
-          <ellipse cx="0" cy="-38" rx="10.5" ry="17" transform="rotate(150)"/>
-          <ellipse cx="0" cy="-38" rx="10.5" ry="17" transform="rotate(180)"/>
-          <ellipse cx="0" cy="-38" rx="10.5" ry="17" transform="rotate(210)"/>
-          <ellipse cx="0" cy="-38" rx="10.5" ry="17" transform="rotate(240)"/>
-          <ellipse cx="0" cy="-38" rx="10.5" ry="17" transform="rotate(270)"/>
-          <ellipse cx="0" cy="-38" rx="10.5" ry="17" transform="rotate(300)"/>
-          <ellipse cx="0" cy="-38" rx="10.5" ry="17" transform="rotate(330)"/>
-        </g>
-        <!-- middle petal ring, offset -->
-        <g fill="#e4a33d" stroke="#0f1813" stroke-width=".8">
-          <ellipse cx="0" cy="-26" rx="9" ry="14" transform="rotate(15)"/>
-          <ellipse cx="0" cy="-26" rx="9" ry="14" transform="rotate(45)"/>
-          <ellipse cx="0" cy="-26" rx="9" ry="14" transform="rotate(75)"/>
-          <ellipse cx="0" cy="-26" rx="9" ry="14" transform="rotate(105)"/>
-          <ellipse cx="0" cy="-26" rx="9" ry="14" transform="rotate(135)"/>
-          <ellipse cx="0" cy="-26" rx="9" ry="14" transform="rotate(165)"/>
-          <ellipse cx="0" cy="-26" rx="9" ry="14" transform="rotate(195)"/>
-          <ellipse cx="0" cy="-26" rx="9" ry="14" transform="rotate(225)"/>
-          <ellipse cx="0" cy="-26" rx="9" ry="14" transform="rotate(255)"/>
-          <ellipse cx="0" cy="-26" rx="9" ry="14" transform="rotate(285)"/>
-          <ellipse cx="0" cy="-26" rx="9" ry="14" transform="rotate(315)"/>
-          <ellipse cx="0" cy="-26" rx="9" ry="14" transform="rotate(345)"/>
-        </g>
-        <!-- inner petal ring -->
-        <g fill="#f3cf82" stroke="#0f1813" stroke-width=".7">
-          <ellipse cx="0" cy="-15" rx="7" ry="10.5" transform="rotate(0)"/>
-          <ellipse cx="0" cy="-15" rx="7" ry="10.5" transform="rotate(40)"/>
-          <ellipse cx="0" cy="-15" rx="7" ry="10.5" transform="rotate(80)"/>
-          <ellipse cx="0" cy="-15" rx="7" ry="10.5" transform="rotate(120)"/>
-          <ellipse cx="0" cy="-15" rx="7" ry="10.5" transform="rotate(160)"/>
-          <ellipse cx="0" cy="-15" rx="7" ry="10.5" transform="rotate(200)"/>
-          <ellipse cx="0" cy="-15" rx="7" ry="10.5" transform="rotate(240)"/>
-          <ellipse cx="0" cy="-15" rx="7" ry="10.5" transform="rotate(280)"/>
-          <ellipse cx="0" cy="-15" rx="7" ry="10.5" transform="rotate(320)"/>
-        </g>
-        <circle r="8.5" fill="#7a4212" stroke="#0f1813" stroke-width=".8"/>
-        <circle r="3" fill="#5a300c"/>
-      </svg>
-  <div class="kicker">marigold &middot; litepaper</div>
-  <div class="head-text" data-lang="en" lang="en">
+<!-- chrome:header -->
+<div class="sky">
+  <header class="note compact" aria-label="Marigold specimen note">
+    <div class="micro top" aria-hidden="true">marigold · digital cash · marigold · digital cash · marigold · digital cash · marigold · digital cash · marigold · digital cash · marigold · digital cash · marigold · digital cash · marigold · digital cash · marigold · digital cash · marigold · digital cash · marigold · digital cash · marigold · digital cash · </div>
+
+    <span class="corner tl" aria-hidden="true">1</span>
+    <span class="corner tr" aria-hidden="true">10</span>
+    <span class="corner bl" aria-hidden="true">100</span>
+    <span class="corner br" aria-hidden="true">1000</span>
+
+    <div class="face">
+      <img class="rosette" src="/rosette.svg" width="118" height="118" alt="Marigold flower">
+
+      <p class="wordmark"><a href="/">Marigold</a></p>
+
+      <div class="head-text" data-lang="en" lang="en">
     <h1>Digital cash for everyday use</h1>
     <p class="tag">The paper you can actually read on your phone.</p>
     <div class="actions">
@@ -328,7 +293,30 @@
     </div>
   </div>
 <!-- /translations:head -->
-</header>
+
+      <div class="divider" aria-hidden="true"></div>
+
+      <p class="status">Litepaper · eight languages</p>
+
+      <nav class="ways" aria-label="Pages">
+        <a class="take" href="/#start">Take a note</a>
+        <a aria-current="page" href="/litepaper/">Litepaper</a>
+        <a href="/whitepaper/">Whitepaper</a>
+        <a href="/faq/">Questions</a>
+        <a href="/companies/">Companies</a>
+        <a href="/about/">About</a>
+      </nav>
+    </div>
+
+    <div class="serial-row" aria-hidden="true">
+      <span>Nº 000002 — specimen</span>
+      <span>marigold.cash</span>
+    </div>
+
+    <div class="micro bottom" aria-hidden="true">marigold · digital cash · marigold · digital cash · marigold · digital cash · marigold · digital cash · marigold · digital cash · marigold · digital cash · marigold · digital cash · marigold · digital cash · marigold · digital cash · marigold · digital cash · marigold · digital cash · marigold · digital cash · </div>
+  </header>
+</div>
+<!-- /chrome:header -->
 
 <div class="micro" aria-hidden="true">marigold · litepaper · marigold · litepaper · marigold · litepaper · marigold · litepaper · marigold · litepaper</div>
 
@@ -1615,6 +1603,23 @@
   </div>
 <!-- /translations:foot -->
 </footer>
+<!-- chrome:footer -->
+<footer class="site-foot">
+  <ul class="links">
+    <li><a href="/#start">Take a note</a></li>
+    <li><a href="/litepaper/">Litepaper</a></li>
+    <li><a href="/whitepaper/">Whitepaper</a></li>
+    <li><a href="/faq/">Questions</a></li>
+    <li><a href="/companies/">Companies</a></li>
+    <li><a href="/about/">About</a></li>
+  </ul>
+  <ul class="links">
+    <li><a href="https://github.com/marigoldcash">GitHub</a></li>
+    <li><a href="https://t.me/marigoldcash_official">Telegram</a></li>
+    <li><a href="mailto:note@marigold.cash">note@marigold.cash</a></li>
+  </ul>
+</footer>
+<!-- /chrome:footer -->
 
 <script id="chrome-data" type="application/json">{"en": {"title": "Marigold Litepaper — digital cash for everyday use", "theme_label": "Switch between day and night", "lang_label": "Language"}, "es": {"title": "Litepaper de Marigold — dinero digital para el día a día", "theme_label": "Cambiar entre día y noche", "lang_label": "Idioma"}, "de": {"title": "Marigold Litepaper — digitales Bargeld für den Alltag", "theme_label": "Zwischen Tag und Nacht wechseln", "lang_label": "Sprache"}, "fr": {"title": "Litepaper Marigold — de l'argent liquide numérique pour tous les jours", "theme_label": "Basculer entre jour et nuit", "lang_label": "Langue"}, "it": {"title": "Litepaper di Marigold — contante digitale per tutti i giorni", "theme_label": "Passa da giorno a notte", "lang_label": "Lingua"}, "pt": {"title": "Litepaper da Marigold — dinheiro digital para o dia a dia", "theme_label": "Alternar entre dia e noite", "lang_label": "Idioma"}, "ru": {"title": "Лайтпейпер Marigold — цифровые наличные на каждый день", "theme_label": "Переключить день и ночь", "lang_label": "Язык"}, "zh": {"title": "Marigold 简明白皮书 — 日常可用的数字现金", "theme_label": "切换日间与夜间", "lang_label": "语言"}}</script>
 <script>
