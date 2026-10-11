@@ -8,12 +8,13 @@ A fresh sync of testnet-10 on pve3 (96 cores, the peer on the same machine, so n
 
 | Phase | Amount | Time | Rate |
 |---|---|---|---|
-| Pruning point proof and headers since the pruning point | 1.28 million headers | 12 minutes | about 2,000 a second |
-| Block bodies since the pruning point, validated | 1.28 million blocks | about 40 minutes | 500 to 700 a second |
-| Disk after the headers | 2.9 GB | | |
-| Disk during the bodies | 5 GB at a sixth of them | | |
+| Pruning point proof and headers since the pruning point | 1.28 million headers | 12.7 minutes | about 1,700 a second |
+| Block bodies since the pruning point, validated | 1,282,527 blocks | 48.4 minutes | 440 a second |
+| The whole first sync | | 61 minutes | |
+| Disk after | 5.6 GB | | |
+| The pool state at the pruning point | 859 notes, 4 lanes | handed over in a moment | |
 
-The pruning point sits about 36 hours behind the tip, and at ten blocks a second that is 1.3 million blocks. Every one of them is downloaded, validated against the UTXO set and the pool, and written to the database, because that is what a node is. On the fastest machine we have, with the data next door, that is close to an hour. A laptop validates a few hundred blocks a second at best and downloads over the internet, so Charly's hours are the same arithmetic, not a fault. Two things made his case worse and are fixed in v2.83: the memory watchdog stopped his sync every few minutes on a false reading of 0.0 GB free, and a first run that is stopped before it finishes is discarded, so he started from nothing each time.
+The pruning point sits about 36 hours behind the tip, and at ten blocks a second that is 1.3 million blocks. Every one of them is downloaded, validated against the UTXO set and the pool, and written to the database, because that is what a node is. On the fastest machine we have, with the data next door, that is an hour and a 5.6 GB database. A laptop validates a few hundred blocks a second at best and downloads over the internet, so Charly's hours are the same arithmetic, not a fault. Two things made his case worse and are fixed in v2.83: the memory watchdog stopped his sync every few minutes on a false reading of 0.0 GB free, and a first run that is stopped before it finishes is discarded, so he started from nothing each time.
 
 Where the time goes decides what helps: the download is a minority of it; validation and database writes are most of it.
 
@@ -35,7 +36,7 @@ A wallet that keeps nothing and asks a node about its notes is what "a public co
 
 The founder's compromise, and it fits what the chain already has. Three facts make it possible:
 
-- Every block header carries the **pool commitment**, a root over the pool state: every live note's serial and current key. The pool state is small, a few dozen bytes a note.
+- Every block header carries the **pool commitment**, a root over the pool state: every live note's serial and current key. The pool state is small, a few dozen bytes a note: 859 notes on testnet-10 today, which a node handed over in a moment during the measurement.
 - The trustees' **finality anchors** sign a block every 300 blocks at launch. A wallet holds the trustees' keys, so it can check an anchor without a node's help.
 - A node can hand over the pool state as of a block, the way it hands over the UTXO set at the pruning point today.
 
