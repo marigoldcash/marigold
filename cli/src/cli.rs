@@ -3039,7 +3039,19 @@ impl KaspaCli {
                 } else {
                     Vec::new()
                 };
-                let rpc = if this.wallet.is_connected() { Some(this.wallet.rpc_api()) } else { None };
+                // A light wallet looks in its own copy of the pool for notes on
+                // the watched keys and feeds them through the same path as a
+                // notification would; nothing is subscribed, no key is named.
+                let light = this.wallet.light();
+                if let (Some(light), false) = (&light, watched.is_empty()) {
+                    let found = light.notes_on_keys(&watched);
+                    if !found.is_empty() {
+                        let _ = channel.sender.try_send(kaspa_rpc_core::Notification::NotesChanged(
+                            kaspa_rpc_core::NotesChangedNotification { added: Arc::new(found), removed: Arc::new(Vec::new()) },
+                        ));
+                    }
+                }
+                let rpc = if this.wallet.is_connected() && light.is_none() { Some(this.wallet.rpc_api()) } else { None };
                 let same_rpc = match (&listener, &rpc) {
                     (Some((old, _)), Some(new)) => Arc::ptr_eq(old, new),
                     (None, None) => true,

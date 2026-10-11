@@ -477,7 +477,7 @@ impl Wallet {
                     if ctx.wallet().is_connected() && !serials.is_empty() {
                         // Only chain-live serials count — the vault may hold
                         // rows the chain has already retired.
-                        let on_chain = ctx.wallet().rpc_api().get_notes_by_serial(serials).await?;
+                        let on_chain = ctx.wallet().pool_notes(serials).await?;
                         for entry in on_chain {
                             if let Some(d) = by_serial.get(&entry.sn) {
                                 active_notes += 1;

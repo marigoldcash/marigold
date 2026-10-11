@@ -58,6 +58,9 @@ struct Inner {
     // Mutex used to protect concurrent access to accounts at the wallet api level
     guard: Arc<AsyncMutex<()>>,
     account_guard: Arc<AsyncMutex<()>>,
+    /// The light wallet's own copy of the pool, when the wallet follows the
+    /// chain that way instead of asking a node about its notes (PLAN P8.7).
+    light: Mutex<Option<Arc<crate::light::LightPool>>>,
 }
 
 ///
@@ -161,6 +164,7 @@ impl Wallet {
                 retained_contexts: Mutex::new(HashMap::new()),
                 guard: Arc::new(AsyncMutex::new(())),
                 account_guard: Arc::new(AsyncMutex::new(())),
+                light: Mutex::new(None),
             }),
         };
 
@@ -516,6 +520,26 @@ impl Wallet {
 
     pub fn rpc_api(&self) -> Arc<DynRpcApi> {
         self.utxo_processor().rpc_api()
+    }
+
+    /// The light copy of the pool this wallet follows, if it follows one.
+    pub fn light(&self) -> Option<Arc<crate::light::LightPool>> {
+        self.inner.light.lock().unwrap().clone()
+    }
+
+    pub fn set_light(&self, light: Option<Arc<crate::light::LightPool>>) {
+        *self.inner.light.lock().unwrap() = light;
+    }
+
+    /// Which of `serials` are live in the pool, and under which keys: from
+    /// the wallet's own light copy when it has one, so nobody is told which
+    /// notes it holds, otherwise from the node. The answer has the node's
+    /// shape either way: only the notes that exist, in no particular order.
+    pub async fn pool_notes(&self, serials: Vec<kaspa_hashes::Hash>) -> Result<Vec<kaspa_rpc_core::RpcNoteEntry>> {
+        if let Some(light) = self.light() {
+            return Ok(light.notes(&serials));
+        }
+        Ok(self.rpc_api().get_notes_by_serial(serials).await?)
     }
 
     pub fn try_rpc_api(&self) -> Option<Arc<DynRpcApi>> {

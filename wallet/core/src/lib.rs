@@ -83,6 +83,7 @@ pub mod error;
 pub mod events;
 pub mod factory;
 mod imports;
+pub mod light;
 pub mod message;
 pub mod metrics;
 pub mod prelude;

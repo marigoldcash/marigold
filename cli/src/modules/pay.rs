@@ -154,10 +154,9 @@ impl Pay {
         // The receiver can only take it once the transfer has landed; say
         // which it is rather than let them find out.
         let first = result.handover.notes[0].0;
-        let rpc = ctx.wallet().rpc_api();
         let mut confirmed = false;
         for _ in 0..120 {
-            if rpc.get_notes_by_serial(vec![first]).await?.iter().any(|entry| entry.sn == first) {
+            if ctx.wallet().pool_notes(vec![first]).await?.iter().any(|entry| entry.sn == first) {
                 confirmed = true;
                 break;
             }

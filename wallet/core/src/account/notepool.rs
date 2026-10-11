@@ -951,7 +951,7 @@ pub async fn receive_handover(wallet: &Arc<Wallet>, wallet_secret: Secret, hando
     if note_key_store.load_info(&serials[0]).await?.is_some() {
         return Err(Error::Custom("you already took this payment — it is in your notes".to_string()));
     }
-    let on_chain = wallet.rpc_api().get_notes_by_serial(serials.clone()).await?;
+    let on_chain = wallet.pool_notes(serials.clone()).await?;
     for (sn, d) in &handover.notes {
         let entry = on_chain.iter().find(|entry| entry.sn == *sn).ok_or_else(|| {
             Error::Custom(format!("note {sn} is not in the pool yet — if it was just handed over, try again in a moment"))
@@ -1043,7 +1043,7 @@ pub async fn import_keys(wallet: &Arc<Wallet>, wallet_secret: Secret, bearers: V
     let verified = wallet.is_connected();
     if verified {
         let serials: Vec<Hash> = bearers.iter().map(|b| b.sn).collect();
-        let on_chain = wallet.rpc_api().get_notes_by_serial(serials).await?;
+        let on_chain = wallet.pool_notes(serials).await?;
         for bearer in &bearers {
             let secret_key = SecretKey::from_slice(&bearer.sk).map_err(|e| Error::Custom(format!("invalid note key: {e}")))?;
             let pk = Keypair::from_secret_key(SECP256K1, &secret_key).x_only_public_key().0.serialize();
@@ -1457,7 +1457,7 @@ pub async fn bearer_import(wallet: &Arc<Wallet>, wallet_secret: Secret, bearer: 
 
     // Verify against live pool state before touching the wallet: the serial must
     // exist, still be owned by exactly this key, and carry the claimed denomination.
-    let on_chain = wallet.rpc_api().get_notes_by_serial(vec![bearer.sn]).await?;
+    let on_chain = wallet.pool_notes(vec![bearer.sn]).await?;
     let entry = on_chain
         .iter()
         .find(|entry| entry.sn == bearer.sn)
@@ -1695,52 +1695,86 @@ pub async fn await_payment_request(
         .ok_or_else(|| Error::Custom("no outstanding payment request for this pk".to_string()))?;
     let target = request_key.amount_petals;
 
-    let rpc = wallet.rpc_api();
-    let notification_channel = Channel::<kaspa_rpc_core::Notification>::unbounded();
-    let listener_id = rpc.register_new_listener(ChannelConnection::new(
-        "notepool-await-payment",
-        notification_channel.sender.clone(),
-        ChannelType::Closable,
-    ));
-    rpc.start_notify(listener_id, Scope::NotesChanged(NotesChangedScope::new(vec![], vec![pk]))).await?;
-
-    let mut landed: Vec<(Hash, DenominationTag)> = Vec::new();
-    let mut total: u64 = 0;
-    let mut timeout_fut = Box::pin(workflow_core::task::sleep(timeout).fuse());
-    let outcome = loop {
-        futures::select! {
-            notification = notification_channel.receiver.recv().fuse() => {
-                match notification {
-                    Ok(kaspa_rpc_core::Notification::NotesChanged(notification)) => {
-                        for entry in notification.added.iter().filter(|entry| entry.pk == pk) {
-                            let d = DenominationTag::try_from(entry.denomination)
-                                .map_err(|_| Error::Custom(format!("unknown denomination tag {}", entry.denomination)))?;
-                            if !landed.iter().any(|(sn, _)| *sn == entry.sn) {
-                                landed.push((entry.sn, d));
-                                total += DENOMINATION_PETALS[d as usize];
-                            }
-                        }
-                        match target {
-                            Some(amount) if total >= amount => break Ok(()),
-                            None if !landed.is_empty() => break Ok(()),
-                            _ => {}
-                        }
-                    }
-                    Ok(_) => {}
-                    Err(_) => break Err(Error::Custom("notification channel closed while awaiting payment".to_string())),
+    let (landed, total) = if let Some(light) = wallet.light() {
+        // The light wallet sees the payment land in its own copy of the pool:
+        // nothing is subscribed, and the request key is named to nobody.
+        let started = workflow_core::time::unixtime_as_millis_u64();
+        let mut landed: Vec<(Hash, DenominationTag)> = Vec::new();
+        let mut total: u64 = 0;
+        loop {
+            for entry in light.notes_on_keys(&[pk]) {
+                if landed.iter().any(|(sn, _)| *sn == entry.sn) {
+                    continue;
                 }
+                let d = DenominationTag::try_from(entry.denomination)
+                    .map_err(|_| Error::Custom(format!("unknown denomination tag {}", entry.denomination)))?;
+                landed.push((entry.sn, d));
+                total += DENOMINATION_PETALS[d as usize];
             }
-            _ = timeout_fut => {
-                break Err(Error::Custom(format!(
+            match target {
+                Some(amount) if total >= amount => break,
+                None if !landed.is_empty() => break,
+                _ => {}
+            }
+            if workflow_core::time::unixtime_as_millis_u64().saturating_sub(started) >= timeout.as_millis() as u64 {
+                return Err(Error::Custom(format!(
                     "timed out awaiting payment ({} petals of {} arrived) — the request remains active",
                     total,
                     target.map(|t| t.to_string()).unwrap_or_else(|| "unpinned".to_string())
                 )));
             }
+            workflow_core::task::sleep(Duration::from_millis(1500)).await;
         }
+        (landed, total)
+    } else {
+        let rpc = wallet.rpc_api();
+        let notification_channel = Channel::<kaspa_rpc_core::Notification>::unbounded();
+        let listener_id = rpc.register_new_listener(ChannelConnection::new(
+            "notepool-await-payment",
+            notification_channel.sender.clone(),
+            ChannelType::Closable,
+        ));
+        rpc.start_notify(listener_id, Scope::NotesChanged(NotesChangedScope::new(vec![], vec![pk]))).await?;
+
+        let mut landed: Vec<(Hash, DenominationTag)> = Vec::new();
+        let mut total: u64 = 0;
+        let mut timeout_fut = Box::pin(workflow_core::task::sleep(timeout).fuse());
+        let outcome = loop {
+            futures::select! {
+                notification = notification_channel.receiver.recv().fuse() => {
+                    match notification {
+                        Ok(kaspa_rpc_core::Notification::NotesChanged(notification)) => {
+                            for entry in notification.added.iter().filter(|entry| entry.pk == pk) {
+                                let d = DenominationTag::try_from(entry.denomination)
+                                    .map_err(|_| Error::Custom(format!("unknown denomination tag {}", entry.denomination)))?;
+                                if !landed.iter().any(|(sn, _)| *sn == entry.sn) {
+                                    landed.push((entry.sn, d));
+                                    total += DENOMINATION_PETALS[d as usize];
+                                }
+                            }
+                            match target {
+                                Some(amount) if total >= amount => break Ok(()),
+                                None if !landed.is_empty() => break Ok(()),
+                                _ => {}
+                            }
+                        }
+                        Ok(_) => {}
+                        Err(_) => break Err(Error::Custom("notification channel closed while awaiting payment".to_string())),
+                    }
+                }
+                _ = timeout_fut => {
+                    break Err(Error::Custom(format!(
+                        "timed out awaiting payment ({} petals of {} arrived) — the request remains active",
+                        total,
+                        target.map(|t| t.to_string()).unwrap_or_else(|| "unpinned".to_string())
+                    )));
+                }
+            }
+        };
+        let _ = rpc.unregister_listener(listener_id).await;
+        outcome?;
+        (landed, total)
     };
-    let _ = rpc.unregister_listener(listener_id).await;
-    outcome?;
 
     let mut notes = Vec::with_capacity(landed.len());
     for (sn, d) in landed {
@@ -1847,7 +1881,7 @@ pub async fn light_verify(wallet: &Arc<Wallet>) -> Result<LightVerifyReport> {
     }
 
     let serials: Vec<Hash> = active.iter().map(|info| info.sn).collect();
-    let on_chain = wallet.rpc_api().get_notes_by_serial(serials).await?;
+    let on_chain = wallet.pool_notes(serials).await?;
     let mut report = LightVerifyReport::default();
     for info in &active {
         match on_chain.iter().find(|entry| entry.sn == info.sn) {
@@ -1886,7 +1920,7 @@ pub async fn deep_verify(wallet: &Arc<Wallet>, wallet_secret: Secret) -> Result<
     }
 
     let serials: Vec<Hash> = active.iter().map(|info| info.sn).collect();
-    let on_chain = wallet.rpc_api().get_notes_by_serial(serials).await?;
+    let on_chain = wallet.pool_notes(serials).await?;
 
     for info in &active {
         // A decrypt failure (corrupted ciphertext) surfaces as `Err`, not `Ok(None)`
@@ -2903,7 +2937,7 @@ pub async fn revive_unspent_notes(wallet: &Arc<Wallet>) -> Result<Vec<Arc<NoteKe
     let candidates = note_key_store.superseded_before(REVIVE_AFTER_SECS).await?;
     let mut revived = Vec::new();
     for chunk in candidates.chunks(500) {
-        let entries = wallet.rpc_api().get_notes_by_serial(chunk.iter().map(|i| i.sn).collect()).await?;
+        let entries = wallet.pool_notes(chunk.iter().map(|i| i.sn).collect()).await?;
         for info in chunk {
             if entries.iter().any(|entry| entry.sn == info.sn && entry.pk == info.pk) {
                 note_key_store.mark_status(&info.sn, NoteStatus::Active).await?;
@@ -3030,7 +3064,7 @@ async fn pool_confirmed(wallet: &Arc<Wallet>, serials: Vec<Hash>) -> Result<Hash
     if serials.is_empty() {
         return Ok(HashSet::new());
     }
-    let entries = wallet.rpc_api().get_notes_by_serial(serials).await?;
+    let entries = wallet.pool_notes(serials).await?;
     Ok(entries.into_iter().map(|entry| entry.sn).collect())
 }
 
@@ -3552,7 +3586,7 @@ pub async fn receive_locked(wallet: &Arc<Wallet>, wallet_secret: Secret, handove
             _ => "you already took this payment — it is in your notes".to_string(),
         }));
     }
-    let on_chain = wallet.rpc_api().get_notes_by_serial(serials.clone()).await?;
+    let on_chain = wallet.pool_notes(serials.clone()).await?;
     let first = on_chain.iter().find(|entry| entry.sn == serials[0]).ok_or_else(|| {
         Error::Custom(format!(
             "note {} is not in the pool — if it was just paid, try again in a moment; if the lock has lapsed, it went back to the payer",
@@ -3631,7 +3665,7 @@ pub async fn reclaim_lapsed(wallet: &Arc<Wallet>, wallet_secret: Secret) -> Resu
     if lapsed.is_empty() {
         return Ok(report);
     }
-    let on_chain = wallet.rpc_api().get_notes_by_serial(lapsed.iter().map(|i| i.sn).collect()).await?;
+    let on_chain = wallet.pool_notes(lapsed.iter().map(|i| i.sn).collect()).await?;
     let mut to_reclaim = Vec::new();
     for info in &lapsed {
         if on_chain.iter().any(|e| e.sn == info.sn) {
