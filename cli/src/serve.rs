@@ -711,6 +711,14 @@ impl WalletService {
             if self.wallet.is_connected() { "connected" } else { "not connected" },
             crate::cli::humanised_minutes(self.started.elapsed().as_secs() / 60)
         ));
+        if let Some(light) = self.wallet.light() {
+            let s = light.status();
+            let ago = workflow_core::time::unixtime_as_millis_u64().saturating_sub(s.checked_ms) / 1000;
+            lines.push(format!(
+                "Light wallet: {} notes in your own copy of the pool, as of DAA {}; the trustees' anchor agreed {ago}s ago. This computer is never asked which notes are yours.",
+                s.notes, s.at_daa
+            ));
+        }
         match self.miner_status().await {
             Some((status, where_)) => {
                 lines.push(Self::miner_line(&status, where_));
@@ -903,6 +911,46 @@ pub async fn open_session(options: &SessionOptions, shutdown: Arc<AtomicBool>, s
             rpc_ctl_open.signal_open().await.map_err(|e| crate::error::Error::custom(format!("rpc: {e}")))?;
         }
         Node::Wrpc(_) => {}
+    }
+    // On any computer that is not our own node, the notes are followed in a
+    // light copy of the pool checked against the trustees' anchors, so the
+    // computer is never asked which notes are ours (SYNC-LIGHT.md).
+    if !matches!(node, Node::Own(_)) && kaspa_wallet_core::light::LightPool::supported(network_id) {
+        match kaspa_wallet_core::light::LightPool::start(&rpc, network_id).await {
+            Ok(light) => {
+                let st = light.status();
+                say(format!(
+                    "Your own copy of the pool is here: {} notes as of the trustees' anchor, checked against their keys. This computer is never asked which notes are yours.",
+                    st.notes
+                ));
+                wallet.set_light(Some(light.clone()));
+                let (wallet_, rpc_, shutdown_) = (wallet.clone(), rpc.clone(), shutdown.clone());
+                workflow_core::task::spawn(async move {
+                    loop {
+                        workflow_core::task::sleep(std::time::Duration::from_secs(2)).await;
+                        if shutdown_.load(std::sync::atomic::Ordering::SeqCst) {
+                            break;
+                        }
+                        match wallet_.light() {
+                            Some(current) if Arc::ptr_eq(&current, &light) => {}
+                            _ => break,
+                        }
+                        if !wallet_.is_connected() {
+                            continue;
+                        }
+                        if let Err(err) = light.follow(&rpc_).await {
+                            log::warn!("light wallet: {err}");
+                        }
+                    }
+                });
+            }
+            Err(err) => say(format!(
+                "This computer cannot serve a light wallet ({err}); it is asked about notes the old way, which tells it which notes are yours."
+            )),
+        }
+    }
+    match &node {
+        Node::Own(_) | Node::Grpc(_) | Node::Wrpc(_) => {}
     }
     let descriptors = wallet.clone().wallet_open(options.password.clone(), Some(options.wallet.clone()), true, false).await?;
     if let Some(descriptors) = descriptors {
