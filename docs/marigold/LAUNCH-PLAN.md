@@ -44,7 +44,7 @@ Proposed outline:
 5. **What is and is not private** — the P5.7 honesty section, elevated to a selling point: graph visibility, anonymity set = denomination cohort, no claim stronger than the design delivers. This section is the brand.
 6. **Host-chain requirements** — what the concept needs from *any* chain (fast confirmation for handover UX, pruning, mature P2P/consensus) and why a 10 BPS GHOSTDAG chain was chosen: sub-second rotation confirmation is what makes bearer handover feel like handing over cash. Credit Kaspa plainly; keep the framing "notes hosted on," never "a Kaspa fork with extras."
 7. **Economics** — 210M cap, smooth decay, fee-funded endgame.
-8. **Launch security** — finality anchors, trustee sunset, stated openly.
+8. **Launch security** — finality anchors, a lasting part of the design since 2026-10-11 (the light wallet checks a public node against them), with trustee succession as the open item, stated openly.
 9. **Related work** — physical cash, Chaumian e-cash (the intellectual ancestor — same bearer idea, but ours needs no issuing mint), Monero/Zcash, plain transparent chains.
 10. **Future** — note-weighted governance (the Future-work section's Route C).
 
@@ -94,7 +94,7 @@ Cadence — two distinct announcement moments, deliberately different in volume:
 
 - **Trustee recruitment (P9.1)** — five genuinely independent people/orgs with measurable independence criteria; realistically the longest human lead time in the whole plan. Start conversations now.
 - **External audit sourcing (P8.8)** — auditors book out 4–8 weeks ahead; get quotes and a slot reserved early in the soak, not at its end. Budget item.
-- **P5.8 sunset-threshold model (P9.5 hard gate)** — the quantitative T-model review 2 demanded; needs real testnet difficulty data, which the soak produces.
+- ~~**P5.8 sunset-threshold model (P9.5 hard gate)**~~ — withdrawn 2026-10-11 with the sunset itself (POOL-SPEC v1.3, DECISIONS "The anchors stay"); P9.1b, trustee succession, takes its place on the list.
 - **Legal counsel (P9.6)** — engage once the whitepaper draft exists (counsel reviews public claims; give them the actual claims).
 - **Exchange posture** — per P1.9, nothing to *do* pre-launch except not promising anything; distribution at launch is mining + P2P, stated honestly everywhere.
 - **Wallet UX gap (flagged, not scheduled)** — marigold-cli's REPL is fine for testers, but the "granny at a market" story eventually needs a GUI wallet (QR flows exist in the CLI already). Post-launch roadmap item / community bounty; the P8.0 single-secret change lands before any of that.

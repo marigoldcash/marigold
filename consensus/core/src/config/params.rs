@@ -221,25 +221,9 @@ pub struct FinalityAnchorParams {
 
     /// The stage-0 (launch) cadence interval: 300 DAA-score-units, ~30s at 10 BPS.
     pub launch_interval: u64,
-
-    /// The staged cadence-decay schedule, stages 1–3 of the P5.8 table:
-    /// `(activation, interval)` per stage, later stages superseding earlier ones once
-    /// active. **The activations ship as `ForkActivation::never()`**: stages 1–2 are
-    /// triggered by the sustained-difficulty condition (median ≥ T for M months, plus
-    /// the K-year floor) whose threshold T is explicitly *not final* until the
-    /// P9.5-gated sensitivity model exists (POOL-SPEC.md P5.8, "Calibration is a hard
-    /// pre-launch gate") — wiring live trigger evaluation against an unfrozen T would
-    /// be premature. These `ForkActivation` scores are the exact hook that evaluation
-    /// (or the PLAN P9.x governance mechanism that upgrades the sunset story)
-    /// sets when the parameters freeze. Stage 4 (expiry) is [`Self::hard_expiry`],
-    /// enforced unconditionally regardless of these stages.
-    pub decay_stages: [(ForkActivation, u64); 3],
-
-    /// The hard maximum DAA score (stage 4): at and beyond it, trustee keys are
-    /// consensus-expired unconditionally — no anchor has any consensus effect, no
-    /// matter what the decay stages say or whether their triggers ever fired.
-    /// "Trust must end even if network growth disappoints."
-    pub hard_expiry_daa_score: u64,
+    // The cadence-decay stages and the hard expiry of POOL-SPEC v1.0–v1.2 were
+    // withdrawn in v1.3 (2026-10-11, DECISIONS "The anchors stay"): the anchors
+    // are enforced for as long as the network runs, at `launch_interval`.
 }
 
 impl FinalityAnchorParams {
@@ -249,34 +233,19 @@ impl FinalityAnchorParams {
         trustees: None,
         depth: crate::finality_anchor::FINALITY_ANCHOR_DEPTH,
         launch_interval: crate::finality_anchor::FINALITY_ANCHOR_LAUNCH_INTERVAL,
-        decay_stages: [
-            (ForkActivation::never(), crate::finality_anchor::ANCHOR_STAGE_INTERVALS[0]),
-            (ForkActivation::never(), crate::finality_anchor::ANCHOR_STAGE_INTERVALS[1]),
-            (ForkActivation::never(), crate::finality_anchor::ANCHOR_STAGE_INTERVALS[2]),
-        ],
-        hard_expiry_daa_score: crate::finality_anchor::FINALITY_ANCHOR_HARD_EXPIRY_DAA_SCORE,
     };
 
-    /// The cadence interval of the decay stage active at `daa_score` — the latest
-    /// activated stage wins; stage 0 (`launch_interval`) if none has activated.
-    pub fn cadence_interval(&self, daa_score: u64) -> u64 {
-        self.decay_stages
-            .iter()
-            .rev()
-            .find_map(|(activation, interval)| activation.is_active(daa_score).then_some(*interval))
-            .unwrap_or(self.launch_interval)
+    /// The cadence interval at `daa_score`. One value since POOL-SPEC v1.3; the
+    /// score stays in the signature because the equivocation rule asks for the
+    /// interval at a given score, and a later hard fork may make it vary again.
+    pub fn cadence_interval(&self, _daa_score: u64) -> u64 {
+        self.launch_interval
     }
 
-    /// The fail-open staleness bound at `daa_score`: `depth + 3 × interval`, scaling
-    /// with the active decay stage so the *relative* tolerance for a missed anchor
-    /// stays constant as the cadence stretches (POOL-SPEC.md P5.8).
+    /// The fail-open staleness bound at `daa_score`: `depth + 3 × interval`
+    /// (POOL-SPEC.md P5.8).
     pub fn staleness_bound(&self, daa_score: u64) -> u64 {
         self.depth + crate::finality_anchor::ANCHOR_STALENESS_INTERVALS * self.cadence_interval(daa_score)
-    }
-
-    /// Whether the trustee keys are consensus-expired at `daa_score` (stage 4).
-    pub fn expired(&self, daa_score: u64) -> bool {
-        daa_score >= self.hard_expiry_daa_score
     }
 }
 

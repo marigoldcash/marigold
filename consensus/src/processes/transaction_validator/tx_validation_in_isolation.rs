@@ -61,14 +61,6 @@ impl TransactionValidator {
         match payload {
             AnchorPayload::Anchor(anchor) => {
                 verify_anchor(&anchor, trustees).map_err(TxRuleError::InvalidFinalityAnchor)?;
-                if self.finality_anchor_params.expired(anchor.anchored_daa_score) {
-                    return Err(TxRuleError::InvalidFinalityAnchor(
-                        kaspa_consensus_core::finality_anchor::FinalityAnchorError::PastHardExpiry(
-                            anchor.anchored_daa_score,
-                            self.finality_anchor_params.hard_expiry_daa_score,
-                        ),
-                    ));
-                }
                 Ok(())
             }
             AnchorPayload::Equivocation(evidence) => {

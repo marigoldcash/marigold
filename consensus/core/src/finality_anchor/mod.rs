@@ -47,19 +47,10 @@ pub const FINALITY_ANCHOR_LAUNCH_INTERVAL: u64 = 300;
 /// "Fail-open liveness": `600 + 3×300 = 1,500` at launch).
 pub const ANCHOR_STALENESS_INTERVALS: u64 = 3;
 
-/// The hard maximum DAA score (POOL-SPEC.md P5.8, "The hard-coded sunset"): 20 years
-/// from genesis at 10 BPS (`20 × 12 × 2,629,800 × 10`). At and beyond this score the
-/// trustee keys are consensus-expired unconditionally — no anchor, however validly
-/// signed, has any consensus effect. Extending trustee life past this score requires an
-/// explicit hard fork; the default, unforced outcome is always expiry.
-pub const FINALITY_ANCHOR_HARD_EXPIRY_DAA_SCORE: u64 = 6_311_520_000;
-
-/// The staged cadence-decay schedule's intervals (stages 1–3 of the P5.8 table;
-/// stage 0 is [`FINALITY_ANCHOR_LAUNCH_INTERVAL`], stage 4 is the hard expiry).
-/// The *triggers* for stages 1–2 are difficulty-dependent (sustained ≥ T for M months,
-/// plus the K-year floor) and are represented as `ForkActivation` scores in params —
-/// see `Params::finality_anchor_decay_stages` for why their evaluation is deferred.
-pub const ANCHOR_STAGE_INTERVALS: [u64; 3] = [36_000, 864_000, 6_048_000];
+// POOL-SPEC v1.0–v1.2 retired the anchors on a schedule (a cadence decay and a
+// 20-year hard expiry). Withdrawn in v1.3 (2026-10-11, DECISIONS "The anchors
+// stay"): a wallet without a node of its own checks a public node against the
+// anchors alone, so they are enforced for as long as the network runs.
 
 /// A 3-of-5 trustee certification of an already-settled block (POOL-SPEC.md P5.8's
 /// exact struct, field for field). Carried as the borsh payload of a transaction in
@@ -176,9 +167,6 @@ pub enum FinalityAnchorError {
 
     #[error("evidence attestation scores are {0} apart, not within one cadence interval of {1}")]
     ScoresNotWithinInterval(u64, u64),
-
-    #[error("anchored DAA score {0} is at or beyond the hard trustee-expiry score {1}")]
-    PastHardExpiry(u64, u64),
 }
 
 /// The outcome of offering an externally-received (gossiped) anchor to consensus
@@ -212,9 +200,10 @@ pub struct FinalityAnchorStatus {
     /// The spec's `finality_anchor_stale` flag: an anchor exists but has fallen
     /// outside the staleness bound — the chain is on plain-PoW guarantees right now.
     pub stale: bool,
-    /// The hard trustee-expiry score has been reached — the mechanism is retired.
+    /// Always false since POOL-SPEC v1.3 withdrew the hard expiry; kept on the
+    /// wire so older wallets keep reading the status.
     pub expired: bool,
-    /// The cadence interval of the currently active decay stage.
+    /// The cadence interval, in DAA-score units.
     pub current_interval: u64,
     /// Trustee indices disqualified as of the current virtual chain.
     pub disqualified: Vec<u8>,

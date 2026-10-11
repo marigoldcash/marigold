@@ -1263,11 +1263,9 @@ impl ConsensusApi for Consensus {
         let deny_list = anchor_read.deny_list().unwrap();
         drop(anchor_read);
 
-        let expired = params.expired(virtual_daa_score);
-        let stale = !expired
-            && latest
-                .is_some_and(|a| virtual_daa_score.saturating_sub(a.anchored_daa_score) > params.staleness_bound(virtual_daa_score));
-        let enforcing = params.trustees.is_some() && !expired && !stale && latest.is_some();
+        let stale =
+            latest.is_some_and(|a| virtual_daa_score.saturating_sub(a.anchored_daa_score) > params.staleness_bound(virtual_daa_score));
+        let enforcing = params.trustees.is_some() && !stale && latest.is_some();
         let mut disqualified: Vec<u8> = deny_list
             .iter()
             .filter(|e| self.services.reachability_service.is_chain_ancestor_of(e.accepting_block, sink))
@@ -1279,7 +1277,8 @@ impl ConsensusApi for Consensus {
             latest_anchor: latest.map(|a| (a.anchored_block, a.anchored_daa_score)),
             enforcing,
             stale,
-            expired,
+            // Withdrawn with the sunset (POOL-SPEC v1.3); kept on the wire.
+            expired: false,
             current_interval: params.cadence_interval(virtual_daa_score),
             disqualified,
         }
@@ -1294,12 +1293,6 @@ impl ConsensusApi for Consensus {
         let params = &self.config.params.finality_anchor;
         let Some(trustees) = params.trustees.as_ref() else { return ExternalAnchorOutcome::Ignored };
         let virtual_state = self.lkg_virtual_state.load();
-        let sink_daa_score = self.storage.headers_store.get_daa_score(virtual_state.ghostdag_data.selected_parent).unwrap();
-        // Stage 4: consensus-expired keys — no anchor has any effect, whichever
-        // channel it arrives through.
-        if params.expired(sink_daa_score) || params.expired(anchor.anchored_daa_score) {
-            return ExternalAnchorOutcome::Ignored;
-        }
         if verify_anchor(&anchor, trustees).is_err() {
             return ExternalAnchorOutcome::Ignored;
         }

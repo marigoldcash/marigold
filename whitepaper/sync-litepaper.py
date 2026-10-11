@@ -367,7 +367,8 @@ def head_html(lang: str, c) -> str:
         f'<div class="head-text" data-lang="{lang}" lang="{html_lang(lang)}">\n'
         f'    <h1>{html.escape(c["h1"], quote=False)}</h1>\n'
         f'    <p class="tag">{html.escape(c["tag"], quote=False)}</p>\n'
-        f'  </div>\n'
+        + (f'    <p class="tag edition">{html.escape(c["edition"], quote=False)}</p>\n' if c.get("edition") else "")
+        + f'  </div>\n'
     )
 
 

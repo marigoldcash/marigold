@@ -211,8 +211,6 @@ pub enum AnchorEnforcementState {
     /// The latest anchor fell outside the staleness bound — fail-open engaged,
     /// plain PoW security until a fresh anchor arrives. Loudly alerted.
     Stale = 2,
-    /// The hard trustee-expiry score is reached: the mechanism is permanently retired.
-    Expired = 3,
 }
 
 impl From<u8> for AnchorEnforcementState {
@@ -220,7 +218,6 @@ impl From<u8> for AnchorEnforcementState {
         match v {
             1 => Self::Enforcing,
             2 => Self::Stale,
-            3 => Self::Expired,
             _ => Self::Inactive,
         }
     }
@@ -503,9 +500,6 @@ impl VirtualStateProcessor {
     /// mechanism didn't exist, with no operator action needed to keep blocks flowing.
     pub(super) fn finality_anchor_guard(&self, virtual_daa_score: u64) -> Option<Hash> {
         self.finality_anchor_params.trustees.as_ref()?;
-        if self.finality_anchor_params.expired(virtual_daa_score) {
-            return None;
-        }
         let latest = self.finality_anchor_store.read().latest().unwrap()?;
         if virtual_daa_score.saturating_sub(latest.anchored_daa_score) > self.finality_anchor_params.staleness_bound(virtual_daa_score)
         {
@@ -552,11 +546,6 @@ impl VirtualStateProcessor {
         // onward ("from that block onward, deterministically"), never retroactively.
         for &accepting_block in chain_path.added.iter() {
             let accepting_daa_score = self.headers_store.get_daa_score(accepting_block).unwrap();
-            if self.finality_anchor_params.expired(accepting_daa_score) {
-                // Stage 4: keys are consensus-expired — no anchor (and no further
-                // disqualification bookkeeping, which is moot) from this point on.
-                continue;
-            }
             // A trustee is disqualified in this POV iff some deny entry's accepting
             // block is on this chain block's selected chain. Entries appended earlier
             // in this very loop qualify by construction (their accepting blocks are
@@ -599,13 +588,9 @@ impl VirtualStateProcessor {
                                 continue;
                             }
                             // Contextual checks, each failure meaning "no effect":
-                            // certified score must precede the hard expiry; the
-                            // anchored block must be known, at its claimed DAA score,
-                            // on this chain block's own selected chain, and at least
-                            // `depth` behind it.
-                            if self.finality_anchor_params.expired(anchor.anchored_daa_score) {
-                                continue;
-                            }
+                            // the anchored block must be known, at its claimed DAA
+                            // score, on this chain block's own selected chain, and
+                            // at least `depth` behind it.
                             if accepting_daa_score.saturating_sub(anchor.anchored_daa_score) < self.finality_anchor_params.depth {
                                 continue;
                             }
@@ -698,12 +683,6 @@ impl VirtualStateProcessor {
                      fallen back to plain PoW security until a fresh anchor arrives (finality_anchor_stale: true)"
                 );
             }
-            AnchorEnforcementState::Expired => {
-                info!(
-                    "[FINALITY ANCHOR] The trustee keys have reached their hard consensus-expiry score — \
-                     the chain now runs on plain PoW security permanently (anchor mechanism retired)"
-                );
-            }
             AnchorEnforcementState::Inactive => {}
         }
     }
@@ -711,9 +690,6 @@ impl VirtualStateProcessor {
     pub(super) fn compute_anchor_enforcement_state(&self, virtual_daa_score: u64) -> AnchorEnforcementState {
         if self.finality_anchor_params.trustees.is_none() {
             return AnchorEnforcementState::Inactive;
-        }
-        if self.finality_anchor_params.expired(virtual_daa_score) {
-            return AnchorEnforcementState::Expired;
         }
         match self.finality_anchor_store.read().latest().unwrap() {
             None => AnchorEnforcementState::Inactive,

@@ -1,7 +1,7 @@
 //! Consensus-level finality-anchor tests (PLAN P6.11's verify criteria,
 //! POOL-SPEC.md P5.8): a heavier attacker chain lacking the latest anchor loses to the
 //! anchored chain; an equivocating quorum is ignored after its proof is processed;
-//! anchors past the hard sunset score are rejected; and anchor-free/stale operation
+//! and anchor-free/stale operation
 //! degrades to plain PoW without halting.
 //!
 //! Context-free verification rules (quorum shape, signature validity, the exact
@@ -110,12 +110,11 @@ fn config(anchor_params: FinalityAnchorParams) -> crate::config::Config {
         .build()
 }
 
-fn keyed_params(keypairs: &[secp256k1::Keypair], depth: u64, interval: u64, hard_expiry: u64) -> FinalityAnchorParams {
+fn keyed_params(keypairs: &[secp256k1::Keypair], depth: u64, interval: u64) -> FinalityAnchorParams {
     FinalityAnchorParams {
         trustees: Some(trustee_keys(keypairs)),
         depth,
         launch_interval: interval,
-        hard_expiry_daa_score: hard_expiry,
         ..FinalityAnchorParams::LAUNCH_UNKEYED
     }
 }
@@ -155,7 +154,7 @@ async fn heavier_attacker_chain_lacking_anchor_loses() {
 
     // Anchored node: sees the honest chain, an anchor for a block on it, then a
     // heavier conflicting chain.
-    let consensus = TestConsensus::new(&config(keyed_params(&keypairs, 2, 50, u64::MAX)));
+    let consensus = TestConsensus::new(&config(keyed_params(&keypairs, 2, 50)));
     let join_handles = consensus.init();
     let genesis = consensus.params().genesis.hash;
 
@@ -216,7 +215,7 @@ async fn heavier_attacker_chain_lacking_anchor_loses() {
 #[tokio::test]
 async fn equivocating_quorum_ignored_after_proof() {
     let keypairs = trustee_keypairs();
-    let consensus = TestConsensus::new(&config(keyed_params(&keypairs, 2, 50, u64::MAX)));
+    let consensus = TestConsensus::new(&config(keyed_params(&keypairs, 2, 50)));
     let join_handles = consensus.init();
     let genesis = consensus.params().genesis.hash;
 
@@ -268,58 +267,8 @@ async fn equivocating_quorum_ignored_after_proof() {
     consensus.shutdown(join_handles);
 }
 
-/// P6.11 verify criterion 3: anchors past the hard sunset score are rejected — as
-/// transactions (isolation: a certified score at/beyond expiry is invalid), and the
-/// enforcement itself retires unconditionally once the chain's own score passes the
-/// hard maximum, letting plain PoW take over ("trust must end even if network growth
-/// disappoints").
-#[tokio::test]
-async fn anchors_past_sunset_rejected_and_enforcement_retires() {
-    let keypairs = trustee_keypairs();
-    // Hard expiry at DAA score 15; depth 2, interval 100 (staleness never triggers
-    // within this test — expiry is what must end enforcement).
-    let consensus = TestConsensus::new(&config(keyed_params(&keypairs, 2, 100, 15)));
-    let join_handles = consensus.init();
-    let genesis = consensus.params().genesis.hash;
-
-    let tip = extend_chain(&consensus, genesis, 10, 8).await;
-
-    // An anchor certifying a score at/beyond the expiry is an invalid transaction
-    // outright, regardless of signatures — body-in-isolation validation rejects the
-    // block carrying it.
-    let expired_anchor = sign_anchor(&keypairs, &[0, 1, 2], 15.into(), 20);
-    let result = consensus
-        .add_utxo_valid_block_with_parents(98.into(), vec![tip], vec![anchor_tx(&AnchorPayload::Anchor(expired_anchor))])
-        .await;
-    assert!(result.is_err(), "an anchor certifying a score at/beyond the hard expiry must be rejected as a transaction");
-
-    // A pre-expiry anchor works normally...
-    let anchored_block: Hash = 12.into();
-    let anchored_score = daa_score_of(&consensus, anchored_block);
-    let anchor = sign_anchor(&keypairs, &[0, 1, 2], anchored_block, anchored_score);
-    let tip = mine_and_confirm(&consensus, tip, 30, vec![anchor_tx(&AnchorPayload::Anchor(anchor))]).await;
-    let status = consensus.get_finality_anchor_status();
-    assert_eq!(status.latest_anchor, Some((anchored_block, anchored_score)));
-    assert!(status.enforcing);
-
-    // ...until the chain's own DAA score reaches the hard maximum: the keys are
-    // consensus-expired, enforcement is off, and a heavier anchor-free fork now wins
-    // on plain PoW despite conflicting with the (still-ratcheted) anchor.
-    let _post_expiry_tip = extend_chain(&consensus, tip, 40, 10).await;
-    let status = consensus.get_finality_anchor_status();
-    assert!(status.expired, "the hard expiry must engage once virtual's DAA score reaches it");
-    assert!(!status.enforcing);
-
-    let mut attacker_tip: Hash = 11.into();
-    for i in 0..40u64 {
-        let hash: Hash = (100 + i).into();
-        consensus.add_utxo_valid_block_with_parents(hash, vec![attacker_tip], vec![]).await.unwrap();
-        attacker_tip = hash;
-    }
-    assert_eq!(consensus.get_sink(), attacker_tip, "post-expiry, a heavier chain must win regardless of the retired anchor");
-
-    consensus.shutdown(join_handles);
-}
+// P6.11's criterion 3 (anchors past the hard sunset score rejected, enforcement
+// retiring) was withdrawn with the sunset in POOL-SPEC v1.3 (2026-10-11).
 
 /// P6.11 verify criterion 4: anchor-free operation degrades to plain PoW without
 /// halting — both the never-anchored case and the fail-open case where the latest
@@ -329,7 +278,7 @@ async fn anchors_past_sunset_rejected_and_enforcement_retires() {
 async fn anchor_free_and_stale_operation_degrade_to_plain_pow() {
     let keypairs = trustee_keypairs();
     // depth 2, interval 5 => staleness bound 2 + 3×5 = 17 DAA-score units.
-    let consensus = TestConsensus::new(&config(keyed_params(&keypairs, 2, 5, u64::MAX)));
+    let consensus = TestConsensus::new(&config(keyed_params(&keypairs, 2, 5)));
     let join_handles = consensus.init();
     let genesis = consensus.params().genesis.hash;
 

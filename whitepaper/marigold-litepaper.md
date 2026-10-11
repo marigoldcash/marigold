@@ -179,15 +179,17 @@ Marigold runs on a proof-of-work blockchain that produces approximately 10 block
 
 ---
 
-## Launch Security: Training Wheels That Come Off
+## The Anchors: A Small Safeguard That Stays
 
-A new proof-of-work chain has low mining power, and low mining power invites attacks. Marigold launches with a temporary, fully disclosed safeguard called **finality anchors**: five publicly identified trustees periodically co-sign (requiring at least 3 of 5) a recent block, making it permanent and irreversible. No one can undo an anchored block.
+A new proof-of-work chain has little mining power, and little mining power invites attacks. Marigold has a fully disclosed safeguard called **finality anchors**: five publicly identified trustees periodically co-sign (at least 3 of 5) a recent block, making it permanent. No one can undo an anchored block, however much mining power they bring.
 
-The trustees cannot censor transactions, create coins, move anyone's funds, or produce blocks. Their only power is to prevent undoing completed transactions. If they go silent, the chain continues normally as a standard proof-of-work network — somewhat less protected, but fully operational.
+The trustees cannot censor transactions, create coins, move anyone's funds, or produce blocks. Their only power is to prevent undoing completed transactions. If they go silent, the chain carries on as an ordinary proof-of-work network — somewhat less protected, but fully working.
 
-The safeguard is designed to retire. Once the network's mining power grows strong enough that attacks are prohibitively expensive, anchors step down from mandatory to advisory to fully expired. Before that happens, the selection of successor trustees is intended to pass to note-holder governance — so even the training wheels' remnant transfers from founders to the community before they are removed entirely.
+Earlier versions of this paper called the anchors training wheels, to come off once the network was strong. They stay, and the reason is your wallet. Most wallets do not run a node of their own: your wallet asks a public computer for the latest anchor, checks the trustees' signatures on it, checks the notes it is handed against that anchored block, finds your own notes among them without telling anyone which they are, and follows along from there. The anchor is the one thing your wallet can hold a public computer to. Without it, a wallet without a node would have to take that computer's word for everything.
 
-On the public testnet the safeguard is running now: five trustee keys, an anchor roughly every thirty seconds, every node enforcing. The testnet trustees are throwaway keys made for the rehearsal; the real set is chosen at launch.
+So the honest statement is this: the five trustees are trusted not to sign a false anchor, for as long as Marigold runs. Three of them together could; with a cooperating public computer, they could mislead a wallet that runs no node. Anyone who wants no trustee in the loop can run a node of their own, which checks every block itself. The founders choose the first five trustees, not the last: replacing them is meant to pass to the people who hold notes, and how a trustee hands over to a successor is being designed now.
+
+On the public testnet the safeguard is running: five trustee keys, an anchor roughly every thirty seconds, every node enforcing, every wallet starting from the latest anchor. The testnet trustees are throwaway keys made for the rehearsal; the real set is chosen at launch.
 
 ---
 

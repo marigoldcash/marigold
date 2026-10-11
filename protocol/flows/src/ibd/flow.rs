@@ -1230,18 +1230,12 @@ staging selected tip ({}) is too small or negative. Aborting IBD...",
             return Ok(());
         }
         let Some(anchor) = consensus.async_get_latest_full_finality_anchor().await else { return Ok(()) };
-        if anchor_params.expired(anchor.anchored_daa_score) {
-            return Ok(());
-        }
         let syncer_sink_daa_score = match consensus.async_get_header(syncer_virtual_selected_parent).await {
             Ok(header) => header.daa_score,
             // Without the syncer sink's own header we cannot judge staleness; leave
             // enforcement to the post-IBD virtual-resolution guard (P6.11)
             Err(_) => return Ok(()),
         };
-        if anchor_params.expired(syncer_sink_daa_score) {
-            return Ok(());
-        }
         if syncer_sink_daa_score.saturating_sub(anchor.anchored_daa_score) > anchor_params.staleness_bound(syncer_sink_daa_score) {
             warn!(
                 "[FINALITY ANCHOR] The latest known anchor (DAA score {}) is stale relative to the syncer chain \

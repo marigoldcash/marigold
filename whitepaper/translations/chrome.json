@@ -38,9 +38,10 @@
       "Why It Is Honest Money": "the arithmetic",
       "The Chain: Fast Enough to Feel Like Cash": "the chain",
       "Economics at a Glance": "economics",
-      "Launch Security: Training Wheels That Come Off": "launch security",
+      "The Anchors: A Small Safeguard That Stays": "launch security",
       "What Marigold Is — and Is Not": "in one breath"
-    }
+    },
+    "edition": "Second edition · October 2026"
   },
   "es": {
     "name": "Español",
@@ -65,9 +66,10 @@
       "Why It Is Honest Money": "la aritmética",
       "The Chain: Fast Enough to Feel Like Cash": "la cadena",
       "Economics at a Glance": "economía",
-      "Launch Security: Training Wheels That Come Off": "seguridad al lanzar",
+      "The Anchors: A Small Safeguard That Stays": "seguridad al lanzar",
       "What Marigold Is — and Is Not": "en una frase"
-    }
+    },
+    "edition": "Second edition · October 2026"
   },
   "de": {
     "name": "Deutsch",
@@ -92,9 +94,10 @@
       "Why It Is Honest Money": "die rechnung",
       "The Chain: Fast Enough to Feel Like Cash": "die chain",
       "Economics at a Glance": "ökonomie",
-      "Launch Security: Training Wheels That Come Off": "sicherheit zum start",
+      "The Anchors: A Small Safeguard That Stays": "sicherheit zum start",
       "What Marigold Is — and Is Not": "in einem satz"
-    }
+    },
+    "edition": "Second edition · October 2026"
   },
   "fr": {
     "name": "Français",
@@ -119,9 +122,10 @@
       "Why It Is Honest Money": "l'arithmétique",
       "The Chain: Fast Enough to Feel Like Cash": "la chaîne",
       "Economics at a Glance": "économie",
-      "Launch Security: Training Wheels That Come Off": "sécurité au lancement",
+      "The Anchors: A Small Safeguard That Stays": "sécurité au lancement",
       "What Marigold Is — and Is Not": "en une phrase"
-    }
+    },
+    "edition": "Second edition · October 2026"
   },
   "it": {
     "name": "Italiano",
@@ -146,9 +150,10 @@
       "Why It Is Honest Money": "l'aritmetica",
       "The Chain: Fast Enough to Feel Like Cash": "la catena",
       "Economics at a Glance": "economia",
-      "Launch Security: Training Wheels That Come Off": "sicurezza al lancio",
+      "The Anchors: A Small Safeguard That Stays": "sicurezza al lancio",
       "What Marigold Is — and Is Not": "in una frase"
-    }
+    },
+    "edition": "Second edition · October 2026"
   },
   "pt": {
     "name": "Português",
@@ -173,9 +178,10 @@
       "Why It Is Honest Money": "a aritmética",
       "The Chain: Fast Enough to Feel Like Cash": "a cadeia",
       "Economics at a Glance": "economia",
-      "Launch Security: Training Wheels That Come Off": "segurança no lançamento",
+      "The Anchors: A Small Safeguard That Stays": "segurança no lançamento",
       "What Marigold Is — and Is Not": "em uma frase"
-    }
+    },
+    "edition": "Second edition · October 2026"
   },
   "ru": {
     "name": "Русский",
@@ -200,9 +206,10 @@
       "Why It Is Honest Money": "арифметика",
       "The Chain: Fast Enough to Feel Like Cash": "цепочка",
       "Economics at a Glance": "экономика",
-      "Launch Security: Training Wheels That Come Off": "защита на старте",
+      "The Anchors: A Small Safeguard That Stays": "защита на старте",
       "What Marigold Is — and Is Not": "коротко"
-    }
+    },
+    "edition": "Second edition · October 2026"
   },
   "zh": {
     "name": "中文",
@@ -227,8 +234,9 @@
       "Why It Is Honest Money": "算术",
       "The Chain: Fast Enough to Feel Like Cash": "这条链",
       "Economics at a Glance": "经济模型",
-      "Launch Security: Training Wheels That Come Off": "启动期安全",
+      "The Anchors: A Small Safeguard That Stays": "启动期安全",
       "What Marigold Is — and Is Not": "一句话"
-    }
+    },
+    "edition": "Second edition · October 2026"
   }
 }

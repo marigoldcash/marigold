@@ -80,5 +80,5 @@ The earlier line in this note that mining works from a light start within minute
 1. The pool state hand-over: its message, its size on testnet-10 and at the scale mainnet is planned for, and how a node keeps the state as of an anchored block.
 2. Whether the light wallet keeps following blocks after the anchor itself, validating pool ops as it goes, or trusts each new anchor and refetches the delta; the first is more code and more private, the second is simpler and leans on the anchors more.
 3. The ledger side for miners: the UTXO set as of the anchor, or the account stays on a full node's copy.
-4. What a light wallet does when the anchors stop, the fail-open case of POOL-SPEC P5.8: it should say so and wait, not fall back to a public computer unasked.
+4. ~~What a light wallet does when the anchors stop~~ — decided 2026-10-11 with "The anchors stay" (DECISIONS, POOL-SPEC v1.3): it says so and waits, never falling back to asking the node about its notes unasked. The same decision withdrew the anchors' sunset: a wallet without a node checks a public node against the anchors alone, so they are enforced for as long as the network runs.
 5. A, the pruning window, is a line in the mainnet parameters and needs a number: twelve hours is the first proposal.

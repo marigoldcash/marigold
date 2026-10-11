@@ -565,3 +565,14 @@ is priced like plumbing; notes are money and cost a penny to move.
 **Why.** Founder, 2026-10-11, on reading `connect status` in the light wallet: "Think of 'Grandma Safe' … It really is an important criterion. The everyday wallet needs to be easy enough to use so that a grandma can do it. There are a couple of grandmas in the testers group for that reason. This means we don't throw vocabularies or technical data around that a grandma would never understand."
 
 **Where.** Every message in `cli/src` and `gui/ui`; reviewed line by line as they are touched.
+
+## The anchors stay (2026-10-11)
+
+**Decision.** The finality anchors are a lasting part of the design, not a launch safeguard with a sunset. The retirement trigger (difficulty T sustained for M months after K years), the four-stage cadence decay and the 20-year hard expiry of POOL-SPEC v1.0–v1.2 are withdrawn from the specification (v1.3) and from the code. Anchors remain mandatory: a chain conflicting with the latest valid anchor is invalid, fail-open liveness and equivocation disqualification stay as written. Trustee succession without a hard fork becomes a committed design item (PLAN P9.1b), and the selection of successors is meant to pass to note holders; until that exists, a trustee is replaced by a release, as the spec already said.
+
+**Why.** Founder, 2026-10-11: "we have to update the litepaper (and whitepaper too???) on the role of the trust anchors, because now we are using them also to enable the lite wallet so there are here to stay. The training wheels are not coming off, though moving to the community is an option." The precise reason, from the critique the founder asked for first: since the light wallet (v2.85, SYNC-LIGHT.md) every wallet without a node of its own starts from the latest anchor and checks a public computer against it; it verifies no proof of work, so the anchor is the only thing it can check. Advisory anchors would be worse than none: a false anchor would then fool the light wallets, which is most users, without splitting the full nodes that would expose it. So the anchors stay mandatory, and because the trust is no longer bounded in time it has to be bounded by who holds the keys and how they are replaced, which is why succession stops being future work.
+
+**What it costs, said plainly.** Three of the five trustee keys plus one cooperating node can show a wallet without a node an anchor and a pool state that are not the network's. A full node is unaffected and is the way out for anyone who wants no trustee in the loop. The papers say so in those words.
+
+**Where.** POOL-SPEC P5.8 (v1.3), `FinalityAnchorParams` without `decay_stages` and `hard_expiry_daa_score`, the whitepaper §9 and §10 (v0.6), the litepaper's section (second edition), LAUNCH-PLAN, PLAN P9.1b. The litepaper's seven translations lag until the section is retranslated.
+
