@@ -3,6 +3,7 @@
 
     scripts/post-x.py "The website has a new face: https://marigold.cash"
     scripts/post-x.py < post.txt                 # the text from stdin
+    scripts/post-x.py --image og.png "text"      # with a picture attached
     DRY_RUN=1 scripts/post-x.py "text"           # print, send nothing
 
 The four credentials are read from a file and never passed on the command
@@ -36,6 +37,7 @@ import urllib.request
 
 ENV_FILE = os.environ.get("MARIGOLD_X_ENV_FILE", os.path.expanduser("~/.config/marigold/x-api.env"))
 ENDPOINT = "https://api.x.com/2/tweets"
+MEDIA_ENDPOINT = "https://api.x.com/2/media/upload"
 HANDLE = "marigoldcash"
 NEEDED = ("X_API_KEY", "X_API_SECRET", "X_ACCESS_TOKEN", "X_ACCESS_SECRET")
 
@@ -86,8 +88,44 @@ def authorization(creds: dict, method: str, url: str) -> str:
     return "OAuth " + ", ".join(f'{pct(k)}="{pct(v)}"' for k, v in sorted(oauth.items()))
 
 
+def upload(creds: dict, path: str) -> str:
+    """One picture, in one multipart request; X answers with the media id to
+    name in the post. The multipart body adds nothing to the OAuth signature."""
+    import mimetypes
+    data = open(path, "rb").read()
+    kind = mimetypes.guess_type(path)[0] or "application/octet-stream"
+    boundary = "----marigold" + secrets.token_hex(12)
+    name = os.path.basename(path)
+    parts = []
+    for field, value in (("media_category", "tweet_image"),):
+        parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="{field}"\r\n\r\n{value}\r\n'.encode())
+    parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="media"; filename="{name}"\r\nContent-Type: {kind}\r\n\r\n'.encode() + data + b"\r\n")
+    parts.append(f"--{boundary}--\r\n".encode())
+    body = b"".join(parts)
+    req = urllib.request.Request(MEDIA_ENDPOINT, data=body, method="POST")
+    req.add_header("Authorization", authorization(creds, "POST", MEDIA_ENDPOINT))
+    req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            reply = json.loads(r.read().decode())
+    except urllib.error.HTTPError as e:
+        sys.exit(f"X refused the picture ({e.code}): {e.read().decode(errors='replace')[:300]}")
+    media_id = (reply.get("data") or reply).get("id") or reply.get("media_id_string")
+    if not media_id:
+        sys.exit(f"unexpected answer to the upload: {json.dumps(reply)[:300]}")
+    return str(media_id)
+
+
 def main() -> int:
-    text = " ".join(sys.argv[1:]) if len(sys.argv) > 1 else sys.stdin.read()
+    args = sys.argv[1:]
+    image = None
+    if "--image" in args:
+        i = args.index("--image")
+        image = args[i + 1]
+        del args[i : i + 2]
+        if not os.path.exists(image):
+            sys.exit(f"{image} is missing")
+    text = " ".join(args) if args else sys.stdin.read()
     text = text.rstrip("\n")
     if not text.strip():
         sys.exit("nothing to post")
@@ -95,10 +133,13 @@ def main() -> int:
     if n > 280 and not os.environ.get("X_LONG"):
         sys.exit(f"the post counts {n} characters for X; 280 is the limit (X_LONG=1 if the account allows more)")
     if os.environ.get("DRY_RUN"):
-        print(f"would post as @{HANDLE} ({n} characters):\n{text}")
+        print(f"would post as @{HANDLE} ({n} characters{', with ' + image if image else ''}):\n{text}")
         return 0
     creds = credentials()
-    body = json.dumps({"text": text}).encode()
+    post = {"text": text}
+    if image:
+        post["media"] = {"media_ids": [upload(creds, image)]}
+    body = json.dumps(post).encode()
     req = urllib.request.Request(ENDPOINT, data=body, method="POST")
     req.add_header("Authorization", authorization(creds, "POST", ENDPOINT))
     req.add_header("Content-Type", "application/json")
