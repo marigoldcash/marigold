@@ -325,6 +325,25 @@ impl WalletService {
     }
 
     /// Before the wallet closes: post any change not yet posted.
+    /// Closes the wallet the way the terminal's 'close' does, so its lock
+    /// is let go: the desktop's close used to leave the store open, and the
+    /// terminal then said the wallet was open in another program until the
+    /// desktop was quit (founder, 2026-10-11).
+    pub async fn close_wallet(&self) {
+        self.wallet.set_light(None);
+        if self.wallet.is_open() {
+            if let Err(err) = self.wallet.store().commit(&self.secret).await {
+                log::warn!("saving the wallet before closing it: {err}");
+            }
+            if let Err(err) = self.wallet.close().await {
+                log::warn!("closing the wallet: {err}");
+            }
+        }
+        if let Err(err) = self.wallet.stop().await {
+            log::warn!("stopping the wallet: {err}");
+        }
+    }
+
     pub async fn backup_flush(&self) {
         let say = self.say.clone();
         let relay = move |line: String| say(line);
@@ -818,8 +837,15 @@ impl Session {
     }
 
     pub async fn close(self) {
-        if let Node::Own(node) = &self.node {
-            let _ = node.stop().await;
+        self.service.close_wallet().await;
+        match &self.node {
+            Node::Own(node) => {
+                let _ = node.stop().await;
+            }
+            Node::Wrpc(client) => {
+                let _ = client.disconnect().await;
+            }
+            Node::Grpc(_) => {}
         }
     }
 }

@@ -1800,7 +1800,7 @@ async fn change_password(ctx: &Arc<KaspaCli>, argv: Vec<String>, guard: WalletGu
         return Err(Error::custom(format!("the keys file could not be rewritten ({err}); nothing was changed")));
     }
     tprintln!(ctx, "{}", crate::ui::ok("Password changed."));
-    tprintln!(ctx, "{}", crate::ui::dim("Your backups are sealed with your 24 words, not the password, so nothing there changes."));
+    tprintln!(ctx, "{}", crate::ui::dim("Your backups are still secured by your 24 words only, not your password."));
     Ok(())
 }
 
