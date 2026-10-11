@@ -565,6 +565,15 @@ impl ConsensusSessionOwned {
     pub async fn async_get_pool_notes(&self, sns: Vec<Hash>) -> Vec<Option<kaspa_consensus_core::notepool::PoolEntry>> {
         self.clone().spawn_blocking(move |c| c.get_pool_notes(&sns)).await
     }
+    pub async fn async_get_pool_state_at(
+        &self,
+        block: Hash,
+    ) -> ConsensusResult<Vec<(Hash, kaspa_consensus_core::notepool::PoolEntry)>> {
+        self.clone().spawn_blocking(move |c| c.get_pool_state_at(block)).await
+    }
+    pub async fn async_get_pool_diff_of(&self, block: Hash) -> ConsensusResult<kaspa_consensus_core::notepool::PoolDiff> {
+        self.clone().spawn_blocking(move |c| c.get_pool_diff_of(block)).await
+    }
     pub async fn async_get_pool_stats(&self) -> kaspa_consensus_core::notepool::PoolStats {
         self.clone().spawn_blocking(move |c| c.get_pool_stats()).await
     }

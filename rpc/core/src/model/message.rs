@@ -4452,3 +4452,213 @@ impl Deserializer for ControlMinerResponse {
         Ok(Self { status })
     }
 }
+
+// ---------------------------------------------------------------------------
+// The light wallet (PLAN P8.7, SYNC-LIGHT.md): the pool state as of a chain
+// block, the diff a chain block applied, and the latest anchor with its
+// signatures, so a wallet can check the anchor against the trustees' keys and
+// the state against the block's pool commitment without naming its notes.
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetPoolStateAtBlockRequest {
+    pub block: RpcHash,
+}
+
+impl GetPoolStateAtBlockRequest {
+    pub fn new(block: RpcHash) -> Self {
+        Self { block }
+    }
+}
+
+impl Serializer for GetPoolStateAtBlockRequest {
+    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        store!(u16, &1, writer)?;
+        store!(RpcHash, &self.block, writer)?;
+        Ok(())
+    }
+}
+
+impl Deserializer for GetPoolStateAtBlockRequest {
+    fn deserialize<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
+        let _version = load!(u16, reader)?;
+        let block = load!(RpcHash, reader)?;
+        Ok(Self { block })
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetPoolStateAtBlockResponse {
+    pub block: RpcHash,
+    pub notes: Vec<RpcNoteEntry>,
+}
+
+impl GetPoolStateAtBlockResponse {
+    pub fn new(block: RpcHash, notes: Vec<RpcNoteEntry>) -> Self {
+        Self { block, notes }
+    }
+}
+
+impl Serializer for GetPoolStateAtBlockResponse {
+    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        store!(u16, &1, writer)?;
+        store!(RpcHash, &self.block, writer)?;
+        serialize!(Vec<RpcNoteEntry>, &self.notes, writer)?;
+        Ok(())
+    }
+}
+
+impl Deserializer for GetPoolStateAtBlockResponse {
+    fn deserialize<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
+        let _version = load!(u16, reader)?;
+        let block = load!(RpcHash, reader)?;
+        let notes = deserialize!(Vec<RpcNoteEntry>, reader)?;
+        Ok(Self { block, notes })
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetPoolDiffRequest {
+    pub block: RpcHash,
+}
+
+impl GetPoolDiffRequest {
+    pub fn new(block: RpcHash) -> Self {
+        Self { block }
+    }
+}
+
+impl Serializer for GetPoolDiffRequest {
+    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        store!(u16, &1, writer)?;
+        store!(RpcHash, &self.block, writer)?;
+        Ok(())
+    }
+}
+
+impl Deserializer for GetPoolDiffRequest {
+    fn deserialize<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
+        let _version = load!(u16, reader)?;
+        let block = load!(RpcHash, reader)?;
+        Ok(Self { block })
+    }
+}
+
+/// What a chain block did to the pool: the notes it added and the notes it
+/// removed, relative to its selected parent.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetPoolDiffResponse {
+    pub block: RpcHash,
+    pub added: Vec<RpcNoteEntry>,
+    pub removed: Vec<RpcNoteEntry>,
+}
+
+impl GetPoolDiffResponse {
+    pub fn new(block: RpcHash, added: Vec<RpcNoteEntry>, removed: Vec<RpcNoteEntry>) -> Self {
+        Self { block, added, removed }
+    }
+}
+
+impl Serializer for GetPoolDiffResponse {
+    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        store!(u16, &1, writer)?;
+        store!(RpcHash, &self.block, writer)?;
+        serialize!(Vec<RpcNoteEntry>, &self.added, writer)?;
+        serialize!(Vec<RpcNoteEntry>, &self.removed, writer)?;
+        Ok(())
+    }
+}
+
+impl Deserializer for GetPoolDiffResponse {
+    fn deserialize<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
+        let _version = load!(u16, reader)?;
+        let block = load!(RpcHash, reader)?;
+        let added = deserialize!(Vec<RpcNoteEntry>, reader)?;
+        let removed = deserialize!(Vec<RpcNoteEntry>, reader)?;
+        Ok(Self { block, added, removed })
+    }
+}
+
+/// A finality anchor as the trustees signed it: the block, its DAA score, which
+/// trustees signed (a bitmap over the pinned keys) and their signatures, 64
+/// bytes each in bitmap order, concatenated.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RpcFinalityAnchor {
+    pub anchored_block: RpcHash,
+    pub anchored_daa_score: u64,
+    pub signer_bitmap: u8,
+    pub signatures: Vec<u8>,
+}
+
+impl Serializer for RpcFinalityAnchor {
+    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        store!(u16, &1, writer)?;
+        store!(RpcHash, &self.anchored_block, writer)?;
+        store!(u64, &self.anchored_daa_score, writer)?;
+        store!(u8, &self.signer_bitmap, writer)?;
+        store!(Vec<u8>, &self.signatures, writer)?;
+        Ok(())
+    }
+}
+
+impl Deserializer for RpcFinalityAnchor {
+    fn deserialize<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
+        let _version = load!(u16, reader)?;
+        let anchored_block = load!(RpcHash, reader)?;
+        let anchored_daa_score = load!(u64, reader)?;
+        let signer_bitmap = load!(u8, reader)?;
+        let signatures = load!(Vec<u8>, reader)?;
+        Ok(Self { anchored_block, anchored_daa_score, signer_bitmap, signatures })
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetFinalityAnchorRequest {}
+
+impl Serializer for GetFinalityAnchorRequest {
+    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        store!(u16, &1, writer)?;
+        Ok(())
+    }
+}
+
+impl Deserializer for GetFinalityAnchorRequest {
+    fn deserialize<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
+        let _version = load!(u16, reader)?;
+        Ok(Self {})
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetFinalityAnchorResponse {
+    pub anchor: Option<RpcFinalityAnchor>,
+}
+
+impl GetFinalityAnchorResponse {
+    pub fn new(anchor: Option<RpcFinalityAnchor>) -> Self {
+        Self { anchor }
+    }
+}
+
+impl Serializer for GetFinalityAnchorResponse {
+    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        store!(u16, &1, writer)?;
+        serialize!(Option<RpcFinalityAnchor>, &self.anchor, writer)?;
+        Ok(())
+    }
+}
+
+impl Deserializer for GetFinalityAnchorResponse {
+    fn deserialize<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
+        let _version = load!(u16, reader)?;
+        let anchor = deserialize!(Option<RpcFinalityAnchor>, reader)?;
+        Ok(Self { anchor })
+    }
+}

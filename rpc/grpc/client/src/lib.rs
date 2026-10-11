@@ -283,6 +283,9 @@ impl RpcApi for GrpcClient {
     route!(get_notes_by_serial_call, GetNotesBySerial);
     route!(get_miner_status_call, GetMinerStatus);
     route!(control_miner_call, ControlMiner);
+    route!(get_pool_state_at_block_call, GetPoolStateAtBlock);
+    route!(get_pool_diff_call, GetPoolDiff);
+    route!(get_finality_anchor_call, GetFinalityAnchor);
     route!(get_pool_stats_call, GetPoolStats);
     route!(get_finality_anchor_status_call, GetFinalityAnchorStatus);
 

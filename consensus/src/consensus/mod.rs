@@ -1205,6 +1205,52 @@ impl ConsensusApi for Consensus {
         self.virtual_stores.read().pool_smt.current_root().expect("live pool root must be readable")
     }
 
+    fn get_pool_state_at(&self, block: Hash) -> ConsensusResult<Vec<(Hash, kaspa_consensus_core::notepool::PoolEntry)>> {
+        use crate::model::stores::notepool_diffs::NotePoolDiffsStoreReader;
+        use crate::model::stores::virtual_state::VirtualStateStoreReader;
+        use kaspa_consensus_core::notepool::PoolCollection;
+        // Pruning must not take the diffs out from under the walk.
+        let _guard = self.pruning_lock.blocking_read();
+        self.validate_block_exists(block)?;
+        // Virtual's read lock keeps the sink, its state and virtual's own
+        // diff one consistent picture for the whole walk.
+        let virtual_read = self.virtual_stores.read();
+        let sink = virtual_read.state.get().unwrap().ghostdag_data.selected_parent;
+        if !self.services.reachability_service.is_chain_ancestor_of(block, sink) {
+            return Err(ConsensusError::General("the block is not on the selected chain"));
+        }
+        // Virtual's state is the sink's state plus virtual's own diff: take
+        // the diff back out, then walk the chain down from the sink, taking
+        // each block's diff back out, until the asked-for block is reached;
+        // its own diff stays in, which is what its commitment covers.
+        let mut entries: PoolCollection = virtual_read.pool_state.iterator().map(|r| r.unwrap()).collect();
+        let reverse = |entries: &mut PoolCollection, diff: &kaspa_consensus_core::notepool::PoolDiff| {
+            for sn in diff.add.keys() {
+                entries.remove(sn);
+            }
+            for (sn, note) in diff.remove.iter() {
+                entries.insert(*sn, *note);
+            }
+        };
+        reverse(&mut entries, &virtual_read.virtual_pool_diff());
+        for current in self.services.reachability_service.default_backward_chain_iterator(sink) {
+            if current == block {
+                break;
+            }
+            let diff = self.notepool_diffs_store.get(current).map_err(|_| ConsensusError::MissingData(current))?;
+            reverse(&mut entries, &diff);
+        }
+        Ok(entries.into_iter().collect())
+    }
+
+    fn get_pool_diff_of(&self, block: Hash) -> ConsensusResult<kaspa_consensus_core::notepool::PoolDiff> {
+        use crate::model::stores::notepool_diffs::NotePoolDiffsStoreReader;
+        let _guard = self.pruning_lock.blocking_read();
+        self.validate_block_exists(block)?;
+        let diff = self.notepool_diffs_store.get(block).map_err(|_| ConsensusError::MissingData(block))?;
+        Ok((*diff).clone())
+    }
+
     fn get_finality_anchor_status(&self) -> kaspa_consensus_core::finality_anchor::FinalityAnchorStatus {
         let params = &self.config.params.finality_anchor;
         let virtual_state = self.lkg_virtual_state.load();

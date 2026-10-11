@@ -1293,3 +1293,45 @@ message ControlMinerResponseMessage {
 
   RPCError error = 1000;
 }
+
+// The light wallet (PLAN P8.7): the pool state as of a chain block, the diff a
+// chain block applied, and the latest finality anchor with its signatures.
+message GetPoolStateAtBlockRequestMessage {
+  bytes block = 1;
+}
+
+message GetPoolStateAtBlockResponseMessage {
+  bytes block = 1;
+  repeated RpcNoteEntryMessage notes = 2;
+
+  RPCError error = 1000;
+}
+
+message GetPoolDiffRequestMessage {
+  bytes block = 1;
+}
+
+message GetPoolDiffResponseMessage {
+  bytes block = 1;
+  repeated RpcNoteEntryMessage added = 2;
+  repeated RpcNoteEntryMessage removed = 3;
+
+  RPCError error = 1000;
+}
+
+message RpcFinalityAnchorMessage {
+  bytes anchoredBlock = 1;
+  uint64 anchoredDaaScore = 2;
+  uint32 signerBitmap = 3;
+  // 64 bytes per signature, in bitmap order, concatenated.
+  bytes signatures = 4;
+}
+
+message GetFinalityAnchorRequestMessage {
+}
+
+message GetFinalityAnchorResponseMessage {
+  optional RpcFinalityAnchorMessage anchor = 1;
+
+  RPCError error = 1000;
+}

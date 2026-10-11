@@ -96,6 +96,9 @@ pub enum KaspadPayloadOps {
     GetFinalityAnchorStatus,
     GetMinerStatus,
     ControlMiner,
+    GetPoolStateAtBlock,
+    GetPoolDiff,
+    GetFinalityAnchor,
 
     // Subscription commands for starting/stopping notifications
     NotifyBlockAdded,

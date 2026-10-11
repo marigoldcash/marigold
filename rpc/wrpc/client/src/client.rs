@@ -671,6 +671,9 @@ impl RpcApi for KaspaRpcClient {
             GetFinalityAnchorStatus,
             GetMinerStatus,
             ControlMiner,
+            GetPoolStateAtBlock,
+            GetPoolDiff,
+            GetFinalityAnchor,
         ]
     );
 

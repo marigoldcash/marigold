@@ -554,6 +554,22 @@ pub trait ConsensusApi: Send + Sync {
         unimplemented!()
     }
 
+    /// The pool state as of chain block `block`, after its mergeset: what the
+    /// block's `pool_commitment` commits to. Rebuilt from the per-block pool
+    /// diffs between the block and the sink, so any chain block in the
+    /// retention window can be asked for. For the light wallet, which takes
+    /// the state at an anchored block and checks it against the commitment
+    /// (SYNC-LIGHT.md, PLAN P8.7).
+    fn get_pool_state_at(&self, _block: Hash) -> ConsensusResult<Vec<(Hash, crate::notepool::PoolEntry)>> {
+        unimplemented!()
+    }
+
+    /// The pool diff chain block `block` applied relative to its selected
+    /// parent, for a light wallet following the chain block by block.
+    fn get_pool_diff_of(&self, _block: Hash) -> ConsensusResult<crate::notepool::PoolDiff> {
+        unimplemented!()
+    }
+
     /// The node's finality-anchor state (POOL-SPEC.md P5.8, PLAN P6.11): the
     /// latest-anchor ratchet, whether the anchor-conflict rule is currently enforced,
     /// the spec's `finality_anchor_stale` fail-open flag, and the trustee deny-list as

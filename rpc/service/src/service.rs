@@ -582,6 +582,47 @@ NOTE: This error usually indicates an RPC conversion error between the node and 
         Ok(GetNotesBySerialResponse::new(entries))
     }
 
+    async fn get_pool_state_at_block_call(
+        &self,
+        _connection: Option<&DynRpcConnection>,
+        request: GetPoolStateAtBlockRequest,
+    ) -> RpcResult<GetPoolStateAtBlockResponse> {
+        // The whole pool as of one chain block, for a light wallet that checks
+        // it against the block's pool commitment and looks its own notes up
+        // locally rather than naming them (PLAN P8.7). The pool is small.
+        let session = self.consensus_manager.consensus().unguarded_session();
+        let entries = session.async_get_pool_state_at(request.block).await?;
+        let notes = entries.into_iter().map(|(sn, e)| rpc_note_entry(sn, &e)).collect();
+        Ok(GetPoolStateAtBlockResponse::new(request.block, notes))
+    }
+
+    async fn get_pool_diff_call(
+        &self,
+        _connection: Option<&DynRpcConnection>,
+        request: GetPoolDiffRequest,
+    ) -> RpcResult<GetPoolDiffResponse> {
+        let session = self.consensus_manager.consensus().unguarded_session();
+        let diff = session.async_get_pool_diff_of(request.block).await?;
+        let added = diff.add.iter().map(|(sn, e)| rpc_note_entry(*sn, e)).collect();
+        let removed = diff.remove.iter().map(|(sn, e)| rpc_note_entry(*sn, e)).collect();
+        Ok(GetPoolDiffResponse::new(request.block, added, removed))
+    }
+
+    async fn get_finality_anchor_call(
+        &self,
+        _connection: Option<&DynRpcConnection>,
+        _request: GetFinalityAnchorRequest,
+    ) -> RpcResult<GetFinalityAnchorResponse> {
+        let session = self.consensus_manager.consensus().unguarded_session();
+        let anchor = session.async_get_latest_full_finality_anchor().await.map(|a| RpcFinalityAnchor {
+            anchored_block: a.anchored_block,
+            anchored_daa_score: a.anchored_daa_score,
+            signer_bitmap: a.signer_bitmap,
+            signatures: a.signatures.iter().flat_map(|s| s.iter().copied()).collect(),
+        });
+        Ok(GetFinalityAnchorResponse::new(anchor))
+    }
+
     async fn get_miner_status_call(
         &self,
         _connection: Option<&DynRpcConnection>,
@@ -1721,5 +1762,15 @@ impl AsyncService for RpcCoreService {
             trace!("{} stopped", Self::IDENT);
             Ok(())
         })
+    }
+}
+
+/// A pool entry in the RPC's words.
+fn rpc_note_entry(sn: kaspa_hashes::Hash, e: &kaspa_consensus_core::notepool::PoolEntry) -> RpcNoteEntry {
+    RpcNoteEntry {
+        sn,
+        denomination: e.note.d as u8,
+        pk: e.note.pk,
+        lock: e.lock.map(|l| kaspa_rpc_core::RpcNoteLock { refund_pk: l.refund_pk, until_daa: l.until_daa }),
     }
 }

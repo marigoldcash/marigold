@@ -75,6 +75,9 @@ message KaspadRequest {
     GetFinalityAnchorStatusRequestMessage getFinalityAnchorStatusRequest = 1127;
     GetMinerStatusRequestMessage getMinerStatusRequest = 1129;
     ControlMinerRequestMessage controlMinerRequest = 1131;
+    GetPoolStateAtBlockRequestMessage getPoolStateAtBlockRequest = 1133;
+    GetPoolDiffRequestMessage getPoolDiffRequest = 1135;
+    GetFinalityAnchorRequestMessage getFinalityAnchorRequest = 1137;
   }
 }
 
@@ -151,6 +154,9 @@ message KaspadResponse {
     GetFinalityAnchorStatusResponseMessage getFinalityAnchorStatusResponse = 1128;
     GetMinerStatusResponseMessage getMinerStatusResponse = 1130;
     ControlMinerResponseMessage controlMinerResponse = 1132;
+    GetPoolStateAtBlockResponseMessage getPoolStateAtBlockResponse = 1134;
+    GetPoolDiffResponseMessage getPoolDiffResponse = 1136;
+    GetFinalityAnchorResponseMessage getFinalityAnchorResponse = 1138;
   }
 }
 

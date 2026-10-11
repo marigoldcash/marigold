@@ -254,6 +254,30 @@ impl RpcApi for RpcCoreMock {
         Err(RpcError::NotImplemented)
     }
 
+    async fn get_pool_state_at_block_call(
+        &self,
+        _connection: Option<&DynRpcConnection>,
+        _request: GetPoolStateAtBlockRequest,
+    ) -> RpcResult<GetPoolStateAtBlockResponse> {
+        Err(RpcError::NotImplemented)
+    }
+
+    async fn get_pool_diff_call(
+        &self,
+        _connection: Option<&DynRpcConnection>,
+        _request: GetPoolDiffRequest,
+    ) -> RpcResult<GetPoolDiffResponse> {
+        Err(RpcError::NotImplemented)
+    }
+
+    async fn get_finality_anchor_call(
+        &self,
+        _connection: Option<&DynRpcConnection>,
+        _request: GetFinalityAnchorRequest,
+    ) -> RpcResult<GetFinalityAnchorResponse> {
+        Err(RpcError::NotImplemented)
+    }
+
     async fn get_subnetwork_call(
         &self,
         _connection: Option<&DynRpcConnection>,

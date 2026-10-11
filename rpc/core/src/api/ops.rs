@@ -157,6 +157,12 @@ pub enum RpcApiOps {
     GetMinerStatus = 157,
     /// Start, stop or resize the miner running inside this node (PLAN P8.3c)
     ControlMiner = 158,
+    /// The whole pool state as of a chain block, for the light wallet (PLAN P8.7)
+    GetPoolStateAtBlock = 159,
+    /// The pool diff a chain block applied, for a light wallet following the chain (PLAN P8.7)
+    GetPoolDiff = 160,
+    /// The latest finality anchor with its signatures, for a wallet to check itself (PLAN P8.7)
+    GetFinalityAnchor = 161,
 }
 
 impl RpcApiOps {

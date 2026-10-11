@@ -296,6 +296,36 @@ pub trait RpcApi: Sync + Send + AnySync {
         connection: Option<&DynRpcConnection>,
         request: GetFinalityAnchorStatusRequest,
     ) -> RpcResult<GetFinalityAnchorStatusResponse>;
+
+    /// The pool state as of a chain block, for the light wallet (PLAN P8.7).
+    async fn get_pool_state_at_block(&self, block: RpcHash) -> RpcResult<GetPoolStateAtBlockResponse> {
+        self.get_pool_state_at_block_call(None, GetPoolStateAtBlockRequest::new(block)).await
+    }
+    async fn get_pool_state_at_block_call(
+        &self,
+        connection: Option<&DynRpcConnection>,
+        request: GetPoolStateAtBlockRequest,
+    ) -> RpcResult<GetPoolStateAtBlockResponse>;
+
+    /// The pool diff a chain block applied (PLAN P8.7).
+    async fn get_pool_diff(&self, block: RpcHash) -> RpcResult<GetPoolDiffResponse> {
+        self.get_pool_diff_call(None, GetPoolDiffRequest::new(block)).await
+    }
+    async fn get_pool_diff_call(
+        &self,
+        connection: Option<&DynRpcConnection>,
+        request: GetPoolDiffRequest,
+    ) -> RpcResult<GetPoolDiffResponse>;
+
+    /// The latest finality anchor with its signatures (PLAN P8.7).
+    async fn get_finality_anchor(&self) -> RpcResult<GetFinalityAnchorResponse> {
+        self.get_finality_anchor_call(None, GetFinalityAnchorRequest {}).await
+    }
+    async fn get_finality_anchor_call(
+        &self,
+        connection: Option<&DynRpcConnection>,
+        request: GetFinalityAnchorRequest,
+    ) -> RpcResult<GetFinalityAnchorResponse>;
     async fn get_pool_stats_call(
         &self,
         connection: Option<&DynRpcConnection>,

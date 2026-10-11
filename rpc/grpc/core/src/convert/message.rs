@@ -642,6 +642,36 @@ from!(item: RpcResult<&kaspa_rpc_core::GetNotesBySerialResponse>, protowire::Get
 
 from!(&kaspa_rpc_core::GetPoolStatsRequest, protowire::GetPoolStatsRequestMessage);
 
+from!(item: &kaspa_rpc_core::GetPoolStateAtBlockRequest, protowire::GetPoolStateAtBlockRequestMessage, {
+    Self { block: item.block.as_bytes().to_vec() }
+});
+from!(item: RpcResult<&kaspa_rpc_core::GetPoolStateAtBlockResponse>, protowire::GetPoolStateAtBlockResponseMessage, {
+    Self { block: item.block.as_bytes().to_vec(), notes: item.notes.iter().map(|x| x.into()).collect(), error: None }
+});
+from!(item: &kaspa_rpc_core::GetPoolDiffRequest, protowire::GetPoolDiffRequestMessage, {
+    Self { block: item.block.as_bytes().to_vec() }
+});
+from!(item: RpcResult<&kaspa_rpc_core::GetPoolDiffResponse>, protowire::GetPoolDiffResponseMessage, {
+    Self {
+        block: item.block.as_bytes().to_vec(),
+        added: item.added.iter().map(|x| x.into()).collect(),
+        removed: item.removed.iter().map(|x| x.into()).collect(),
+        error: None,
+    }
+});
+from!(item: &kaspa_rpc_core::RpcFinalityAnchor, protowire::RpcFinalityAnchorMessage, {
+    Self {
+        anchored_block: item.anchored_block.as_bytes().to_vec(),
+        anchored_daa_score: item.anchored_daa_score,
+        signer_bitmap: item.signer_bitmap as u32,
+        signatures: item.signatures.clone(),
+    }
+});
+from!(&kaspa_rpc_core::GetFinalityAnchorRequest, protowire::GetFinalityAnchorRequestMessage);
+from!(item: RpcResult<&kaspa_rpc_core::GetFinalityAnchorResponse>, protowire::GetFinalityAnchorResponseMessage, {
+    Self { anchor: item.anchor.as_ref().map(|a| a.into()), error: None }
+});
+
 from!(item: &kaspa_rpc_core::RpcMinerStatus, protowire::RpcMinerStatusMessage, {
     Self {
         available: item.available,
@@ -1283,6 +1313,35 @@ try_from!(item: &protowire::GetNotesBySerialResponseMessage, RpcResult<kaspa_rpc
 });
 
 try_from!(&protowire::GetPoolStatsRequestMessage, kaspa_rpc_core::GetPoolStatsRequest);
+
+try_from!(item: &protowire::GetPoolStateAtBlockRequestMessage, kaspa_rpc_core::GetPoolStateAtBlockRequest, {
+    Self { block: hash_from_bytes(&item.block)? }
+});
+try_from!(item: &protowire::GetPoolStateAtBlockResponseMessage, RpcResult<kaspa_rpc_core::GetPoolStateAtBlockResponse>, {
+    Self { block: hash_from_bytes(&item.block)?, notes: item.notes.iter().map(|x| x.try_into()).collect::<RpcResult<Vec<_>>>()? }
+});
+try_from!(item: &protowire::GetPoolDiffRequestMessage, kaspa_rpc_core::GetPoolDiffRequest, {
+    Self { block: hash_from_bytes(&item.block)? }
+});
+try_from!(item: &protowire::GetPoolDiffResponseMessage, RpcResult<kaspa_rpc_core::GetPoolDiffResponse>, {
+    Self {
+        block: hash_from_bytes(&item.block)?,
+        added: item.added.iter().map(|x| x.try_into()).collect::<RpcResult<Vec<_>>>()?,
+        removed: item.removed.iter().map(|x| x.try_into()).collect::<RpcResult<Vec<_>>>()?,
+    }
+});
+try_from!(item: &protowire::RpcFinalityAnchorMessage, kaspa_rpc_core::RpcFinalityAnchor, {
+    Self {
+        anchored_block: hash_from_bytes(&item.anchored_block)?,
+        anchored_daa_score: item.anchored_daa_score,
+        signer_bitmap: item.signer_bitmap as u8,
+        signatures: item.signatures.clone(),
+    }
+});
+try_from!(&protowire::GetFinalityAnchorRequestMessage, kaspa_rpc_core::GetFinalityAnchorRequest);
+try_from!(item: &protowire::GetFinalityAnchorResponseMessage, RpcResult<kaspa_rpc_core::GetFinalityAnchorResponse>, {
+    Self { anchor: item.anchor.as_ref().map(|a| a.try_into()).transpose()? }
+});
 
 try_from!(item: &protowire::RpcMinerStatusMessage, kaspa_rpc_core::RpcMinerStatus, {
     Self {

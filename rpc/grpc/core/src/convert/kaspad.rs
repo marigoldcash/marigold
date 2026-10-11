@@ -70,6 +70,9 @@ pub mod kaspad_request_convert {
     impl_into_kaspad_request!(GetNotesBySerial);
     impl_into_kaspad_request!(GetMinerStatus);
     impl_into_kaspad_request!(ControlMiner);
+    impl_into_kaspad_request!(GetPoolStateAtBlock);
+    impl_into_kaspad_request!(GetPoolDiff);
+    impl_into_kaspad_request!(GetFinalityAnchor);
     impl_into_kaspad_request!(GetPoolStats);
     impl_into_kaspad_request!(GetFinalityAnchorStatus);
 
@@ -217,6 +220,9 @@ pub mod kaspad_response_convert {
     impl_into_kaspad_response!(GetNotesBySerial);
     impl_into_kaspad_response!(GetMinerStatus);
     impl_into_kaspad_response!(ControlMiner);
+    impl_into_kaspad_response!(GetPoolStateAtBlock);
+    impl_into_kaspad_response!(GetPoolDiff);
+    impl_into_kaspad_response!(GetFinalityAnchor);
     impl_into_kaspad_response!(GetPoolStats);
     impl_into_kaspad_response!(GetFinalityAnchorStatus);
 
