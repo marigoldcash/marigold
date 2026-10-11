@@ -66,6 +66,8 @@ pub mod test;
 pub mod theme;
 pub mod track;
 pub mod transfer;
+// The wallet in a browser cannot replace its own program.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod update;
 pub mod utxos;
 pub mod wallet;
@@ -88,7 +90,7 @@ pub fn register_handlers(cli: &Arc<KaspaCli>) -> Result<()> {
             about, account, address, advanced, auto, backup, balance, close, connect, create, details, disconnect, estimate, exchange,
             exit, export, guide, help, history, import, rpc, list, mint, mv, pay, receive, request, miner, message, monitor, lane,
             mute, network, node, note, open, otp, ping, pskb, quit, reload, select, server, settings, sweep, track, transfer,
-            telegram, update, utxos, wallet, words,
+            telegram, utxos, wallet, words,
             // halt,
             // theme,  start, stop
         ]
@@ -104,6 +106,10 @@ pub fn register_handlers(cli: &Arc<KaspaCli>) -> Result<()> {
     // configures an external kaspa-miner binary — and stays under 'advanced'.)
     #[cfg(feature = "embedded-node")]
     register_handlers!(cli, cli.handlers(), [mine]);
+
+    // `update` replaces the program on disk, which the browser build has none of.
+    #[cfg(not(target_arch = "wasm32"))]
+    register_handlers!(cli, cli.handlers(), [update]);
 
     Ok(())
 }
