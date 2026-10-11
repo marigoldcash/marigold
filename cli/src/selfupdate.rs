@@ -66,12 +66,60 @@ pub fn offer(document: &release_check::Document, network: Option<NetworkId>) -> 
     Ok(Some(Offer { version, asset, digest }))
 }
 
-/// Where the new file is written: beside the running program, so the final
-/// move is a rename on one filesystem.
-fn staged_path() -> Result<PathBuf> {
+/// Whether this process may create a file in `dir`: tried, not guessed from
+/// the mode bits, because the answer on a Pi's /usr/local/bin is "no" for
+/// the user and "yes" for sudo (tester, 2026-10-10).
+fn dir_is_writable(dir: &Path) -> bool {
+    let probe = dir.join(format!(".marigold-write-probe-{}", std::process::id()));
+    match std::fs::OpenOptions::new().write(true).create_new(true).open(&probe) {
+        Ok(_) => {
+            let _ = std::fs::remove_file(&probe);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+/// Where the running program lives, and whether it can be replaced without
+/// more rights than this process has.
+fn program_home() -> Result<(PathBuf, PathBuf, bool)> {
     let exe = std::env::current_exe().map_err(|e| Error::custom(format!("cannot tell where this program is: {e}")))?;
+    let dir = exe.parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
+    let writable = dir_is_writable(&dir);
+    Ok((exe, dir, writable))
+}
+
+/// True when installing will need the system's permission (sudo): the program
+/// sits in a folder this user cannot write, /usr/local/bin for one.
+pub fn needs_privileges() -> bool {
+    program_home().map(|(_, _, writable)| !writable).unwrap_or(false)
+}
+
+/// Where the new file is written: beside the running program, so the final
+/// move is a rename on one filesystem; in the system's temporary folder when
+/// the program's own folder is not ours to write, and then installed with
+/// sudo.
+fn staged_path() -> Result<PathBuf> {
+    let (exe, dir, writable) = program_home()?;
     let name = exe.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "marigold-cli".into());
-    Ok(exe.with_file_name(format!("{name}.update")))
+    let staged = format!("{name}.update");
+    Ok(if writable { dir.join(staged) } else { std::env::temp_dir().join(staged) })
+}
+
+/// A rename, or a copy when the two sides are different filesystems.
+fn move_file(from: &Path, to: &Path) -> std::io::Result<()> {
+    match std::fs::rename(from, to) {
+        Ok(()) => Ok(()),
+        Err(_) => {
+            std::fs::copy(from, to)?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(to, std::fs::Permissions::from_mode(0o755))?;
+            }
+            std::fs::remove_file(from)
+        }
+    }
 }
 
 /// Downloads the offered file and checks its digest. Returns where it was put.
@@ -135,17 +183,51 @@ pub async fn download(offer: &Offer, say: &(dyn Fn(String) + Send + Sync)) -> Re
 /// Puts the staged file in place of the running program. The old one stays
 /// beside it as `.old`.
 pub fn install(staged: &Path) -> Result<PathBuf> {
-    let exe = std::env::current_exe().map_err(|e| Error::custom(format!("cannot tell where this program is: {e}")))?;
+    let (exe, dir, writable) = program_home()?;
     let old = exe.with_extension(if cfg!(windows) { "old.exe" } else { "old" });
+    if !writable {
+        return install_with_privileges(staged, &exe, &old, &dir);
+    }
     let _ = std::fs::remove_file(&old);
     // A running program can be renamed on every platform, and overwritten on
     // none that matters here: move the old aside, the new in.
     std::fs::rename(&exe, &old).map_err(|e| Error::custom(format!("cannot move {} aside: {e}", exe.display())))?;
-    if let Err(e) = std::fs::rename(staged, &exe) {
+    if let Err(e) = move_file(staged, &exe) {
         let _ = std::fs::rename(&old, &exe);
         return Err(Error::custom(format!("cannot put the new program at {}: {e}", exe.display())));
     }
     Ok(exe)
+}
+
+/// The program sits where only the system may write: sudo does the two
+/// moves, after asking for the password on the terminal. If that fails, or
+/// there is no sudo, the downloaded file stays where it is and the one
+/// command that finishes the job is spelled out.
+#[cfg(unix)]
+fn install_with_privileges(staged: &Path, exe: &Path, old: &Path, dir: &Path) -> Result<PathBuf> {
+    let q = |p: &Path| format!("'{}'", p.display().to_string().replace('\'', "'\\''"));
+    let script = format!("cp -p {} {} && install -m 755 {} {} && rm -f {}", q(exe), q(old), q(staged), q(exe), q(staged));
+    let ran = std::process::Command::new("sudo").arg("sh").arg("-c").arg(&script).status();
+    match ran {
+        Ok(status) if status.success() => Ok(exe.to_path_buf()),
+        _ => Err(Error::custom(format!(
+            "could not install into {} without the system's permission. The new program is checked and waiting at {}; this finishes it:\n  sudo install -m 755 {} {}",
+            dir.display(),
+            staged.display(),
+            staged.display(),
+            exe.display()
+        ))),
+    }
+}
+
+#[cfg(not(unix))]
+fn install_with_privileges(staged: &Path, exe: &Path, _old: &Path, dir: &Path) -> Result<PathBuf> {
+    Err(Error::custom(format!(
+        "this program sits in {}, which this user cannot write. The new program is checked and waiting at {}; copy it over {} as an administrator, or move the program to a folder of your own.",
+        dir.display(),
+        staged.display(),
+        exe.display()
+    )))
 }
 
 /// Starts the program at `exe` with this process's arguments and leaves.
@@ -159,11 +241,15 @@ pub fn restart(exe: &Path) -> Result<()> {
     }
     #[cfg(not(unix))]
     {
-        std::process::Command::new(exe)
+        // Windows has no exec: the shell waits for this process, so leaving
+        // after a spawn gave the console back to the shell while the new
+        // wallet was still starting (tester, 2026-10-10). This process stays
+        // as a thin shell around the new one and ends when it ends.
+        let status = std::process::Command::new(exe)
             .args(&args)
-            .spawn()
+            .status()
             .map_err(|e| Error::custom(format!("could not start {}: {e}", exe.display())))?;
-        std::process::exit(0);
+        std::process::exit(status.code().unwrap_or(0));
     }
 }
 
@@ -217,6 +303,9 @@ pub async fn command(cli: &Arc<KaspaCli>) -> Result<()> {
         cli.stop_embedded_node().await?;
     }
     cli.stop_telegram_bot();
+    if needs_privileges() {
+        tprintln!(cli, "{}", crate::ui::dim("The program sits in a system folder; installing there asks for your password (sudo)."));
+    }
     let exe = install(&staged)?;
     tprintln!(cli, "{}", style(format!("Installed {}. Restarting…", offer.version)).green());
     tprintln!(

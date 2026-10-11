@@ -606,22 +606,46 @@ impl WalletService {
             ))
         } else if code.starts_with(BEARER_NOTE_PREFIX) {
             let bearer = BearerNote::from_text(code).map_err(|e| e.to_string())?;
-            let result = notepool::bearer_import(&self.wallet, self.secret.clone(), bearer).await.map_err(|e| e.to_string())?;
-            let value = DENOMINATION_PETALS[bearer.d as usize];
-            self.record(
-                "received",
-                value,
-                result.rotation.fee_petals,
-                self.tag("note").as_str(),
-                &result.rotation.transaction_id.to_string(),
-            );
-            self.note_spent(result.rotation.fee_petals);
-            Ok(format!(
-                "Received {} {} (fee {}).",
-                sompi_to_kaspa_string(value),
-                self.ticker(),
-                sompi_to_kaspa_string(result.rotation.fee_petals)
-            ))
+            let (sn, value) = (bearer.sn, DENOMINATION_PETALS[bearer.d as usize]);
+            match notepool::bearer_import(&self.wallet, self.secret.clone(), bearer).await {
+                Ok(result) => {
+                    self.record(
+                        "received",
+                        value,
+                        result.rotation.fee_petals,
+                        self.tag("note").as_str(),
+                        &result.rotation.transaction_id.to_string(),
+                    );
+                    self.note_spent(result.rotation.fee_petals);
+                    Ok(format!(
+                        "Received {} {} (fee {}).",
+                        sompi_to_kaspa_string(value),
+                        self.ticker(),
+                        sompi_to_kaspa_string(result.rotation.fee_petals)
+                    ))
+                }
+                Err(err) => {
+                    // The key is stored before the lock is turned, so a failed
+                    // turn still leaves the note in the wallet: it is received,
+                    // and the history must say so (tester, 2026-10-10: a faucet
+                    // note counted in the balance and absent from the history).
+                    let kept = match self.wallet.store().as_note_key_store() {
+                        Ok(store) => {
+                            matches!(store.load_info(&sn).await, Ok(Some(info)) if info.status == kaspa_wallet_core::storage::NoteStatus::Active)
+                        }
+                        Err(_) => false,
+                    };
+                    if !kept {
+                        return Err(err.to_string());
+                    }
+                    self.record("received", value, 0, self.tag("note, lock not turned yet").as_str(), "");
+                    Ok(format!(
+                        "Received {} {}. Its lock could not be turned yet ({err}); the wallet turns it on its own once connected, or 'note rotate all' does it now.",
+                        sompi_to_kaspa_string(value),
+                        self.ticker()
+                    ))
+                }
+            }
         } else {
             Err("that is not a Marigold code (marigoldpay: or marigoldnote:)".to_string())
         }

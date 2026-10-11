@@ -525,3 +525,11 @@ is priced like plumbing; notes are money and cost a penny to move.
 **Decision.** A wallet password, or at least a PIN, of four characters or more is required of a regular user at creation. A wallet without a password is a deliberate advanced choice, whatever the reason: `advanced on` before `create` in the terminal, the "Advanced: no password" box on the desktop's Create screen, or `MARIGOLD_ALLOW_EMPTY_PASSWORD=1` in the environment for scripts and tests. The policy is one function, `password_verdict`, with tests, used by both creation wizards; the prompts of an existing wallet accept an empty answer, since such wallets exist. Nothing changes at mainnet. This replaces the 2026-10-09 decision to allow empty passwords on the testnet behind a switch.
 
 **Why.** Founder, 2026-10-10: "Charly is heavily leaning on allowing empty passwords; I disagree, but I can see his point. Make this a deliberate advanced setting that allows creation of wallets without passwords, whatever the end user reason may be — helpful in a scripting context — though for a regular user a password or at least a PIN of reasonable length should be required. This is the policy stance." Four characters is the shortest PIN people recognise as one; the backups never open with the password, so the password only guards the files on the disk, which is why a PIN is enough and why the advanced way out exists at all.
+
+## Pieces are for the advanced (2026-10-10)
+
+**Decision.** The ledger line shows an amount; the count of pieces (one piece is one block reward, one coin on the ledger) is shown only with `advanced on`. The pending-reward note and the housekeeping's "minted into notes" line stay, in words.
+
+**Why.** Founder, on GitHub #19, after a tester read the moving piece count beside a steady amount as an inconsistency: "The whole operation is supposed to be grandma safe … I propose to withhold any inconsistent info, in fact I think the 'pieces' info, for a regular simple user, is not needed. Again, for an advanced user, yes by all means."
+
+**Where.** `cli/src/cli.rs`, the holdings display. v2.83.

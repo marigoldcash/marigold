@@ -144,6 +144,10 @@ impl Connect {
                             }
                             workflow_core::task::sleep(std::time::Duration::from_millis(250)).await;
                         }
+                        if !ctx.wallet().is_connected() {
+                            tprintln!(ctx, "{}", style("The public computer has not answered yet; the prompt says DISCONNECTED until it does. 'connect public' tries again.").yellow());
+                            return Ok(());
+                        }
                         tprintln!(ctx, "Public computer connected.");
                         ctx.print_next_step().await;
                         if ctx.wallet().is_open() {
@@ -153,23 +157,51 @@ impl Connect {
                     }
                     SyncStart::PublicMeanwhile(rpc) => {
                         let target = public.expect("offered only when there is one");
+                        // The question was on the screen for a while, and the
+                        // memory watchdog may have stopped the sync meanwhile
+                        // (tester, 2026-10-10): then there is nothing to hand
+                        // over to, and the handle must not be kept.
+                        let own = if ctx.embedded_node_running() {
+                            Some(rpc)
+                        } else {
+                            drop(rpc);
+                            tprintln!(
+                                ctx,
+                                "{}",
+                                style("Your own sync was stopped meanwhile; connecting to a public computer only. 'connect' starts a sync of your own again when there is room for it.").yellow()
+                            );
+                            None
+                        };
                         if let Err(err) = dial(wrpc_client, target).await {
                             tprintln!(ctx, "{}", style("Could not reach the public computer.").yellow());
                             if ctx.advanced() {
                                 tprintln!(ctx, "{}", style(format!("({err})")).dim());
                             }
-                            tprintln!(ctx, "Using your own copy while it catches up — 'connect status' shows progress.");
-                            ctx.adopt_embedded_node(rpc).await?;
+                            if let Some(rpc) = own {
+                                tprintln!(ctx, "Using your own copy while it catches up — 'connect status' shows progress.");
+                                ctx.adopt_embedded_node(rpc).await?;
+                            }
                             return Ok(());
                         }
-                        ctx.start_node_handover_task(rpc);
+                        let handing_over = own.is_some();
+                        if let Some(rpc) = own {
+                            ctx.start_node_handover_task(rpc);
+                        }
                         for _ in 0..40 {
                             if ctx.wallet().is_connected() {
                                 break;
                             }
                             workflow_core::task::sleep(std::time::Duration::from_millis(250)).await;
                         }
-                        tprintln!(ctx, "Public computer connected. Your own sync takes over once it has caught up.");
+                        if !ctx.wallet().is_connected() {
+                            tprintln!(ctx, "{}", style("The public computer has not answered yet; the prompt says DISCONNECTED until it does. 'connect public' tries again.").yellow());
+                            return Ok(());
+                        }
+                        if handing_over {
+                            tprintln!(ctx, "Public computer connected. Your own sync takes over once it has caught up.");
+                        } else {
+                            tprintln!(ctx, "Public computer connected.");
+                        }
                         ctx.print_next_step().await;
                         if ctx.wallet().is_open() {
                             ctx.request_open_housekeeping();

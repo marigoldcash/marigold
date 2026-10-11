@@ -111,14 +111,36 @@ impl Receive {
             // A single note's own key, handed over the older way: rotating it
             // costs one of our own stamps.
             let bearer = BearerNote::from_text(code)?;
-            let result = notepool::bearer_import(&wallet, wallet_secret.clone(), bearer).await?;
-            ctx.record(
-                "received",
-                DENOMINATION_PETALS[bearer.d as usize],
-                result.rotation.fee_petals,
-                "note",
-                result.rotation.transaction_id.to_string(),
-            );
+            let (sn, value) = (bearer.sn, DENOMINATION_PETALS[bearer.d as usize]);
+            let result = match notepool::bearer_import(&wallet, wallet_secret.clone(), bearer).await {
+                Ok(result) => result,
+                Err(err) => {
+                    // The key is stored before the lock is turned: a failed turn
+                    // leaves the note in the wallet, received, and the history
+                    // says so rather than losing the receipt.
+                    let kept = matches!(
+                        ctx.wallet().store().as_note_key_store()?.load_info(&sn).await,
+                        Ok(Some(info)) if info.status == kaspa_wallet_core::storage::NoteStatus::Active
+                    );
+                    if !kept {
+                        return Err(err.into());
+                    }
+                    ctx.record("received", value, 0, "note, lock not turned yet", "");
+                    ctx.refresh_prompt_total().await;
+                    tprintln!(ctx, "");
+                    tprintln!(ctx, "Received {} {ticker}.", sompi_to_kaspa_string(value));
+                    tprintln!(
+                        ctx,
+                        "{}",
+                        crate::ui::warn(format!(
+                            "Its lock could not be turned yet ({err}). The wallet turns it on its own once connected; 'note rotate all' does it now."
+                        ))
+                    );
+                    tprintln!(ctx, "");
+                    return Ok(());
+                }
+            };
+            ctx.record("received", value, result.rotation.fee_petals, "note", result.rotation.transaction_id.to_string());
             ctx.refresh_prompt_total().await;
             tprintln!(ctx, "");
             tprintln!(ctx, "Received {} {ticker}.", sompi_to_kaspa_string(DENOMINATION_PETALS[bearer.d as usize]));

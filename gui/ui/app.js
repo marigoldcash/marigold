@@ -30,7 +30,7 @@ function startSyncWatch() {
 
 function show(screen) {
   for (const s of document.querySelectorAll(".screen")) s.hidden = s.id !== `screen-${screen}`;
-  $("close-wallet").hidden = screen !== "app";
+  $("close-wallet").hidden = screen !== "home";
 }
 $("node").addEventListener("change", () => { $("node-local-hint").hidden = $("node").value !== "local"; });
 function tab(name) {

@@ -103,6 +103,12 @@ pub struct KaspaCli {
     /// a node exists.
     #[cfg(feature = "embedded-node")]
     embedded_node_adopted: Arc<AtomicBool>,
+    /// The node's RPC handle a hand-over task is waiting with, kept here and
+    /// not in the task, so stopping the node drops it at once: a handle kept
+    /// alive holds the node's database lock, and 'connect' after a stop then
+    /// found the database locked by this very process (tester, 2026-10-10).
+    #[cfg(feature = "embedded-node")]
+    handover_rpc: Mutex<Option<Rpc>>,
     /// The CPU miner, while it is running. Only ever set when the wallet is on
     /// its own node — see `start_mining`.
     #[cfg(feature = "embedded-node")]
@@ -359,6 +365,8 @@ impl KaspaCli {
             advanced: AtomicBool::new(false),
             #[cfg(feature = "embedded-node")]
             embedded_node_adopted: Arc::new(AtomicBool::new(false)),
+            #[cfg(feature = "embedded-node")]
+            handover_rpc: Mutex::new(None),
             #[cfg(feature = "embedded-node")]
             cpu_miner: Mutex::new(None),
             mine_to: Mutex::new(None),
@@ -1108,7 +1116,11 @@ impl KaspaCli {
             Verdict::Fine => true,
             Verdict::Tight { available } => {
                 tprintln!(self, "");
-                tprintln!(self, "{}", style(format!("{} free — enough to start {what}, not much more.", human(available))).yellow());
+                tprintln!(
+                    self,
+                    "{}",
+                    style(format!("{} free on disk — enough to start {what}, not much more.", human(available))).yellow()
+                );
                 tprintln!(self, "{}", style(remedy).dim());
                 tprintln!(self, "");
                 true
@@ -1401,9 +1413,9 @@ impl KaspaCli {
     /// Watch the node we started, and move the wallet over when it is ready.
     #[cfg(feature = "embedded-node")]
     pub(crate) fn start_node_handover_task(self: &Arc<Self>, rpc: Rpc) {
+        *self.handover_rpc.lock().unwrap() = Some(rpc);
         let this = self.clone();
         workflow_core::task::spawn(async move {
-            let mut rpc = rpc;
             let mut restarted = false;
             loop {
                 workflow_core::task::sleep(Duration::from_secs(60)).await;
@@ -1412,8 +1424,12 @@ impl KaspaCli {
                 }
                 // Stopped by hand, or never took: nothing left to hand over to.
                 if !this.embedded_node_running() {
+                    this.handover_rpc.lock().unwrap().take();
                     break;
                 }
+                // Taken from the slot for this round only, never held across
+                // the sleep: a stop empties the slot and the lock goes with it.
+                let Some(rpc) = this.handover_rpc.lock().unwrap().clone() else { break };
                 if this.wallet.try_rpc_api().map(|api| Arc::ptr_eq(&api, rpc.rpc_api())).unwrap_or(false) {
                     // Already ours — someone ran 'node start' in the meantime.
                     break;
@@ -1445,11 +1461,15 @@ impl KaspaCli {
                     );
                     match this.restart_embedded_node(rpc).await {
                         Ok(Some(fresh)) => {
-                            rpc = fresh;
+                            *this.handover_rpc.lock().unwrap() = Some(fresh);
                             continue;
                         }
-                        Ok(None) => break,
+                        Ok(None) => {
+                            this.handover_rpc.lock().unwrap().take();
+                            break;
+                        }
                         Err(err) => {
+                            this.handover_rpc.lock().unwrap().take();
                             // The old node is stopped by now; there is nothing
                             // to carry on with. The wallet is still on the
                             // public computer it was using meanwhile.
@@ -1461,6 +1481,7 @@ impl KaspaCli {
                 }
                 match this.adopt_embedded_node(rpc.clone()).await {
                     Ok(()) => {
+                        this.handover_rpc.lock().unwrap().take();
                         tprintln!(this, "");
                         tprintln!(
                             this,
@@ -1835,6 +1856,9 @@ impl KaspaCli {
 
     #[cfg(feature = "embedded-node")]
     pub async fn stop_embedded_node(self: &Arc<Self>) -> Result<()> {
+        // First, before the node: a hand-over task's handle on it would keep
+        // the database locked after the stop.
+        self.handover_rpc.lock().unwrap().take();
         let node = self.embedded_node.lock().unwrap().take();
         self.embedded_node_adopted.store(false, Ordering::SeqCst);
         crate::log_sink::clear_sync_progress();
@@ -2159,6 +2183,9 @@ impl KaspaCli {
             })
             .unwrap_or((0, 0));
         let mut notes = 0u64;
+        // Taken so the sum never runs between a transfer's new notes going
+        // in and its old ones being retired.
+        let _settled = kaspa_wallet_core::account::notepool::settled().await;
         if let Ok(store) = self.wallet.store().as_note_key_store()
             && let Ok(mut stream) = store.iter().await
         {
@@ -2327,13 +2354,15 @@ impl KaspaCli {
             } else {
                 ""
             };
-            tprintln!(
-                self,
-                "ledger: {} {ticker}  ({} piece{}){so_far}",
-                crate::ui::ledger_amount(ledger),
-                pieces.separated_string(),
-                if pieces == 1 { "" } else { "s" }
-            );
+            // A piece is one coin on the ledger; the count moves while the
+            // amount barely does, which read as an inconsistency to a tester
+            // (GitHub #19). Shown to the advanced, who asked what it was.
+            let pieces_note = if self.advanced() {
+                format!("  ({} piece{})", pieces.separated_string(), if pieces == 1 { "" } else { "s" })
+            } else {
+                String::new()
+            };
+            tprintln!(self, "ledger: {} {ticker}{pieces_note}{so_far}", crate::ui::ledger_amount(ledger));
         }
         if let Some((count, value)) = vanished {
             tprintln!(self, "");

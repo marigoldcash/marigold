@@ -30,7 +30,39 @@ pub fn read() -> Option<Memory> {
     if total == 0 {
         return None;
     }
-    Some(Memory { total, available: system.available_memory() })
+    #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
+    let mut available = system.available_memory();
+    // macOS answered 0.0 GB free on a 36 GB machine to a tester (2026-10-10),
+    // which stopped a sync that had room; the system's own vm_stat knows.
+    #[cfg(target_os = "macos")]
+    if available < total / 100 {
+        match vm_stat_available() {
+            Some(a) => available = a,
+            None => return None,
+        }
+    }
+    Some(Memory { total, available })
+}
+
+/// Free, inactive, speculative and purgeable pages, as vm_stat reports them:
+/// what macOS would hand to a program that asked, which is the figure a
+/// person means by "free".
+#[cfg(target_os = "macos")]
+fn vm_stat_available() -> Option<u64> {
+    let out = std::process::Command::new("vm_stat").output().ok()?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let page: u64 = text.lines().next()?.split("page size of ").nth(1)?.split_whitespace().next()?.parse().ok()?;
+    let mut pages = 0u64;
+    for line in text.lines() {
+        let (name, value) = match line.split_once(':') {
+            Some(p) => p,
+            None => continue,
+        };
+        if matches!(name.trim(), "Pages free" | "Pages inactive" | "Pages speculative" | "Pages purgeable") {
+            pages += value.trim().trim_end_matches('.').parse::<u64>().unwrap_or(0);
+        }
+    }
+    (pages > 0).then_some(pages * page)
 }
 
 #[cfg(target_arch = "wasm32")]

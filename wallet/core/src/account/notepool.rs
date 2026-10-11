@@ -1227,6 +1227,11 @@ async fn submit_transfer_with_locks(
 
     let note_key_store = wallet.store().as_note_key_store()?;
     let external_serials: Vec<Hash> = (0..external.len()).map(|i| serial_hash(&transaction_id, i as u32)).collect();
+    // The new notes go in and the old ones are marked under one lock, so a
+    // reader that sums the store meanwhile never counts both (tester,
+    // 2026-10-10: the prompt showed 51.49 for a moment during a rotation of
+    // 40.98).
+    let _settling = SETTLE.lock().await;
     let mut own_notes = Vec::with_capacity(own_fresh.len());
     for (offset, fresh) in own_fresh.iter().enumerate() {
         let sn = serial_hash(&transaction_id, (external.len() + offset) as u32);
@@ -1280,6 +1285,16 @@ pub enum FeeSource {
     /// not fail for want of a stamp: the fee comes out of the note's own value
     /// (slack mode), exactly as it does into an empty wallet (GitHub #15).
     SlackIfNoStamp,
+}
+
+/// Held while a transfer writes its new notes and retires the old ones, and
+/// by anyone summing the store, so the sum never sees the half-written state.
+static SETTLE: std::sync::LazyLock<futures::lock::Mutex<()>> = std::sync::LazyLock::new(|| futures::lock::Mutex::new(()));
+
+/// A reader's turn: taken while a store-wide sum runs, so it waits for a
+/// transfer's writes to settle rather than counting through them.
+pub async fn settled() -> futures::lock::MutexGuard<'static, ()> {
+    SETTLE.lock().await
 }
 
 pub async fn rotate_notes(wallet: &Arc<Wallet>, wallet_secret: Secret, serials: Vec<Hash>) -> Result<TransferResult> {

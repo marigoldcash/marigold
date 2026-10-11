@@ -351,6 +351,9 @@ async fn tidy_old_copies(token: &str, index: &mut BackupIndex, say: &(dyn Fn(Str
 /// than one growing archive: a change is one small new file for the mirror
 /// to carry, a damaged file costs one change and not the lot, and a copy
 /// that has had its day is deleted rather than rewritten.
+// A handful exist at a time; the size difference between the variants is
+// not worth an allocation per destination.
+#[allow(clippy::large_enum_variant)]
 pub enum Destination {
     Telegram { cfg: TelegramConfig, chat_id: i64 },
     Folder(PathBuf),

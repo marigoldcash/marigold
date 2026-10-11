@@ -32,6 +32,14 @@ pub(crate) fn qr_string(text: &str) -> Option<String> {
 #[help("Expert note operations: list, mint, pos, rotate, unknown, verify")]
 pub struct Note;
 
+/// What a batched rotation did, so the line after it can be true.
+#[derive(Default, Debug, Clone, Copy)]
+pub(crate) struct RotationOutcome {
+    pub rotated: usize,
+    pub failed: usize,
+    pub already_rotated: usize,
+}
+
 impl Note {
     async fn main(self: Arc<Self>, ctx: &Arc<dyn Context>, mut argv: Vec<String>, _cmd: &str) -> Result<()> {
         let ctx = ctx.clone().downcast_arc::<KaspaCli>()?;
@@ -463,10 +471,11 @@ impl Note {
         wallet: &Arc<kaspa_wallet_core::wallet::Wallet>,
         wallet_secret: &Secret,
         serials: Vec<Hash>,
-    ) -> Result<()> {
+    ) -> Result<RotationOutcome> {
         let ticker = ctx.ticker();
         let store = ctx.wallet().store().as_note_key_store()?;
         let batches = plan_restore_rotation(serials);
+        let mut outcome = RotationOutcome::default();
         for (i, batch) in batches.iter().enumerate() {
             let mut still_active = Vec::with_capacity(batch.len());
             for sn in batch {
@@ -476,24 +485,38 @@ impl Note {
                     still_active.push(*sn);
                 }
             }
+            let already = batch.len() - still_active.len();
+            outcome.already_rotated += already;
             if still_active.is_empty() {
                 tprintln!(ctx, "  batch {}/{}: already rotated by an earlier batch's fee stamp - skipped", i + 1, batches.len());
                 continue;
             }
+            let rotating = still_active.len();
+            // Said when it happens, so the count announced and the counts in
+            // the batches add up on the screen (tester, 2026-10-10: 21
+            // announced, 11 + 9 reported).
+            let aside =
+                if already > 0 { format!(" ({already} already rotated by an earlier batch's fee stamp)") } else { String::new() };
             match notepool::rotate_notes(wallet, wallet_secret.clone(), still_active).await {
-                Ok(result) => tprintln!(
-                    ctx,
-                    "  batch {}/{}: {} note(s), tx {} (fee {} {ticker})",
-                    i + 1,
-                    batches.len(),
-                    result.own_notes.len(),
-                    result.transaction_id,
-                    sompi_to_kaspa_string(result.fee_petals)
-                ),
-                Err(err) => tprintln!(ctx, "  batch {}/{}: failed - {err} (other batches still attempted)", i + 1, batches.len()),
+                Ok(result) => {
+                    outcome.rotated += rotating;
+                    tprintln!(
+                        ctx,
+                        "  batch {}/{}: {} note(s), tx {} (fee {} {ticker}){aside}",
+                        i + 1,
+                        batches.len(),
+                        rotating,
+                        result.transaction_id,
+                        sompi_to_kaspa_string(result.fee_petals)
+                    )
+                }
+                Err(err) => {
+                    outcome.failed += rotating;
+                    tprintln!(ctx, "  batch {}/{}: failed - {err} (other batches still attempted){aside}", i + 1, batches.len())
+                }
             }
         }
-        Ok(())
+        Ok(outcome)
     }
 
     /// `note rotate all` / `note rotate <serial> [...]` — on-chain rotation to
@@ -528,10 +551,40 @@ impl Note {
             tprintln!(ctx, "no active notes to rotate\r\n");
             return Ok(());
         }
+        // A rotation is a transaction; without a node there is none, and
+        // every batch would fail (tester, 2026-10-10: three failures, then a
+        // line saying the old keys were worthless).
+        if !wallet.is_connected() {
+            tprintln!(ctx, "{}", crate::ui::warn("The wallet is not connected, so nothing can be rotated yet."));
+            tprintln!(ctx, "{}", crate::ui::dim("'connect public' or 'connect' first, then 'note rotate all' again."));
+            tprintln!(ctx, "");
+            return Ok(());
+        }
         let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(None).await?;
         tprintln!(ctx, "rotating {} note(s) to fresh cold keys...", serials.len());
-        self.rotate_serials(ctx, &wallet, &wallet_secret, serials).await?;
-        tprintln!(ctx, "rotation complete - every old copy (backups, exports, stolen files) of these keys is now worthless\r\n");
+        let outcome = self.rotate_serials(ctx, &wallet, &wallet_secret, serials).await?;
+        if outcome.failed == 0 {
+            tprintln!(ctx, "rotation complete - every old copy (backups, exports, stolen files) of these keys is now worthless\r\n");
+        } else if outcome.rotated > 0 {
+            tprintln!(
+                ctx,
+                "{}",
+                crate::ui::warn(format!(
+                    "{} note(s) rotated; {} could not be, and every old copy of those keys still works. 'note rotate all' again once the connection is steady.",
+                    outcome.rotated, outcome.failed
+                ))
+            );
+            tprintln!(ctx, "");
+        } else {
+            tprintln!(
+                ctx,
+                "{}",
+                crate::ui::warn(
+                    "Nothing was rotated: every batch failed, and every old copy of these keys still works. Check 'connect status' and run 'note rotate all' again."
+                )
+            );
+            tprintln!(ctx, "");
+        }
         Ok(())
     }
 
