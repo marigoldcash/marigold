@@ -64,6 +64,7 @@ kaspa-consensus-core.workspace = true
 kaspa-consensus-wasm.workspace = true
 kaspa-core.workspace = true
 kaspa-hashes.workspace = true
+kaspa-smt.workspace = true
 kaspa-metrics-core.workspace = true
 kaspa-notify.workspace = true
 kaspa-rpc-core.workspace = true

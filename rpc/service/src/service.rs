@@ -601,11 +601,23 @@ NOTE: This error usually indicates an RPC conversion error between the node and 
         _connection: Option<&DynRpcConnection>,
         request: GetPoolDiffRequest,
     ) -> RpcResult<GetPoolDiffResponse> {
+        // A wallet that fell further behind than this refetches the state at
+        // the anchor instead; a public node answers strangers.
+        const MAX_BLOCKS_PER_CALL: usize = 2_000;
+        if request.blocks.len() > MAX_BLOCKS_PER_CALL {
+            return Err(RpcError::General(format!("at most {MAX_BLOCKS_PER_CALL} blocks per call ({} asked)", request.blocks.len())));
+        }
         let session = self.consensus_manager.consensus().unguarded_session();
-        let diff = session.async_get_pool_diff_of(request.block).await?;
-        let added = diff.add.iter().map(|(sn, e)| rpc_note_entry(*sn, e)).collect();
-        let removed = diff.remove.iter().map(|(sn, e)| rpc_note_entry(*sn, e)).collect();
-        Ok(GetPoolDiffResponse::new(request.block, added, removed))
+        let mut diffs = Vec::with_capacity(request.blocks.len());
+        for block in request.blocks {
+            let diff = session.async_get_pool_diff_of(block).await?;
+            diffs.push(RpcPoolDiff {
+                block,
+                added: diff.add.iter().map(|(sn, e)| rpc_note_entry(*sn, e)).collect(),
+                removed: diff.remove.iter().map(|(sn, e)| rpc_note_entry(*sn, e)).collect(),
+            });
+        }
+        Ok(GetPoolDiffResponse::new(diffs))
     }
 
     async fn get_finality_anchor_call(

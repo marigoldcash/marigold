@@ -649,15 +649,17 @@ from!(item: RpcResult<&kaspa_rpc_core::GetPoolStateAtBlockResponse>, protowire::
     Self { block: item.block.as_bytes().to_vec(), notes: item.notes.iter().map(|x| x.into()).collect(), error: None }
 });
 from!(item: &kaspa_rpc_core::GetPoolDiffRequest, protowire::GetPoolDiffRequestMessage, {
-    Self { block: item.block.as_bytes().to_vec() }
+    Self { blocks: item.blocks.iter().map(|x| x.as_bytes().to_vec()).collect() }
 });
-from!(item: RpcResult<&kaspa_rpc_core::GetPoolDiffResponse>, protowire::GetPoolDiffResponseMessage, {
+from!(item: &kaspa_rpc_core::RpcPoolDiff, protowire::RpcPoolDiffMessage, {
     Self {
         block: item.block.as_bytes().to_vec(),
         added: item.added.iter().map(|x| x.into()).collect(),
         removed: item.removed.iter().map(|x| x.into()).collect(),
-        error: None,
     }
+});
+from!(item: RpcResult<&kaspa_rpc_core::GetPoolDiffResponse>, protowire::GetPoolDiffResponseMessage, {
+    Self { diffs: item.diffs.iter().map(|x| x.into()).collect(), error: None }
 });
 from!(item: &kaspa_rpc_core::RpcFinalityAnchor, protowire::RpcFinalityAnchorMessage, {
     Self {
@@ -1321,14 +1323,17 @@ try_from!(item: &protowire::GetPoolStateAtBlockResponseMessage, RpcResult<kaspa_
     Self { block: hash_from_bytes(&item.block)?, notes: item.notes.iter().map(|x| x.try_into()).collect::<RpcResult<Vec<_>>>()? }
 });
 try_from!(item: &protowire::GetPoolDiffRequestMessage, kaspa_rpc_core::GetPoolDiffRequest, {
-    Self { block: hash_from_bytes(&item.block)? }
+    Self { blocks: item.blocks.iter().map(|x| hash_from_bytes(x)).collect::<RpcResult<Vec<_>>>()? }
 });
-try_from!(item: &protowire::GetPoolDiffResponseMessage, RpcResult<kaspa_rpc_core::GetPoolDiffResponse>, {
+try_from!(item: &protowire::RpcPoolDiffMessage, kaspa_rpc_core::RpcPoolDiff, {
     Self {
         block: hash_from_bytes(&item.block)?,
         added: item.added.iter().map(|x| x.try_into()).collect::<RpcResult<Vec<_>>>()?,
         removed: item.removed.iter().map(|x| x.try_into()).collect::<RpcResult<Vec<_>>>()?,
     }
+});
+try_from!(item: &protowire::GetPoolDiffResponseMessage, RpcResult<kaspa_rpc_core::GetPoolDiffResponse>, {
+    Self { diffs: item.diffs.iter().map(|x| x.try_into()).collect::<RpcResult<Vec<_>>>()? }
 });
 try_from!(item: &protowire::RpcFinalityAnchorMessage, kaspa_rpc_core::RpcFinalityAnchor, {
     Self {

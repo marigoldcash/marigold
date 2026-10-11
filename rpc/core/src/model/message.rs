@@ -4519,22 +4519,24 @@ impl Deserializer for GetPoolStateAtBlockResponse {
     }
 }
 
+/// The pool diffs of chain blocks, asked for in a batch: a wallet following the
+/// chain asks once per poll for every chain block added since its last one.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetPoolDiffRequest {
-    pub block: RpcHash,
+    pub blocks: Vec<RpcHash>,
 }
 
 impl GetPoolDiffRequest {
-    pub fn new(block: RpcHash) -> Self {
-        Self { block }
+    pub fn new(blocks: Vec<RpcHash>) -> Self {
+        Self { blocks }
     }
 }
 
 impl Serializer for GetPoolDiffRequest {
     fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
         store!(u16, &1, writer)?;
-        store!(RpcHash, &self.block, writer)?;
+        store!(Vec<RpcHash>, &self.blocks, writer)?;
         Ok(())
     }
 }
@@ -4542,8 +4544,8 @@ impl Serializer for GetPoolDiffRequest {
 impl Deserializer for GetPoolDiffRequest {
     fn deserialize<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
         let _version = load!(u16, reader)?;
-        let block = load!(RpcHash, reader)?;
-        Ok(Self { block })
+        let blocks = load!(Vec<RpcHash>, reader)?;
+        Ok(Self { blocks })
     }
 }
 
@@ -4551,19 +4553,13 @@ impl Deserializer for GetPoolDiffRequest {
 /// removed, relative to its selected parent.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct GetPoolDiffResponse {
+pub struct RpcPoolDiff {
     pub block: RpcHash,
     pub added: Vec<RpcNoteEntry>,
     pub removed: Vec<RpcNoteEntry>,
 }
 
-impl GetPoolDiffResponse {
-    pub fn new(block: RpcHash, added: Vec<RpcNoteEntry>, removed: Vec<RpcNoteEntry>) -> Self {
-        Self { block, added, removed }
-    }
-}
-
-impl Serializer for GetPoolDiffResponse {
+impl Serializer for RpcPoolDiff {
     fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
         store!(u16, &1, writer)?;
         store!(RpcHash, &self.block, writer)?;
@@ -4573,13 +4569,41 @@ impl Serializer for GetPoolDiffResponse {
     }
 }
 
-impl Deserializer for GetPoolDiffResponse {
+impl Deserializer for RpcPoolDiff {
     fn deserialize<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
         let _version = load!(u16, reader)?;
         let block = load!(RpcHash, reader)?;
         let added = deserialize!(Vec<RpcNoteEntry>, reader)?;
         let removed = deserialize!(Vec<RpcNoteEntry>, reader)?;
         Ok(Self { block, added, removed })
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetPoolDiffResponse {
+    pub diffs: Vec<RpcPoolDiff>,
+}
+
+impl GetPoolDiffResponse {
+    pub fn new(diffs: Vec<RpcPoolDiff>) -> Self {
+        Self { diffs }
+    }
+}
+
+impl Serializer for GetPoolDiffResponse {
+    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        store!(u16, &1, writer)?;
+        serialize!(Vec<RpcPoolDiff>, &self.diffs, writer)?;
+        Ok(())
+    }
+}
+
+impl Deserializer for GetPoolDiffResponse {
+    fn deserialize<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
+        let _version = load!(u16, reader)?;
+        let diffs = deserialize!(Vec<RpcPoolDiff>, reader)?;
+        Ok(Self { diffs })
     }
 }
 

@@ -1308,13 +1308,17 @@ message GetPoolStateAtBlockResponseMessage {
 }
 
 message GetPoolDiffRequestMessage {
-  bytes block = 1;
+  repeated bytes blocks = 1;
 }
 
-message GetPoolDiffResponseMessage {
+message RpcPoolDiffMessage {
   bytes block = 1;
   repeated RpcNoteEntryMessage added = 2;
   repeated RpcNoteEntryMessage removed = 3;
+}
+
+message GetPoolDiffResponseMessage {
+  repeated RpcPoolDiffMessage diffs = 1;
 
   RPCError error = 1000;
 }

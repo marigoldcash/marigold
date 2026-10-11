@@ -307,9 +307,9 @@ pub trait RpcApi: Sync + Send + AnySync {
         request: GetPoolStateAtBlockRequest,
     ) -> RpcResult<GetPoolStateAtBlockResponse>;
 
-    /// The pool diff a chain block applied (PLAN P8.7).
-    async fn get_pool_diff(&self, block: RpcHash) -> RpcResult<GetPoolDiffResponse> {
-        self.get_pool_diff_call(None, GetPoolDiffRequest::new(block)).await
+    /// The pool diffs the given chain blocks applied (PLAN P8.7).
+    async fn get_pool_diff(&self, blocks: Vec<RpcHash>) -> RpcResult<GetPoolDiffResponse> {
+        self.get_pool_diff_call(None, GetPoolDiffRequest::new(blocks)).await
     }
     async fn get_pool_diff_call(
         &self,
