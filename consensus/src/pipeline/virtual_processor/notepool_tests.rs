@@ -1047,3 +1047,62 @@ async fn locked_note_lands_and_answers_to_the_right_key() {
 
     consensus.shutdown(join_handles);
 }
+
+/// The pool state as of a chain block, rebuilt from the per-block diffs (PLAN
+/// P8.7a, the light wallet's hand-over): for every chain block its root over
+/// the entries returned equals the block's own `pool_commitment`, which is
+/// what a wallet checks; and the diff reported for a block is what that block
+/// did to the pool.
+#[tokio::test]
+async fn pool_state_at_block_matches_the_block_commitment() {
+    use kaspa_consensus_core::api::ConsensusApi;
+    use kaspa_consensus_core::notepool::hashing::leaf_hash_entry;
+    use kaspa_hashes::NotePoolSmt;
+    use kaspa_smt::SmtHasher;
+    use kaspa_smt::store::{BTreeSmtStore, LeafUpdate, SortedLeafUpdates};
+    use kaspa_smt::tree::compute_root_update;
+
+    fn root_of(entries: &[(Hash, kaspa_consensus_core::notepool::PoolEntry)]) -> Hash {
+        let leaves =
+            SortedLeafUpdates::from_unsorted(entries.iter().map(|(sn, e)| LeafUpdate { key: *sn, leaf_hash: leaf_hash_entry(e) }));
+        let (root, _) = compute_root_update::<NotePoolSmt, _>(&BTreeSmtStore::new(), NotePoolSmt::empty_root(), leaves).unwrap();
+        root
+    }
+
+    let consensus = TestConsensus::new(&config());
+    let join_handles = consensus.init();
+    let genesis = consensus.params().genesis.hash;
+
+    let alice = Wallet::new(1);
+    let bob = Wallet::new(2);
+
+    let (outpoint, entry, tip) = fund(&consensus, &alice, genesis, 5.into(), 10.into()).await;
+    let mint = mint_funded(&alice, (outpoint, entry), vec![alice.note(DenominationTag::D0_01), alice.note(DenominationTag::D0_1)]);
+    let sn0 = produced_serial(&mint, 0);
+    let sn1 = produced_serial(&mint, 1);
+    consensus.add_utxo_valid_block_with_parents(11.into(), vec![tip], vec![mint]).await.unwrap();
+
+    let rotate = pool_tx(&alice.rotate(vec![sn0], vec![bob.note(DenominationTag::D0_01)], 0));
+    let rotated = produced_serial(&rotate, 0);
+    consensus.add_utxo_valid_block_with_parents(12.into(), vec![11.into()], vec![rotate]).await.unwrap();
+    consensus.add_utxo_valid_block_with_parents(13.into(), vec![12.into()], vec![]).await.unwrap();
+
+    // Every chain block: the walk's result hashes to the header's commitment.
+    for block in [tip, 11.into(), 12.into(), 13.into()] {
+        let entries = consensus.get_pool_state_at(block).unwrap();
+        assert_eq!(root_of(&entries), consensus.header_pool_commitment(block), "state at {block} must hash to its commitment");
+    }
+    // The shapes: block 11's own mint lands in the state at block 12 (it is in
+    // 12's mergeset), block 12's rotate in the state at block 13.
+    let at_12: std::collections::HashMap<_, _> = consensus.get_pool_state_at(12.into()).unwrap().into_iter().collect();
+    assert!(at_12.contains_key(&sn0) && at_12.contains_key(&sn1) && !at_12.contains_key(&rotated));
+    let at_13: std::collections::HashMap<_, _> = consensus.get_pool_state_at(13.into()).unwrap().into_iter().collect();
+    assert!(!at_13.contains_key(&sn0) && at_13.contains_key(&sn1) && at_13.contains_key(&rotated));
+    // The diffs say the same.
+    let diff_13 = consensus.get_pool_diff_of(13.into()).unwrap();
+    assert!(diff_13.add.contains_key(&rotated) && diff_13.remove.contains_key(&sn0));
+    // A block off the chain, or unknown, is refused rather than guessed.
+    assert!(consensus.get_pool_state_at(999.into()).is_err());
+
+    consensus.shutdown(join_handles);
+}
