@@ -547,10 +547,6 @@ impl Note {
             }
             serials
         };
-        if serials.is_empty() {
-            tprintln!(ctx, "no active notes to rotate\r\n");
-            return Ok(());
-        }
         // A rotation is a transaction; without a node there is none, and
         // every batch would fail (tester, 2026-10-10: three failures, then a
         // line saying the old keys were worthless).
@@ -558,6 +554,10 @@ impl Note {
             tprintln!(ctx, "{}", crate::ui::warn("The wallet is not connected, so nothing can be rotated yet."));
             tprintln!(ctx, "{}", crate::ui::dim("'connect public' or 'connect' first, then 'note rotate all' again."));
             tprintln!(ctx, "");
+            return Ok(());
+        }
+        if serials.is_empty() {
+            tprintln!(ctx, "no active notes to rotate\r\n");
             return Ok(());
         }
         let (wallet_secret, _payment_secret) = ctx.ask_wallet_secret(None).await?;
