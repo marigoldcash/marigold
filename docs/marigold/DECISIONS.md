@@ -557,3 +557,11 @@ is priced like plumbing; notes are money and cost a penny to move.
 **Why.** Founder, 2026-10-11: "Yes that is the solution. It's not a node, it's a wallet, light is OK … By default we just want the light wallet on everyone's wallet, low memory use, low storage requirements." Measured the same day: a full first sync is an hour on pve3 and hours on a laptop, and it is the validation of 1.3 million blocks, not the download, that costs; a wallet that trusts the anchors for the past, as the chain already does for finality, needs minutes.
 
 **Where.** [SYNC-LIGHT.md](SYNC-LIGHT.md), PLAN P8.7. Not built yet.
+
+## Grandma safe (2026-10-11)
+
+**Decision.** Everything the everyday wallet shows a person, terminal and desktop alike, is written so that a grandmother can read it and act on it: no vocabulary she would not know (no DAA, anchor, pool, commitment, serial, node), no figures that only mean something to a developer, and a plain sentence for every state. Figures and technical words live behind `advanced on`. An error says what happened in her terms ("That is not this wallet's password") and what to do next.
+
+**Why.** Founder, 2026-10-11, on reading `connect status` in the light wallet: "Think of 'Grandma Safe' … It really is an important criterion. The everyday wallet needs to be easy enough to use so that a grandma can do it. There are a couple of grandmas in the testers group for that reason. This means we don't throw vocabularies or technical data around that a grandma would never understand."
+
+**Where.** Every message in `cli/src` and `gui/ui`; reviewed line by line as they are touched.

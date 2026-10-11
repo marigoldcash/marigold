@@ -174,7 +174,8 @@ async function refreshStatus() {
     const m = await invoke("machine");
     $("machine").textContent = `Memory: ${m.memory}\n${m.mining}`;
     $("mine-note").textContent = m.can_mine ? "Mining pays to this wallet's ledger address and starts only once the sync is complete." : "Mining needs a network running on this computer or a sync of your own: through a public computer, its operator would see where your rewards go.";
-    $("mine-start").hidden = !m.can_mine; $("mine-stop").hidden = !m.can_mine;
+    const mining = !/^Not mining/.test(m.mining);
+    $("mine-start").hidden = !m.can_mine || mining; $("mine-stop").hidden = !m.can_mine || !mining;
   } catch (e) { $("machine").textContent = String(e); }
 }
 $("mine-start").addEventListener("click", async () => {

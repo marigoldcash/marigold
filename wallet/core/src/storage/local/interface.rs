@@ -366,7 +366,11 @@ impl LocalStoreInner {
                 let mut cache = self.cache.write().unwrap();
                 let old_prv_key_data: Decrypted<PrvKeyDataMap> = cache.prv_key_data.decrypt(old_secret)?;
                 let new_prv_key_data = Decrypted::new(old_prv_key_data.unwrap()).encrypt(new_secret, cache.encryption_kind)?;
+                // The payment request keys sit under the same password.
+                let requests: Decrypted<PaymentRequestMap> = cache.payment_request_data.decrypt(old_secret)?;
+                let requests = Decrypted::new(requests.unwrap()).encrypt(new_secret, cache.encryption_kind)?;
                 cache.prv_key_data.replace(new_prv_key_data);
+                cache.payment_request_data.replace(requests);
 
                 Ok(())
             }
@@ -375,7 +379,12 @@ impl LocalStoreInner {
                     let mut cache = self.cache.write().unwrap();
                     let old_prv_key_data: Decrypted<PrvKeyDataMap> = cache.prv_key_data.decrypt(old_secret)?;
                     let new_prv_key_data = Decrypted::new(old_prv_key_data.unwrap()).encrypt(new_secret, cache.encryption_kind)?;
+                    // The payment request keys sit under the same password;
+                    // to_wallet opens them with the one it is given.
+                    let requests: Decrypted<PaymentRequestMap> = cache.payment_request_data.decrypt(old_secret)?;
+                    let requests = Decrypted::new(requests.unwrap()).encrypt(new_secret, cache.encryption_kind)?;
                     cache.prv_key_data.replace(new_prv_key_data);
+                    cache.payment_request_data.replace(requests);
 
                     cache.to_wallet(None, new_secret)?
                 };
@@ -487,8 +496,11 @@ impl LocalStoreInner {
 
 impl Drop for LocalStoreInner {
     fn drop(&mut self) {
+        // A bug, and said as one; but a wallet must not die of it. The upstream
+        // panic here took a tester's whole terminal down after an 'open' of
+        // another wallet during housekeeping (founder, 2026-10-11).
         if self.is_modified() {
-            panic!("LocalStoreInner::drop called while modified flag is true");
+            workflow_log::log_error!("a wallet store was dropped with changes not yet saved");
         }
     }
 }
@@ -1017,6 +1029,10 @@ impl NoteKeyStore for LocalStoreInner {
 
     async fn vault_restore_from_words(&self, words: &str, wallet_secret: &Secret) -> Result<()> {
         self.notevault.restore_key_from_words(words, wallet_secret).await
+    }
+
+    async fn vault_change_secret(&self, old_secret: &Secret, new_secret: &Secret) -> Result<()> {
+        self.notevault.change_secret(old_secret, new_secret).await
     }
 
     async fn vault_words_match(&self, words: &str, wallet_secret: &Secret) -> Result<bool> {

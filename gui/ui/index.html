@@ -8,9 +8,9 @@
 </head>
 <body>
 <header>
-  <button id="close-wallet" class="link" hidden>Close the wallet</button>
   <div class="brand">Marigold</div>
   <div id="context" class="context"></div>
+  <button id="close-wallet" class="quiet" hidden>Close the wallet</button>
 </header>
 
 <main>
@@ -30,13 +30,13 @@
     </label>
     <label>Network access
       <select id="node">
-        <option value="public">A public computer (works at once)</option>
+        <option value="public">A public computer (works at once; your notes stay private)</option>
         <option value="local" hidden>A Marigold program already running on this computer</option>
         <option value="own">Sync here, inside the app</option>
       </select>
     </label>
     <p class="hint" id="node-local-hint" hidden>A Marigold program is running on this computer already, the terminal wallet's sync or another Marigold program, and this wallet can use its copy of the network: nothing to download, and nobody else sees your notes.</p>
-    <p class="hint">Through a public computer, whoever runs it sees which notes your wallet asks about. A sync of your own needs a few gigabytes and some time.</p>
+    <p class="hint">Through a public computer the wallet keeps its own copy of the notes, checked against the network, so nobody is told which notes are yours. A sync of your own needs a few gigabytes and an hour or more, and is the way to mine.</p>
     <button id="open" class="primary">Open</button>
     <p id="open-error" class="error"></p>
     <p class="hint">No wallet yet? <button id="go-create" class="link">Create one</button> · <button id="go-restore" class="link">Restore one from its 24 words</button> · <button id="go-restore-tg" class="link">Restore one from Telegram</button> · <button id="go-restore-dir" class="link">Restore one from a backup folder</button></p>
@@ -222,7 +222,7 @@
       </div>
     </div>
 
-    <div id="tab-backup" class="tab-panel" hidden>
+    <div id="tab-backup" class="tab-panel wide" hidden>
       <h1>Backup</h1>
       <pre id="backup-status" class="figures small">…</pre>
       <p class="hint">A backup holds every wallet on this computer, each sealed with its own 24 words and with nothing else — never with a password. A copy on someone else's server is noise to everyone but you.</p>
@@ -274,7 +274,7 @@
       <p id="backup-done" class="ok" hidden></p>
     </div>
 
-    <div id="tab-status" class="tab-panel" hidden>
+    <div id="tab-status" class="tab-panel wide" hidden>
       <pre id="status" class="figures small">…</pre>
       <h2>This machine</h2>
       <pre id="machine" class="figures small">…</pre>

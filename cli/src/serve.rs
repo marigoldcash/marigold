@@ -872,6 +872,11 @@ pub async fn open_session(options: &SessionOptions, shutdown: Arc<AtomicBool>, s
         }
         Some(url) => {
             use kaspa_wallet_core::rpc::{ConnectOptions, ConnectStrategy, WrpcEncoding};
+            say(if url.contains("127.0.0.1") || url.contains("localhost") {
+                "Connecting to the Marigold program on this computer…".to_string()
+            } else {
+                "Connecting to the public computer…".to_string()
+            });
             let client = Arc::new(
                 kaspa_wrpc_client::KaspaRpcClient::new(WrpcEncoding::Borsh, Some(&url), None, Some(network_id), None)
                     .map_err(|err| crate::error::Error::custom(format!("{url}: {err}")))?,
@@ -916,13 +921,12 @@ pub async fn open_session(options: &SessionOptions, shutdown: Arc<AtomicBool>, s
     // light copy of the pool checked against the trustees' anchors, so the
     // computer is never asked which notes are ours (SYNC-LIGHT.md).
     if !matches!(node, Node::Own(_)) && kaspa_wallet_core::light::LightPool::supported(network_id) {
+        say("Connected. Taking your own copy of the notes and checking it against the network…".to_string());
         match kaspa_wallet_core::light::LightPool::start(&rpc, network_id).await {
             Ok(light) => {
                 let st = light.status();
-                say(format!(
-                    "Your own copy of the pool is here: {} notes as of the trustees' anchor, checked against their keys. This computer is never asked which notes are yours.",
-                    st.notes
-                ));
+                log::info!("light copy: {} notes as of the trustees' anchor at DAA {}", st.notes, st.anchored_daa);
+                say("Your own copy of the notes is here, checked against the network. This computer is never asked which notes are yours.".to_string());
                 wallet.set_light(Some(light.clone()));
                 let (wallet_, rpc_, shutdown_) = (wallet.clone(), rpc.clone(), shutdown.clone());
                 workflow_core::task::spawn(async move {
@@ -952,10 +956,15 @@ pub async fn open_session(options: &SessionOptions, shutdown: Arc<AtomicBool>, s
     match &node {
         Node::Own(_) | Node::Grpc(_) | Node::Wrpc(_) => {}
     }
+    say("Opening the wallet…".to_string());
     let descriptors = wallet.clone().wallet_open(options.password.clone(), Some(options.wallet.clone()), true, false).await?;
     if let Some(descriptors) = descriptors {
         let ids: Vec<_> = descriptors.iter().map(|d| d.account_id).collect();
         if !ids.is_empty() {
+            // A wallet that has mined has thousands of ledger entries, and
+            // through a public computer they come over the internet: this is
+            // where a minute goes (founder, 2026-10-11).
+            say("Reading your ledger. A wallet that has mined has many entries, so this can take a minute…".to_string());
             wallet.clone().accounts_activate(Some(ids)).await?;
         }
     }

@@ -13,6 +13,7 @@ pub(crate) async fn create(
     wallet_guard: Option<WalletGuard<'_>>,
     name: Option<&str>,
     import_with_mnemonic: bool,
+    given_words: Option<String>,
 ) -> Result<()> {
     let term = ctx.term();
     let wallet = ctx.wallet();
@@ -42,7 +43,7 @@ pub(crate) async fn create(
         drop(guard);
         ctx.wallet().close().await?;
         tprintln!(ctx, "{}", crate::ui::dim(format!("Closed '{was}' first; 'open {was}' brings it back.")));
-        return Box::pin(create(ctx, None, name, import_with_mnemonic)).await;
+        return Box::pin(create(ctx, None, name, import_with_mnemonic, given_words)).await;
     }
     // Storage-location step: the wallet file is the user's money — its
     // location must be proposed up front, not revealed after the fact
@@ -285,7 +286,11 @@ pub(crate) async fn create(
     // explained, and checked — the 2026-09-15 choice to keep the ceremony
     // behind 'advanced on' rested on the password opening backups, which it
     // no longer does. Supplying your own words stays an advanced option.
-    let vault_words = if ctx.advanced() {
+    // Words handed in by the caller (a password reset) are the wallet's own
+    // and are taken whatever the mode; typing one's own is an advanced choice.
+    let vault_words = if let Some(words) = given_words.clone() {
+        Some(words)
+    } else if ctx.advanced() {
         tprintln!(ctx, "");
         tprintln!(ctx, "---");
         tpara!(
@@ -297,21 +302,23 @@ pub(crate) async fn create(
             ",
         );
         tprintln!(ctx, "");
-        loop {
-            let input = term.ask(false, "Enter your own 24 words, or press <enter> to generate them: ").await?.trim().to_string();
-            if input.is_empty() {
-                break None;
-            }
-            let words: Vec<&str> = input.split_whitespace().collect();
-            if words.len() != 24 {
-                tprintln!(ctx, "Expected 24 words, got {} — try again (or press <enter> to generate)", words.len());
-                continue;
-            }
-            match Mnemonic::new(words.join(" "), Language::default()) {
-                Ok(_) => break Some(words.join(" ")),
-                Err(err) => {
-                    tprintln!(ctx, "Not a valid 24-word phrase ({err}) — try again (or press <enter> to generate)");
+        {
+            loop {
+                let input = term.ask(false, "Enter your own 24 words, or press <enter> to generate them: ").await?.trim().to_string();
+                if input.is_empty() {
+                    break None;
+                }
+                let words: Vec<&str> = input.split_whitespace().collect();
+                if words.len() != 24 {
+                    tprintln!(ctx, "Expected 24 words, got {} — try again (or press <enter> to generate)", words.len());
                     continue;
+                }
+                match Mnemonic::new(words.join(" "), Language::default()) {
+                    Ok(_) => break Some(words.join(" ")),
+                    Err(err) => {
+                        tprintln!(ctx, "Not a valid 24-word phrase ({err}) — try again (or press <enter> to generate)");
+                        continue;
+                    }
                 }
             }
         }
@@ -382,7 +389,7 @@ pub(crate) async fn create(
         tpara!(
             ctx,
             "This wallet also holds an ordinary account key for the transparent ledger. It is \
-            derived from the 24 words below, so those words bring it back too — there is nothing \
+            derived from your 24 words, so those words bring it back too — there is nothing \
             separate to write down. If another program ever needs it, 'export mnemonic' shows it. \
             ",
         );

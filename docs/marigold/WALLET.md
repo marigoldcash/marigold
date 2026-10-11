@@ -73,6 +73,12 @@ Choice 1 is `connect public`, which since the light wallet (SYNC-LIGHT.md) means
 
 The policy behind the order (DECISIONS 2026-10-11): your own copy first; a public computer is a stopgap while it downloads, never the way the network is meant to be used, because whoever runs it sees everything and one node must not carry everyone.
 
+## 2d. The password: changing it, and a lost one (2026-10-11)
+
+`wallet password`, with the wallet open, asks for the password it has, then a new one twice, and rewrites both places the password guards: the keys file and the wrapping of the notes' key. The backups are sealed with the 24 words, never with the password, so they need nothing. A wrong current password is refused with "That is not this wallet's password", the same line `open` now gives instead of "Unable to decrypt this wallet".
+
+`wallet password reset <name>`, with the wallet closed, is for a password that is lost. It asks for the wallet's 24 words and checks them against what the wallet left in the clear: its backup key, written from the words, or failing that a note file, which only the words' key opens. Then it asks for a new password and makes the wallet afresh from the words (the same keys, the same ledger account, since both come from the words), puts the notes back exactly as they were, and keeps the old keys file beside the wallet as `<name>.keys.before-reset-<time>` in case the old password comes back to mind. The wizard runs with the wallet's own words, so it shows no new ones and holds no quiz. A reset that was killed half way leaves the keys file and the notes under those set-aside names; the next `wallet password reset <name>` puts the newest pair back before it starts, so running it again is the way out. The password also guards the payment request keys inside the keys file, and the change rewrites those too (the first cut missed them and refused the new password).
+
 ## 3. Create a wallet
 
 ```

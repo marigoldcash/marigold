@@ -126,14 +126,25 @@ impl Node {
         if let Some(light) = ctx.wallet().light() {
             let s = light.status();
             let ago = workflow_core::time::unixtime_as_millis_u64().saturating_sub(s.checked_ms) / 1000;
+            tprintln!(ctx, "Using: {}", style("a public computer, with your own copy of the notes.").bold());
+            tprintln!(ctx, "Nobody is told which notes are yours. Last checked against the network {ago} seconds ago, all in order.");
+            if ctx.advanced() {
+                tprintln!(
+                    ctx,
+                    "{}",
+                    crate::ui::dim(format!(
+                        "{} notes in the copy, as of DAA {}; the trustees' anchor at DAA {} agreed.",
+                        s.notes, s.at_daa, s.anchored_daa
+                    ))
+                );
+            }
             tprintln!(
                 ctx,
-                "Light wallet: {} notes in your own copy of the pool, as of DAA {}; the trustees' anchor at DAA {} agreed {ago}s ago.",
-                s.notes,
-                s.at_daa,
-                s.anchored_daa
+                "{}",
+                crate::ui::dim("'connect own' runs a full copy of the network here instead: slow, and the way to mine.")
             );
-            tprintln!(ctx, "{}", crate::ui::dim("This computer is never asked which notes are yours."));
+            tprintln!(ctx, "");
+            return;
         }
         if pending {
             // Two different situations, and calling both of them "using a

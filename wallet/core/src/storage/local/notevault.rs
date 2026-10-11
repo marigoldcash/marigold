@@ -531,6 +531,26 @@ impl NoteVault {
     /// files" half); anything cached from before that copy, including an empty
     /// index from an earlier `is_empty()`/`iter()` on a then-nonexistent vault,
     /// would otherwise silently shadow the restored data forever.
+    /// Wraps `K` under a new password: `vault.key` is read with the old one,
+    /// written with the new one, to a temporary file renamed over the original
+    /// so a crash leaves one whole file or the other, never half of one.
+    pub async fn change_secret(&self, old_secret: &Secret, new_secret: &Secret) -> Result<()> {
+        let key_path = self.folder.join(VAULT_KEY_FILE);
+        let wrapped =
+            fs::read(&key_path).await.map_err(|_| Error::Custom("no note vault found (or vault.key is missing)".to_string()))?;
+        let (k, _) = unwrap_vault_key(&wrapped, old_secret)?;
+        let rewrapped = wrap_vault_key(&k, new_secret)?;
+        match unwrap_vault_key(&rewrapped, new_secret) {
+            Ok((check, _)) if check == k => {}
+            _ => return Err(Error::Custom("the new password did not round-trip; nothing was changed".to_string())),
+        }
+        let tmp = key_path.with_extension("key.new");
+        write_private(&tmp, &rewrapped).await?;
+        fs::rename(&tmp, &key_path).await?;
+        self.key.write().await.replace(k);
+        Ok(())
+    }
+
     pub async fn restore_key_from_words(&self, words: &str, wallet_secret: &Secret) -> Result<()> {
         let mnemonic = Mnemonic::new(words, Language::English)?;
         let entropy = mnemonic.entropy();

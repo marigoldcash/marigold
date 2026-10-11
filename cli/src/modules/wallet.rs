@@ -89,7 +89,7 @@ impl Wallet {
 
                 let wallet_name = wallet_name.as_deref();
                 let import_with_mnemonic = op.as_str() == "import";
-                wizards::wallet::create(&ctx, guard.into(), wallet_name, import_with_mnemonic).await?;
+                wizards::wallet::create(&ctx, guard.into(), wallet_name, import_with_mnemonic, None).await?;
             }
             "open" => {
                 let name = if let Some(name) = argv.first().cloned() {
@@ -136,7 +136,7 @@ impl Wallet {
                                 return Ok(());
                             }
                             tprintln!(ctx, "");
-                            return wizards::wallet::create(&ctx, guard.into(), None, false).await;
+                            return wizards::wallet::create(&ctx, guard.into(), None, false, None).await;
                         }
                         1 => Some(wallets[0].filename.clone()),
                         _ => {
@@ -227,7 +227,14 @@ impl Wallet {
                 let (wallet_secret, _) = ctx.ask_wallet_secret(None).await?;
                 let _ = ctx.notifier().show(Notification::Processing).await;
                 let args = WalletOpenArgs::default_with_legacy_accounts();
-                ctx.wallet().open(&wallet_secret, name.clone(), args, &guard).await?;
+                ctx.wallet().open(&wallet_secret, name.clone(), args, &guard).await.map_err(|err| match err {
+                    // "Unable to decrypt this wallet" read as damage to a tester;
+                    // it means the password was not this wallet's (founder, 2026-10-11).
+                    kaspa_wallet_core::error::Error::WalletDecrypt(_) => {
+                        Error::custom("That is not this wallet's password. 'open' to try again.")
+                    }
+                    other => Error::from(other),
+                })?;
                 ctx.wallet().activate_accounts(None, &guard).await?;
                 // The phone, if one is paired: answered from here, with the
                 // password just typed, until 'close'.
@@ -811,6 +818,7 @@ impl Wallet {
                     tprintln!(ctx, "usage:\n'wallet hint <text>' or 'wallet hint remove' to remove the hint");
                 }
             }
+            "password" => return change_password(&ctx, argv, guard).await,
             "words" => return crate::modules::note::Note.vault_words(&ctx).await,
             "verify" => return crate::modules::note::Note.vault_verify(&ctx, argv).await,
             "paper" => {
@@ -1730,4 +1738,214 @@ impl Wallet {
         file.sync_all().map_err(|e| Error::custom(format!("cannot flush {}: {e}", path.display())))?;
         Ok(())
     }
+}
+
+/// A new password, held to the policy (DECISIONS 2026-10-10: a PIN at least,
+/// none only in advanced mode), typed twice.
+async fn ask_new_password(ctx: &Arc<KaspaCli>, prompt: &str) -> Result<Option<Secret>> {
+    let term = ctx.term();
+    let allow_empty = ctx.advanced() || crate::empty_password_allowed_by_env();
+    let typed = loop {
+        let typed = term.ask(true, prompt).await?.trim().to_string();
+        match crate::password_verdict(&typed, allow_empty) {
+            crate::PasswordVerdict::EmptyRefused => {
+                tprintln!(ctx, "A password is needed — at least {} characters; a PIN will do.", crate::MIN_WALLET_PASSWORD_CHARS);
+            }
+            crate::PasswordVerdict::TooShort => {
+                tprintln!(ctx, "At least {} characters, please — a PIN will do.", crate::MIN_WALLET_PASSWORD_CHARS);
+            }
+            crate::PasswordVerdict::EmptyAllowed | crate::PasswordVerdict::Fine => break typed,
+        }
+    };
+    let again = term.ask(true, "Once more, to be sure: ").await?.trim().to_string();
+    if again != typed {
+        tprintln!(ctx, "{}", crate::ui::warn("The two did not match; nothing was changed."));
+        return Ok(None);
+    }
+    Ok(Some(Secret::new(typed.into_bytes())))
+}
+
+/// `wallet password`: a new password for the open wallet. `wallet password
+/// reset <name>`: a new password for a wallet whose password is lost, from
+/// its 24 words. The backups are sealed with the words, never the password,
+/// so neither touches them.
+async fn change_password(ctx: &Arc<KaspaCli>, argv: Vec<String>, guard: WalletGuard<'_>) -> Result<()> {
+    if argv.first().map(|s| s.as_str()) == Some("reset") {
+        return reset_password(ctx, argv.get(1).cloned(), guard).await;
+    }
+    if !ctx.wallet().is_open() {
+        tprintln!(
+            ctx,
+            "Open the wallet first. Forgotten its password? 'wallet password reset <name>' sets a new one from its 24 words."
+        );
+        return Ok(());
+    }
+    tprintln!(ctx, "The password it has now, first.");
+    let (old, _) = ctx.ask_wallet_secret(None).await?;
+    let Some(new) = ask_new_password(ctx, "The new password: ").await? else { return Ok(()) };
+    let store = ctx.store();
+    let notes = store.as_note_key_store()?;
+    // The notes' key first, since that write is atomic; then the keys file,
+    // and the notes' key goes back if the keys file refuses.
+    if let Err(err) = notes.vault_change_secret(&old, &new).await {
+        let text = err.to_string();
+        if text.contains("decrypt") || text.contains("aead") || text.contains("Decrypt") {
+            tprintln!(ctx, "{}", crate::ui::warn("That is not this wallet's password; nothing was changed."));
+            return Ok(());
+        }
+        return Err(err.into());
+    }
+    if let Err(err) = store.change_secret(&old, &new).await {
+        let _ = notes.vault_change_secret(&new, &old).await;
+        return Err(Error::custom(format!("the keys file could not be rewritten ({err}); nothing was changed")));
+    }
+    tprintln!(ctx, "{}", crate::ui::ok("Password changed."));
+    tprintln!(ctx, "{}", crate::ui::dim("Your backups are sealed with your 24 words, not the password, so nothing there changes."));
+    Ok(())
+}
+
+async fn reset_password(ctx: &Arc<KaspaCli>, name: Option<String>, guard: WalletGuard<'_>) -> Result<()> {
+    use kaspa_wallet_core::storage::local::{keys_file_name, wallet_dir_name};
+    // The wizard takes the wallet guard itself when it is not handed one, so
+    // the guard held for this command goes to it, or is let go before a close.
+    let mut guard = Some(guard);
+    let Some(name) = name else {
+        tprintln!(ctx, "usage: 'wallet password reset <name>' — a new password from the wallet's 24 words.");
+        return Ok(());
+    };
+    let folder: String = ctx
+        .wallet()
+        .settings()
+        .get(WalletSettings::Folder)
+        .unwrap_or_else(|| kaspa_wallet_core::storage::local::default_storage_folder().to_string());
+    let base = workflow_store::fs::resolve_path(&folder).map_err(|e| Error::custom(e.to_string()))?;
+    let wallet_dir = base.join(wallet_dir_name(&name));
+    if !wallet_dir.exists() {
+        tprintln!(ctx, "There is no wallet named '{name}' in {folder}. 'wallet list' shows the names.");
+        return Ok(());
+    }
+    if ctx.wallet().is_open() {
+        let open_name = ctx.store().descriptor().map(|d| d.filename).unwrap_or_default();
+        if open_name == name {
+            #[cfg(feature = "embedded-node")]
+            crate::tgbackup::flush_before_close(ctx).await;
+            ctx.disarm_automation();
+            drop(guard.take());
+            ctx.wallet().close().await?;
+        } else {
+            tprintln!(ctx, "Close the open wallet first ('close'), then try again.");
+            return Ok(());
+        }
+    }
+    tprintln!(ctx, "");
+    tprintln!(
+        ctx,
+        "A new password for '{name}' from its 24 words. The words are checked against the wallet; nothing is kept but a new password."
+    );
+    let words = loop {
+        let input = ctx.term().ask(false, "Its 24 words: ").await?.trim().to_string();
+        if input.is_empty() {
+            tprintln!(ctx, "Nothing was changed.");
+            return Ok(());
+        }
+        let count = input.split_whitespace().count();
+        if count != 24 {
+            tprintln!(ctx, "That is {count} words; 24 are needed. Try again, or press <enter> to stop.");
+            continue;
+        }
+        match kaspa_bip32::Mnemonic::new(input.split_whitespace().collect::<Vec<_>>().join(" "), kaspa_bip32::Language::default()) {
+            Ok(_) => break input.split_whitespace().collect::<Vec<_>>().join(" "),
+            Err(_) => {
+                tprintln!(ctx, "Those are not 24 wallet words. Try again, or press <enter> to stop.");
+                continue;
+            }
+        }
+    };
+    // The words are checked against what the wallet left in the clear: its
+    // backup key, written from the words; failing that, a note file, which
+    // only the words' key opens.
+    let known = match crate::backup::read_recipient(&wallet_dir) {
+        Some(public) => public == crate::backup::recipient_public(&words),
+        None => crate::backup::cover_with_words(&wallet_dir, &words).is_ok(),
+    };
+    if !known {
+        tprintln!(ctx, "{}", crate::ui::warn("Those are not this wallet's words; nothing was changed."));
+        return Ok(());
+    }
+    tprintln!(ctx, "{}", crate::ui::ok("The words are this wallet's."));
+    // The keys file and the notes are moved aside, because a wallet is made
+    // fresh here: the notes come back unchanged afterwards (they are sealed
+    // with the words' key, which a new password only wraps), and the old keys
+    // file stays beside the wallet in case the old password comes back to mind.
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let keys = wallet_dir.join(keys_file_name(&name));
+    let notes = wallet_dir.join("notes");
+    // A reset that did not finish (the program killed in the middle) leaves
+    // the keys file and the notes under their set-aside names; put the newest
+    // pair back first, so the wallet is whole before it is made anew.
+    if !keys.exists() {
+        let prefix = format!("{}.before-reset-", keys_file_name(&name));
+        let mut aside: Vec<String> = std::fs::read_dir(&wallet_dir)
+            .map(|rd| rd.filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().to_string()).collect())
+            .unwrap_or_default();
+        aside.retain(|f| f.starts_with(&prefix));
+        aside.sort();
+        if let Some(latest) = aside.pop() {
+            let old_stamp = latest[prefix.len()..].to_string();
+            std::fs::rename(wallet_dir.join(&latest), &keys)
+                .map_err(|e| Error::custom(format!("cannot put the keys file back: {e}")))?;
+            let notes_old = wallet_dir.join(format!("notes.before-reset-{old_stamp}"));
+            if notes_old.exists() {
+                let _ = std::fs::remove_dir_all(&notes);
+                std::fs::rename(&notes_old, &notes).map_err(|e| Error::custom(format!("cannot put the notes back: {e}")))?;
+            }
+            tprintln!(ctx, "{}", crate::ui::dim("An earlier reset had not finished; the wallet was put back together first."));
+        }
+    }
+    let keys_aside = wallet_dir.join(format!("{}.before-reset-{stamp}", keys_file_name(&name)));
+    if keys.exists() {
+        std::fs::rename(&keys, &keys_aside).map_err(|e| Error::custom(format!("cannot move the keys file aside: {e}")))?;
+    }
+    let notes_aside = wallet_dir.join(format!("notes.before-reset-{stamp}"));
+    if notes.exists() {
+        std::fs::rename(&notes, &notes_aside).map_err(|e| Error::custom(format!("cannot move the notes aside: {e}")))?;
+    }
+    let made = wizards::wallet::create(ctx, guard.take(), Some(&name), false, Some(words)).await;
+    if let Err(err) = made {
+        // Put everything back the way it was.
+        let _ = std::fs::remove_dir_all(&notes);
+        if notes_aside.exists() {
+            let _ = std::fs::rename(&notes_aside, &notes);
+        }
+        if keys_aside.exists() {
+            let _ = std::fs::remove_file(&keys);
+            let _ = std::fs::rename(&keys_aside, &keys);
+        }
+        return Err(err);
+    }
+    // The notes back in, over the fresh folder; the new vault key stays, it
+    // wraps the same key under the new password.
+    if notes_aside.exists() {
+        if let Ok(entries) = std::fs::read_dir(&notes_aside) {
+            for entry in entries.flatten() {
+                let file = entry.file_name();
+                if file == "vault.key" {
+                    continue;
+                }
+                let target = notes.join(&file);
+                let _ = std::fs::remove_file(&target);
+                let _ = std::fs::remove_dir_all(&target);
+                let _ = std::fs::rename(entry.path(), &target);
+            }
+        }
+        let _ = std::fs::remove_dir_all(&notes_aside);
+    }
+    tprintln!(ctx, "");
+    tprintln!(ctx, "{}", crate::ui::ok(format!("'{name}' has its new password. Its notes are as they were.")));
+    tprintln!(
+        ctx,
+        "{}",
+        crate::ui::dim(format!("The old keys file is kept beside it as {}; delete it when you are sure.", keys_aside.display()))
+    );
+    Ok(())
 }

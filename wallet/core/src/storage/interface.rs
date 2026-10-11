@@ -181,6 +181,10 @@ pub trait NoteKeyStore: Send + Sync {
     async fn vault_restore_from_words(&self, _words: &str, _wallet_secret: &Secret) -> Result<()> {
         Err(Error::NotImplemented)
     }
+    /// Wrap the vault key under a new wallet password; `wallet password`.
+    async fn vault_change_secret(&self, _old_secret: &Secret, _new_secret: &Secret) -> Result<()> {
+        Err(Error::NotImplemented)
+    }
     /// Whether `words` decode to the same `K` this vault is already wrapping under
     /// `wallet_secret` — lets a caller distinguish "this is a safe idempotent
     /// re-run of a restore that got partway through" from "this is an unrelated

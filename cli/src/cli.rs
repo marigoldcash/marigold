@@ -1191,10 +1191,14 @@ impl KaspaCli {
                 tprintln!(
                     self,
                     "{}",
-                    style(format!(
-                        "Your own copy of the pool is here: {} notes as of the trustees' anchor at DAA {}, checked against their keys.",
-                        status.notes, status.anchored_daa
-                    ))
+                    style(if self.advanced() {
+                        format!(
+                            "Your own copy of the pool is here: {} notes as of the trustees' anchor at DAA {}, checked against their keys.",
+                            status.notes, status.anchored_daa
+                        )
+                    } else {
+                        "Your own copy of the notes is here, checked against the network.".to_string()
+                    })
                     .green()
                 );
                 tprintln!(self, "{}", crate::ui::dim("This computer is never asked which notes are yours."));
@@ -2981,7 +2985,13 @@ impl KaspaCli {
             // Left behind by an interrupted 'account create'; they hold nothing
             // and no address can have received to them. Cleaning them up is
             // housekeeping, not a decision to put to the user.
-            if let Ok(store) = self.wallet.store().as_prv_key_data_store()
+            // One handle for the whole step: the removal and the commit must hit
+            // the same store. With 'open <other>' typed while this ran, the
+            // removal went to the old wallet's store and the commit to the new
+            // one's, and the old store was dropped still modified, which killed
+            // the program (founder, 2026-10-11).
+            let interface = self.wallet.store();
+            if let Ok(store) = interface.as_prv_key_data_store()
                 && let Ok(mut stream) = store.iter().await
             {
                 let mut orphans = Vec::new();
@@ -2995,12 +3005,12 @@ impl KaspaCli {
                     }
                 }
                 drop(guard);
-                if !orphans.is_empty() {
+                if !orphans.is_empty() && Arc::ptr_eq(&self.wallet.store(), &interface) {
                     let removed = orphans.len();
                     for id in orphans {
                         store.remove(&secret, &id).await.ok();
                     }
-                    self.wallet.store().commit(&secret).await.ok();
+                    interface.commit(&secret).await.ok();
                     if loud {
                         tprintln!(self, "Removed {removed} unused recovery key(s).");
                     }
