@@ -123,6 +123,18 @@ impl Node {
             tprintln!(ctx, "");
             return;
         }
+        if let Some(light) = ctx.wallet().light() {
+            let s = light.status();
+            let ago = workflow_core::time::unixtime_as_millis_u64().saturating_sub(s.checked_ms) / 1000;
+            tprintln!(
+                ctx,
+                "Light wallet: {} notes in your own copy of the pool, as of DAA {}; the trustees' anchor at DAA {} agreed {ago}s ago.",
+                s.notes,
+                s.at_daa,
+                s.anchored_daa
+            );
+            tprintln!(ctx, "{}", crate::ui::dim("This computer is never asked which notes are yours."));
+        }
         if pending {
             // Two different situations, and calling both of them "using a
             // public node" was a lie in the second: the public node may have

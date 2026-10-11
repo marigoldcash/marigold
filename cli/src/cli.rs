@@ -1172,9 +1172,99 @@ impl KaspaCli {
         Ok(Some(rpc))
     }
 
+    /// The light copy of the pool (docs/marigold/SYNC-LIGHT.md): taken and
+    /// checked whenever the wallet is on a computer that is not its own node,
+    /// so that computer is never asked which notes are the wallet's. Says
+    /// what happened either way; a computer too old to serve it is used the
+    /// old way, and said so.
+    pub async fn start_light(self: &Arc<Self>) {
+        use kaspa_wallet_core::light::LightPool;
+        let Ok(network_id) = self.wallet.network_id() else { return };
+        if !LightPool::supported(network_id) {
+            return;
+        }
+        let rpc = self.wallet.rpc_api();
+        match LightPool::start(&rpc, network_id).await {
+            Ok(light) => {
+                let status = light.status();
+                self.wallet.set_light(Some(light.clone()));
+                tprintln!(
+                    self,
+                    "{}",
+                    style(format!(
+                        "Your own copy of the pool is here: {} notes as of the trustees' anchor at DAA {}, checked against their keys.",
+                        status.notes, status.anchored_daa
+                    ))
+                    .green()
+                );
+                tprintln!(self, "{}", crate::ui::dim("This computer is never asked which notes are yours."));
+                self.start_light_task(light, rpc);
+            }
+            Err(err) => {
+                self.wallet.set_light(None);
+                tprintln!(
+                    self,
+                    "{}",
+                    style(format!("This computer cannot serve a light wallet ({err}); it is asked about notes the old way, which tells it which notes are yours.")).yellow()
+                );
+            }
+        }
+    }
+
+    /// Lets go of the light copy: on disconnect, and when the wallet moves to
+    /// a node of its own, which needs none.
+    pub fn stop_light(&self) {
+        self.wallet.set_light(None);
+    }
+
+    /// Follows the chain for the light copy every couple of seconds, for as
+    /// long as that copy is the wallet's and the connection is the one it was
+    /// started on.
+    fn start_light_task(self: &Arc<Self>, light: Arc<kaspa_wallet_core::light::LightPool>, rpc: Arc<DynRpcApi>) {
+        let this = self.clone();
+        workflow_core::task::spawn(async move {
+            let mut said = false;
+            loop {
+                workflow_core::task::sleep(Duration::from_secs(2)).await;
+                if this.shutdown.load(Ordering::SeqCst) {
+                    break;
+                }
+                match this.wallet.light() {
+                    Some(current) if Arc::ptr_eq(&current, &light) => {}
+                    _ => break,
+                }
+                if !Arc::ptr_eq(&this.wallet.rpc_api(), &rpc) {
+                    // The wallet moved to another computer; its light copy, if
+                    // any, is started afresh there.
+                    this.wallet.set_light(None);
+                    break;
+                }
+                if !this.wallet.is_connected() {
+                    continue;
+                }
+                match light.follow(&rpc).await {
+                    Ok(done) => {
+                        if done.restarted {
+                            tprintln!(this, "{}", crate::ui::dim("Light wallet: started over from the latest anchor."));
+                        }
+                        said = false;
+                    }
+                    Err(err) => {
+                        if !said {
+                            tprintln!(this, "{}", style(format!("Light wallet: {err}")).yellow());
+                            said = true;
+                        }
+                    }
+                }
+            }
+        });
+    }
+
     /// Point the wallet at the node we started.
     #[cfg(feature = "embedded-node")]
     pub async fn adopt_embedded_node(self: &Arc<Self>, rpc: Rpc) -> Result<()> {
+        // A node of our own needs no light copy.
+        self.wallet.set_light(None);
         // The utxo processor subscribes to its RpcCtl's multiplexer once, when
         // it starts. Binding a new Rpc swaps the api but leaves that task
         // listening to the OLD ctl, so signalling the new one reaches nobody
@@ -1937,6 +2027,7 @@ impl KaspaCli {
     /// 'connect' has something to dial with.
     #[cfg(feature = "embedded-node")]
     pub async fn bind_unconnected_client(self: &Arc<Self>) {
+        self.wallet.set_light(None);
         let network_id = self.wallet.network_id().ok();
         if let Ok(client) = KaspaRpcClient::new(WrpcEncoding::Borsh, None, None, network_id, None) {
             let client = Arc::new(client);

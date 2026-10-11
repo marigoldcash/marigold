@@ -192,6 +192,7 @@ impl Connect {
                             return Ok(());
                         }
                         tprintln!(ctx, "Public computer connected.");
+                        ctx.start_light().await;
                         ctx.print_next_step().await;
                         if ctx.wallet().is_open() {
                             ctx.request_open_housekeeping();
@@ -245,6 +246,7 @@ impl Connect {
                         } else {
                             tprintln!(ctx, "Public computer connected.");
                         }
+                        ctx.start_light().await;
                         ctx.print_next_step().await;
                         if ctx.wallet().is_open() {
                             ctx.request_open_housekeeping();
@@ -436,6 +438,16 @@ impl Connect {
             } else {
                 ctx.note_remote_miner(None);
             }
+            // On any computer that is not our own node, the notes are followed
+            // in a light copy of the pool, checked against the trustees'
+            // anchors, so the computer is never asked which notes are ours.
+            #[cfg(feature = "embedded-node")]
+            let on_own_node = ctx.embedded_node_in_use();
+            #[cfg(not(feature = "embedded-node"))]
+            let on_own_node = false;
+            if !on_own_node && ctx.wallet().is_connected() {
+                ctx.start_light().await;
+            }
             ctx.print_next_step().await;
 
             // Connecting by hand, after opening a wallet offline, is a normal
@@ -594,7 +606,11 @@ pub async fn ask_how_to_connect(ctx: &Arc<KaspaCli>) -> Result<Option<String>> {
     tprintln!(ctx, "Connect now?");
     tprintln!(ctx, "  0: No");
     tprintln!(ctx, "  1: Connect to a public computer while downloading your own copy, for privacy{}", mark(1, "meanwhile"));
-    tprintln!(ctx, "  2: Download your own copy only, no public computer{}", mark(2, "own"));
+    tprintln!(
+        ctx,
+        "  2: Download your own copy without using a public computer (a full node: slow, needed to mine){}",
+        mark(2, "own")
+    );
     if running {
         tprintln!(ctx, "  3: Connect to a Marigold program already running on this computer");
     }
@@ -607,8 +623,10 @@ pub async fn ask_how_to_connect(ctx: &Arc<KaspaCli>) -> Result<Option<String>> {
     Ok(match choice {
         0 => None,
         1 => {
+            // The light wallet: a public computer for the chain, the notes in
+            // a copy of the pool checked against the trustees' anchors.
             settings.set(WalletSettings::Connect, "meanwhile".to_string()).await.ok();
-            Some("connect local".to_string())
+            Some("connect public".to_string())
         }
         2 => {
             settings.set(WalletSettings::Connect, "own".to_string()).await.ok();
