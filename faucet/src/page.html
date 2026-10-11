@@ -1,54 +1,244 @@
 <!doctype html>
+<!--
+  The faucet's page, served by marigold-faucet (include_str! in main.rs).
+
+  It wears the website's chrome: the note header, the top bar and the footer
+  come from tools/chrome.py in the marigoldcash.github.io repository and are
+  stamped between the chrome:header / chrome:footer markers with
+
+      python3 tools/chrome.py --external faucet=<this file>
+
+  run from that repository's root; chrome.css and rosette.svg are loaded from
+  marigold.cash, so a change to the site's chrome reaches this page without a
+  rebuild. The page below the note is this file's own.
+-->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Marigold Testnet Faucet</title>
+<title>Marigold — the testnet faucet</title>
+<meta name="description" content="The Marigold testnet faucet hands out real bearer notes: 10, 1 and 0.1 MAGLD a claim, once an hour. Testnet money, worthless by design, real in every other way.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%23141f19'/%3E%3Ccircle cx='32' cy='32' r='17' fill='%23E4A33D'/%3E%3Ccircle cx='32' cy='32' r='7' fill='%237A4212'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://marigold.cash/chrome.css?v=746dca38">
 <style>
-  :root{
-    --ink:#141f19; --note:#18291f; --note-edge:#0f1813; --gold:#e4a33d;
-    --amber:#c9761f; --petal:#f3cf82; --cream:#efe7d3; --moss:#9aa894;
-  }
   *{margin:0;padding:0;box-sizing:border-box}
-  body{background:var(--cream);color:var(--ink);font:16px/1.6 Georgia,'Times New Roman',serif;min-height:100vh}
-  .wrap{max-width:680px;margin:0 auto;padding:48px 20px}
-  h1{font-size:2rem;font-weight:600;margin-bottom:4px}
-  .kicker{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.72rem;letter-spacing:.28em;text-transform:uppercase;color:var(--amber);margin-bottom:16px}
-  p.lede{color:#3d4a42;margin-bottom:28px}
-  button{background:var(--note);color:var(--petal);border:1px solid var(--note-edge);border-radius:10px;padding:14px 28px;font:inherit;font-size:1.05rem;cursor:pointer}
-  button:hover{background:#213627}
-  button:disabled{opacity:.5;cursor:wait}
-  .error{background:#f6dcd2;border:1px solid var(--amber);border-radius:10px;padding:12px 16px;margin-top:20px;display:none}
-  .warn{background:var(--petal);border:1px solid var(--amber);border-radius:10px;padding:12px 16px;margin:24px 0;font-size:.95rem;display:none}
-  .notes{display:none}
-  .note-card{background:#fff;border:1px solid #d8cfb8;border-radius:14px;padding:20px;margin-top:16px}
-  .note-card h3{font-size:1.05rem;margin-bottom:10px}
-  .note-card svg{display:block;margin:0 auto}
-  .payload{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.72rem;word-break:break-all;background:var(--cream);border-radius:8px;padding:10px;margin-top:12px}
-  .copy{margin-top:8px;padding:6px 14px;font-size:.85rem;border-radius:8px}
-  .how{margin-top:36px;border-top:1px solid #d8cfb8;padding-top:20px;font-size:.95rem;color:#3d4a42}
-  .how code{font-family:ui-monospace,Menlo,Consolas,monospace;background:#e5dcc4;border-radius:4px;padding:1px 6px;font-size:.85rem}
-  .status{margin-top:14px;font-size:.8rem;color:var(--moss)}
+  body{background:var(--page-bg);color:var(--page-fg);font-family:"Fraunces",serif;font-weight:300;line-height:1.6}
+  .page{max-width:62rem;margin:0 auto;padding:0 1.2rem 1rem}
+  .lede{max-width:40em;margin:3rem auto 2.4rem;text-align:center;font-size:clamp(1.15rem,2.4vw,1.4rem);line-height:1.55;color:var(--text-3)}
+  .lede strong{font-weight:500;color:var(--page-fg)}
+  .kicker{font-family:"IBM Plex Mono",monospace;font-size:.68rem;letter-spacing:.24em;text-transform:uppercase;color:var(--amber);margin:0 0 .5rem}
+  h2{font-size:clamp(1.5rem,3vw,2rem);font-weight:400;margin:0 0 .9rem;letter-spacing:.01em}
+  section{margin-top:3.4rem;scroll-margin-top:1.5rem}
+  .prose{color:var(--text);display:flex;flex-direction:column;gap:.9rem}
+  .prose strong{font-weight:500;color:var(--page-fg)}
+  code{font-family:"IBM Plex Mono",monospace;font-size:.88em;background:var(--code-bg);border-radius:4px;padding:1px 5px}
+  a{color:var(--amber)}
+  a:hover{color:var(--link-hover)}
+  .btn{
+    display:inline-block;font-family:"IBM Plex Mono",monospace;font-size:.76rem;letter-spacing:.12em;
+    text-transform:uppercase;text-decoration:none;color:var(--note-edge);background:var(--gold);
+    border:1px solid var(--amber);border-radius:10px;padding:.7rem 1rem;cursor:pointer;
+  }
+  .btn:hover{background:#f0b45a;color:var(--note-edge)}
+  .btn:disabled{opacity:.55;cursor:wait}
+  .btn.quiet{background:transparent;color:var(--text-2);border-color:var(--line-3)}
+  .btn.quiet:hover{color:var(--page-fg);border-color:var(--amber)}
+  .claim{display:flex;flex-direction:column;align-items:center;gap:1rem;text-align:center}
+  .claim .btn{font-size:.9rem;padding:1rem 1.6rem}
+  .status{font-family:"IBM Plex Mono",monospace;font-size:.72rem;letter-spacing:.08em;color:var(--moss);min-height:1.2em}
+  .error{display:none;max-width:40em;margin:0 auto;border-left:3px solid var(--amber);padding:.2rem 0 .2rem 1.1rem;color:var(--text);text-align:left}
+  .warn{display:none;max-width:44em;margin:2rem auto 0;border-left:3px solid var(--gold);padding:.2rem 0 .2rem 1.1rem;color:var(--text)}
+  .warn strong{color:var(--page-fg);font-weight:500}
+  .notes{display:none;grid-template-columns:repeat(auto-fit,minmax(16rem,1fr));gap:1.1rem;margin-top:1.6rem}
+  .note-card{
+    background:var(--card);border:1px solid var(--line-2);border-radius:14px;padding:1.3rem;
+    box-shadow:0 18px 40px -30px var(--shadow);display:flex;flex-direction:column;gap:.8rem;align-items:center;text-align:center;
+  }
+  .note-card h3{font-size:1.15rem;font-weight:500;margin:0}
+  .note-card h3 small{font-family:"IBM Plex Mono",monospace;font-size:.68rem;letter-spacing:.2em;text-transform:uppercase;color:var(--amber);display:block;margin-bottom:.3rem}
+  .note-card svg{display:block;background:#fff;border-radius:8px;padding:6px;max-width:100%;height:auto}
+  .payload{font-family:"IBM Plex Mono",monospace;font-size:.7rem;word-break:break-all;background:var(--code-bg);border-radius:8px;padding:.6rem .7rem;text-align:left;width:100%;color:var(--text)}
+  .steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(16rem,1fr));gap:1.1rem;counter-reset:step}
+  .step{
+    counter-increment:step;background:var(--card);border:1px solid var(--line-2);border-radius:14px;padding:1.3rem 1.3rem 1.2rem;
+    box-shadow:0 18px 40px -30px var(--shadow);display:flex;flex-direction:column;gap:.6rem;
+  }
+  .step::before{content:counter(step,decimal-leading-zero);font-family:"IBM Plex Mono",monospace;font-size:.72rem;letter-spacing:.2em;color:var(--amber)}
+  .step h3{font-size:1.15rem;font-weight:500;margin:0}
+  .step p{margin:0;color:var(--text);font-size:.98rem}
+  .step em{font-style:italic;color:var(--page-fg)}
+  .step .cta{margin-top:auto;padding-top:.6rem}
 </style>
 </head>
 <body>
-<div class="wrap">
-  <div class="kicker">marigold · testnet faucet</div>
-  <h1>Take a note.</h1>
-  <p class="lede">This faucet hands out real Marigold bearer notes — digital cash, not an account credit. One claim gives you three notes — 10, 1 and 0.1&nbsp;MAGLD, 11.10 in all. Testnet money: worthless by design, real in every other way.</p>
 
-  <button id="claim">Claim a note bundle</button>
-  <div class="error" id="error"></div>
+<!-- chrome:header -->
+<script>
+  (function () {
+    var t = null; try { t = localStorage.getItem("marigold-theme"); } catch (e) {}
+    if (t === "dark" || t === "light") document.documentElement.setAttribute("data-theme", t);
+  })();
+</script>
+<nav class="topbar">
+  <button class="tgl" id="themeBtn" type="button" aria-pressed="false">
+    <svg class="sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.4v2.2M12 19.4v2.2M4.2 12H2M22 12h-2.2M6.5 6.5 4.9 4.9M19.1 19.1l-1.6-1.6M17.5 6.5l1.6-1.6M4.9 19.1l1.6-1.6"/></svg>
+    <svg class="moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.2A8.2 8.2 0 0 1 9.8 4 8.4 8.4 0 1 0 20 14.2Z"/></svg>
+    <span class="sr" id="themeLabel">Switch between day and night</span>
+  </button>
+  <div class="grow"></div>
+  <label class="langpick" hidden>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg>
+    <span class="sr" id="langLabel">Language</span>
+    <select id="langSel" aria-labelledby="langLabel">
+      <option value="en">English</option>
+      <option value="es">Español</option>
+      <option value="de">Deutsch</option>
+      <option value="fr">Français</option>
+      <option value="it">Italiano</option>
+      <option value="pt">Português</option>
+      <option value="ru">Русский</option>
+      <option value="zh">中文</option>
+    </select>
+  </label>
+</nav>
+<div class="sky">
+  <header class="note compact" aria-label="Marigold specimen note">
+    <div class="micro top" aria-hidden="true">marigold · digital cash · marigold · digital cash · marigold · digital cash · marigold · digital cash · marigold · digital cash · marigold · digital cash · marigold · digital cash · marigold · digital cash · marigold · digital cash · marigold · digital cash · marigold · digital cash · marigold · digital cash · </div>
 
-  <div class="warn" id="warn"><strong>These are bearer notes.</strong> Whoever holds these codes owns the money — import them into your wallet immediately, then treat the page as spent paper.</div>
+    <span class="corner tl" aria-hidden="true">1</span>
+    <span class="corner tr" aria-hidden="true">10</span>
+    <span class="corner bl" aria-hidden="true">100</span>
+    <span class="corner br" aria-hidden="true">1000</span>
+
+    <div class="face">
+      <img class="rosette" src="https://marigold.cash/rosette.svg" width="118" height="118" alt="Marigold flower">
+
+      <p class="wordmark"><a href="https://marigold.cash/">Marigold</a></p>
+
+      <h1 class="title">The faucet</h1>
+
+      <p class="tag">three real notes an hour, for the testnet</p>
+
+      <div class="divider" aria-hidden="true"></div>
+
+      <p class="status">Testnet faucet · 11.10 MAGLD a claim</p>
+
+      <nav class="ways" aria-label="Pages">
+        <a href="https://marigold.cash/">Home</a>
+        <a href="https://marigold.cash/litepaper/">Litepaper</a>
+        <a href="https://marigold.cash/whitepaper/">Whitepaper</a>
+        <a href="https://marigold.cash/faq/">Questions</a>
+        <a href="https://marigold.cash/companies/">Companies</a>
+        <a href="https://marigold.cash/about/">About</a>
+      </nav>
+    </div>
+
+    <div class="serial-row" aria-hidden="true">
+      <span>Nº 000007 — specimen</span>
+      <span>marigold.cash</span>
+    </div>
+
+    <div class="micro bottom" aria-hidden="true">marigold · digital cash · marigold · digital cash · marigold · digital cash · marigold · digital cash · marigold · digital cash · marigold · digital cash · marigold · digital cash · marigold · digital cash · marigold · digital cash · marigold · digital cash · marigold · digital cash · marigold · digital cash · </div>
+  </header>
+</div>
+<script>
+  (function () {
+    var root = document.documentElement, btn = document.getElementById("themeBtn");
+    var dark = function () {
+      var chosen = root.getAttribute("data-theme");
+      return chosen ? chosen === "dark" : window.matchMedia("(prefers-color-scheme: dark)").matches;
+    };
+    var apply = function () { btn.setAttribute("aria-pressed", dark() ? "true" : "false"); };
+    apply();
+    btn.addEventListener("click", function () {
+      var next = dark() ? "light" : "dark";
+      root.setAttribute("data-theme", next);
+      try { localStorage.setItem("marigold-theme", next); } catch (e) {}
+      apply();
+    });
+  })();
+</script>
+<!-- /chrome:header -->
+
+<main class="page">
+
+  <p class="lede"><strong>This faucet hands out real Marigold bearer notes</strong>, digital cash and not an account credit. One claim gives you three notes, 10, 1 and 0.1&nbsp;MAGLD, 11.10 in all. Testnet money: worthless by design, real in every other way.</p>
+
+  <div class="claim">
+    <button class="btn" id="claim" type="button">Claim a note bundle</button>
+    <p class="status" id="status"></p>
+    <div class="error" id="error"></div>
+  </div>
+
+  <div class="warn" id="warn"><strong>These are bearer notes.</strong> Whoever holds these codes owns the money. Import them into your wallet now, then treat this page as spent paper.</div>
   <div class="notes" id="notes"></div>
 
-  <div class="how">
-    <p><strong>To use them:</strong> in the wallet CLI, connect to a testnet node, open your wallet, and run <code>receive &lt;code&gt;</code> for each note, <strong>top to bottom — the big note first</strong> (scan the QR or paste the <code>marigoldnote:</code> text). Your wallet verifies each note on-chain and immediately rotates its lock — from that moment the note is irrevocably yours. Into a brand-new wallet, the first rotation pays its fee out of the big note itself, so you'll receive the value as a spread of smaller denominations — perfect for paying and being paid.</p>
-    <p style="margin-top:10px">New here? Grab the node + wallet from the repo and join the testnet first.</p>
+  <section id="how">
+    <p class="kicker">Then</p>
+    <h2>Put them in your wallet</h2>
+    <div class="steps">
+      <div class="step">
+        <h3>Open the wallet</h3>
+        <p>Open your Marigold wallet on the testnet. New here? <a href="https://marigold.cash/#start">The three steps on marigold.cash</a> get you from nothing to a wallet in a few minutes.</p>
+      </div>
+      <div class="step">
+        <h3>Take each note, big one first</h3>
+        <p>In the desktop app, open the <em>Pay</em> tab, paste a code under "A code you were given" and press <em>Take it</em>. In the terminal wallet, <code>receive &lt;code&gt;</code> does the same. Go top to bottom: the 10 first, then the 1, then the 0.1.</p>
+      </div>
+      <div class="step">
+        <h3>It is yours from that moment</h3>
+        <p>Your wallet checks each note on the chain and at once turns its lock, so the code on this page can never be used again. Into a brand-new wallet, the first turn pays its fee out of the big note itself, so you receive the value as a spread of smaller notes, which is what you want for paying and being paid.</p>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- chrome:footer -->
+<footer class="site-foot">
+  <div class="inner">
+    <p class="lead">
+      <a href="https://marigold.cash/">marigold.cash</a> &middot; <a href="https://marigoldcash.t.me">marigoldcash.t.me</a><br>
+      No token sale. No presale. Nothing to buy yet.<br>
+      When there is something real, it will be here.
+    </p>
+    <hr>
+    <ul class="links">
+      <li><a href="https://marigold.cash/">Home</a></li>
+      <li><a href="https://marigold.cash/litepaper/">Litepaper</a></li>
+      <li><a href="https://marigold.cash/whitepaper/">Whitepaper</a></li>
+      <li><a href="https://marigold.cash/faq/">Questions</a></li>
+      <li><a href="https://marigold.cash/companies/">Companies</a></li>
+      <li><a href="https://marigold.cash/about/">About</a></li>
+    </ul>
+    <ul class="links">
+      <li><a href="https://github.com/marigoldcash">GitHub</a></li>
+      <li><a href="https://x.com/marigoldcash">X</a></li>
+      <li><a href="https://www.youtube.com/@marigoldcash">YouTube</a></li>
+      <li><a href="https://marigoldcash.t.me">Telegram</a></li>
+    </ul>
   </div>
-  <div class="status" id="status"></div>
-</div>
+</footer>
+<a class="to-top" href="#top" id="toTop" aria-label="Back to the top" hidden>
+  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+</a>
+<script>
+  (function () {
+    var b = document.getElementById("toTop"); if (!b) return;
+    var show = function () { b.hidden = (window.scrollY || document.documentElement.scrollTop) < 600; };
+    window.addEventListener("scroll", show, { passive: true }); show();
+    b.addEventListener("click", function (e) {
+      e.preventDefault();
+      var smooth = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      window.scrollTo({ top: 0, behavior: smooth ? "smooth" : "auto" });
+    });
+  })();
+</script>
+<!-- /chrome:footer -->
+
 <script>
 // navigator.clipboard.writeText is asynchronous and can reject — no permission,
 // not focused, an extension in the way — and the old code neither awaited it nor
@@ -66,9 +256,9 @@ function copyText(text, button, payloadEl) {
     clearTimeout(button._resetTimer);
     button._resetTimer = setTimeout(() => { button.textContent = 'Copy code'; }, 1400);
   };
-  const ok = () => flash('Copied \u2713');
+  const ok = () => flash('Copied ✓');
   const manual = () => {
-    flash('Selected \u2014 press Ctrl+C');
+    flash('Selected — press Ctrl+C');
     const range = document.createRange();
     range.selectNodeContents(payloadEl);
     const sel = window.getSelection();
@@ -112,8 +302,8 @@ btn.addEventListener('click', async () => {
     for (const n of body.notes) {
       const card = document.createElement('div');
       card.className = 'note-card';
-      card.innerHTML = '<h3>' + n.denomination_magld + ' MAGLD</h3>' + n.qr_svg +
-        '<div class="payload"></div><button class="copy">Copy code</button>';
+      card.innerHTML = '<h3><small>a note of</small>' + n.denomination_magld + ' MAGLD</h3>' + n.qr_svg +
+        '<div class="payload"></div><button class="btn quiet copy" type="button">Copy code</button>';
       card.querySelector('.payload').textContent = n.payload;
       card.querySelector('.copy').addEventListener('click', (e) => {
         copyText(n.payload, e.target, card.querySelector('.payload'));
@@ -121,7 +311,7 @@ btn.addEventListener('click', async () => {
       notes.appendChild(card);
     }
     warn.style.display = 'block';
-    notes.style.display = 'block';
+    notes.style.display = 'grid';
     btn.textContent = 'Claimed — import your notes';
   } catch (e) {
     errBox.textContent = e.message;
