@@ -362,16 +362,26 @@ impl Wallet {
                         .and_then(|m| m.server.clone())
                         .or_else(|| ctx.wallet().settings().get::<String>(WalletSettings::Server))
                         .filter(|server| server != "public" && !crate::modules::connect::is_local_target(server));
-                    tprintln!(ctx, "");
-                    let answer = ctx.term().ask(false, "Connect now? [Y/n]: ").await?.trim().to_lowercase();
-                    if answer.starts_with('n') {
-                        tprintln!(ctx, "Not connected. Type 'connect' when you are ready.");
-                    } else {
-                        match target {
-                            Some(server) => ctx.exec_within(&format!("connect {server}")).await?,
-                            None => ctx.exec_within("connect").await?,
+                    match target {
+                        Some(server) => {
+                            tprintln!(ctx, "");
+                            let answer = ctx.term().ask(false, "Connect now? [Y/n]: ").await?.trim().to_lowercase();
+                            if answer.starts_with('n') {
+                                tprintln!(ctx, "Not connected. Type 'connect' when you are ready.");
+                            } else {
+                                ctx.exec_within(&format!("connect {server}")).await?;
+                                ctx.request_open_housekeeping();
+                            }
                         }
-                        ctx.request_open_housekeeping();
+                        // The same menu the desktop app shows, with the same
+                        // choices (founder, 2026-10-11).
+                        None => match crate::modules::connect::ask_how_to_connect(&ctx).await? {
+                            Some(command) => {
+                                ctx.exec_within(&command).await?;
+                                ctx.request_open_housekeeping();
+                            }
+                            None => tprintln!(ctx, "Not connected. Type 'connect' when you are ready."),
+                        },
                     }
                 }
 

@@ -53,13 +53,45 @@ impl Connect {
             _ => {}
         }
 
-        let want_local = matches!(argv.first().map(|s| s.as_str()), Some("local") | Some("mine") | Some("own"));
+        // 'local' and 'mine': a public computer now, your own copy behind it,
+        // the wallet moves over when it has caught up. 'own': your own copy
+        // only, no public computer at any point. Both are what the menu below
+        // runs; nobody has to know the words.
+        let mode = match argv.first().map(|s| s.as_str()) {
+            Some("local") | Some("mine") => SyncMode::Meanwhile,
+            Some("own") => SyncMode::OwnOnly,
+            _ => SyncMode::Ask,
+        };
+        let want_local = mode != SyncMode::Ask;
         if want_local {
             argv.remove(0);
             if !cfg!(feature = "embedded-node") {
                 tprintln!(ctx, "This build cannot sync the network itself. 'connect <host>:port' reaches a computer that does.");
                 return Ok(());
             }
+        }
+
+        // Bare 'connect', typed: the same choice the desktop app offers, in
+        // one menu (founder, 2026-10-11, after tester Charly asked for it).
+        // A remembered address skips it, as does a word after 'connect'.
+        #[cfg(feature = "embedded-node")]
+        if argv.is_empty()
+            && mode == SyncMode::Ask
+            && !ctx.embedded_node_running()
+            && ctx
+                .wallet()
+                .settings()
+                .get::<String>(WalletSettings::Server)
+                .filter(|s| !s.trim().is_empty() && s != "public" && !is_local_target(s))
+                .is_none()
+        {
+            return match ask_how_to_connect(&ctx).await? {
+                Some(command) => ctx.exec_within(&command).await,
+                None => {
+                    tprintln!(ctx, "Not connected. Type 'connect' when you are ready.");
+                    Ok(())
+                }
+            };
         }
 
         // On your own copy while it is still catching up, 'connect public'
@@ -127,7 +159,7 @@ impl Connect {
                     .into_iter()
                     .next()
                     .and_then(|node| wrpc_client.parse_url_with_network_type(node, network_id.into()).ok());
-                match start_network_sync(&ctx, public.is_some()).await? {
+                match start_network_sync(&ctx, public.is_some(), mode).await? {
                     SyncStart::Settled => return Ok(()),
                     SyncStart::PublicOnly => {
                         let target = public.expect("offered only when there is one");
@@ -262,7 +294,7 @@ impl Connect {
                     .into_iter()
                     .next()
                     .and_then(|node| wrpc_client.parse_url_with_network_type(node, network_id.into()).ok());
-                match start_network_sync(&ctx, public.is_some()).await? {
+                match start_network_sync(&ctx, public.is_some(), SyncMode::Ask).await? {
                     SyncStart::Settled => return Ok(()),
                     SyncStart::PublicOnly => {
                         let target = public.expect("offered only when there is one");
@@ -474,7 +506,7 @@ pub(crate) async fn dial(client: &kaspa_wrpc_client::KaspaRpcClient, url: String
 /// Is a node answering on this machine's wRPC port, and does it have a miner
 /// in it? `None` when nothing answers. A node too old to know the question is
 /// treated as a node without a miner.
-async fn probe_local_node(network_id: NetworkId) -> Option<kaspa_rpc_core::RpcMinerStatus> {
+pub async fn probe_local_node(network_id: NetworkId) -> Option<kaspa_rpc_core::RpcMinerStatus> {
     let url = format!("ws://127.0.0.1:{}", network_id.default_borsh_rpc_port());
     let client = kaspa_wrpc_client::KaspaRpcClient::new(WrpcEncoding::Borsh, Some(&url), None, Some(network_id), None).ok()?;
     let options = ConnectOptions {
@@ -519,7 +551,77 @@ enum SyncStart {
 /// public computer meanwhile — asked, never assumed, because whoever runs
 /// it sees which notes this wallet asks about.
 #[cfg(feature = "embedded-node")]
-async fn start_network_sync(ctx: &Arc<KaspaCli>, public_available: bool) -> Result<SyncStart> {
+/// How the person wants the wait for a first sync handled.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SyncMode {
+    /// Ask, once the sync has started and only if it has to catch up.
+    Ask,
+    /// A public computer meanwhile, no question.
+    Meanwhile,
+    /// Your own copy only, no question.
+    OwnOnly,
+}
+
+/// What a person can choose when the wallet asks how to connect: the same
+/// choices as the desktop app's open screen, in the same order and words
+/// (founder, 2026-10-11). Returns the command that does it, or None for
+/// "not now". A Marigold program already running on this computer is offered
+/// only when one is found, and then first: it needs no sync and shows nobody
+/// anything.
+pub async fn ask_how_to_connect(ctx: &Arc<KaspaCli>) -> Result<Option<String>> {
+    let network_id = ctx.wallet().network_id()?;
+    let running = probe_local_node(network_id).await.is_some();
+    let last = ctx.wallet().settings().get::<String>(WalletSettings::Connect).unwrap_or_default();
+    let default = if running {
+        3
+    } else if last == "own" {
+        2
+    } else {
+        1
+    };
+    let mark = |n: usize, word: &str| -> String {
+        let mut tags = Vec::new();
+        if n == 1 {
+            tags.push("recommended");
+        }
+        if last == word {
+            tags.push("last used");
+        }
+        if tags.is_empty() { String::new() } else { format!("  ({})", tags.join(", ")) }
+    };
+    tprintln!(ctx, "");
+    tprintln!(ctx, "Connect now?");
+    tprintln!(ctx, "  0: No");
+    tprintln!(ctx, "  1: Connect to a public computer while downloading your own copy, for privacy{}", mark(1, "meanwhile"));
+    tprintln!(ctx, "  2: Download your own copy only, no public computer{}", mark(2, "own"));
+    if running {
+        tprintln!(ctx, "  3: Connect to a Marigold program already running on this computer");
+    }
+    let top = if running { 3 } else { 2 };
+    let answer = ctx.term().ask(false, &format!("Select [0..{top}] or <enter> for {default}: ")).await?.trim().to_string();
+    tprintln!(ctx, "");
+    let choice = if answer.is_empty() { default } else { answer.parse::<usize>().unwrap_or(usize::MAX) };
+    let wallet = ctx.wallet();
+    let settings = wallet.settings();
+    Ok(match choice {
+        0 => None,
+        1 => {
+            settings.set(WalletSettings::Connect, "meanwhile".to_string()).await.ok();
+            Some("connect local".to_string())
+        }
+        2 => {
+            settings.set(WalletSettings::Connect, "own".to_string()).await.ok();
+            Some("connect own".to_string())
+        }
+        3 if running => Some(format!("connect 127.0.0.1:{}", network_id.default_borsh_rpc_port())),
+        _ => {
+            tprintln!(ctx, "{}", style(format!("'{answer}' is not one of the choices.")).yellow());
+            None
+        }
+    })
+}
+
+async fn start_network_sync(ctx: &Arc<KaspaCli>, public_available: bool, mode: SyncMode) -> Result<SyncStart> {
     tprintln!(ctx, "");
     tprintln!(ctx, "Starting sync with the network...");
     let rpc = match ctx.spawn_embedded_node().await {
@@ -575,9 +677,19 @@ async fn start_network_sync(ctx: &Arc<KaspaCli>, public_available: bool) -> Resu
         style("We could connect to a public computer that has all the data already, but whoever runs it sees which notes your wallet asks about.").dim()
     );
     tprintln!(ctx, "");
-    let answer = ctx.term().ask(false, "Use a public computer until sync has caught up? [y/N]: ").await?.trim().to_lowercase();
+    let yes = match mode {
+        SyncMode::Ask => ctx
+            .term()
+            .ask(false, "Use a public computer until sync has caught up? [y/N]: ")
+            .await?
+            .trim()
+            .to_lowercase()
+            .starts_with('y'),
+        SyncMode::Meanwhile => true,
+        SyncMode::OwnOnly => false,
+    };
     tprintln!(ctx, "");
-    if answer.starts_with('y') {
+    if yes {
         if public_available {
             tprintln!(ctx, "Connecting to a public computer until your own sync has caught up.");
             return Ok(SyncStart::PublicMeanwhile(rpc));

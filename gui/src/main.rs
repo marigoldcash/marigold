@@ -43,7 +43,9 @@ async fn start_background(app: &App, service: Arc<WalletService>) {
         tokio::spawn(async move {
             match bot.await {
                 Ok(()) => say("The Telegram bot stopped answering; close and open the wallet to start it again.".to_string()),
-                Err(err) if err.is_panic() => say("The Telegram bot crashed; close and open the wallet to start it again.".to_string()),
+                Err(err) if err.is_panic() => {
+                    say("The Telegram bot crashed; close and open the wallet to start it again.".to_string())
+                }
                 Err(_) => {}
             }
         });
@@ -164,6 +166,14 @@ struct Requested {
     code: String,
     amount: String,
     qr: String,
+}
+
+/// Whether a Marigold program on this computer already serves the network on
+/// its usual port: the terminal wallet's sync, or another Marigold program.
+#[tauri::command]
+async fn local_program_present() -> Result<bool, String> {
+    let (_, _, network_id) = probe().await?;
+    Ok(kaspa_cli_lib::modules::connect::probe_local_node(network_id).await.is_some())
 }
 
 /// The wallet settings decide the folder and the network, as everywhere else.
@@ -297,7 +307,7 @@ async fn open(app: AppHandle, state: State<'_, App>, wallet: String, password: S
         if text.contains("already in use") {
             "Looks like there is already a Marigold network running on this computer. Select \"A network running on this computer\" to connect to it.".to_string()
         } else if node == "local" && (text.contains("cannot reach") || text.contains("Connection refused") || text.contains("timed out")) {
-            "No Marigold network is running on this computer right now. \"A network running on this computer\" is for a node already started here — by the terminal wallet's sync, by marigoldd, or by another Marigold program. Choose \"Sync here, inside the app\" or a public computer instead.".to_string()
+            "No Marigold program is answering on this computer right now; the one that was running has stopped. Choose \"Sync here, inside the app\" or a public computer instead.".to_string()
         } else {
             text
         }
@@ -385,7 +395,10 @@ async fn restore_folder(app: AppHandle, path: String, words: String, name: Strin
     } else {
         let fits = bundle::wallets_for_words(&archives, &words).map_err(|e| e.to_string())?;
         let Some(mine) = fits.first() else {
-            return Err(format!("those words open none of the wallets in this backup ({}) — each wallet opens with its own 24 words", names.join(", ")));
+            return Err(format!(
+                "those words open none of the wallets in this backup ({}) — each wallet opens with its own 24 words",
+                names.join(", ")
+            ));
         };
         let mut map = std::collections::BTreeMap::new();
         map.insert(mine.clone(), words.clone());
@@ -406,7 +419,11 @@ async fn restore_folder(app: AppHandle, path: String, words: String, name: Strin
         done.join("; "),
         bundle::checkpoint_moment(&merged.stamp),
         merged.deltas,
-        if others.is_empty() { String::new() } else { format!(" The backup also holds {}: run this again with its own words.", bundle::wallets_phrase(&others)) }
+        if others.is_empty() {
+            String::new()
+        } else {
+            format!(" The backup also holds {}: run this again with its own words.", bundle::wallets_phrase(&others))
+        }
     ))
 }
 
@@ -792,6 +809,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             version,
             wallets,
+            local_program_present,
             create_wallet,
             open,
             close,

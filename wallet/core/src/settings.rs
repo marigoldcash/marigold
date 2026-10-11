@@ -29,6 +29,10 @@ pub enum WalletSettings {
     HistoryDetail,
     #[describe("Show the technical side: every command in 'help', addresses, the reasons behind errors (default off; 'advanced on')")]
     Advanced,
+    #[describe(
+        "How the wallet connects when asked: 'meanwhile' (a public computer while your own copy downloads) or 'own' (your own copy only)"
+    )]
+    Connect,
 }
 
 #[async_trait]

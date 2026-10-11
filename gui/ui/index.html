@@ -31,11 +31,11 @@
     <label>Network access
       <select id="node">
         <option value="public">A public computer (works at once)</option>
-        <option value="local">A network running on this computer</option>
+        <option value="local" hidden>A Marigold program already running on this computer</option>
         <option value="own">Sync here, inside the app</option>
       </select>
     </label>
-    <p class="hint" id="node-local-hint" hidden>"A network running on this computer" is for a Marigold node already started on this machine — by the terminal wallet's sync, by marigoldd, or by another Marigold program. If there is none, this fails after fifteen seconds; choose "Sync here" or a public computer then.</p>
+    <p class="hint" id="node-local-hint" hidden>A Marigold program is running on this computer already, the terminal wallet's sync or another Marigold program, and this wallet can use its copy of the network: nothing to download, and nobody else sees your notes.</p>
     <p class="hint">Through a public computer, whoever runs it sees which notes your wallet asks about. A sync of your own needs a few gigabytes and some time.</p>
     <button id="open" class="primary">Open</button>
     <p id="open-error" class="error"></p>

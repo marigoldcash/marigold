@@ -208,6 +208,14 @@ async function init() {
   $("version").textContent = "v" + (await invoke("version"));
   checkUpdate();
   await loadWallets();
+  // The "program already running on this computer" choice shows only when
+  // there is one, and is then the choice made for you (founder, 2026-10-11).
+  try {
+    if (await invoke("local_program_present")) {
+      const opt = $("node").querySelector('option[value="local"]');
+      opt.hidden = false; $("node").value = "local"; $("node-local-hint").hidden = false;
+    }
+  } catch (_) {}
   await listen("say", (event) => {
     $("say").textContent = event.payload;
     if (restoringTg) $("rt-progress").textContent += `\n${event.payload}`;

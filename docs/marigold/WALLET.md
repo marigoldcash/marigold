@@ -57,6 +57,22 @@ Once a day the wallet reads `https://marigold.cash/release.json`. When it names 
 
 The manifest is written by the release procedure: the binaries workflow attaches `SHA256SUMS-cli.txt` to the release, and `scripts/release-notice.sh --latest <v> --manifest SHA256SUMS-cli.txt` has each testnet trustee host sign it (`marigold-trustee-signer --sign-release-manifest`) and writes `release` into the document. The desktop wallet keeps the notice with a download link until the installers are signed for their platforms (Apple notarization, a Windows certificate — DECISIONS.md 2026-10-08).
 
+## 2c. Connecting: one menu, the same as the desktop's (2026-10-11)
+
+When a wallet is opened without a connection, and when `connect` is typed alone, the wallet asks how to connect, with the desktop app's choices in the desktop app's order:
+
+```
+Connect now?
+  0: No
+  1: Connect to a public computer while downloading your own copy, for privacy  (recommended)
+  2: Download your own copy only, no public computer
+Select [0..2] or <enter> for 1:
+```
+
+Choice 1 is `connect local`: a public computer at once, your own copy of the network downloading behind it, and the wallet moves over to its own copy once that has caught up. Choice 2 is `connect own`: your own copy only, nothing asked of anybody, and the ledger stays unread until the sync has caught up (notes work throughout). The choice is remembered (`settings` key `connect`) and offered as the default next time. A third line, "Connect to a Marigold program already running on this computer", appears only when one answers on the network's port, and is then the default: nothing to download and nobody else sees the wallet's notes. `connect public` (a public computer only) and `connect <host>:port` stay as typed commands; a remembered address (`server`) is used with a plain "Connect now? [Y/n]" instead of the menu.
+
+The policy behind the order (DECISIONS 2026-10-11): your own copy first; a public computer is a stopgap while it downloads, never the way the network is meant to be used, because whoever runs it sees everything and one node must not carry everyone.
+
 ## 3. Create a wallet
 
 ```

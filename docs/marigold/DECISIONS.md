@@ -541,3 +541,11 @@ is priced like plumbing; notes are money and cost a penny to move.
 **Why.** Founder, 2026-10-11: "We don't want to encourage the network to use our public node or any public node. No public node: because they can see everything. Our public node: because we don't want to carry the weight of the world on the shoulder of our public node. If it fails, everyone's wallet fails. It should always and only be a stopgap whenever possible."
 
 **Where.** `cli/src/modules/connect.rs`; answered on the issue.
+
+## One menu for connecting, in the terminal as on the desktop (2026-10-11)
+
+**Decision.** Opening a wallet without a connection, and `connect` typed alone, show one numbered menu: 0 No; 1 a public computer while your own copy downloads, for privacy (recommended, the default); 2 your own copy only, no public computer. A Marigold program already running on this computer is offered only when one is found, and is then the default. The choice is remembered. The desktop app's open screen loses its "a network running on this computer" line unless such a program is found, and the line is worded without the word node: "A Marigold program already running on this computer".
+
+**Why.** Founder, 2026-10-11, after tester Charly showed the terminal's "Connect now? [Y/n]" and the desktop's three-way choice side by side and proposed one menu: "I think that is better", with the running-program line taken out of the everyday choices ("this option is for people who have the cli running with a node and then they use the gui wallet on top … not very common for non-geek crowd" — Charly; "if we detect it ask to use it, otherwise don't show it at all" — founder), and the word node kept out of what people read. The default is the stopgap-plus-own-copy because of the same day's decision that a public computer is only ever a stopgap; and the founder's aim is that once a first sync is fast enough for everyone, the public-only choice goes and what remains is a privacy choice, not a convenience.
+
+**Where.** `cli/src/modules/connect.rs` (`ask_how_to_connect`, `SyncMode`), `cli/src/modules/wallet.rs` (open), `gui/ui/index.html`, `gui/ui/app.js`, `gui/src/main.rs` (`local_program_present`), WALLET.md §2c.
