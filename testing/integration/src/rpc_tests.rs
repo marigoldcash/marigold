@@ -779,6 +779,38 @@ async fn sanity_test() {
                 })
             }
 
+            KaspadPayloadOps::GetPoolStateAtBlock => {
+                let rpc_client = client.clone();
+                tst!(op, {
+                    // The light wallet's hand-over (PLAN P8.7): an unknown block is refused,
+                    // the sink answers with the (empty) simnet pool.
+                    assert!(rpc_client.get_pool_state_at_block(0.into()).await.is_err());
+                    let sink = rpc_client.get_sink().await.unwrap().sink;
+                    let state = rpc_client.get_pool_state_at_block(sink).await.unwrap();
+                    assert_eq!(state.block, sink);
+                    assert!(state.notes.is_empty());
+                })
+            }
+
+            KaspadPayloadOps::GetPoolDiff => {
+                let rpc_client = client.clone();
+                tst!(op, {
+                    assert!(rpc_client.get_pool_diff(vec![0.into()]).await.is_err());
+                    let sink = rpc_client.get_sink().await.unwrap().sink;
+                    let diffs = rpc_client.get_pool_diff(vec![sink]).await.unwrap().diffs;
+                    assert_eq!(diffs.len(), 1);
+                    assert!(diffs[0].added.is_empty() && diffs[0].removed.is_empty());
+                })
+            }
+
+            KaspadPayloadOps::GetFinalityAnchor => {
+                let rpc_client = client.clone();
+                tst!(op, {
+                    // Simnet is unkeyed: no anchor, and no error.
+                    assert!(rpc_client.get_finality_anchor().await.unwrap().anchor.is_none());
+                })
+            }
+
             KaspadPayloadOps::GetFinalityAnchorStatus => {
                 let rpc_client = client.clone();
                 tst!(op, {
