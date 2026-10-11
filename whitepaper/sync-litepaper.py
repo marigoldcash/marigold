@@ -374,7 +374,7 @@ def head_html(lang: str, c) -> str:
 def foot_html(lang: str, c) -> str:
     return (
         f'<div class="foot-text" data-lang="{lang}" lang="{html_lang(lang)}">\n'
-        f'    <a href="https://marigold.cash/">marigold.cash</a> &middot; note@marigold.cash<br>\n'
+        f'    <a href="https://marigold.cash/">marigold.cash</a> &middot; <a href="https://marigoldcash.t.me">marigoldcash.t.me</a><br>\n'
         f'    {html.escape(c["footer1"], quote=False)}<br>\n'
         f'    {html.escape(c["footer2"], quote=False)}\n'
         f'  </div>\n'
