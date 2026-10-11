@@ -533,3 +533,11 @@ is priced like plumbing; notes are money and cost a penny to move.
 **Why.** Founder, on GitHub #19, after a tester read the moving piece count beside a steady amount as an inconsistency: "The whole operation is supposed to be grandma safe … I propose to withhold any inconsistent info, in fact I think the 'pieces' info, for a regular simple user, is not needed. Again, for an advanced user, yes by all means."
 
 **Where.** `cli/src/cli.rs`, the holdings display. v2.83.
+
+## `connect` means your own sync first; a public computer is only ever a stopgap (2026-10-11)
+
+**Decision.** Plain `connect` starts the wallet's own copy of the network and asks about a public computer only while that copy is catching up, default no. `connect public` stays for whoever wants it. Tester Charly's proposal (GitHub #21) that plain `connect` should mean the public computer, with `connect local` for one's own, is declined.
+
+**Why.** Founder, 2026-10-11: "We don't want to encourage the network to use our public node or any public node. No public node: because they can see everything. Our public node: because we don't want to carry the weight of the world on the shoulder of our public node. If it fails, everyone's wallet fails. It should always and only be a stopgap whenever possible."
+
+**Where.** `cli/src/modules/connect.rs`; answered on the issue.
