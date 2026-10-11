@@ -1,6 +1,6 @@
 # A first sync that takes minutes — a design note (proposal, 2026-10-11)
 
-Status: a proposal, written at the founder's request after tester Charly found a sync of his own unusable on a 36 GB Mac ("each time I close it, it has to resync and it takes a long time before I can use it for transactions", 2026-10-11). The aim the founder set: make the private way fast enough for everyone, so that the choice between a public computer and your own copy is a privacy choice and no longer a convenience, and the public-only way can go. Nothing here is decided or built.
+Status: decided in direction by the founder on 2026-10-11 ("Yes that is the solution. It's not a node, it's a wallet, light is OK"), written after tester Charly found a sync of his own unusable on a 36 GB Mac ("each time I close it, it has to resync and it takes a long time before I can use it for transactions"). The aim: make the private way fast enough for everyone, so that the choice between a public computer and your own copy is a privacy choice and no longer a convenience, and the public-only way can go. Nothing is built yet; the open questions at the end are the work.
 
 ## What a first sync is today, measured
 
@@ -48,6 +48,13 @@ What it gives. The private way takes minutes. The menu's first choice stops bein
 ## Recommendation
 
 D, with A beside it at the parameter freeze. D is the one that changes what a laptop experiences; A is a number in the parameters that makes every full node's first sync a third of the work and is worth having regardless. B is not worth building on its own. C is today's public mode and stays only as long as D does not exist.
+
+## What was decided (2026-10-11)
+
+- **The light wallet is the default on every wallet**: low memory, low storage. Its storage is the pool state, the ledger set it needs, and the blocks since the latest anchor; nothing older. It is a wallet, not a node, and it is called a wallet.
+- **The connect menu becomes:** 0 Don't connect; 1 Connect to a public computer while downloading your own copy, for privacy, the default, where "your own copy" is the light sync and the public computer covers the minutes it takes; 2 Download your own copy without using the public computer.
+- **Mining works from a light start.** A wallet that follows the blocks after the anchor and validates them holds exactly what a block template needs: the tips, the ledger and pool state, and the difficulty window, which the hand-over includes as a few thousand headers before the anchor. It can mine once it has followed the chain for the length of the merge-depth window, minutes at ten blocks a second, not after a full sync.
+- **A light wallet can grow into a full node by keeping what it sees.** Keep every block from the anchor forward instead of dropping them, and after one pruning window the wallet holds the same 36 hours a full node holds and can serve peers. The only difference from a node synced the old way is that its earliest history came from a trustee-signed anchor rather than a validated proof. This is an advanced choice, never the default.
 
 ## Open questions
 
