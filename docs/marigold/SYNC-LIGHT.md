@@ -54,8 +54,26 @@ D, with A beside it at the parameter freeze. D is the one that changes what a la
 
 - **The light wallet is the default on every wallet**: low memory, low storage. Its storage is the pool state, the ledger set it needs, and the blocks since the latest anchor; nothing older. It is a wallet, not a node, and it is called a wallet.
 - **The connect menu becomes:** 0 Don't connect; 1 Connect to a public computer while downloading your own copy, for privacy, the default, where "your own copy" is the light sync and the public computer covers the minutes it takes; 2 Download your own copy without using the public computer.
-- **Mining works from a light start.** A wallet that follows the blocks after the anchor and validates them holds exactly what a block template needs: the tips, the ledger and pool state, and the difficulty window, which the hand-over includes as a few thousand headers before the anchor. It can mine once it has followed the chain for the length of the merge-depth window, minutes at ten blocks a second, not after a full sync.
+- **Mining from a light start** was wanted; the code read the same day shows it needs Route N, the light node, not the light wallet. Under Route W mining stays with the own-copy choice.
 - **A light wallet can grow into a full node by keeping what it sees.** Keep every block from the anchor forward instead of dropping them, and after one pruning window the wallet holds the same 36 hours a full node holds and can serve peers. The only difference from a node synced the old way is that its earliest history came from a trustee-signed anchor rather than a validated proof. This is an advanced choice, never the default.
+
+## What the code says (2026-10-11, after a full read of the sync, the stores and the anchors)
+
+Three facts change the shape of the work, and they separate two routes.
+
+- **An anchor is a minute behind the tip; a node rooted there is not safe.** Anchors sit 600 blocks below the tip. A block may merge blocks up to the merge depth, 36,000 blocks or one hour, below it, so a node whose history starts at the latest anchor would meet blocks it cannot validate and treat them as violations. A node rooted at an anchor has to root at one at least an hour back, and follow an hour of blocks, 36,000 of them, at every start: a few minutes on pve3, longer on a laptop.
+- **A node needs twelve hours of headers below its root** for the sequencing commitments of the lanes (KIP-21), about 432,000 headers, and the lane state at the root. Headers only, no bodies, but it is the largest part of what a light node would download.
+- **A node rooted anywhere but a real pruning point trips consensus-critical checks**: the pruning-point validity rule, the per-block check of the header's pruning point against the pruning-sample chain (a missing sample is a panic today), the pruning processor's proof building. Each needs a light-mode path that trusts the anchor in its place. Every such bypass is a place where a light node accepts what a full node would check.
+
+So there are two routes.
+
+**Route W, the light wallet.** No consensus changes. A node gains one thing: the ability to answer "the pool state as of block B" for any chain block in its window, which it can build by walking its per-block pool diffs back from the tip; the pool is small, so this is cheap. The wallet fetches the latest anchor and its header from a public node, checks the anchor's signatures against the trustees' keys, fetches the pool state as of that block, rebuilds the pool root locally and checks it against the header's pool commitment, and finds its own notes in it without naming them. From then on it follows the chain's headers and fetches the pool diff per new chain block, checking each new root. Minutes at every start, a few megabytes, no node inside the wallet. What it cannot do: mine, or read a ledger account without asking a node by address; both stay with the own-copy choice. Weeks of work, most of it wallet code; the trust it adds is the anchor quorum, which the chain trusts already.
+
+**Route N, the light node.** The embedded node roots at an anchor about an hour back instead of the pruning point: a new trusted-data hand-over rooted at that block (its anticone with bodies, the difficulty and median-time windows, the GHOSTDAG chain, twelve hours of headers for the lanes and the lane state), new P2P messages for the UTXO set and pool state as of that block, a client branch of the sync that seeds a staging consensus from them without a proof, and light-mode paths through the pruning-point checks. It can mine once it has followed the merge-depth window, and it can grow into a full node by keeping what it sees. Months of consensus work, with the safety of every post-root block resting on the bypasses being right, and on mainnet only once the trustees are keyed (P9.1).
+
+The earlier line in this note that mining works from a light start within minutes was written before this read; it holds for Route N and not for Route W.
+
+**Recommendation.** Route W first: it gives every wallet the minutes-long private start, which is the aim, with no change to consensus. Mining and the ledger stay with the own-copy choice, which is already the advanced path. Route N is a second project, taken on only if mining from a light start turns out to matter more than the till draw makes it matter.
 
 ## Open questions
 
