@@ -2,6 +2,17 @@ use crate::imports::*;
 #[cfg(feature = "embedded-node")]
 use kaspa_wallet_core::rpc::Rpc;
 
+/// How the person wants the wait for a first sync handled.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SyncMode {
+    /// Ask, once the sync has started and only if it has to catch up.
+    Ask,
+    /// A public computer meanwhile, no question.
+    Meanwhile,
+    /// Your own copy only, no question.
+    OwnOnly,
+}
+
 #[derive(Default, Handler)]
 #[help("Connect to a Marigold network")]
 pub struct Connect;
@@ -551,17 +562,7 @@ enum SyncStart {
 /// public computer meanwhile — asked, never assumed, because whoever runs
 /// it sees which notes this wallet asks about.
 #[cfg(feature = "embedded-node")]
-/// How the person wants the wait for a first sync handled.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum SyncMode {
-    /// Ask, once the sync has started and only if it has to catch up.
-    Ask,
-    /// A public computer meanwhile, no question.
-    Meanwhile,
-    /// Your own copy only, no question.
-    OwnOnly,
-}
-
+#[cfg(feature = "embedded-node")]
 /// What a person can choose when the wallet asks how to connect: the same
 /// choices as the desktop app's open screen, in the same order and words
 /// (founder, 2026-10-11). Returns the command that does it, or None for
@@ -621,6 +622,7 @@ pub async fn ask_how_to_connect(ctx: &Arc<KaspaCli>) -> Result<Option<String>> {
     })
 }
 
+#[cfg(feature = "embedded-node")]
 async fn start_network_sync(ctx: &Arc<KaspaCli>, public_available: bool, mode: SyncMode) -> Result<SyncStart> {
     tprintln!(ctx, "");
     tprintln!(ctx, "Starting sync with the network...");

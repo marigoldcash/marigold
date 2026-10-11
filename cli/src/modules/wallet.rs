@@ -375,6 +375,7 @@ impl Wallet {
                         }
                         // The same menu the desktop app shows, with the same
                         // choices (founder, 2026-10-11).
+                        #[cfg(feature = "embedded-node")]
                         None => match crate::modules::connect::ask_how_to_connect(&ctx).await? {
                             Some(command) => {
                                 ctx.exec_within(&command).await?;
@@ -382,6 +383,18 @@ impl Wallet {
                             }
                             None => tprintln!(ctx, "Not connected. Type 'connect' when you are ready."),
                         },
+                        // A build without the network in it has one way: a public computer.
+                        #[cfg(not(feature = "embedded-node"))]
+                        None => {
+                            tprintln!(ctx, "");
+                            let answer = ctx.term().ask(false, "Connect now? [Y/n]: ").await?.trim().to_lowercase();
+                            if answer.starts_with('n') {
+                                tprintln!(ctx, "Not connected. Type 'connect' when you are ready.");
+                            } else {
+                                ctx.exec_within("connect").await?;
+                                ctx.request_open_housekeeping();
+                            }
+                        }
                     }
                 }
 
