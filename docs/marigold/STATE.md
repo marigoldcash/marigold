@@ -19,6 +19,7 @@ Last updated: 2026-09-14 (a full plan/decisions reconciliation — see the 2026-
 
 All ten Phase 1 decisions are recorded, with full rationale and rejected alternatives, in [DECISIONS.md](DECISIONS.md) — this is a summary for quick reference, not a substitute for it.
 
+- **Website and faucet, 2026-10-10 (faucet build 2.82.329):** marigold.cash has one header (the specimen note with the page's name, the buttons as tabs, a serial per page), one top bar (day and night everywhere, languages only on the litepaper), one footer and a back-to-the-top button on every page, stamped by `tools/chrome.py` in the site repository; new pages `/companies` and `/about` (the registrar, marigold.cash Ltd, incorporation applied for; nobody named); the faucet page (`faucet/src/page.html`) wears the same chrome from marigold.cash and was deployed to pve3 (`marigold-faucet` 2.82.329, the old binary kept as `.prev`). The litepaper's headline is "The Litepaper" in eight languages. Announced to the channel and the testers' group.
 - **Name / ticker**: Marigold / **MAGLD** (not the originally pre-decided MGLD — collision found on execution-time recheck).
 - **Prefixes**: `marigold` / `marigoldtest`. **Domain**: marigold.cash.
 - **Units**: 8 decimals, base unit **petal** (1 marigold = 10⁸ petals).
