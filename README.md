@@ -22,8 +22,8 @@ transferred by handing over a private key.
 > changes from upstream rusty-kaspa. **Mainnet launches without that audit.** The project
 > has no treasury; the audit is commissioned after launch, from the project's first
 > income, and published when done. Anyone who needs an independent audit before trusting
-> value to the network should wait for it. Launch is fair from zero: no premine, no dev
-> fund, no airdrop.
+> value to the network can commission one: the code, the scope and the self-assessment are
+> all public. Launch is fair from zero: no premine, no dev fund, no airdrop.
 
 ## Nothing is hidden
 
