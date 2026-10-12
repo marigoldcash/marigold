@@ -665,11 +665,15 @@ impl MinerHost {
         Ok(self.status())
     }
 
+    /// Stop, and report what the run came to. The status is read before the
+    /// miner is let go: read after, it was always zero blocks and zero shares
+    /// (the log said "0 shares this run" after 27, 2026-10-12).
     pub fn stop(&self) -> RpcMinerStatus {
+        let status = self.status();
         if let Some(miner) = self.miner.lock().unwrap().take() {
             miner.stop();
         }
-        self.status()
+        status
     }
 
     pub fn status(&self) -> RpcMinerStatus {
@@ -839,6 +843,18 @@ mod tests {
         let target = kaspa_pow::stratum::target_for_stratum_difficulty(1e-9);
         assert!(State::from_pre_pow(pre_pow, header.timestamp, target).check_pow(nonce).0, "the share meets the pool target");
         assert!(miner.block_for(&solution).is_none(), "a share is not a block");
+    }
+
+    #[test]
+    fn stopping_the_host_reports_the_run_it_just_ended() {
+        let host = MinerHost::new_unbound(Arc::new(AtomicBool::new(false)));
+        let (miner, _solutions) = Miner::start(1);
+        miner.record_accepted();
+        host.miner.lock().unwrap().replace(miner);
+        let status = host.stop();
+        assert!(status.mining, "the status is the run that just ended, not the idle host");
+        assert_eq!(status.blocks_accepted, 1);
+        assert!(host.miner().is_none());
     }
 
     #[test]
