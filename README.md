@@ -54,8 +54,9 @@ it simply never records who holds a note, the same way a banknote doesn't.
 The full design, with every decision and its rationale, lives in
 [PLAN.md](PLAN.md) and [docs/marigold/](docs/marigold/) — start with
 [POOL-SPEC.md](docs/marigold/POOL-SPEC.md) (the pool specification),
-[DECISIONS.md](docs/marigold/DECISIONS.md) (locked parameters and why), and
-[WALLET.md](docs/marigold/WALLET.md) (wallet usage).
+[DECISIONS.md](docs/marigold/DECISIONS.md) (locked parameters and why),
+[WALLET.md](docs/marigold/WALLET.md) (wallet usage), and
+[EXCHANGE.md](docs/marigold/EXCHANGE.md) (for exchanges and integrators: the RPC, confirmations, addresses, the interface freeze).
 
 ## Network parameters
 

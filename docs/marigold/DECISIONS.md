@@ -576,3 +576,11 @@ is priced like plumbing; notes are money and cost a penny to move.
 
 **Where.** POOL-SPEC P5.8 (v1.3), `FinalityAnchorParams` without `decay_stages` and `hard_expiry_daa_score`, the whitepaper §9 and §10 (v0.6), the litepaper's section (second edition), LAUNCH-PLAN, PLAN P9.1b. The litepaper's seven translations lag until the section is retranslated.
 
+## The RPC interface is frozen from v2.87.343 until genesis (2026-10-11)
+
+**Decision.** The node's RPC, gRPC and wRPC in both encodings, is frozen from tag v2.87.343 until mainnet's genesis: every call keeps its name, its request and response fields and their meanings. Changes are additive only, a new call or a new optional field; nothing is removed or renamed. A breaking change, should one ever be unavoidable, is a new freeze tag announced in the release channel and recorded here before it ships. [EXCHANGE.md](EXCHANGE.md) is the integrator's statement of the interface.
+
+**Why.** Founder, 2026-10-11, relaying a reviewer: "DECISIONS.md locks parameters but not the RPC." An exchange or a tool builder integrates against an interface, not a parameter table, and needs to know from which tag it can rely on it. v2.87.343 is the first tag that carries the full set: the paged `GetUtxosByAddresses`, the anchor calls, and the three calls of the light wallet.
+
+**Where.** EXCHANGE.md; every RPC change from now on is checked against this entry in review.
+
