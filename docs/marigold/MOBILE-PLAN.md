@@ -11,13 +11,17 @@ Decided 2026-10-12 (DECISIONS "The phone wallet: one Rust core, a React Native s
 - **No secret in the repository.** Signing keys, store credentials and the updater key live in the organisation's accounts and the workflow secrets; the plan names where, never what.
 - **Builds:** Rust for the phone targets builds on the macOS runner the desktop already uses (`gui-binaries.yaml`) and on Ubuntu for Android; pve3 is not involved. Local iOS work needs a Mac.
 
+## How an agent works a step
+
+One step, or one lettered sub-step, is one branch and one pull request: `mobile/M3a` and so on. Read the step, the rules above, and the files it names before touching anything. Do only what the step says; something missing from the plan that the step needs is added to the plan in the same pull request, as a new lettered sub-step, not done silently. Run the verify line and paste its output into the pull request; CI must be green. Tick the box in this file in that pull request. If the verify line cannot pass, say so in the pull request with the reason and stop; do not loosen the verify line. Versions of Expo, UniFFI and the phone toolchains are the current stable ones at the time of the first mobile commit, pinned in `mobile/package.json` and `wallet/service/Cargo.toml`, and bumped only in a commit of their own.
+
 ## Architecture in one paragraph
 
 The Rust wallet core (`wallet/core`, with the light wallet in `light.rs`) is compiled natively for `aarch64-apple-ios`, the iOS simulator and `aarch64-linux-android` (plus `x86_64-linux-android` for the emulator), wrapped by UniFFI, which generates the Swift and Kotlin bindings, and exposed to React Native through one Expo native module, `@marigold/core`. The app is TypeScript under Expo, with a development client (not Expo Go, which cannot load native modules). The service runs inside the app process; the light copy of the pool lives in the app's own storage; keys stay in the app's sandbox with the password in the platform keystore behind biometrics. The node is a public computer by default and configurable.
 
 ## The steps
 
-### M0 — Accounts and identifiers (the founder's, done outside the code)
+### [ ] M0 — Accounts and identifiers (the founder's, done outside the code)
 
 Do: the Apple Developer account enrolled as the organisation Marigold.cash Ltd (D-U-N-S arrives by itself for a UK company); the Google Play developer account; the bundle identifier `cash.marigold.wallet` reserved on both; Charly given an App Store Connect role and Play Console access.
 
@@ -25,11 +29,14 @@ Verify: both consoles show the organisation and the identifier. Done when: a Tes
 
 ### M1 — The service in its own crate
 
-Do: move `WalletService`, `Session`, `SessionOptions`, `open_session` and what they need (`bundle.rs`, `tgbackup.rs`, `backup.rs`, the miner host interface, the error type) out of `cli/src/` into a new crate `wallet/service` (`kaspa-wallet-service`), without the terminal (`workflow-terminal`) and without the embedded node as a hard dependency: the node inside the process stays behind a feature `embedded-node`, as in the cli today. The cli and the desktop (`gui/src/main.rs`) import the crate; `cli/src/serve.rs` becomes the `serve` subcommand only. `say` stays a plain callback; nothing prints.
+The service today is `cli/src/serve.rs` (1,143 lines) and it reaches into `cli/src/bundle.rs`, `tgbackup.rs`, `backup.rs`, `miner.rs`, `embedded.rs`, `telegram.rs`, `error.rs` and `ui.rs`. It moves to a new crate `wallet/service` (`kaspa-wallet-service`) in four sub-steps, each leaving the cli, the desktop and the bot building and the drivers passing.
 
-Verify: `cargo build --release -p kaspa-cli -p marigold-gui`; `NO_BUMP=1 scripts/build-gui.sh`; the terminal drivers `tlight.py`, `tpassword2.py` and the Telegram backup driver pass unchanged; `cargo tree -p kaspa-wallet-service` shows no `workflow-terminal`. Done when: the desktop opens a wallet through the new crate and CI is green.
+- [ ] **M1a — The crate, empty but wired.** Create `wallet/service` with `kaspa-wallet-service` in the workspace, depending on `kaspa-wallet-core` and the rpc clients, not on `kaspa-cli` and never on `workflow-terminal`. Move `cli/src/error.rs`'s service-facing error into it (or a new `WalletError`), re-exported from the cli so nothing else changes. Verify: `cargo build --release -p kaspa-cli -p marigold-gui`; `cargo tree -p kaspa-wallet-service | grep -c workflow-terminal` prints 0.
+- [ ] **M1b — Backups move.** Move `bundle.rs`, `backup.rs` and `tgbackup.rs` into the crate; what they printed through the terminal goes through the `say` callback or a returned string. The cli calls them from the crate. Verify: the folder backup driver and `tbundle.py` (Telegram backup) pass; `cargo build` of cli and gui.
+- [ ] **M1c — The service moves.** Move `WalletService`, `Session`, `SessionOptions`, `open_session` and the miner host interface (`miner.rs` stays in the cli; the service sees a trait). The embedded node stays behind a feature `embedded-node` on the crate, as on the cli. `cli/src/serve.rs` keeps only the `serve` subcommand and imports the crate; `gui/src/main.rs` imports the crate. Verify: `NO_BUMP=1 scripts/build-gui.sh`; `tlight.py` against the public node; `tpassword2.py`; the desktop opens a wallet (the founder confirms once).
+- [ ] **M1d — Nothing prints.** `grep -rn "tprintln\|println" wallet/service/src` prints nothing; every message is a `say` line or a return value. Verify: that grep, and CI green.
 
-### M2 — The core builds for the phones
+### [ ] M2 — The core builds for the phones
 
 Do: add the four phone targets to `rust-toolchain.toml` and to a new workflow `mobile-core.yaml` (macOS runner for the Apple targets, Ubuntu with `cargo-ndk` for Android). Build `kaspa-wallet-service` as a static library (`crate-type = ["staticlib", "cdylib", "rlib"]`) for each target. Fix what does not compile: expect `getrandom` features, `mio`/`tokio` features, and C dependencies (`secp256k1`, `rocksdb` must not be pulled: confirm with `cargo tree`). Produce an XCFramework for Apple and a `jniLibs` tree for Android as workflow artifacts.
 
@@ -39,15 +46,24 @@ Verify: the workflow is green on all four targets and uploads the two artifacts;
 
 Do: in `wallet/service/src/ffi.rs`, behind a feature `ffi`, export with UniFFI's proc macros an interface that mirrors the desktop's commands one to one (the thirty-three `#[tauri::command]`s in `gui/src/main.rs` are the list): `probe`, `list_wallets`, `create_wallet`, `restore_from_words`, `open`, `close`, `status`, `balance`, `receive`, `request`, `pay_preview`, `pay`, `history`, `recovery_words`, `backup_status`, `backup_now`, `backup_cover`, `change_password`, `light_status`, plus an event callback interface (`say` lines, notes changed, connection state). Async functions are exported as UniFFI async. Errors cross as one `WalletError` enum with the user-facing text the terminal already produces.
 
-Verify: `cargo test -p kaspa-wallet-service --features ffi` includes a test that creates a wallet in a temp dir through the ffi layer, opens it, reads the status, and closes it; `uniffi-bindgen` generates Swift and Kotlin without warnings; on the macOS runner a ten-line Swift program links the XCFramework and prints `version()`. Done when: those three pass in CI.
+- [ ] **M3a — The interface, tested in Rust.** The `ffi` feature, the exported functions and the error enum; `cargo test -p kaspa-wallet-service --features ffi` includes a test that creates a wallet in a temp dir through the ffi layer, opens it, reads the status, and closes it. Verify: that test passes.
+- [ ] **M3b — The bindings.** `uniffi-bindgen` generates Swift and Kotlin into `mobile/modules/marigold-core/{ios,android}/generated`, checked in, regenerated by a script `scripts/mobile-bindings.sh`. Verify: generation has no warnings and `git diff` after a second run is empty.
+- [ ] **M3c — Swift links it.** On the macOS runner a ten-line Swift program links the XCFramework from M2 with the Swift binding and prints `version()`. Verify: the workflow step prints the version.
+
+Done when: the three pass in CI.
 
 ### M4 — The Expo app and the native module
 
 Do: `mobile/` at the repository root: an Expo app (TypeScript, Expo SDK current, development client, EAS config checked in without credentials) and a local Expo module `mobile/modules/marigold-core` whose Swift and Kotlin sides wrap the UniFFI bindings from M3 and whose TypeScript side exposes them as typed functions and an event emitter. The iOS podspec pulls the XCFramework; the Android module pulls the `jniLibs`. The first screen shows the core's version.
 
-Verify: `npm test` in `mobile/` (Jest) covers the TypeScript wrapper against a mocked native module; on CI a development client builds for the iOS simulator and for an Android emulator and a Maestro flow launches it and reads the version on screen. Done when: both simulator builds show the version from Rust.
+- [ ] **M4a — The app skeleton.** `mobile/` with the Expo app, TypeScript strict, the development client configuration, Jest, Maestro, and `npm test` passing on an empty wrapper. Verify: `npm test`; `npx expo doctor` clean.
+- [ ] **M4b — The native module, iOS.** The Expo module's Swift side wraps the generated binding; the podspec pulls the XCFramework; the first screen shows `version()`. Verify: a development client builds for the iOS simulator on the macOS runner and a Maestro flow reads the version on screen.
+- [ ] **M4c — The native module, Android.** The Kotlin side wraps the generated binding; the module pulls the `jniLibs`. Verify: the same on an Android emulator on the Ubuntu runner.
+- [ ] **M4d — The TypeScript wrapper.** Typed functions for every exported operation and an event emitter for the callback interface; Jest tests against a mocked native module. Verify: `npm test` covers every function once.
 
-### M5 — Storage, the password and biometrics
+Done when: both simulator builds show the version from Rust.
+
+### [ ] M5 — Storage, the password and biometrics
 
 Do: the wallet folder is the app's own documents directory (iOS: excluded from iCloud backup by attribute, since the sealed backup of M8 is the backup; Android: internal storage); files owner-only as on the desktop. The password is the PIN the policy already requires (at least four characters); it is kept in the Keychain / Keystore (`expo-secure-store`) and released by `expo-local-authentication` (Face ID, fingerprint), with the PIN typed as the fallback. The password never crosses to JavaScript in the clear longer than the call that opens the wallet.
 
@@ -57,45 +73,58 @@ Verify: Maestro: create a wallet, kill the app, reopen with biometrics (simulato
 
 Do: on open, the app connects to the public computer (default `wss://rpc1.marigold.cash` for testnet-10, changeable in settings; a `ws://` address for one's own node) and the service starts the light copy as the desktop does; the `say` lines ("Connecting…", "Taking your own copy of the notes…") show on the open screen. On foreground after background the service reconnects and restarts from the latest anchor; on network loss the status says so in plain words. No background execution is requested; the app says incoming payments show when it is open.
 
-Verify: Maestro against testnet: open, the status reads "a public computer, with your own copy of the notes" within thirty seconds; background the app ten minutes (simulator clock), foreground, status is current within thirty seconds; airplane mode gives the plain-words message and recovery when it ends. Done when: those pass on both platforms.
+- [ ] **M6a — Connect and the light copy.** Verify: Maestro against testnet: open, the status reads "a public computer, with your own copy of the notes" within thirty seconds, on both platforms.
+- [ ] **M6b — Background and back.** Verify: background the app ten minutes (simulator clock), foreground, the status is current within thirty seconds; airplane mode gives the plain-words message and recovery when it ends, on both platforms.
+
+Done when: both pass.
 
 ### M7 — The screens, basic
 
 Do: seven screens, plain components, no styling pass: Open or create (list of wallets, create with the words shown once and two asked back as the terminal does, restore from words); Home (balance in notes and ledger, the last movements, connection status line); Receive (a request code with amount, as text and QR); Pay (paste or scan a code, preview with amount and fee, confirm, result); History; Backup (status, back up now, the words again behind biometrics); Settings (node address, PIN change, advanced switch). Every text from the service, not retyped.
 
-Verify: Maestro flows: a faucet payment to a request code lands and shows on Home; a payment to a terminal wallet's request code goes out and the terminal receives it; history shows both; restore from words on a fresh install brings the ledger back. Done when: the four flows pass on both platforms.
+One screen per sub-step, each with its own Maestro flow, in this order because each needs the one before:
 
-### M8 — Backups to the cloud
+- [ ] **M7a — Open or create.** List, create with the words shown once and two asked back, open with the PIN. Verify: create, close, open; the balance screen appears.
+- [ ] **M7b — Home.** Balance in notes and ledger, the connection status line, the last movements. Verify: the faucet's figures match the terminal's `balance` for the same wallet file.
+- [ ] **M7c — Receive.** A request code with an amount, as text and QR. Verify: a faucet payment to the request lands and shows on Home.
+- [ ] **M7d — Pay.** Paste a code, preview with amount and fee, confirm, result. Verify: a payment to a terminal wallet's request goes out and the terminal receives it.
+- [ ] **M7e — History.** Verify: both movements above show, with the terminal's wording.
+- [ ] **M7f — Backup.** Status, back up now, the words again behind biometrics. Verify: the words shown equal the ones from creation.
+- [ ] **M7g — Settings and restore.** Node address, PIN change, the advanced switch; restore from words on the open screen. Verify: restore from words on a fresh install brings the ledger back; the PIN change is refused with the wrong current PIN.
+
+Done when: all seven pass on both platforms.
+
+### [ ] M8 — Backups to the cloud
 
 Do: the sealed backup bundle (the folder backup of `backup.rs`, sealed to the 24 words) written on a schedule to the app's iCloud Drive container on iOS and to Google Drive's app folder on Android, and read back on restore: restore asks for the words, finds the bundle, brings the notes back. The toggle is on by default and explained in one sentence.
 
 Verify: Maestro: wallet with notes, backup runs, app deleted and reinstalled, restore from words plus the cloud bundle, notes back; a Rust test covers the bundle round trip through the service. Done when: the round trip passes on both platforms with real iCloud and Drive test accounts.
 
-### M9 — Camera and sharing
+### [ ] M9 — Camera and sharing
 
 Do: scan a payment or request code with the camera (`expo-camera`), paste from the clipboard, share a request code through the system share sheet, and open `marigoldpay:` / `marigoldreq:` links handed to the app.
 
 Verify: Maestro with a code rendered on screen and scanned from a second device or an injected image; a link opened from a message opens the pay screen prefilled. Done when: both pass.
 
-### M10 — Release builds and testers
+### [ ] M10 — Release builds and testers
 
 Do: `mobile-release.yaml`: signed builds through EAS Build or the runners, with the certificates and keys in the organisation's accounts and workflow secrets; upload to TestFlight and the Play internal track on a tag `mobile-vX`; the testers' group invited; version number from the workspace version.
 
 Verify: a tester installs from TestFlight and from the Play internal track and completes the M7 flows. Done when: both tracks carry a build the testers use.
 
-### M11 — Words and reach
+### [ ] M11 — Words and reach
 
 Do: the grandma-safe pass over every string, screen reader labels, large text, dark mode following the system; the terminal's exact phrasings reused where the same thing is said.
 
 Verify: a checklist in the pull request; two testers from the group who are not developers complete the four flows unaided. Done when: they do.
 
-### M11b — Knowing when a payment arrived while the app was closed (after M7, before the stores)
+### [ ] M11b — Knowing when a payment arrived while the app was closed (after M7, before the stores)
 
 Do, in this order, each its own pull request. (1) A background check: the app asks the operating system for periodic background time (iOS background app refresh, Android WorkManager), takes the light copy's diffs since its last look, checks its own request keys and its ledger address locally, and raises a local notification "A payment arrived. Open the wallet." Nothing leaves the phone; the delay is the operating system's, fifteen minutes to hours. (2) A payer-side ping, opt in: a request code may carry a one-time notify token minted by a small relay we run; a paying wallet that honours it tells the relay "token done" once its transaction is accepted, and the relay pushes the same content-free line to the device behind the token. The relay learns that a device received a payment at a time, never which note or how much; tokens are single use; the wallet trusts nothing in the push and reads its own copy on open. (3) For people with a home machine, the wallet service there, which watches anyway, pings through the same relay. Never (4): registering keys with a public node to be watched.
 
 Verify: (1) on a simulator with background refresh forced, a faucet payment to a request issued before the app was closed raises the local notification within the next refresh; (2) a terminal wallet paying a request with a token produces a push on the device within seconds, and the relay's log holds no key, serial or amount; (3) the Telegram-linked machine's payment produces the push. Done when: the three pass and the FAQ says what the relay learns.
 
-### M12 — The stores
+### [ ] M12 — The stores
 
 Do: App Store listing and review (privacy manifest, the non-custodial wallet declaration, screenshots), Play listing (data safety form, financial-services declaration), a page on marigold.cash for the app, the FAQ entry, and the release post.
 
