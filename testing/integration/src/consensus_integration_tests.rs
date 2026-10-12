@@ -509,7 +509,10 @@ async fn header_in_isolation_validation_test() {
 
 #[tokio::test]
 async fn header_version_is_enforced_test() {
-    const WRONG_BLOCK_VERSION: u16 = BLOCK_VERSION - 1;
+    // On a Marigold network the note pool is active from genesis, so the expected
+    // version is the pool's, and upstream's own BLOCK_VERSION is the wrong one.
+    const WRONG_BLOCK_VERSION: u16 = NOTE_POOL_BLOCK_VERSION - 1;
+    const _: () = assert!(WRONG_BLOCK_VERSION == BLOCK_VERSION);
 
     fn set_block_version(mut block: MutableBlock, version: u16) -> MutableBlock {
         block.header.version = version;
@@ -523,12 +526,12 @@ async fn header_version_is_enforced_test() {
     let wait_handles = consensus.init();
 
     let block = consensus.build_header_only_block_with_parents(2.into(), vec![config.genesis.hash]);
-    assert_eq!(block.header.version, BLOCK_VERSION);
+    assert_eq!(block.header.version, NOTE_POOL_BLOCK_VERSION);
 
     let wrong_version_block = set_block_version(block.clone(), WRONG_BLOCK_VERSION);
     assert_match!(
         consensus.validate_and_insert_block(wrong_version_block.to_immutable()).block_task.await,
-        Err(RuleError::WrongBlockVersion(WRONG_BLOCK_VERSION, BLOCK_VERSION))
+        Err(RuleError::WrongBlockVersion(WRONG_BLOCK_VERSION, NOTE_POOL_BLOCK_VERSION))
     );
 
     assert_match!(consensus.validate_and_insert_block(block.to_immutable()).block_task.await, Ok(BlockStatus::StatusHeaderOnly));
