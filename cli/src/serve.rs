@@ -797,8 +797,12 @@ impl WalletService {
                         s.blocks_found,
                         s.blocks_accepted
                     )
-                } else {
+                } else if self.origin == "telegram" {
+                    // The bot's user types commands; the desktop has a button
+                    // (spacecharly, GitHub #27 and #35).
                     "Not mining. /mine start".to_string()
+                } else {
+                    "Not mining.".to_string()
                 }
             }
         }

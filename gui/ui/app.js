@@ -172,8 +172,7 @@ async function refreshStatus() {
   try { $("status").textContent = await invoke("status"); } catch (e) { $("status").textContent = String(e); }
   try {
     const m = await invoke("machine");
-    const miningStatus = m.mining === "Not mining. /mine start" ? "Not mining." : m.mining;
-    $("machine").textContent = `Memory: ${m.memory}\n${miningStatus}`;
+    $("machine").textContent = `Memory: ${m.memory}\n${m.mining}`;
     $("mine-note").textContent = m.can_mine ? "Mining pays to this wallet's ledger address and starts only once the sync is complete." : "Mining needs a network running on this computer or a sync of your own: through a public computer, its operator would see where your rewards go.";
     const mining = !/^Not mining/.test(m.mining);
     $("mine-start").hidden = !m.can_mine || mining; $("mine-stop").hidden = !m.can_mine || !mining;
