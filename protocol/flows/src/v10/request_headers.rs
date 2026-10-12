@@ -130,7 +130,7 @@ pub(super) fn estimated_header_size(header: &Header) -> usize {
     // maximum protobuf varint size, while hashes and blue work include their tags and length prefixes.
     TAG_SIZE + MAX_U32_VARINT_SIZE // version
         + parents_size
-        + 4 * HASH_FIELD_SIZE // hashMerkleRoot, acceptedIdMerkleRoot, utxoCommitment and pruningPoint
+        + 5 * HASH_FIELD_SIZE // hashMerkleRoot, acceptedIdMerkleRoot, utxoCommitment, pruningPoint and Marigold's poolCommitment
         + TAG_SIZE + MAX_U64_VARINT_SIZE // timestamp
         + TAG_SIZE + MAX_U32_VARINT_SIZE // bits
         + TAG_SIZE + MAX_U64_VARINT_SIZE // nonce
