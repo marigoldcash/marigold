@@ -541,6 +541,10 @@ impl KaspaCli {
                 blocks_rejected: miner.blocks_rejected(),
                 address: String::new(),
                 uptime_seconds: miner.uptime().as_secs(),
+                pool: miner.pool().map(|p| p.pool.clone()).unwrap_or_default(),
+                shares_accepted: miner.pool().map(|p| p.accepted()).unwrap_or(0),
+                shares_rejected: miner.pool().map(|p| p.rejected()).unwrap_or(0),
+                share_difficulty: miner.pool().map(|p| p.difficulty()).unwrap_or(0.0),
             })
         });
         let service = crate::serve::WalletService::new(
@@ -805,6 +809,24 @@ impl KaspaCli {
             style("the miner program running in the background").dim()
         );
         tprintln!(self, "Speed:  {}", crate::miner::format_hashrate(status.hashrate));
+        if !status.pool.is_empty() {
+            tprintln!(self, "Pool:   {}", status.pool);
+            if status.share_difficulty > 0.0 {
+                tprintln!(self, "Shares: difficulty {}", format_share_difficulty(status.share_difficulty));
+            }
+            tprintln!(
+                self,
+                "        {} accepted{}",
+                status.shares_accepted.separated_string(),
+                match status.shares_rejected {
+                    0 => String::new(),
+                    n => format!(", {} refused", n.separated_string()),
+                }
+            );
+            tprintln!(self, "Pays:   {}, by the pool's rules and on its schedule", status.address);
+            tprintln!(self, "");
+            return;
+        }
         if status.blocks_found == 0 {
             tprintln!(self, "Blocks: none yet");
             tprintln!(self, "{}", style("Finding one is luck. Leaving it running is the whole technique.").dim());
@@ -1823,6 +1845,63 @@ impl KaspaCli {
         Ok(())
     }
 
+    /// 'mine start --pool <host:port>': the same threads, working for a pool
+    /// over stratum instead of for a node of our own. No node, no sync, no
+    /// public-computer worry: the pool is told the address on purpose, since
+    /// that is what it pays.
+    #[cfg(feature = "embedded-node")]
+    pub async fn start_pool_mining(self: &Arc<Self>, arg: Option<String>, pool: String) -> Result<()> {
+        if self.cpu_miner.lock().unwrap().is_some() {
+            tprintln!(self, "Already mining — 'mine status' for how it is going, 'mine stop' first to change.");
+            return Ok(());
+        }
+        let pool = pool.trim().trim_start_matches("stratum+tcp://").trim_start_matches("stratum://").to_string();
+        if pool.rsplit_once(':').is_none_or(|(host, port)| host.is_empty() || port.parse::<u16>().is_err()) {
+            tprintln!(self, "Give the pool as host:port, for example 'mine start --pool pool.example.net:5562'.");
+            return Ok(());
+        }
+        let account = match self.wallet.account() {
+            Ok(account) => account,
+            Err(_) if self.wallet.is_open() => {
+                tprintln!(self, "This wallet keeps notes only — there is no ledger account, and a pool pays to a ledger address.");
+                tprintln!(
+                    self,
+                    "'account create bip32' adds one (from the same 24 words, nothing new to write down), then try again."
+                );
+                return Ok(());
+            }
+            Err(_) => {
+                tprintln!(self, "Open a wallet first — the pool has to be told which address to pay.");
+                return Ok(());
+            }
+        };
+        let address = account.receive_address()?;
+        let cores = crate::miner::cores();
+        let Some(percent) = self.mining_share(arg).await? else { return Ok(()) };
+
+        let (miner, solutions) = crate::miner::Miner::start(percent);
+        let stats = Arc::new(crate::miner::PoolStats::new(pool.clone(), crate::miner::worker_name()));
+        miner.attach_pool(stats.clone());
+        self.cpu_miner.lock().unwrap().replace(miner.clone());
+        *self.mine_to.lock().unwrap() = Some((self.store().descriptor().map(|d| d.filename).unwrap_or_default(), address.to_string()));
+
+        tprintln!(self, "");
+        tprintln!(
+            self,
+            "{}",
+            style(format!("Mining for the pool at {pool} — {percent}% of this machine ({} of {cores} cores).", miner.thread_count()))
+                .green()
+        );
+        tprintln!(self, "Shares go to the pool as '{address}.{}'; the pool pays that address by its own rules.", stats.worker);
+        tprintln!(self, "{}", style("It yields to anything else that needs the processor.").dim());
+        tprintln!(self, "'mine status' to check, 'mine stop' to stop.");
+        tprintln!(self, "");
+
+        let login = format!("{address}.{}", stats.worker);
+        crate::stratum::spawn_pool_session(stats, login, miner, solutions, self.shutdown.clone());
+        Ok(())
+    }
+
     #[cfg(feature = "embedded-node")]
     pub async fn stop_mining(self: &Arc<Self>) -> Result<()> {
         if self.pending_mine_percent.lock().unwrap().take().is_some() && self.cpu_miner.lock().unwrap().is_none() {
@@ -1837,9 +1916,12 @@ impl KaspaCli {
         match miner {
             Some(miner) => {
                 let found = miner.blocks_found();
+                let pool = miner.pool();
                 miner.stop();
                 tprintln!(self, "Mining stopped.");
-                if found > 0 {
+                if let Some(pool) = pool {
+                    tprintln!(self, "The pool at {} took {} share(s) this run.", pool.pool, pool.accepted().separated_string());
+                } else if found > 0 {
                     tprintln!(self, "Found {} block(s) this run.", found.separated_string());
                 }
                 Ok(())
@@ -1881,6 +1963,7 @@ impl KaspaCli {
         let miner = self.cpu_miner.lock().unwrap().clone();
         tprintln!(self, "");
         match miner {
+            Some(miner) if miner.pool().is_some() => self.print_pool_mining(&miner),
             Some(miner) => {
                 tprintln!(
                     self,
@@ -1946,6 +2029,53 @@ impl KaspaCli {
             }
         }
         tprintln!(self, "");
+    }
+
+    /// 'mine status' while working for a pool: the pool's view of us is what
+    /// matters, not blocks.
+    #[cfg(feature = "embedded-node")]
+    fn print_pool_mining(&self, miner: &crate::miner::Miner) {
+        let Some(pool) = miner.pool() else { return };
+        tprintln!(
+            self,
+            "Mining: {} of {} cores ({}% of this machine) — for the pool at {}",
+            miner.thread_count(),
+            crate::miner::cores(),
+            miner.percent(),
+            pool.pool
+        );
+        tprintln!(self, "Speed:  {}", crate::miner::format_hashrate(miner.hashrate()));
+        if pool.is_connected() {
+            tprintln!(self, "Pool:   connected, as worker '{}'", pool.worker);
+        } else {
+            tprintln!(self, "{}", style("Pool:   not reachable right now — it keeps trying").yellow());
+        }
+        match pool.difficulty() {
+            d if d > 0.0 => tprintln!(self, "Shares: difficulty {}", format_share_difficulty(d)),
+            _ => tprintln!(self, "Shares: the pool has not set a difficulty yet"),
+        }
+        let accepted = pool.accepted();
+        if accepted == 0 {
+            tprintln!(self, "        none accepted yet");
+            tprintln!(self, "{}", style("The first one takes a minute or two at this speed; the pool then settles the pace.").dim());
+        } else {
+            tprintln!(
+                self,
+                "        {} accepted ({} in the last minute){}",
+                accepted.separated_string(),
+                pool.accepted_last_minute(),
+                match pool.rejected() {
+                    0 => String::new(),
+                    n => format!(", {} refused", n.separated_string()),
+                }
+            );
+            if let Some(reason) = pool.last_rejection() {
+                tprintln!(self, "{}", style(format!("The last one refused: {reason}")).dim());
+            }
+        }
+        if let Some((_, address)) = self.mine_to.lock().unwrap().clone() {
+            tprintln!(self, "Pays:   {address}, by the pool's rules and on its schedule");
+        }
     }
 
     #[cfg(feature = "embedded-node")]
@@ -4901,5 +5031,17 @@ pub struct SwitchingGuard(Arc<AtomicBool>);
 impl Drop for SwitchingGuard {
     fn drop(&mut self) {
         self.0.store(false, Ordering::SeqCst);
+    }
+}
+
+/// A share difficulty as a person reads it: whole numbers plain, fractions
+/// with enough digits to mean something.
+fn format_share_difficulty(difficulty: f64) -> String {
+    if difficulty >= 1.0 {
+        format!("{difficulty:.0}")
+    } else if difficulty >= 0.01 {
+        format!("{difficulty:.3}")
+    } else {
+        format!("{difficulty:.5}")
     }
 }

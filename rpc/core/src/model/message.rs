@@ -4296,11 +4296,17 @@ pub struct RpcMinerStatus {
     /// Where the rewards go. Empty when nothing is mining.
     pub address: String,
     pub uptime_seconds: u64,
+    /// The pool the miner works for, as "host:port"; empty when it mines its own node.
+    pub pool: String,
+    pub shares_accepted: u64,
+    pub shares_rejected: u64,
+    /// The share difficulty the pool has set; zero before it has said.
+    pub share_difficulty: f64,
 }
 
 impl Serializer for RpcMinerStatus {
     fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
-        store!(u16, &1, writer)?;
+        store!(u16, &2, writer)?;
         store!(bool, &self.available, writer)?;
         store!(bool, &self.mining, writer)?;
         store!(u32, &self.percent, writer)?;
@@ -4312,13 +4318,18 @@ impl Serializer for RpcMinerStatus {
         store!(u64, &self.blocks_rejected, writer)?;
         store!(String, &self.address, writer)?;
         store!(u64, &self.uptime_seconds, writer)?;
+        // Version 2: the pool fields, after everything a version-1 reader expects.
+        store!(String, &self.pool, writer)?;
+        store!(u64, &self.shares_accepted, writer)?;
+        store!(u64, &self.shares_rejected, writer)?;
+        store!(f64, &self.share_difficulty, writer)?;
         Ok(())
     }
 }
 
 impl Deserializer for RpcMinerStatus {
     fn deserialize<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
-        let _version = load!(u16, reader)?;
+        let version = load!(u16, reader)?;
         let available = load!(bool, reader)?;
         let mining = load!(bool, reader)?;
         let percent = load!(u32, reader)?;
@@ -4330,6 +4341,12 @@ impl Deserializer for RpcMinerStatus {
         let blocks_rejected = load!(u64, reader)?;
         let address = load!(String, reader)?;
         let uptime_seconds = load!(u64, reader)?;
+        // A miner program older than the pool fields answers with version 1.
+        let (pool, shares_accepted, shares_rejected, share_difficulty) = if version >= 2 {
+            (load!(String, reader)?, load!(u64, reader)?, load!(u64, reader)?, load!(f64, reader)?)
+        } else {
+            (String::new(), 0, 0, 0.0)
+        };
         Ok(Self {
             available,
             mining,
@@ -4342,6 +4359,10 @@ impl Deserializer for RpcMinerStatus {
             blocks_rejected,
             address,
             uptime_seconds,
+            pool,
+            shares_accepted,
+            shares_rejected,
+            share_difficulty,
         })
     }
 }

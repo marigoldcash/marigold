@@ -106,6 +106,8 @@ pub mod selfupdate;
 pub mod serve;
 pub mod space;
 pub mod splash;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod stratum;
 #[cfg(feature = "embedded-node")]
 pub mod telegram;
 #[cfg(feature = "embedded-node")]
@@ -136,6 +138,9 @@ pub const HELP: &str = "marigold-cli {version} — the Marigold wallet, and the 
   marigold-cli                       open the wallet
   marigold-cli mine-to <address> [<percent>] [--network <id>]
                                      mine in the background — no wallet needed
+  marigold-cli mine-to <address> [<percent>] --pool <host:port>
+                                     mine for a pool instead: shares go there,
+                                     it pays the address by its own rules
   marigold-cli serve <wallet> [--password-file <path>] [--mine <percent>]
                                      keep a wallet open as a service, answering
                                      your Telegram bot ('telegram link' pairs it)

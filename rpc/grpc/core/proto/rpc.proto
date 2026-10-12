@@ -1270,6 +1270,11 @@ message RpcMinerStatusMessage {
   uint64 blocksRejected = 9;
   string address = 10;
   uint64 uptimeSeconds = 11;
+  // Working for a pool over stratum: the pool as host:port, and how it is treating the miner.
+  string pool = 12;
+  uint64 sharesAccepted = 13;
+  uint64 sharesRejected = 14;
+  double shareDifficulty = 15;
 }
 
 message GetMinerStatusRequestMessage {

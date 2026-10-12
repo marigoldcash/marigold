@@ -27,6 +27,7 @@
 use kaspa_addresses::Address;
 use kaspa_consensus_core::block::Block;
 use kaspa_consensus_core::header::Header;
+use kaspa_hashes::Hash;
 use kaspa_pow::State;
 use kaspa_rpc_core::api::miner::MinerControl;
 use kaspa_rpc_core::model::RpcRawBlock;
@@ -45,13 +46,138 @@ pub const TEMPLATE_REFRESH_MS: u64 = 400;
 /// atomic loads are lost in the noise of hashing.
 const CHUNK: u64 = 512;
 
-/// One unit of work: everything a thread needs to search, plus the block it
-/// would submit if it found something.
+/// What a solution turns into once a thread finds one.
+enum Work {
+    /// A template from our own node: the solution is a block to submit.
+    Block { header: Box<Header>, transactions: Arc<Vec<kaspa_consensus_core::tx::Transaction>> },
+    /// A job from a pool: the solution is a share, matched to its job id by
+    /// generation in `recent_share_jobs`.
+    Share,
+}
+
+/// One unit of work: everything a thread needs to search, plus what it would
+/// hand back if it found something.
+///
+/// A pool reserves the top bytes of the nonce for each worker (the stratum
+/// "extranonce"), so two workers never search the same nonces. `nonce_mask`
+/// and `nonce_prefix` express that: a thread's next nonce is
+/// `(nonce + 1) & mask | prefix`. Solo work has no reservation, so the mask
+/// is all ones and the prefix zero.
 struct Job {
     generation: u64,
     state: State,
-    header: Header,
-    transactions: Arc<Vec<kaspa_consensus_core::tx::Transaction>>,
+    work: Work,
+    nonce_prefix: u64,
+    nonce_mask: u64,
+}
+
+/// The nonce space a stratum extranonce leaves to the worker: the prefix the
+/// top bytes must carry and the mask of the bytes that are the worker's own.
+/// Up to seven bytes of extranonce; the bridge hands out two.
+pub fn nonce_space_for_extranonce(extranonce_hex: &str) -> Option<(u64, u64)> {
+    let hex = extranonce_hex.trim().trim_start_matches("0x");
+    if hex.is_empty() {
+        return Some((0, u64::MAX));
+    }
+    if !hex.len().is_multiple_of(2) || hex.len() > 14 {
+        return None;
+    }
+    let value = u64::from_str_radix(hex, 16).ok()?;
+    let own_bits = 64 - 4 * hex.len() as u32;
+    Some((value << own_bits, (1u64 << own_bits) - 1))
+}
+
+/// How the pool is treating this miner: shown by 'mine status', kept by the
+/// stratum session, readable from anywhere the miner is.
+pub struct PoolStats {
+    pub pool: String,
+    pub worker: String,
+    connected: AtomicBool,
+    difficulty_bits: AtomicU64,
+    accepted: AtomicU64,
+    rejected: AtomicU64,
+    last_rejection: std::sync::Mutex<Option<String>>,
+    recent_accepts: std::sync::Mutex<std::collections::VecDeque<std::time::Instant>>,
+}
+
+impl PoolStats {
+    pub fn new(pool: String, worker: String) -> Self {
+        Self {
+            pool,
+            worker,
+            connected: AtomicBool::new(false),
+            difficulty_bits: AtomicU64::new(0),
+            accepted: AtomicU64::new(0),
+            rejected: AtomicU64::new(0),
+            last_rejection: std::sync::Mutex::new(None),
+            recent_accepts: std::sync::Mutex::new(std::collections::VecDeque::new()),
+        }
+    }
+
+    pub fn set_connected(&self, connected: bool) {
+        self.connected.store(connected, Ordering::Relaxed);
+    }
+
+    pub fn is_connected(&self) -> bool {
+        self.connected.load(Ordering::Relaxed)
+    }
+
+    pub fn set_difficulty(&self, difficulty: f64) {
+        self.difficulty_bits.store(difficulty.to_bits(), Ordering::Relaxed);
+    }
+
+    /// The share difficulty the pool has set, zero before it has said.
+    pub fn difficulty(&self) -> f64 {
+        f64::from_bits(self.difficulty_bits.load(Ordering::Relaxed))
+    }
+
+    pub fn record_accepted(&self) {
+        self.accepted.fetch_add(1, Ordering::Relaxed);
+        let now = std::time::Instant::now();
+        let mut recent = self.recent_accepts.lock().unwrap();
+        recent.push_back(now);
+        while recent.front().is_some_and(|t| now.duration_since(*t).as_secs() >= 60) {
+            recent.pop_front();
+        }
+    }
+
+    pub fn record_rejected(&self, reason: &str) {
+        self.rejected.fetch_add(1, Ordering::Relaxed);
+        *self.last_rejection.lock().unwrap() = Some(reason.to_string());
+    }
+
+    pub fn accepted(&self) -> u64 {
+        self.accepted.load(Ordering::Relaxed)
+    }
+
+    pub fn rejected(&self) -> u64 {
+        self.rejected.load(Ordering::Relaxed)
+    }
+
+    pub fn last_rejection(&self) -> Option<String> {
+        self.last_rejection.lock().unwrap().clone()
+    }
+
+    /// Shares the pool took in the last minute.
+    pub fn accepted_last_minute(&self) -> usize {
+        let now = std::time::Instant::now();
+        let mut recent = self.recent_accepts.lock().unwrap();
+        while recent.front().is_some_and(|t| now.duration_since(*t).as_secs() >= 60) {
+            recent.pop_front();
+        }
+        recent.len()
+    }
+}
+
+/// This machine's name as the pool will show it: letters, digits, dashes and
+/// underscores only, at most 32 of them, "cpu" when the system has no name.
+pub fn worker_name() -> String {
+    #[cfg(not(target_arch = "wasm32"))]
+    let raw = sysinfo::System::host_name().unwrap_or_default();
+    #[cfg(target_arch = "wasm32")]
+    let raw = String::new();
+    let cleaned: String = raw.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').take(32).collect();
+    if cleaned.is_empty() { "cpu".to_string() } else { cleaned }
 }
 
 /// A solved block on its way back to the async side.
@@ -74,7 +200,16 @@ pub struct Miner {
     thread_count: usize,
     percent: u32,
     started: std::time::Instant,
+    /// Pool jobs a share may still belong to, newest last: a share found a
+    /// moment after the job moved on is still worth sending, and the bridge
+    /// keeps hundreds of old jobs around for exactly that.
+    recent_share_jobs: std::sync::Mutex<std::collections::VecDeque<(u64, String)>>,
+    /// Set when the miner works for a pool rather than its own node.
+    pool: std::sync::OnceLock<Arc<PoolStats>>,
 }
+
+/// How many past pool jobs a share is still matched against.
+const REMEMBERED_SHARE_JOBS: usize = 16;
 
 /// Cores this machine has, as the denominator for the percentage.
 /// The anchor drill's override of the synced-node gate; see its use.
@@ -173,6 +308,8 @@ impl Miner {
             thread_count,
             percent,
             started: std::time::Instant::now(),
+            recent_share_jobs: std::sync::Mutex::new(std::collections::VecDeque::new()),
+            pool: std::sync::OnceLock::new(),
         });
 
         let mut handles = Vec::with_capacity(thread_count);
@@ -201,7 +338,7 @@ impl Miner {
                                 continue;
                             }
                             for _ in 0..CHUNK {
-                                nonce = nonce.wrapping_add(1);
+                                nonce = (nonce.wrapping_add(1) & current.nonce_mask) | current.nonce_prefix;
                                 if current.state.check_pow(nonce).0 {
                                     found.fetch_add(1, Ordering::Relaxed);
                                     // A closed channel means the miner is
@@ -225,7 +362,43 @@ impl Miner {
         let generation = self.generation.fetch_add(1, Ordering::Relaxed) + 1;
         let header = (*block.header).clone();
         let state = State::new(&header);
-        self.job.store(Some(Arc::new(Job { generation, state, header, transactions: block.transactions.clone() })));
+        let work = Work::Block { header: Box::new(header), transactions: block.transactions.clone() };
+        self.job.store(Some(Arc::new(Job { generation, state, work, nonce_prefix: 0, nonce_mask: u64::MAX })));
+    }
+
+    /// Hand the threads a pool's job: the pre-PoW hash and timestamp from
+    /// `mining.notify`, the share difficulty from `mining.set_difficulty`, and
+    /// the extranonce the pool reserved for this worker (none is fine).
+    pub fn set_share_job(&self, job_id: String, pre_pow_hash: Hash, timestamp: u64, difficulty: f64, extranonce_hex: &str) {
+        let generation = self.generation.fetch_add(1, Ordering::Relaxed) + 1;
+        let target = kaspa_pow::stratum::target_for_stratum_difficulty(difficulty);
+        let state = State::from_pre_pow(pre_pow_hash, timestamp, target);
+        let (nonce_prefix, nonce_mask) = nonce_space_for_extranonce(extranonce_hex).unwrap_or((0, u64::MAX));
+        {
+            let mut recent = self.recent_share_jobs.lock().unwrap();
+            recent.push_back((generation, job_id.clone()));
+            while recent.len() > REMEMBERED_SHARE_JOBS {
+                recent.pop_front();
+            }
+        }
+        self.job.store(Some(Arc::new(Job { generation, state, work: Work::Share, nonce_prefix, nonce_mask })));
+    }
+
+    /// The pool job a solution belongs to, with its nonce, for `mining.submit`.
+    /// None when the job is too old to remember, or the work was a block.
+    pub fn share_for(&self, solution: &Solution) -> Option<(String, u64)> {
+        let recent = self.recent_share_jobs.lock().unwrap();
+        recent.iter().rev().find(|(generation, _)| *generation == solution.generation).map(|(_, id)| (id.clone(), solution.nonce))
+    }
+
+    /// Make this miner a pool's worker: the stats the session keeps and
+    /// 'mine status' reads.
+    pub fn attach_pool(&self, stats: Arc<PoolStats>) {
+        let _ = self.pool.set(stats);
+    }
+
+    pub fn pool(&self) -> Option<Arc<PoolStats>> {
+        self.pool.get().cloned()
     }
 
     /// Rebuild the block a solution belongs to, with the winning nonce in it.
@@ -237,12 +410,13 @@ impl Miner {
         if job.generation != solution.generation {
             return None;
         }
-        let mut header = job.header.clone();
+        let Work::Block { header, transactions } = &job.work else { return None };
+        let mut header = header.as_ref().clone();
         header.nonce = solution.nonce;
         // The header hash is derived from its fields, so it has to be
         // recomputed once the nonce changes or the node rejects the block.
         header.finalize();
-        let block = Block::from_arcs(Arc::new(header), job.transactions.clone());
+        let block = Block::from_arcs(Arc::new(header), transactions.clone());
         Some((&block).into())
     }
 
@@ -403,6 +577,8 @@ pub struct MinerHost {
     rpc: std::sync::OnceLock<Arc<DynRpcApi>>,
     miner: std::sync::Mutex<Option<Arc<Miner>>>,
     shutdown: Arc<AtomicBool>,
+    /// A pool to work for instead of a node of our own ("host:port").
+    pool: std::sync::OnceLock<String>,
 }
 
 impl MinerHost {
@@ -420,7 +596,17 @@ impl MinerHost {
             rpc: std::sync::OnceLock::new(),
             miner: std::sync::Mutex::new(None),
             shutdown,
+            pool: std::sync::OnceLock::new(),
         })
+    }
+
+    /// Work for a pool: shares go there over stratum and no node is needed.
+    pub fn set_pool(&self, pool: String) {
+        let _ = self.pool.set(pool);
+    }
+
+    pub fn pool_address(&self) -> Option<&str> {
+        self.pool.get().map(String::as_str)
     }
 
     pub fn bind_address(&self, address: Address) {
@@ -451,11 +637,24 @@ impl MinerHost {
         if !(1..=100).contains(&percent) {
             return Err(RpcError::General(format!("{percent}% is not a share of the machine between 1 and 100")));
         }
-        let Some(rpc) = self.rpc.get().cloned() else {
-            return Err(RpcError::General("the node is not up yet".to_string()));
-        };
         let Some(address) = self.address.get().cloned() else {
             return Err(RpcError::General("no address to pay the rewards to".to_string()));
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(pool) = self.pool.get() {
+            if let Some(old) = self.miner.lock().unwrap().take() {
+                old.stop();
+            }
+            let (miner, solutions) = Miner::start(percent);
+            let stats = Arc::new(PoolStats::new(pool.clone(), worker_name()));
+            miner.attach_pool(stats.clone());
+            let login = format!("{address}.{}", stats.worker);
+            crate::stratum::spawn_pool_session(stats, login, miner.clone(), solutions, self.shutdown.clone());
+            self.miner.lock().unwrap().replace(miner);
+            return Ok(self.status());
+        }
+        let Some(rpc) = self.rpc.get().cloned() else {
+            return Err(RpcError::General("the node is not up yet".to_string()));
         };
         if let Some(old) = self.miner.lock().unwrap().take() {
             old.stop();
@@ -489,6 +688,12 @@ impl MinerHost {
             status.blocks_accepted = miner.blocks_accepted();
             status.blocks_rejected = miner.blocks_rejected();
             status.uptime_seconds = miner.uptime().as_secs();
+            if let Some(pool) = miner.pool() {
+                status.pool = pool.pool.clone();
+                status.shares_accepted = pool.accepted();
+                status.shares_rejected = pool.rejected();
+                status.share_difficulty = pool.difficulty();
+            }
         }
         status
     }
@@ -598,6 +803,49 @@ mod tests {
         // Finalizing must change the block's identity, or we would be
         // submitting a block claiming a hash it does not have.
         assert_ne!(rebuilt.hash, header.hash, "the header hash must follow the nonce");
+    }
+
+    #[test]
+    fn an_extranonce_reserves_the_top_bytes_of_the_nonce() {
+        // Two bytes, as the bridge hands out: the top sixteen bits are the pool's.
+        let (prefix, mask) = nonce_space_for_extranonce("ab12").unwrap();
+        assert_eq!(prefix, 0xab12_0000_0000_0000);
+        assert_eq!(mask, 0x0000_ffff_ffff_ffff);
+        for raw in [0u64, 1, u64::MAX, 0x1234_5678_9abc_def0] {
+            let nonce = (raw.wrapping_add(1) & mask) | prefix;
+            assert!(format!("{nonce:016x}").starts_with("ab12"), "{nonce:016x}");
+        }
+        // No extranonce: the whole space is ours.
+        assert_eq!(nonce_space_for_extranonce(""), Some((0, u64::MAX)));
+        assert_eq!(nonce_space_for_extranonce("0x"), Some((0, u64::MAX)));
+        // Garbage is refused rather than guessed at.
+        assert_eq!(nonce_space_for_extranonce("abc"), None);
+        assert_eq!(nonce_space_for_extranonce("zz"), None);
+        assert_eq!(nonce_space_for_extranonce("0123456789abcdef"), None, "an eight-byte extranonce leaves nothing to search");
+    }
+
+    #[test]
+    fn a_share_job_is_solved_against_the_pool_target_and_remembered() {
+        let header = easy_header();
+        let pre_pow = kaspa_consensus_core::hashing::header::hash_override_nonce_time(&header, 0, 0);
+        let (miner, solutions) = Miner::start(1);
+        // A difficulty so low the first few nonces clear it; the extranonce pins the top bytes.
+        miner.set_share_job("job-7".to_string(), pre_pow, header.timestamp, 1e-9, "ab12");
+        let solution = solutions.recv_timeout(std::time::Duration::from_secs(30)).expect("a share at this difficulty");
+        miner.stop();
+        let (job_id, nonce) = miner.share_for(&solution).expect("the job is remembered");
+        assert_eq!(job_id, "job-7");
+        assert!(format!("{nonce:016x}").starts_with("ab12"));
+        let target = kaspa_pow::stratum::target_for_stratum_difficulty(1e-9);
+        assert!(State::from_pre_pow(pre_pow, header.timestamp, target).check_pow(nonce).0, "the share meets the pool target");
+        assert!(miner.block_for(&solution).is_none(), "a share is not a block");
+    }
+
+    #[test]
+    fn a_pool_worker_name_is_plain() {
+        let name = worker_name();
+        assert!(!name.is_empty() && name.len() <= 32);
+        assert!(name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'), "{name}");
     }
 
     #[test]

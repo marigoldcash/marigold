@@ -368,7 +368,16 @@ impl WalletService {
     }
 
     fn miner_line(status: &kaspa_rpc_core::RpcMinerStatus, where_: &str) -> String {
-        if status.mining {
+        if status.mining && !status.pool.is_empty() {
+            format!(
+                "Miner ({where_}): {} on {} threads ({}%) for the pool at {}, {} shares accepted",
+                crate::miner::format_hashrate(status.hashrate),
+                status.threads,
+                status.percent,
+                status.pool,
+                status.shares_accepted
+            )
+        } else if status.mining {
             format!(
                 "Miner ({where_}): {} on {} threads ({}%), {} blocks found, {} accepted",
                 crate::miner::format_hashrate(status.hashrate),

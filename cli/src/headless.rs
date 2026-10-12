@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-pub const USAGE: &str = "usage: marigold-cli mine-to <address> [<percent>] [--network <id>] [--node <url>]
+pub const USAGE: &str = "usage: marigold-cli mine-to <address> [<percent>] [--network <id>] [--node <url>] [--pool <host:port>]
 
   <address>        where the rewards go — an address from 'address' in your wallet
   <percent>        share of this machine to use, 1-100 (default 50); '--cpu 50' means the same
@@ -30,6 +30,10 @@ pub const USAGE: &str = "usage: marigold-cli mine-to <address> [<percent>] [--ne
   --node <url>     mine against a node already running instead of syncing one here:
                    ws://127.0.0.1:27210 (wRPC) or grpc://127.0.0.1:26210 (gRPC, what a
                    marigoldd has on by default). No wallet can steer the miner then.
+  --pool <host:port>
+                   mine for a pool over stratum instead of for a node: shares go to the
+                   pool, which pays the address by its own rules. No node runs here and
+                   no sync is needed; no wallet can steer the miner then.
 
 Runs in the foreground and logs to stdout; stop it with Ctrl-C or SIGTERM.
 A wallet on this machine finds it when it connects and steers it with 'mine'.";
@@ -49,6 +53,8 @@ struct Options {
     node: Option<String>,
     /// Where the miner's own node listens for wallets; `None` is loopback.
     listen: Option<String>,
+    /// A pool to work for, "host:port"; then there is no node at all.
+    pool: Option<String>,
 }
 
 fn parse(args: &[String]) -> std::result::Result<Options, String> {
@@ -57,6 +63,7 @@ fn parse(args: &[String]) -> std::result::Result<Options, String> {
     let mut network = None;
     let mut node = None;
     let mut listen: Option<String> = None;
+    let mut pool: Option<String> = None;
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
         let (flag, inline) = match arg.split_once('=') {
@@ -87,6 +94,15 @@ fn parse(args: &[String]) -> std::result::Result<Options, String> {
                 let value = inline.or_else(|| iter.next().cloned()).ok_or("--node needs a url, e.g. ws://127.0.0.1:27210")?;
                 node = Some(if value.contains("://") { value } else { format!("ws://{value}") });
             }
+            "--pool" => {
+                let value =
+                    inline.or_else(|| iter.next().cloned()).ok_or("--pool needs the pool as host:port, e.g. pool.example.net:5562")?;
+                let value = value.trim_start_matches("stratum+tcp://").trim_start_matches("stratum://").to_string();
+                if value.rsplit_once(':').is_none_or(|(host, port)| host.is_empty() || port.parse::<u16>().is_err()) {
+                    return Err(format!("'{value}' is not a pool as host:port, e.g. pool.example.net:5562"));
+                }
+                pool = Some(value);
+            }
             "--help" | "-h" => return Err(USAGE.to_string()),
             other if other.starts_with('-') => return Err(format!("unknown option '{other}'\n\n{USAGE}")),
             // A bare number is the share of the machine: 'mine-to <address> 50'.
@@ -107,6 +123,9 @@ fn parse(args: &[String]) -> std::result::Result<Options, String> {
         }
     }
     let address = address.ok_or_else(|| format!("an address to pay the rewards to is needed\n\n{USAGE}"))?;
+    if pool.is_some() && (node.is_some() || listen.is_some()) {
+        return Err("--pool works for a pool and runs no node here, so --node and --listen do not go with it".to_string());
+    }
     let network_id = match network {
         Some(id) => {
             if Prefix::from(id.network_type()) != address.prefix {
@@ -121,7 +140,42 @@ fn parse(args: &[String]) -> std::result::Result<Options, String> {
             Prefix::Devnet => NetworkId::new(NetworkType::Devnet),
         },
     };
-    Ok(Options { address, percent, network_id, node, listen })
+    Ok(Options { address, percent, network_id, node, listen, pool })
+}
+
+/// `mine-to --pool`: no node, no sync; the threads work for the pool until
+/// SIGTERM, and once a minute the log says how the pool is treating them.
+async fn mine_for_pool(host: Arc<MinerHost>, pool: String, percent: u32, shutdown: Arc<AtomicBool>) -> Result<()> {
+    host.set_pool(pool.clone());
+    log::info!("Working for the pool at {pool}; it pays the address by its own rules. No node runs here.");
+    let status = host.start(percent).map_err(|err| crate::error::Error::custom(err.to_string()))?;
+    log::info!(
+        "Mining started: {} threads at {}% of the machine, as worker '{}'.",
+        status.threads,
+        status.percent,
+        crate::miner::worker_name()
+    );
+    let mut last_report = std::time::Instant::now();
+    while !shutdown.load(Ordering::SeqCst) {
+        if last_report.elapsed() >= Duration::from_secs(60) {
+            last_report = std::time::Instant::now();
+            let status = host.status();
+            let connected = host.miner().and_then(|m| m.pool()).is_some_and(|p| p.is_connected());
+            log::info!(
+                "mining for {pool}: {} on {} threads, {}, difficulty {}, {} shares accepted, {} refused",
+                crate::miner::format_hashrate(status.hashrate),
+                status.threads,
+                if connected { "connected" } else { "not reachable right now, trying again" },
+                status.share_difficulty,
+                status.shares_accepted,
+                status.shares_rejected
+            );
+        }
+        tokio::time::sleep(Duration::from_secs(5)).await;
+    }
+    let status = host.stop();
+    log::info!("Mining stopped: the pool took {} shares this run.", status.shares_accepted);
+    Ok(())
 }
 
 /// The miner's node: one started here, or one already running elsewhere.
@@ -139,7 +193,7 @@ pub async fn mine_to(args: Vec<String>) -> Result<()> {
             std::process::exit(2);
         }
     };
-    let Options { address, percent, network_id, node: node_url, listen } = options;
+    let Options { address, percent, network_id, node: node_url, listen, pool } = options;
 
     // Plain lines on stdout, one per record, for journald or a log file.
     kaspa_core::log::init_logger(None, "info");
@@ -155,6 +209,9 @@ pub async fn mine_to(args: Vec<String>) -> Result<()> {
         crate::miner::threads_for_percent(percent),
         crate::miner::cores()
     );
+    if let Some(pool) = pool {
+        return mine_for_pool(host, pool, percent, shutdown).await;
+    }
     let (node, rpc): (Node, Arc<kaspa_wallet_core::rpc::DynRpcApi>) = match node_url {
         // A node already running — a marigoldd on this machine, say. Nothing
         // to sync here, and no RPC of our own for a wallet to steer.

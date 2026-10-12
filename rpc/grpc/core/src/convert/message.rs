@@ -687,6 +687,10 @@ from!(item: &kaspa_rpc_core::RpcMinerStatus, protowire::RpcMinerStatusMessage, {
         blocks_rejected: item.blocks_rejected,
         address: item.address.clone(),
         uptime_seconds: item.uptime_seconds,
+        pool: item.pool.clone(),
+        shares_accepted: item.shares_accepted,
+        shares_rejected: item.shares_rejected,
+        share_difficulty: item.share_difficulty,
     }
 });
 from!(&kaspa_rpc_core::GetMinerStatusRequest, protowire::GetMinerStatusRequestMessage);
@@ -1361,6 +1365,10 @@ try_from!(item: &protowire::RpcMinerStatusMessage, kaspa_rpc_core::RpcMinerStatu
         blocks_rejected: item.blocks_rejected,
         address: item.address.clone(),
         uptime_seconds: item.uptime_seconds,
+        pool: item.pool.clone(),
+        shares_accepted: item.shares_accepted,
+        shares_rejected: item.shares_rejected,
+        share_difficulty: item.share_difficulty,
     }
 });
 try_from!(&protowire::GetMinerStatusRequestMessage, kaspa_rpc_core::GetMinerStatusRequest);
