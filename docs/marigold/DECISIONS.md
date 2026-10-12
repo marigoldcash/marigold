@@ -608,3 +608,11 @@ is priced like plumbing; notes are money and cost a penny to move.
 
 **Where.** README (status box and development section), PLAN (phase ordering and P8.8), LAUNCH-PLAN, reviews/README.md, the scope statement's status and timeline.
 
+## Upstream rusty-kaspa v2.1.0 merged; what was kept Marigold's way (2026-10-12)
+
+**Decision.** Upstream's v2.1.0 (thirteen commits since the 2.0.1 snapshot) is merged on the branch `upstream-2.1.0`, tested on pve3, and goes to `main` and the fleet as a release once the suites pass: pve3 first, then the other nodes. Three choices made in the merge stand as policy. (1) **Proto field numbers:** upstream's new P2P messages (the chunked proof and trusted data of protocol 11) take 70–73 in `messages.proto`; Marigold's pool-state and anchor messages keep 64–69, because they were on the testnet first and a running fleet speaks them; future merges renumber upstream's side, never ours. (2) **The arithmetic lint** (`clippy::arithmetic_side_effects`, upstream's new workspace policy) is allowed workspace-wide: Marigold's 69,000 added lines predate it, the lint job denies warnings, and a sweep of our own crates is its own piece of work, not a merge's. (3) **Toccata is unconditional** in Marigold as upstream made it: its activation switch is gone; the pool, note-lock, wide-lane and anchor switches stay, and the block version follows the pool switch alone (2, then 3 from the pool's activation, which is genesis on every Marigold network).
+
+**Why.** Founder, 2026-10-12: "Do the upstream merge now on its own branch as you described." The security content: P2P hardening (message and block size caps, banned peers refused at connect, bounded parent counts), the stratum bridge dashboard's path-traversal fix, safe Borsh address decoding, constant-time key comparison in bip32; and protocol 11's chunked IBD, which negotiates 10 with older peers so a mixed fleet keeps syncing during the rollout.
+
+**Where.** The merge commit on `upstream-2.1.0`; `master` moves to upstream's v2.1.0 when the branch lands on `main`; EXCHANGE.md and the self-assessment name the merged version.
+
