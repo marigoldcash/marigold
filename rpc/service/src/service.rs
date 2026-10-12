@@ -105,6 +105,11 @@ use workflow_rpc::server::WebSocketCounters as WrpcServerCounters;
 /// Subscriber.
 pub struct RpcCoreService {
     consensus_manager: Arc<ConsensusManager>,
+    /// `get_pool_stats` answered from a short cache (one pool walk every few
+    /// seconds whoever asks). On the instance, not a static: the integration
+    /// tests run several nodes in one process, and a static served one node's
+    /// answer to another's client.
+    pool_stats_cache: std::sync::Mutex<Option<(std::time::Instant, GetPoolStatsResponse)>>,
     notifier: Arc<Notifier<Notification, ChannelConnection>>,
     mining_manager: MiningManagerProxy,
     flow_context: Arc<FlowContext>,
@@ -230,6 +235,7 @@ impl RpcCoreService {
 
         Self {
             consensus_manager,
+            pool_stats_cache: std::sync::Mutex::new(None),
             notifier,
             mining_manager,
             flow_context,
@@ -668,11 +674,8 @@ NOTE: This error usually indicates an RPC conversion error between the node and 
         // A full walk of the pool store under virtual's read lock, answered
         // to anyone: served from a short cache so a stranger asking in a loop
         // costs one walk every few seconds, not one per ask.
-        static CACHE: std::sync::OnceLock<std::sync::Mutex<Option<(std::time::Instant, GetPoolStatsResponse)>>> =
-            std::sync::OnceLock::new();
         const FRESH_FOR: std::time::Duration = std::time::Duration::from_secs(5);
-        let cache = CACHE.get_or_init(|| std::sync::Mutex::new(None));
-        if let Some((at, response)) = cache.lock().unwrap().as_ref()
+        if let Some((at, response)) = self.pool_stats_cache.lock().unwrap().as_ref()
             && at.elapsed() < FRESH_FOR
         {
             return Ok(response.clone());
@@ -680,7 +683,7 @@ NOTE: This error usually indicates an RPC conversion error between the node and 
         let session = self.consensus_manager.consensus().unguarded_session();
         let stats = session.async_get_pool_stats().await;
         let response = GetPoolStatsResponse::new(stats.counts);
-        *cache.lock().unwrap() = Some((std::time::Instant::now(), response.clone()));
+        *self.pool_stats_cache.lock().unwrap() = Some((std::time::Instant::now(), response.clone()));
         Ok(response)
     }
 
