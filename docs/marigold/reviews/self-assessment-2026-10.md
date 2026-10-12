@@ -1,0 +1,62 @@
+# Security self-assessment of Marigold, October 2026
+
+**Prepared by** O'Brien & Partners, Neyruz, Switzerland, **for** marigold.cash Ltd. **Disclosure, first:** O'Brien & Partners is the founder's own consultancy. This document is a self-assessment, written by the people who built the system, and it says so in its title so that nobody mistakes it for the independent audit. Its purpose is to give the independent auditor a map before they start, which saves their hours and the project's money, and to tell an exchange's analyst that the project knows its own attack surface. The independent audit is a separate engagement, scoped in [audit-scope-2026-10.md](audit-scope-2026-10.md), and its report will sit beside this one under the auditor's own name.
+
+**What this assesses:** the Marigold source at tag `v2.87.343` (2026-10-11) of [marigoldcash/marigold](https://github.com/marigoldcash/marigold), a fork of rusty-kaspa taken at its version 2.0.1 (upstream commit `a41a333b`, 2026-08-02; the untouched upstream snapshot is the `master` branch of the same repository, so `git diff master..v2.87.343` is the whole difference). The difference is 502 files, about 69,000 lines added and 3,600 removed. Nothing in upstream's consensus was removed or rewritten; Marigold adds to it.
+
+## 1. What Marigold adds to rusty-kaspa
+
+Each item names where the code lives and what it changes, so the auditor can weigh it. Sizes are lines added over upstream.
+
+| Area | Where | What it does | Size |
+|---|---|---|---|
+| The note pool | `consensus/src/pipeline/virtual_processor/notepool.rs`, `consensus/core/src/notepool/`, the pool stores under `consensus/src/model/stores/` | A consensus-maintained map of live notes (denomination, current key, serial) beside the UTXO set; five operations (mint, transfer, redeem, locked transfer, the fee stamp) validated for authorization, conservation and freshness in every block; the pool's Merkle commitment; the pool diff per block; the pool state handed over at the pruning point. The normative text is [POOL-SPEC.md](../POOL-SPEC.md) v1.3. | consensus/src +4,100, consensus/core +3,500 |
+| `pool_commitment` in the header | `consensus/core/src/header.rs`, hashing | One new 32-byte header field, hashed, so a block commits to the pool after its mergeset. Mining software that round-trips a template must carry it ([MINING-COMPAT.md](../MINING-COMPAT.md)). | within the above |
+| Finality anchors | `consensus/core/src/finality_anchor/`, the virtual processor's `finality_anchor_guard`, `protocol/flows` (gossip, IBD), `trustee-signer/` | Five trustee keys pinned in the parameters; a 3-of-5 signature over a block 600 DAA scores deep, once per 300; a chain conflicting with the latest valid anchor is invalid; fail-open after `depth + 3 × interval` without an anchor; equivocation proofs disqualify a key permanently; anchors are gossiped and fetched during IBD. The sunset of the earlier spec was withdrawn on 2026-10-11 ([DECISIONS](../DECISIONS.md), "The anchors stay"). | protocol/flows +700, trustee-signer +950 |
+| Lanes | `consensus/seq-commit/` (upstream's KIP-21 sequencing commitments, used, not changed), `consensus/core/src/lane*`, the registry rules in [LANE-REGISTRY.md](../LANE-REGISTRY.md) | A subnetwork id per lane, a tag of one to five capitals or digits, claimed on the chain; the point-of-sale design of [TILL-DRAW.md](../TILL-DRAW.md) builds on it and is not implemented. | small |
+| Time-locked notes | within the pool code | A note may carry a refund key and a deadline; from the deadline the note answers to the refund key (POOL-SPEC P5.9). | small |
+| Assets, foundation only | within the pool code | Issued-asset notes carry their lane's tag; the four extra operations are laid down and not activated on any network ([ASSETS.md](../ASSETS.md)). | small |
+| Fee floor and the own lane | mempool, `mining/` | A minimum fee per note operation; a node's own below-floor lane is opt-in (`--accept-own-below-floor`) and never on a public node. | mining +690 |
+| RPC additions | `rpc/core`, `rpc/grpc`, `rpc/service`, wRPC | Paged `GetUtxosByAddresses`; `GetNotesBySerial`, `GetPoolStats`, `NotifyNotesChanged`; `GetFinalityAnchorStatus`, `GetFinalityAnchor`; `GetPoolStateAtBlock`, `GetPoolDiff`; `GetSeqCommitLaneProof`; the node's miner control. Frozen from v2.87.343 ([EXCHANGE.md](../EXCHANGE.md)). | rpc +2,300 |
+| The wallet's note storage | `wallet/core/src/storage/local/notevault.rs`, `wallet/core/src/storage/notekeys*` | Note keys kept in per-note files under a vault key; the vault key derived from the wallet's 24 words and wrapped under the password; the backup recipient key written from the words; folder and Telegram backups sealed to the words, never to the password. | wallet/core +9,600 |
+| Payment codes and the bot | `cli/src/modules/pay.rs`, `receive.rs`, `request.rs`, `telegram.rs`, `cli/src/serve.rs` | `marigoldpay:` and `marigoldreq:` codes carrying bearer value or a signed, dated request; a Telegram bot as the phone's remote, paired by a code, with a PIN and a daily limit; the desktop app over the same service. | cli +21,600 (all of the terminal wallet) |
+| The light wallet | `wallet/core/src/light.rs` | A wallet without a node of its own takes the latest anchor from a public node, verifies the trustees' signatures, rebuilds the pool root from the state it is handed and checks it against the header, finds its notes locally, follows the chain by diffs, and restarts from the anchor on any disagreement ([SYNC-LIGHT.md](../SYNC-LIGHT.md)). | within wallet/core |
+| Self-update | `cli/src/selfupdate.rs`, `scripts/release-notice.sh`, `scripts/desktop-manifest.sh` | The wallet fetches a release manifest signed by the trustee keys compiled into it, verifies, downloads, checks the hash, installs; refuses to run when the manifest says its release is too old. | small |
+| Stratum bridge, faucet, deploy | `stratum-bridge`, `faucet/`, `deploy/ansible` | Infrastructure: a bridge aware of the pool commitment, a testnet faucet with a Telegram Mini App, the Ansible runbook of [TESTNET.md](../TESTNET.md). Out of the audit's scope except where named. | faucet +1,100, deploy +1,400 |
+
+## 2. The threat model, in brief
+
+**What is at risk.** Notes: bearer value, spendable by whoever holds a note's current private key. Ledger coins: as on Kaspa. The chain's history: a reorganisation across settled payments. The wallet's files: keys, backups, the Telegram bot's token. The trustees' keys.
+
+**Who is assumed hostile.** Any node a wallet talks to, including the project's own public node; any peer; any Telegram user; anyone who reads a wallet's backup; a miner with a majority of a small testnet's hashrate; a quorum of trustees, considered separately because trusting them is the design's one explicit assumption.
+
+**What is trusted, stated plainly.** (1) Three of the five trustee keys, for finality and, since the light wallet, for what a wallet without a node takes as the pool's state; a colluding quorum plus one cooperating node can mislead such a wallet, and full nodes see the equivocation (POOL-SPEC P5.8, trust boundary). (2) The software release: trustee keys, genesis and seeders ship in it, and the self-update verifies against keys compiled into the previous release. (3) A light wallet trusts its node for liveness and, between two anchors, for the chain it follows; a lie is caught at the next anchor, within about twenty seconds, and the wallet restarts from the anchor. (4) The 24 words: every backup opens with them and nothing else. The password guards the files on one machine only.
+
+**What is not claimed.** No cryptographic unlinkability: the operation graph is public, and a note's anonymity set is at best its denomination cohort (whitepaper §7). No protection of a wallet whose machine is compromised. No defence against a trustee quorum beyond its visibility.
+
+## 3. What has been tested, and how
+
+- **The pool specification was reviewed externally** before implementation began: two cryptographers, two rounds, a cross-review and a confirmation pass, all filed in this folder ([README.md](README.md)). The headline finding, a redeem-redirect malleability, was fixed in v1.1 and the signing preimage has bound the transparent outputs since.
+- **Consensus tests.** 18 pool tests in `notepool_tests.rs` (authorization, conservation, freshness, locks, the commitment matching the state at a block), 4 anchor tests in `finality_anchor_tests.rs` (a heavier chain without the anchor loses; an equivocating quorum is ignored after its proof; fail-open on a stale anchor; the lane closed without keys), 17 unit tests of anchor verification and equivocation boundaries in `consensus/core`, the daemon integration tests of anchors over a live node, and one RPC test per added operation in `testing/integration/src/rpc_tests.rs`. CI runs the suite, clippy with warnings denied, the WASM builds and the no_std check on every push.
+- **The public testnet** (testnet-10) has run since August 2026 on three public nodes and the testers' machines, with a chain never reset, under the anchors with five throwaway trustee keys since the P6.11 rehearsal; every incident is in [INCIDENTS.md](../INCIDENTS.md) with cause, fix and the test that covers it.
+- **The anchor forgery rehearsal of 2026-09-22:** a deliberate deep reorganisation attempted from the largest miner against the anchored chain, refused by every node.
+- **The wallet threat pass of 2026-09-20** ([threat-pass-2026-09-20.md](threat-pass-2026-09-20.md)): three read-only reviews of the wallet against its attack surfaces, 13 findings (5 high, 6 medium, 2 low), every one fixed the same day; the two high findings worth an auditor's attention were the below-floor fee exemption reachable through the public node, and restored or imported keys spendable from two wallets.
+- **Recovery drills:** scripted restores from the 24 words and from folder backups (`scripts/p80-recovery-verify`, `scripts/p80b-notes-only-verify`), and the Telegram backup flow replayed against a test home.
+
+## 4. Known weaknesses and open items
+
+Listed so that the auditor does not spend time rediscovering them, and so that a reader knows the project's own view of where it is thin.
+
+1. **Trustee succession** has no mechanism short of a release; a permanent institution needs one (PLAN P9.1b). Until it exists, a lost trustee key is replaced by a hard fork.
+2. **The light wallet's restore path** still asks the node by serial for a shallow verification of restored notes, which names those notes to that node; the ordinary path does not. A wallet with a ledger account subscribes its address at the public node, which names the address. Both are on the list ([light-wallet project](../SYNC-LIGHT.md)).
+3. **The public RPC node** is one machine behind nginx, offered as a stopgap; the wallet's design steers people to their own copy, and an outage there is an outage for whoever leaned on it.
+4. **Resource limits on the node's RPC** are the two caps from the threat pass (1,000 serials per lookup, the paged UTXO query) and nothing finer; there is no per-client rate limit.
+5. **Wallet files rely on the operating system**: owner-only permissions, no encryption of note files beyond the vault key, which the password wraps. A compromised machine is out of scope by design.
+6. **The Telegram bot** holds a token on disk and a PIN hash; its threat model is the threat pass's, and it is reachable only from the paired chat.
+7. **The self-update's trust** is the trustee keys compiled into the running release; the first installation's trust is the download itself, as for every software.
+8. **Mainnet parameters are not frozen** (PLAN P9.5): the pruning window, the trustee set and the genesis are placeholders on the testnet.
+9. **AI-assisted development, disclosed.** The code was written with AI assistance and reviewed by one person. The auditor should assume that most lines were read by one human, not two, and weigh the test suite and the testnet record accordingly.
+
+## 5. Where to look first
+
+An auditor with limited hours should read, in this order: POOL-SPEC P5.2 (authorization) and P5.3 (freshness) against `notepool.rs`; P5.8 against `finality_anchor/` and the virtual processor's guard; `light.rs` against SYNC-LIGHT.md; `notevault.rs` and the backup sealing; `selfupdate.rs`; then the paged UTXO query and the mempool fee floor.

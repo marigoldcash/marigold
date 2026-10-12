@@ -1,7 +1,7 @@
-# Spec reviews
+# Reviews
 
-This directory holds written external reviews of frozen specs, per PLAN.md's
-review-gate steps (currently just P5.9).
+This directory holds the written external reviews of the frozen pool specification (P5.9), the wallet threat pass of 2026-09-20 (P8.5), and the material for the independent code audit (P8.8): the project's own [security self-assessment](self-assessment-2026-10.md), disclosed as prepared by the founder's firm, and the [scope statement](audit-scope-2026-10.md) the independent auditor is engaged against. The audit report goes here too, under the auditor's name, when it exists.
+
 
 ## P5.9 — Pool spec review (CLOSED 2026-08-15 — spec tagged `pool-spec-v1.1`)
 
