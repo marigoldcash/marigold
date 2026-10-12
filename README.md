@@ -15,8 +15,12 @@ transferred by handing over a private key.
 
 > ⚠️ **Status: pre-mainnet.** Marigold's mainnet has not launched. There is no MAGLD
 > token to buy anywhere — anything sold under that name today is a scam. The current
-> phase is the public testnet soak; mainnet follows a full external security audit.
-> Launch is fair from zero: no premine, no dev fund, no airdrop.
+> phase is the public testnet soak. Before mainnet, the consensus changes from upstream
+> rusty-kaspa — the note pool, the finality anchors, the lanes — are independently audited,
+> and the audit is published in [docs/marigold/reviews/](docs/marigold/reviews/) beside the
+> external cryptographer reviews of the pool specification already there. That is the
+> promise, scoped to what a project with no treasury can deliver; it is not a full audit
+> of the whole node. Launch is fair from zero: no premine, no dev fund, no airdrop.
 
 ## Nothing is hidden
 
@@ -195,12 +199,15 @@ There is also a **desktop wallet** in [gui/](gui/): the same wallet with screens
 
 ## Development process and review
 
-Marigold is developed by a human founder using AI-assisted engineering, with all
-consensus-critical work externally reviewed: the pool specification passed review by
-external cryptographers (see [docs/marigold/reviews/](docs/marigold/reviews/)), a full
-security audit precedes mainnet, and the network soaks on a public testnet for months
-before any real value touches it. The development record — including the step-by-step
-[PLAN.md](PLAN.md) this project is built from — is published as-is; trust
+Marigold is developed by [leancode](https://github.com/leancode) using AI-assisted
+engineering, with all consensus-critical work externally reviewed: the pool specification
+passed review by external cryptographers (see [docs/marigold/reviews/](docs/marigold/reviews/));
+before mainnet, the consensus changes from upstream rusty-kaspa — the note pool, the
+finality anchors, the lanes — are independently audited, with the scope and the report
+published in the same folder (PLAN P8.8; the whole node is not re-audited, and the README
+says so rather than promising it); and the network has soaked on a public testnet since
+August 2026, months before any real value touches it. The development record — including
+the step-by-step [PLAN.md](PLAN.md) this project is built from — is published as-is; trust
 should rest on tests, review, audit, and soak, not on who typed the code.
 
 Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). Consensus changes

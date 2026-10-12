@@ -584,3 +584,11 @@ is priced like plumbing; notes are money and cost a penny to move.
 
 **Where.** EXCHANGE.md; every RPC change from now on is checked against this entry in review.
 
+## The audit promise, narrowed to what is funded (2026-10-11)
+
+**Decision.** The README no longer says that "mainnet follows a full external security audit". It says what will be delivered: the pool specification's external cryptographer reviews, already published, plus an independent audit of the consensus changes from upstream rusty-kaspa (the note pool, the finality anchors, the lanes) and the wallet crypto, scoped in writing, engaged by the end of October 2026, and published in `docs/marigold/reviews/` before genesis. The whole node is not re-audited, and every public text says so rather than implying otherwise. PLAN P8.8 and LAUNCH-PLAN carry the same scope. The testnet-soak sentence stays, stated as a fact with its start (August 2026) rather than as a promise.
+
+**Why.** Founder, 2026-10-11, relaying a reviewer and deciding: a full audit of a modified rusty-kaspa plus the note pool is weeks of a specialist firm's time and real money, the project has no treasury and the founder has borne every expense so far; "the line as written, with nothing behind it, is the thing that would hurt us"; of the two defensible choices, commission the full audit now or narrow the promise, "I think we need to go with the second." An exchange reading the README quotes it back; a promise with no report linked stops the conversation.
+
+**Where.** README (status box and "Development process and review"), PLAN P8.8, LAUNCH-PLAN; the audit's scope statement and report go to `docs/marigold/reviews/` when they exist.
+
