@@ -3,7 +3,7 @@ use crate::{
     default_client::{default_handlers, handle_authorize, handle_subscribe},
     jsonrpc_event::JsonRpcEvent,
     kaspaapi::KaspaApi,
-    share_handler::{KaspaApiTrait, ShareHandler},
+    share_handler::{KaspaApiTrait, NoopSink, PoolSink, ShareHandler},
     stratum_context::StratumContext,
     stratum_listener::{StratumListener, StratumListenerConfig},
 };
@@ -28,6 +28,9 @@ pub struct BridgeConfig {
     pub extranonce_size: u8,
     pub pow2_clamp: bool,
     pub coinbase_tag_suffix: Option<String>,
+    /// A pool's payout address: when set, every template pays it and the
+    /// miners' own addresses are identities only.
+    pub pool_address: Option<String>,
 }
 
 /// Start block template listener with concrete KaspaApi
@@ -60,7 +63,7 @@ pub async fn listen_and_serve<T: KaspaApiTrait + Send + Sync + 'static>(
     // Optional: if concrete KaspaApi is provided, use notification-based listener
     concrete_kaspa_api: Option<Arc<KaspaApi>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    listen_and_serve_impl(config, kaspa_api, concrete_kaspa_api, None).await
+    listen_and_serve_impl(config, kaspa_api, concrete_kaspa_api, None, Arc::new(NoopSink)).await
 }
 
 pub async fn listen_and_serve_with_shutdown<T: KaspaApiTrait + Send + Sync + 'static>(
@@ -69,7 +72,20 @@ pub async fn listen_and_serve_with_shutdown<T: KaspaApiTrait + Send + Sync + 'st
     concrete_kaspa_api: Option<Arc<KaspaApi>>,
     shutdown_rx: watch::Receiver<bool>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    listen_and_serve_impl(config, kaspa_api, concrete_kaspa_api, Some(shutdown_rx)).await
+    listen_and_serve_impl(config, kaspa_api, concrete_kaspa_api, Some(shutdown_rx), Arc::new(NoopSink)).await
+}
+
+/// `listen_and_serve_with_shutdown` for a pool: every accepted share and every
+/// block the node takes is reported to `sink`. Pair it with
+/// `BridgeConfig::pool_address` so the templates pay the pool.
+pub async fn listen_and_serve_with_sink<T: KaspaApiTrait + Send + Sync + 'static>(
+    config: BridgeConfig,
+    kaspa_api: Arc<T>,
+    concrete_kaspa_api: Option<Arc<KaspaApi>>,
+    shutdown_rx: watch::Receiver<bool>,
+    sink: Arc<dyn PoolSink>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    listen_and_serve_impl(config, kaspa_api, concrete_kaspa_api, Some(shutdown_rx), sink).await
 }
 
 async fn listen_and_serve_impl<T: KaspaApiTrait + Send + Sync + 'static>(
@@ -77,6 +93,7 @@ async fn listen_and_serve_impl<T: KaspaApiTrait + Send + Sync + 'static>(
     kaspa_api: Arc<T>,
     concrete_kaspa_api: Option<Arc<KaspaApi>>,
     shutdown_rx: Option<watch::Receiver<bool>>,
+    sink: Arc<dyn PoolSink>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Calculate min diff with pow2 clamp if needed
     let mut min_diff = config.min_share_diff as f64;
@@ -99,12 +116,18 @@ async fn listen_and_serve_impl<T: KaspaApiTrait + Send + Sync + 'static>(
 
     // Create share handler with instance identifier
     let instance_id = config.instance_id.clone();
-    let share_handler = Arc::new(ShareHandler::new(instance_id.clone()));
+    let share_handler = Arc::new(ShareHandler::with_sink(instance_id.clone(), sink));
 
     // Create client handler
     // Note: extranonce_size parameter is now only used for backward compatibility
     // Actual extranonce assignment happens per-client in handle_subscribe based on detected miner type
-    let client_handler = Arc::new(ClientHandler::new(Arc::clone(&share_handler), min_diff, extranonce_size, instance_id.clone()));
+    let client_handler = Arc::new(ClientHandler::new(
+        Arc::clone(&share_handler),
+        min_diff,
+        extranonce_size,
+        instance_id.clone(),
+        config.pool_address.clone(),
+    ));
 
     let shutdown_rx_for_bg = shutdown_rx.clone();
 

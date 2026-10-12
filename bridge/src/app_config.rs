@@ -42,6 +42,11 @@ pub struct GlobalConfig {
     pub pow2_clamp: bool,
     #[serde(deserialize_with = "deserialize_coinbase_tag_suffix")]
     pub coinbase_tag_suffix: Option<String>,
+    /// A pool's payout address. Empty or absent: solo bridge, each miner's
+    /// blocks pay the miner. Set: every block pays this address and the
+    /// miners' logins are identities for their shares.
+    #[serde(deserialize_with = "deserialize_coinbase_tag_suffix")]
+    pub pool_address: Option<String>,
 }
 
 /// Bridge configuration (supports both single and multi-instance modes)
@@ -199,6 +204,7 @@ impl Default for GlobalConfig {
             extranonce_size: 0,
             pow2_clamp: false,
             coinbase_tag_suffix: None,
+            pool_address: None,
         }
     }
 }
@@ -270,6 +276,11 @@ impl BridgeConfig {
             if !ports.insert(&instance.stratum_port) {
                 return Err(anyhow::anyhow!("Duplicate stratum_port: {}", instance.stratum_port));
             }
+        }
+
+        if let Some(address) = raw.global.pool_address.as_deref() {
+            kaspa_addresses::Address::try_from(address)
+                .map_err(|e| anyhow::anyhow!("pool_address '{}' is not a valid address: {}", address, e))?;
         }
 
         Ok(BridgeConfig { global: raw.global, instances })

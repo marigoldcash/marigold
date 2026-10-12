@@ -34,10 +34,20 @@ pub struct ClientHandler {
     last_balance_check: Arc<Mutex<Instant>>,
     share_handler: Arc<ShareHandler>,
     instance_id: String, // Instance identifier for logging
+    /// When set, every block template pays this address instead of the
+    /// address each miner logged in with: the bridge is then a pool's front
+    /// door, and the miner's own address is only its identity for shares.
+    pool_address: Option<String>,
 }
 
 impl ClientHandler {
-    pub fn new(share_handler: Arc<ShareHandler>, min_share_diff: f64, extranonce_size: i8, instance_id: String) -> Self {
+    pub fn new(
+        share_handler: Arc<ShareHandler>,
+        min_share_diff: f64,
+        extranonce_size: i8,
+        instance_id: String,
+        pool_address: Option<String>,
+    ) -> Self {
         #[allow(clippy::arithmetic_side_effects, reason = "extranonce_size.min(3) <= 3")]
         let max_extranonce = if extranonce_size > 0 { (2_f64.powi(8 * extranonce_size.min(3) as i32) - 1.0) as i32 } else { 0 };
 
@@ -51,7 +61,14 @@ impl ClientHandler {
             last_balance_check: Arc::new(Mutex::new(Instant::now())),
             share_handler,
             instance_id,
+            pool_address,
         }
+    }
+
+    /// The address a template for `client` should pay: the pool's if this is a
+    /// pool, otherwise the miner's own.
+    fn template_pay_address(&self, client: &StratumContext) -> String {
+        self.pool_address.clone().unwrap_or_else(|| client.wallet_addr.lock().clone())
     }
 
     pub fn on_connect(&self, ctx: Arc<StratumContext>) {
@@ -203,6 +220,7 @@ impl ClientHandler {
         let share_handler = Arc::clone(&self.share_handler);
         let min_diff = self.min_share_diff;
         let instance_id = self.instance_id.clone();
+        let pay_address = self.template_pay_address(&client_clone);
 
         tokio::spawn(async move {
             // Get per-client mining state from context
@@ -210,7 +228,7 @@ impl ClientHandler {
 
             // Get client info
             let (wallet_addr, remote_app, canxium_addr) = {
-                let wallet = client_clone.wallet_addr.lock().clone();
+                let wallet = pay_address.clone();
                 let app = client_clone.remote_app.lock().clone();
                 let canx = client_clone.canxium_addr.lock().clone();
                 (wallet, app, canx)
@@ -512,6 +530,7 @@ impl ClientHandler {
             let share_handler = Arc::clone(&self.share_handler);
             let min_diff = self.min_share_diff;
             let instance_id = self.instance_id.clone();
+            let pay_address = self.template_pay_address(&client_clone);
 
             tokio::spawn(async move {
                 // Get per-client mining state from context
@@ -544,7 +563,7 @@ impl ClientHandler {
 
                 // Get block template
                 let (wallet_addr, remote_app, canxium_addr) = {
-                    let wallet = client_clone.wallet_addr.lock().clone();
+                    let wallet = pay_address.clone();
                     let app = client_clone.remote_app.lock().clone();
                     let canx = client_clone.canxium_addr.lock().clone();
                     (wallet, app, canx)

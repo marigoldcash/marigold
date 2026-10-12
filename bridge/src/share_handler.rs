@@ -25,6 +25,61 @@ use std::time::{Duration, Instant};
 use tokio::sync::watch;
 use tracing::{debug, error, info, warn};
 
+/// What the bridge tells a pool about a share it accepted: whose it was, how
+/// hard it was, and where in the DAG the job sat.
+///
+/// `difficulty` is the stratum difficulty the share was checked against and
+/// `hash_value` the expected number of hashes it stands for (the bridge's own
+/// hashrate unit, from the same `KaspaDiff`). `daa_score` and `blue_score` are
+/// the job's header values, which is what a pool keys a share window on.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShareEvent {
+    pub address: String,
+    pub worker: String,
+    pub difficulty: f64,
+    pub hash_value: f64,
+    pub daa_score: u64,
+    pub blue_score: u64,
+    pub timestamp_ms: u64,
+}
+
+/// A block the node accepted from this bridge. Reported when `submit_block`
+/// succeeds; whether it ends up blue is checked afterwards and only logged.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BlockEvent {
+    pub address: String,
+    pub worker: String,
+    pub hash: String,
+    pub blue_score: u64,
+    pub daa_score: u64,
+    pub nonce: u64,
+    pub timestamp_ms: u64,
+}
+
+/// A pool's ear on the bridge.
+///
+/// On its own the bridge is a solo tool: a share is counted in a statistic and
+/// forgotten. A pool needs every one, so it hands the bridge a sink and hears
+/// each share as it is accepted and each block as the node takes it. Both
+/// calls happen inline on the submit path, so an implementation must not
+/// block — push onto a channel and return.
+pub trait PoolSink: Send + Sync {
+    fn share_accepted(&self, event: ShareEvent);
+    fn block_found(&self, event: BlockEvent);
+}
+
+/// Nobody listening, which is the solo bridge.
+pub struct NoopSink;
+
+impl PoolSink for NoopSink {
+    fn share_accepted(&self, _event: ShareEvent) {}
+    fn block_found(&self, _event: BlockEvent) {}
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+}
+
 #[allow(dead_code)]
 const VAR_DIFF_THREAD_SLEEP: u64 = 10;
 #[allow(dead_code)]
@@ -241,16 +296,23 @@ pub struct ShareHandler {
     overall: Arc<WorkStats>,
     instance_id: String, // Instance identifier for logging
     duplicate_submit_guard: Arc<Mutex<DuplicateSubmitGuard>>,
+    sink: Arc<dyn PoolSink>,
 }
 
 impl ShareHandler {
     pub fn new(instance_id: String) -> Self {
+        Self::with_sink(instance_id, Arc::new(NoopSink))
+    }
+
+    /// A handler that reports every accepted share and node-accepted block to `sink`.
+    pub fn with_sink(instance_id: String, sink: Arc<dyn PoolSink>) -> Self {
         Self {
             tip_blue_score: Arc::new(Mutex::new(0)),
             stats: Arc::new(Mutex::new(HashMap::new())),
             overall: Arc::new(WorkStats::new("overall".to_string())),
             instance_id,
             duplicate_submit_guard: Arc::new(Mutex::new(DuplicateSubmitGuard::new(Duration::from_secs(180), 50_000))),
+            sink,
         }
     }
 
@@ -846,6 +908,16 @@ impl ShareHandler {
 
                         record_block_accepted_by_node(&prom_worker);
 
+                        self.sink.block_found(BlockEvent {
+                            address: wallet_addr.clone(),
+                            worker: worker_name.clone(),
+                            hash: block_hash.clone(),
+                            blue_score,
+                            daa_score: block.header.daa_score,
+                            nonce: nonce_val,
+                            timestamp_ms: now_ms(),
+                        });
+
                         let kaspa_api = Arc::clone(&kaspa_api);
                         let block_hash_for_confirm = block_hash.clone();
 
@@ -1138,6 +1210,16 @@ impl ShareHandler {
         }
 
         record_share_found(&self.worker_prom_context(&ctx, ""), hash_value);
+
+        self.sink.share_accepted(ShareEvent {
+            address: ctx.wallet_addr.lock().clone(),
+            worker: ctx.effective_worker_name(),
+            difficulty: state.stratum_diff().map(|d| d.diff_value).unwrap_or(0.0),
+            hash_value,
+            daa_score: current_job.block.header.daa_score,
+            blue_score: current_job.block.header.blue_score,
+            timestamp_ms: now_ms(),
+        });
 
         {
             let now = Instant::now();

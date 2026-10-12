@@ -159,38 +159,11 @@ pub fn diff_to_target(diff: f64) -> BigUint {
     diff_to_target_standard(diff)
 }
 
-/// Standard target calculation
-/// Formula: target = maxTarget / diff
-/// This uses floating point division then converts to integer
+/// Standard target calculation: `maxTarget / diff`, done in `kaspa_pow::stratum`
+/// so a stratum client built on that crate computes the very same target the
+/// bridge checks shares against.
 fn diff_to_target_standard(diff: f64) -> BigUint {
-    use num_traits::Num;
-
-    // Handle edge cases
-    if diff <= 0.0 {
-        // Return maximum target for invalid difficulty
-        return <BigUint as Num>::from_str_radix(MAX_TARGET, 16).unwrap();
-    }
-
-    // maxTarget = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
-    // This is 2^224 - 1, NOT the old 0xffff * 2^208!
-    let max_target = <BigUint as Num>::from_str_radix(MAX_TARGET, 16).unwrap();
-
-    // Calculate target = maxTarget / difficulty (EXACTLY like Go)
-    // Go uses big.Float division: target = maxTarget / diff
-    // Then converts to big.Int by truncating
-    // We need high precision, so use a large scaling factor
-    // Use 18 decimal places of precision (multiply by 1e18) to match big.Float precision
-    let diff_scaled = (diff * 1_000_000_000_000_000_000.0) as u128;
-    let diff_big = BigUint::from(diff_scaled);
-
-    // target = (maxTarget * 1e18) / (diff * 1e18)
-    // Uses big.Float division followed by Int() truncation
-    #[allow(clippy::arithmetic_side_effects, reason = "BigUint can't overflow")]
-    {
-        (max_target * BigUint::from(1_000_000_000_000_000_000u128))
-            .checked_div(&diff_big)
-            .unwrap_or(<BigUint as Num>::from_str_radix(MAX_TARGET, 16).unwrap())
-    }
+    BigUint::from_bytes_be(&kaspa_pow::stratum::target_for_stratum_difficulty(diff).to_be_bytes())
 }
 
 /// Convert difficulty to hash value
@@ -467,6 +440,24 @@ pub fn big_diff_to_little(diff: &BigUint) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The bridge's own formula, as it was before the arithmetic moved to `kaspa_pow`:
+    /// `(maxTarget * 1e18) / (diff * 1e18)` in big integers. The shared function must agree.
+    fn reference_target(diff: f64) -> BigUint {
+        use num_traits::Num;
+        let max_target = <BigUint as Num>::from_str_radix(MAX_TARGET, 16).unwrap();
+        let diff_scaled = (diff * 1_000_000_000_000_000_000.0) as u128;
+        (max_target * BigUint::from(1_000_000_000_000_000_000u128))
+            .checked_div(&BigUint::from(diff_scaled))
+            .unwrap_or(<BigUint as Num>::from_str_radix(MAX_TARGET, 16).unwrap())
+    }
+
+    #[test]
+    fn shared_target_matches_the_bridge_formula() {
+        for diff in [0.25, 0.5, 1.0, 3.0, 4.0, 512.0, 8192.0, 16384.0, 1_000_000.0, 123_456.789] {
+            assert_eq!(diff_to_target(diff), reference_target(diff), "difficulty {diff}");
+        }
+    }
 
     #[test]
     #[ignore] // Diagnostic test - values may vary based on implementation

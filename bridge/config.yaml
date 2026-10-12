@@ -19,6 +19,10 @@ var_diff_stats: true
 pow2_clamp: true
 extranonce_size: 2
 coinbase_tag_suffix: ""
+# A pool's payout address. Leave empty for a solo bridge (each miner's blocks
+# pay the miner). Set it and every block pays this address instead; the miners'
+# logins then only identify whose shares are whose.
+pool_address: ""
 
 instances:
   - stratum_port: ":5559"

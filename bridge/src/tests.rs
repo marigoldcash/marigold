@@ -1145,6 +1145,7 @@ mod integration {
             extranonce_size: 4,
             pow2_clamp: false,
             coinbase_tag_suffix: None,
+            pool_address: None,
         };
 
         // Start the bridge server (with a timeout to prevent hanging)
@@ -1232,6 +1233,7 @@ mod integration {
             extranonce_size: 4,
             pow2_clamp: false,
             coinbase_tag_suffix: None,
+            pool_address: None,
         };
 
         // Start the bridge server
@@ -1386,7 +1388,7 @@ mod comprehensive_tests {
         // This demonstrates how extranonce is auto-assigned based on miner type
 
         let share_handler = Arc::new(ShareHandler::new("test-instance".to_string()));
-        let client_handler = Arc::new(ClientHandler::new(share_handler, 8192.0, 2, "test-instance".to_string()));
+        let client_handler = Arc::new(ClientHandler::new(share_handler, 8192.0, 2, "test-instance".to_string(), None));
 
         let ctx = create_test_context().await;
         let event = JsonRpcEvent::new(Some("1".to_string()), "mining.subscribe", vec![json!("IceRiver KS2L")]);
@@ -1407,7 +1409,7 @@ mod comprehensive_tests {
         // This demonstrates miner-specific handling
 
         let share_handler = Arc::new(ShareHandler::new("test-instance".to_string()));
-        let client_handler = Arc::new(ClientHandler::new(share_handler, 8192.0, 0, "test-instance".to_string()));
+        let client_handler = Arc::new(ClientHandler::new(share_handler, 8192.0, 0, "test-instance".to_string(), None));
 
         let ctx = create_test_context().await;
         let event = JsonRpcEvent::new(Some("1".to_string()), "mining.subscribe", vec![json!("GodMiner")]);
@@ -1434,7 +1436,7 @@ mod comprehensive_tests {
     fn test_miner_type_detection_iceriver() {
         // Test: IceRiver miner detection
         let share_handler = Arc::new(ShareHandler::new("test-instance".to_string()));
-        let client_handler = Arc::new(ClientHandler::new(share_handler, 8192.0, 2, "test-instance".to_string()));
+        let client_handler = Arc::new(ClientHandler::new(share_handler, 8192.0, 2, "test-instance".to_string(), None));
 
         let ctx = create_test_context_sync();
         *ctx.remote_app.lock() = "IceRiver KS2L".to_string();
@@ -1448,7 +1450,7 @@ mod comprehensive_tests {
     fn test_miner_type_detection_bitmain() {
         // Test: Bitmain miner detection (no extranonce)
         let share_handler = Arc::new(ShareHandler::new("test-instance".to_string()));
-        let client_handler = Arc::new(ClientHandler::new(share_handler, 8192.0, 0, "test-instance".to_string()));
+        let client_handler = Arc::new(ClientHandler::new(share_handler, 8192.0, 0, "test-instance".to_string(), None));
 
         let ctx = create_test_context_sync();
         *ctx.remote_app.lock() = "GodMiner".to_string();
@@ -1462,7 +1464,7 @@ mod comprehensive_tests {
     fn test_miner_type_detection_bzminer() {
         // Test: BzMiner detection
         let share_handler = Arc::new(ShareHandler::new("test-instance".to_string()));
-        let client_handler = Arc::new(ClientHandler::new(share_handler, 8192.0, 2, "test-instance".to_string()));
+        let client_handler = Arc::new(ClientHandler::new(share_handler, 8192.0, 2, "test-instance".to_string(), None));
 
         let ctx = create_test_context_sync();
         *ctx.remote_app.lock() = "BzMiner".to_string();
@@ -1937,7 +1939,7 @@ mod comprehensive_tests {
 
         // 1. Create components
         let share_handler = Arc::new(ShareHandler::new("test-instance".to_string()));
-        let client_handler = Arc::new(ClientHandler::new(share_handler.clone(), 8192.0, 2, "test-instance".to_string()));
+        let client_handler = Arc::new(ClientHandler::new(share_handler.clone(), 8192.0, 2, "test-instance".to_string(), None));
         let ctx = create_test_context().await;
 
         // 2. Subscribe
@@ -2009,7 +2011,7 @@ mod comprehensive_tests {
 
         // This test verifies the components are set up correctly
         let share_handler = Arc::new(ShareHandler::new("example-instance".to_string()));
-        let client_handler = Arc::new(ClientHandler::new(share_handler, 8192.0, 2, "example-instance".to_string()));
+        let client_handler = Arc::new(ClientHandler::new(share_handler, 8192.0, 2, "example-instance".to_string(), None));
         // Verify handler was created
         assert!(std::mem::size_of_val(&client_handler) > 0, "Client handler should be created");
     }
@@ -2773,7 +2775,7 @@ mod comprehensive_tests {
         // Test: Extranonce wrapping at MAX_EXTRANONCE boundary
         // This tests the extranonce assignment logic when reaching the maximum value
         let share_handler = Arc::new(ShareHandler::new("test-instance".to_string()));
-        let handler = ClientHandler::new(share_handler, 8192.0, 2, "test-instance".to_string());
+        let handler = ClientHandler::new(share_handler, 8192.0, 2, "test-instance".to_string(), None);
 
         // Create multiple contexts to test extranonce assignment
         let ctx1 = create_test_context_sync();
@@ -2803,7 +2805,7 @@ mod comprehensive_tests {
     fn test_client_handler_big_job_format_detection() {
         // Test: Big job format detection for BzMiner/IceRiver
         let share_handler = Arc::new(ShareHandler::new("test-instance".to_string()));
-        let handler = ClientHandler::new(share_handler, 8192.0, 2, "test-instance".to_string());
+        let handler = ClientHandler::new(share_handler, 8192.0, 2, "test-instance".to_string(), None);
 
         let ctx_bzminer = create_test_context_sync();
         let ctx_iceriver = create_test_context_sync();
@@ -2998,5 +3000,152 @@ mod comprehensive_tests {
         );
         assert_eq!(summary.worker_name, "worker1", "Summary should contain worker name");
         assert_eq!(summary.remote_app, "BzMiner", "Summary should contain remote app");
+    }
+
+    // ========================================================================
+    // POOL SINK AND POOL ADDRESS
+    // ========================================================================
+    // A pool in front of the bridge hears every accepted share through a
+    // `PoolSink` and has every template pay its own address.
+    // ========================================================================
+
+    #[derive(Default)]
+    struct PoolTestDouble {
+        shares: parking_lot::Mutex<Vec<kaspa_stratum_bridge::share_handler::ShareEvent>>,
+        blocks: parking_lot::Mutex<Vec<kaspa_stratum_bridge::share_handler::BlockEvent>>,
+        templates_asked_for: parking_lot::Mutex<Vec<String>>,
+    }
+
+    impl kaspa_stratum_bridge::share_handler::PoolSink for PoolTestDouble {
+        fn share_accepted(&self, event: kaspa_stratum_bridge::share_handler::ShareEvent) {
+            self.shares.lock().push(event);
+        }
+        fn block_found(&self, event: kaspa_stratum_bridge::share_handler::BlockEvent) {
+            self.blocks.lock().push(event);
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl kaspa_stratum_bridge::share_handler::KaspaApiTrait for PoolTestDouble {
+        async fn get_block_template(
+            &self,
+            wallet_addr: &str,
+            _remote_app: &str,
+            _canxium_addr: &str,
+        ) -> Result<Block, Box<dyn std::error::Error + Send + Sync>> {
+            self.templates_asked_for.lock().push(wallet_addr.to_string());
+            Err("no node in this test".into())
+        }
+        async fn submit_block(
+            &self,
+            _block: Block,
+        ) -> Result<kaspa_rpc_core::SubmitBlockResponse, Box<dyn std::error::Error + Send + Sync>> {
+            Err("no node in this test".into())
+        }
+        async fn get_balances_by_addresses(
+            &self,
+            _addresses: &[String],
+        ) -> Result<Vec<(String, u64)>, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(vec![])
+        }
+        async fn get_current_block_color(&self, _block_hash: &str) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(false)
+        }
+    }
+
+    /// A context whose far end stays open, so more than one reply can be written to it.
+    async fn create_test_context_kept_open() -> (Arc<StratumContext>, tokio::net::TcpStream) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let accept_handle = tokio::spawn(async move { listener.accept().await });
+        let far_end = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let (accepted_stream, _) = accept_handle.await.unwrap().unwrap();
+        let state = Arc::new(MiningState::new());
+        let (tx, _rx) = mpsc::unbounded_channel();
+        (StratumContext::new("127.0.0.1".to_string(), 12345, accepted_stream, state, tx), far_end)
+    }
+
+    fn block_in_the_dag(daa_score: u64, blue_score: u64) -> Block {
+        let mut header = Header::from_precomputed_hash(Hash::from_bytes([3; 32]), vec![]);
+        header.timestamp = 1_700_000_000_000;
+        header.bits = 0x1e7fffff;
+        header.daa_score = daa_score;
+        header.blue_score = blue_score;
+        let tx = Transaction::new(
+            0,
+            vec![],
+            vec![TransactionOutput::new(0, ScriptPublicKey::from_vec(0, vec![]))],
+            0,
+            SubnetworkId::from_bytes([0; 20]),
+            0,
+            vec![],
+        );
+        Block::from_arcs(Arc::new(header), Arc::new(vec![tx]))
+    }
+
+    #[tokio::test]
+    async fn pool_sink_hears_an_accepted_share_and_not_a_weak_one() {
+        let pool = Arc::new(PoolTestDouble::default());
+        let handler = Arc::new(ShareHandler::with_sink("test-instance".to_string(), pool.clone()));
+        let (ctx, _far_end) = create_test_context_kept_open().await;
+        *ctx.wallet_addr.lock() = "marigoldtest:qpool".to_string();
+        *ctx.worker_name.lock() = "rig7".to_string();
+        let state = GetMiningState(&ctx);
+        let job_id = state.add_job(Job { block: block_in_the_dag(4242, 99), pre_pow_hash: Hash::default() });
+
+        // Share difficulty so low that every hash counts, well under the network target.
+        let mut diff = KaspaDiff::new();
+        diff.set_diff_value(1e-12);
+        state.set_stratum_diff(diff);
+        let submit = JsonRpcEvent::new(
+            Some("7".to_string()),
+            "mining.submit",
+            vec![json!("marigoldtest:qpool.rig7"), json!(job_id.to_string()), json!("00000000deadbeef")],
+        );
+        handler.handle_submit(ctx.clone(), submit, pool.clone()).await.expect("an accepted share replies true");
+
+        let shares = pool.shares.lock().clone();
+        assert_eq!(shares.len(), 1, "one accepted share, one event");
+        let share = &shares[0];
+        assert_eq!(share.address, "marigoldtest:qpool");
+        assert_eq!(share.worker, "rig7");
+        assert_eq!(share.difficulty, 1e-12);
+        assert!(share.hash_value > 0.0);
+        assert_eq!(share.daa_score, 4242);
+        assert_eq!(share.blue_score, 99);
+        assert!(share.timestamp_ms > 0);
+        assert!(pool.blocks.lock().is_empty(), "no block: the network target was never met");
+
+        // Now a difficulty no CPU meets by luck: the share is weak and the pool must not hear it.
+        let mut diff = KaspaDiff::new();
+        diff.set_diff_value(1e30);
+        state.set_stratum_diff(diff);
+        let submit = JsonRpcEvent::new(
+            Some("8".to_string()),
+            "mining.submit",
+            vec![json!("marigoldtest:qpool.rig7"), json!(job_id.to_string()), json!("00000000deadbef0")],
+        );
+        let _ = handler.handle_submit(ctx.clone(), submit, pool.clone()).await;
+        assert_eq!(pool.shares.lock().len(), 1, "a weak share is not reported");
+    }
+
+    #[tokio::test]
+    async fn pool_address_wins_over_the_miner_address_in_the_template() {
+        let pool = Arc::new(PoolTestDouble::default());
+        let share_handler = Arc::new(ShareHandler::new("test-instance".to_string()));
+        let as_pool =
+            ClientHandler::new(share_handler.clone(), 4.0, 2, "test-instance".to_string(), Some("marigoldtest:qpool".to_string()));
+        let solo = ClientHandler::new(share_handler, 4.0, 2, "test-instance".to_string(), None);
+
+        let (ctx, _far_end) = create_test_context_kept_open().await;
+        *ctx.wallet_addr.lock() = "marigoldtest:qminer".to_string();
+        *ctx.worker_name.lock() = "rig7".to_string();
+
+        as_pool.send_immediate_job_to_client(ctx.clone(), pool.clone()).await;
+        solo.send_immediate_job_to_client(ctx.clone(), pool.clone()).await;
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+        let asked = pool.templates_asked_for.lock().clone();
+        assert_eq!(asked, vec!["marigoldtest:qpool".to_string(), "marigoldtest:qminer".to_string()]);
     }
 }

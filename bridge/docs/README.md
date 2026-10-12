@@ -54,6 +54,7 @@ The sample configuration file is:
 
 **Note:** If no config file is found, the bridge uses code defaults:
 - Default `kaspad_address`: `localhost:16110` (code default) or `127.0.0.1:16110` (as in `config.yaml`)
+- `pool_address` (empty by default): set it and every block template pays that address instead of each miner's own, which is what a pool in front of this bridge needs; the miners' logins then only identify whose shares are whose. The pool itself hears the shares through `listen_and_serve_with_sink`.
 - Default `node_mode`: `inprocess` (if `--node-mode` is not specified)
 - Default `web_dashboard_port`: empty (dashboard disabled unless configured)
 

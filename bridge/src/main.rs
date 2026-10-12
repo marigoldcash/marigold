@@ -437,6 +437,7 @@ async fn main() -> Result<(), anyhow::Error> {
                 extranonce_size: instance.extranonce_size.unwrap_or(global.extranonce_size),
                 pow2_clamp: instance.pow2_clamp.unwrap_or(global.pow2_clamp),
                 coinbase_tag_suffix: global.coinbase_tag_suffix.clone(),
+                pool_address: global.pool_address.clone(),
             };
 
             listen_and_serve_with_shutdown(
