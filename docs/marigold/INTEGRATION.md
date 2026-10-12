@@ -12,6 +12,18 @@ Two consequences for integrators. A deposit address handed to a customer is stab
 
 Older addresses a wallet derived before this policy, or imported, stay tracked so their funds remain spendable; `address` lists any that still hold coins and `sweep` gathers them.
 
+## Operational notes for an exchange
+
+Everything here follows from the one-address rule, and most of it is simpler than on Kaspa. One point, the last, has to be got right.
+
+**Deposit attribution.** One ledger account per customer, one address per account, attribution by address, as on any UTXO chain. The address is never rotated, so the mapping from address to customer is permanent: there is no address-reuse detection, no gap limit, and no case of a customer paying to an address the wallet stopped watching. A deposit can be credited at the anchor rather than after a count of confirmations: an anchored block is final in the strict sense, and the anchor sits about a minute behind the tip, so "one anchor" is the natural deposit policy, with the finality depth as the fallback whenever `GetFinalityAnchorStatus` reports the anchors stale.
+
+**Dust and spam.** Anyone can send dust to a published address; nothing on any UTXO chain prevents it, and nothing here needs to. Marigold inherits Kaspa's storage mass, which makes creating small outputs expensive for the sender, so spam against a hot address costs the spammer more than the exchange. When the entry count grows, consolidate with an ordinary transaction to the same address, and read a busy address by cursor, as the paging section above says.
+
+**Sweeping to cold storage.** A ledger transaction from the hot address to the cold one, and nothing else: no note, no pool operation, no special case. Cold storage is a plain address whose key is kept offline, and the partially signed transaction flows inherited from Kaspa (`pskb`, `sign`) cover signing there.
+
+**Accounts, and what the 24 words bring back.** Per-customer addresses means per-customer accounts, and the one-address design's recovery promise, derive one key and ask about one address, holds per account. An exchange with many customer accounts has moved the discovery question from the address index to the account index, and must treat it as such. The facts, from the wallet as it stands: every ledger account is derived from the wallet's 24 words, with account indices 0, 1, 2 … in the order the accounts were created, so the same words recreate the same addresses; the wallet's own files remember which indices exist, and a restore from the words alone brings back the first account, after which `account create bip32` recreates the rest in order, each with the address it had. The wallet library carries an account scan (`accounts_discovery`) that the terminal does not yet expose as a command. So an exchange keeps two things beside the words: a backup of the wallet files, and its own ledger of account index to customer. With those, nothing is probabilistic; without them, the first restore from words alone looks like missing funds until the accounts are recreated in order.
+
 ## Addresses and networks
 
 The address format is Kaspa's bech32 variant with Marigold prefixes: `marigold:` on mainnet and `marigoldtest:` on the testnet. Testnet-10 is the public test network; its ticker is TMAGLD, its smallest unit the petal, 100,000,000 to a coin.
