@@ -32,7 +32,7 @@ use kaspa_consensus_core::{
     muhash::MuHashExtensions,
     notepool::{PoolCollection, PoolDiff, PoolOp, PoolStateView, PoolViewComposition, leaf_hash_entry, validate_stateful},
     subnets::SUBNETWORK_ID_NOTE_POOL,
-    tx::{MutableTransaction, PopulatedTransaction, Transaction, ValidatedTransaction, VerifiableTransaction},
+    tx::{MutableTransaction, PopulatedTransaction, Transaction, TransactionId, ValidatedTransaction, VerifiableTransaction},
     utxo::{
         utxo_diff::UtxoDiff,
         utxo_view::{UtxoView, UtxoViewComposition},
@@ -47,7 +47,6 @@ use kaspa_smt::tree::compute_root_update;
 use kaspa_utils::refs::Refs;
 
 use crate::model::services::seq_commit_accessor::SeqCommitAccessor;
-use kaspa_consensus_core::tx::TransactionId;
 use rayon::prelude::*;
 use smallvec::{SmallVec, smallvec};
 use std::{iter::once, ops::Deref};
@@ -132,8 +131,6 @@ impl VirtualStateProcessor {
         ctx.mergeset_diff.add_transaction(&validated_coinbase, pov_daa_score).unwrap();
         ctx.multiset_hash.add_transaction(&validated_coinbase, pov_daa_score);
         let validated_coinbase_id = validated_coinbase.id();
-        ctx.accepted_tx_ids.push(validated_coinbase_id);
-        ctx.accepted_tx_versions.push(validated_coinbase.version());
 
         for (i, (merged_block, txs)) in once((ctx.selected_parent(), selected_parent_transactions))
             .chain(
@@ -239,13 +236,9 @@ impl VirtualStateProcessor {
             return Err(BadPoolCommitment(header.hash, header.pool_commitment, expected_pool_commitment));
         }
 
-        let (expected_accepted_id_merkle_root, smt_build) = if self.toccata_activation.is_active(header.daa_score) {
-            // KIP-21: compute seq_commit from SMT lane processing
-            let (hash, build) = self.recompute_seq_commit(ctx, header)?;
-            (hash, Some(build))
-        } else {
-            (self.calc_accepted_id_merkle_root(ctx.accepted_tx_ids.iter().copied(), ctx.selected_parent()), None)
-        };
+        // KIP-21: compute seq_commit from SMT lane processing
+        let (expected_accepted_id_merkle_root, smt_build) = self.recompute_seq_commit(ctx, header)?;
+        let smt_build = Some(smt_build);
 
         // Verify header accepted_id_merkle_root
         if expected_accepted_id_merkle_root != header.accepted_id_merkle_root {
@@ -278,12 +271,10 @@ impl VirtualStateProcessor {
         // header-validity. This maintains compatibility with protocols like DAGKNIGHT,
         // which may not compute selected parents for every block, while still securing
         // the pruning point (which is a qualified chain block by definition).
-        if self.toccata_activation.is_active(header.daa_score) {
-            let selected_parent = ctx.ghostdag_data.selected_parent;
-            let first_parent = header.direct_parents()[0];
-            if first_parent != selected_parent {
-                return Err(WrongSelectedParentOrder(header.hash, selected_parent, first_parent));
-            }
+        let selected_parent = ctx.ghostdag_data.selected_parent;
+        let first_parent = header.direct_parents()[0];
+        if first_parent != selected_parent {
+            return Err(WrongSelectedParentOrder(header.hash, selected_parent, first_parent));
         }
 
         // Final chain qualification condition: verify all transactions are valid in context.
@@ -449,17 +440,8 @@ impl VirtualStateProcessor {
 
         let populated_tx = PopulatedTransaction::new(transaction, entries);
 
-        let seq_commit_accessor = if self.toccata_activation.is_active(pov_daa_score) {
-            Some(SeqCommitAccessor::new(
-                selected_parent,
-                &self.reachability_service,
-                &self.headers_store,
-                self.toccata_activation,
-                self.finality_depth,
-            ))
-        } else {
-            None
-        };
+        let seq_commit_accessor =
+            SeqCommitAccessor::new(selected_parent, &self.reachability_service, &self.headers_store, self.finality_depth);
         let pool_value = validated_pool_op.as_ref().map(|v| (v.consumed_petals, v.produced_petals));
         let res = self.transaction_validator.validate_populated_transaction_and_get_fee(
             &populated_tx,
@@ -467,7 +449,7 @@ impl VirtualStateProcessor {
             block_daa_score,
             flags,
             None,
-            seq_commit_accessor.as_ref().map(|v| v as _),
+            Some(&seq_commit_accessor),
             pool_value,
         );
         match res {
@@ -560,20 +542,11 @@ impl VirtualStateProcessor {
         // At this point we know all UTXO entries are populated, so we can safely pass the tx as verifiable
         let mass_and_feerate_threshold = args.feerate_threshold.map(|threshold| {
             let mass = kaspa_consensus_core::mass::Mass::new(mutable_tx.calculated_non_contextual_masses.unwrap(), contextual_mass);
-            (mass.normalized_max(&self.mempool_mass_cofactors.get(pov_daa_score)), threshold)
+            (mass.normalized_max(&self.mempool_mass_cofactors), threshold)
         });
 
-        let seq_commit_accessor = if self.toccata_activation.is_active(pov_daa_score) {
-            Some(SeqCommitAccessor::new(
-                selected_parent,
-                &self.reachability_service,
-                &self.headers_store,
-                self.toccata_activation,
-                self.finality_depth,
-            ))
-        } else {
-            None
-        };
+        let seq_commit_accessor =
+            SeqCommitAccessor::new(selected_parent, &self.reachability_service, &self.headers_store, self.finality_depth);
 
         let pool_value = validated_pool_op.as_ref().map(|v| (v.consumed_petals, v.produced_petals));
         let calculated_fee = self.transaction_validator.validate_populated_transaction_and_get_fee(
@@ -582,7 +555,7 @@ impl VirtualStateProcessor {
             pov_daa_score,
             TxValidationFlags::SkipMassCheck, // we can skip the mass check since we just set it
             mass_and_feerate_threshold,
-            seq_commit_accessor.as_ref().map(|v| v as _),
+            Some(&seq_commit_accessor),
             pool_value,
         )?;
         mutable_tx.calculated_fee = Some(calculated_fee);
@@ -828,19 +801,6 @@ impl VirtualStateProcessor {
         let empty_store = BTreeSmtStore::new();
         let (root, _) = compute_root_update::<NotePoolSmt, _>(&empty_store, NotePoolSmt::empty_root(), leaf_updates).unwrap();
         root
-    }
-
-    /// Calculates the accepted_id_merkle_root based on the current DAA score and the accepted tx ids
-    /// refer KIP-15 for more details
-    pub(super) fn calc_accepted_id_merkle_root(
-        &self,
-        accepted_tx_digests: impl ExactSizeIterator<Item = Hash>,
-        selected_parent: Hash,
-    ) -> Hash {
-        kaspa_merkle::merkle_hash(
-            self.headers_store.get_header(selected_parent).unwrap().accepted_id_merkle_root,
-            kaspa_merkle::calc_merkle_root(accepted_tx_digests),
-        )
     }
 }
 

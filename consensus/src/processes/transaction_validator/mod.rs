@@ -11,7 +11,7 @@ use kaspa_txscript::{
 
 use kaspa_consensus_core::{
     KType,
-    config::params::{FinalityAnchorParams, ForkActivation, ForkedParam},
+    config::params::{FinalityAnchorParams, ForkActivation},
     mass::MassCalculator,
 };
 
@@ -19,13 +19,12 @@ use kaspa_consensus_core::{
 pub struct TransactionValidator {
     max_tx_inputs: usize,
     max_tx_outputs: usize,
-    max_signature_script_len: ForkedParam<usize>,
+    max_signature_script_len: usize,
     max_script_public_key_len: usize,
     coinbase_payload_script_public_key_max_len: u8,
     coinbase_maturity: u64,
     ghostdag_k: KType,
     sig_cache: Cache<SigCacheKey, bool>,
-    toccata_activation: ForkActivation,
     /// Five-byte lane tags from this score (Marigold, PLAN P9.4c).
     wide_lanes_activation: ForkActivation,
     mass_per_sig_op: u64,
@@ -43,14 +42,13 @@ impl TransactionValidator {
     pub fn new(
         max_tx_inputs: usize,
         max_tx_outputs: usize,
-        max_signature_script_len: impl Into<ForkedParam<usize>>,
+        max_signature_script_len: usize,
         max_script_public_key_len: usize,
         coinbase_payload_script_public_key_max_len: u8,
         coinbase_maturity: u64,
         ghostdag_k: KType,
         counters: Arc<TxScriptCacheCounters>,
         mass_calculator: MassCalculator,
-        toccata_activation: ForkActivation,
         wide_lanes_activation: ForkActivation,
         mass_per_sig_op: u64,
         finality_anchor_params: FinalityAnchorParams,
@@ -58,14 +56,13 @@ impl TransactionValidator {
         Self {
             max_tx_inputs,
             max_tx_outputs,
-            max_signature_script_len: max_signature_script_len.into(),
+            max_signature_script_len,
             max_script_public_key_len,
             coinbase_payload_script_public_key_max_len,
             coinbase_maturity,
             ghostdag_k,
             sig_cache: Cache::with_counters(10_000, counters),
             mass_calculator,
-            toccata_activation,
             wide_lanes_activation,
             mass_per_sig_op,
             finality_anchor_params,
@@ -75,7 +72,7 @@ impl TransactionValidator {
     pub fn new_for_tests(
         max_tx_inputs: usize,
         max_tx_outputs: usize,
-        max_signature_script_len: impl Into<ForkedParam<usize>>,
+        max_signature_script_len: usize,
         max_script_public_key_len: usize,
         coinbase_payload_script_public_key_max_len: u8,
         coinbase_maturity: u64,
@@ -85,14 +82,13 @@ impl TransactionValidator {
         Self {
             max_tx_inputs,
             max_tx_outputs,
-            max_signature_script_len: max_signature_script_len.into(),
+            max_signature_script_len,
             max_script_public_key_len,
             coinbase_payload_script_public_key_max_len,
             coinbase_maturity,
             ghostdag_k,
             sig_cache: Cache::with_counters(10_000, counters),
             mass_calculator: MassCalculator::new(0, 0, 0),
-            toccata_activation: ForkActivation::never(),
             wide_lanes_activation: ForkActivation::never(),
             mass_per_sig_op: 0,
             finality_anchor_params: FinalityAnchorParams::LAUNCH_UNKEYED,

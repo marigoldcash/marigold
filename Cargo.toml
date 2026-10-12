@@ -300,6 +300,7 @@ tower-http = { version = "0.5.2", features = [
 tower = "0.5.1"
 chrono = "0.4.31"
 indexed_db_futures = "0.5.0"
+serde_with = "3.23.0"
 
 # ZK consensus verifier dependencies: do not bump casually.
 # Upstream verifier fixes can change proof/receipt acceptance, so any bump
@@ -434,6 +435,10 @@ opt-level = 2
 unknown_lints = "allow"
 
 [workspace.lints.clippy]
+# Upstream v2.1.0 warns on every unchecked arithmetic (its docs/ARITH-SAFETY.md);
+# Marigold's additions were written before that policy, and the lint job denies
+# warnings. Allowed here; a sweep of our own crates is its own piece of work.
+arithmetic_side_effects = "allow"
 empty_docs = "allow"
 uninlined_format_args = "allow"
 # New in clippy 1.98; it fires across the inherited crypto crates and the

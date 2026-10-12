@@ -64,6 +64,11 @@ message KaspadMessage {
     DonePruningPointPoolStateChunksMessage donePruningPointPoolStateChunks = 67;
     RequestFinalityAnchorMessage requestFinalityAnchor = 68;
     FinalityAnchorMessage finalityAnchor = 69;
+    // Upstream v2.1.0 took 64-67 for its chunked IBD; Marigold's 64-69 were on the testnet first and stay.
+    PruningPointProofChunkMessage pruningPointProofChunk = 70;
+    PruningPointProofChunksEndMessage pruningPointProofChunksEnd = 71;
+    TrustedDataChunkMessage trustedDataChunk = 72;
+    TrustedDataChunksEndMessage trustedDataChunksEnd = 73;
   }
 }
 

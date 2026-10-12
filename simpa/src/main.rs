@@ -1,3 +1,4 @@
+#![allow(clippy::arithmetic_side_effects)]
 use async_channel::unbounded;
 use clap::Parser;
 use futures::{Future, future::try_join_all};
@@ -213,7 +214,6 @@ fn main_impl(mut args: Args) {
     // runs reject every pool-op tx as UnknownTxVersion (toccata/pool never activate
     // during a short simulation otherwise). `test_pruning`'s own `toccata_activation`
     // override in `apply_args_to_consensus_params` still applies afterward for that mode.
-    params.toccata_activation = ForkActivation::always();
     params.pool_activation = ForkActivation::always();
     params.coinbase_maturity = 200;
     params.storage_mass_parameter = 10_000;
@@ -415,8 +415,6 @@ fn apply_args_to_consensus_params(args: &Args, params: &mut Params) {
         params.merge_depth = 64 * 2;
         params.mergeset_size_limit = 32 * 2;
         params.pruning_depth = 100 * 2 * 2 + 50;
-
-        params.toccata_activation = ForkActivation::new(1000);
 
         info!("Setting pruning depth to {:?}", params.pruning_depth());
     }

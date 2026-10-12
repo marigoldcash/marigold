@@ -23,10 +23,7 @@ use crate::{
 };
 use kaspa_consensus_core::{
     coinbase::MinerData,
-    config::{
-        constants::consensus::{DEFAULT_GAS_PER_LANE_LIMIT, DEFAULT_LANES_PER_BLOCK_LIMIT},
-        params::ForkActivation,
-    },
+    config::constants::consensus::{DEFAULT_GAS_PER_LANE_LIMIT, DEFAULT_LANES_PER_BLOCK_LIMIT},
     constants::TX_VERSION_TOCCATA,
     mass::{BlockLaneLimits, BlockMassLimits},
     notepool::{DenominationTag, FreshnessAnchor, MintOp, NewNote, PoolOp, SignedGroup, TransferOp, hashing as pool_hashing},
@@ -47,7 +44,6 @@ fn mining_manager() -> MiningManager {
         TARGET_TIME_PER_BLOCK,
         false,
         BlockMassLimits::with_shared_limit(MAX_BLOCK_MASS),
-        ForkActivation::never(),
         BLOCK_LANE_LIMITS,
         None,
         Arc::new(MiningCounters::default()),
