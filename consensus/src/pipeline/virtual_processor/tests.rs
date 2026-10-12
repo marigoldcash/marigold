@@ -7,7 +7,7 @@ use kaspa_consensus_core::{
     blockstatus::BlockStatus,
     coinbase::MinerData,
     config::{ConfigBuilder, params::MAINNET_PARAMS},
-    constants::BLOCK_VERSION,
+    constants::{BLOCK_VERSION, NOTE_POOL_BLOCK_VERSION},
     tx::{ScriptPublicKey, ScriptVec, Transaction},
 };
 use kaspa_hashes::Hash;
@@ -180,7 +180,10 @@ async fn block_template_uses_current_block_version() {
     let template = consensus
         .build_block_template(miner_data, Box::new(OnetimeTxSelector::new(Default::default())), TemplateBuildMode::Standard)
         .unwrap();
-    assert_eq!(template.block.header.version, BLOCK_VERSION);
+    // The note pool is active from genesis on MAINNET_PARAMS, so the template
+    // carries the pool's block version, one above upstream's BLOCK_VERSION.
+    assert_eq!(template.block.header.version, NOTE_POOL_BLOCK_VERSION);
+    assert_eq!(NOTE_POOL_BLOCK_VERSION, BLOCK_VERSION + 1);
 
     consensus.shutdown(join_handles);
 }
