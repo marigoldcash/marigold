@@ -21,7 +21,7 @@ pub struct BridgeConfig {
     pub log_to_file: bool,
     pub health_check_port: String,
     pub block_wait_time: Duration,
-    pub min_share_diff: u32,
+    pub min_share_diff: f64,
     pub var_diff: bool,
     pub shares_per_min: u32,
     pub var_diff_stats: bool,
@@ -96,7 +96,7 @@ async fn listen_and_serve_impl<T: KaspaApiTrait + Send + Sync + 'static>(
     sink: Arc<dyn PoolSink>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Calculate min diff with pow2 clamp if needed
-    let mut min_diff = config.min_share_diff as f64;
+    let mut min_diff = config.min_share_diff;
     if config.pow2_clamp && min_diff > 0.0 {
         min_diff = 2_f64.powi((min_diff.log2().floor()) as i32);
     }
@@ -210,6 +210,9 @@ async fn listen_and_serve_impl<T: KaspaApiTrait + Send + Sync + 'static>(
     };
 
     // Start vardiff thread if enabled
+    // Vardiff never drops a client under the port's own minimum.
+    share_handler.set_vardiff_floor(min_diff);
+
     if config.var_diff {
         let shares_per_min = if config.shares_per_min > 0 { config.shares_per_min } else { 20 };
         if let Some(rx) = shutdown_rx_for_bg.as_ref().cloned() {

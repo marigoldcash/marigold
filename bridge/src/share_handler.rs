@@ -98,17 +98,27 @@ const VARDIFF_UPPER_RATIO: f64 = 1.25; // above this => increase diff
 const VARDIFF_MAX_STEP_UP: f64 = 2.0; // max 2x per adjustment tick
 const VARDIFF_MAX_STEP_DOWN: f64 = 0.5; // max -50% per adjustment tick
 
-fn vardiff_pow2_clamp_towards(current: f64, next: f64) -> f64 {
+/// The nearest power of two in the direction of travel, never under `floor`
+/// (the port's minimum, which need not be a power of two itself).
+fn vardiff_pow2_clamp_towards(current: f64, next: f64, floor: f64) -> f64 {
     if !next.is_finite() || next <= 0.0 {
-        return 1.0;
+        return floor;
     }
 
     let exp = if next >= current { next.log2().ceil() } else { next.log2().floor() };
     let clamped = 2_f64.powi(exp as i32);
-    if clamped < 1.0 { 1.0 } else { clamped }
+    if clamped < floor { floor } else { clamped }
 }
 
-fn vardiff_compute_next_diff(current: f64, shares: f64, elapsed_secs: f64, expected_spm: f64, clamp_pow2: bool) -> Option<f64> {
+/// `floor` is the port's own minimum: vardiff never hands a client less than it.
+fn vardiff_compute_next_diff(
+    current: f64,
+    shares: f64,
+    elapsed_secs: f64,
+    expected_spm: f64,
+    clamp_pow2: bool,
+    floor: f64,
+) -> Option<f64> {
     if !current.is_finite() || current <= 0.0 {
         return None;
     }
@@ -118,11 +128,11 @@ fn vardiff_compute_next_diff(current: f64, shares: f64, elapsed_secs: f64, expec
 
     if shares == 0.0 && elapsed_secs >= VARDIFF_MAX_ELAPSED_SECS_NO_SHARES {
         let mut next = current * VARDIFF_MAX_STEP_DOWN;
-        if next < 1.0 {
-            next = 1.0;
+        if next < floor {
+            next = floor;
         }
         if clamp_pow2 {
-            next = vardiff_pow2_clamp_towards(current, next);
+            next = vardiff_pow2_clamp_towards(current, next, floor);
         }
         return if (next - current).abs() > f64::EPSILON { Some(next) } else { None };
     }
@@ -142,14 +152,17 @@ fn vardiff_compute_next_diff(current: f64, shares: f64, elapsed_secs: f64, expec
 
     let step = ratio.sqrt().clamp(VARDIFF_MAX_STEP_DOWN, VARDIFF_MAX_STEP_UP);
     let mut next = current * step;
-    if next < 1.0 {
-        next = 1.0;
+    if next < floor {
+        next = floor;
     }
     if clamp_pow2 {
-        next = vardiff_pow2_clamp_towards(current, next);
+        next = vardiff_pow2_clamp_towards(current, next, floor);
     }
 
-    let rel_change = (next - current).abs() / current.max(1.0);
+    // Relative to the difficulty itself: measured against one, as it once
+    // was, no change under one could ever clear ten percent, and a CPU port
+    // sat at its starting difficulty for good.
+    let rel_change = (next - current).abs() / current;
     if rel_change < 0.10 {
         return None;
     }
@@ -297,6 +310,8 @@ pub struct ShareHandler {
     instance_id: String, // Instance identifier for logging
     duplicate_submit_guard: Arc<Mutex<DuplicateSubmitGuard>>,
     sink: Arc<dyn PoolSink>,
+    /// The port's minimum share difficulty, which vardiff never goes under.
+    vardiff_floor: Arc<Mutex<f64>>,
 }
 
 impl ShareHandler {
@@ -313,7 +328,13 @@ impl ShareHandler {
             instance_id,
             duplicate_submit_guard: Arc::new(Mutex::new(DuplicateSubmitGuard::new(Duration::from_secs(180), 50_000))),
             sink,
+            vardiff_floor: Arc::new(Mutex::new(1.0)),
         }
+    }
+
+    /// The lowest difficulty vardiff may hand a client on this port.
+    pub fn set_vardiff_floor(&self, floor: f64) {
+        *self.vardiff_floor.lock() = floor;
     }
 
     fn log_prefix(&self) -> String {
@@ -1735,6 +1756,7 @@ impl ShareHandler {
         clamp: bool,
         mut shutdown_rx: Option<watch::Receiver<bool>>,
     ) {
+        let vardiff_floor = Arc::clone(&self.vardiff_floor);
         let stats = Arc::clone(&self.stats);
         let prefix = self.log_prefix();
 
@@ -1778,7 +1800,8 @@ impl ShareHandler {
                     let elapsed = now.duration_since(start).as_secs_f64().max(0.0);
                     let shares = *v.var_diff_shares_found.lock() as f64;
                     let current = *v.min_diff.lock();
-                    let next_opt = vardiff_compute_next_diff(current, shares, elapsed, expected_spm, clamp);
+                    let floor = *vardiff_floor.lock();
+                    let next_opt = vardiff_compute_next_diff(current, shares, elapsed, expected_spm, clamp, floor);
                     let Some(next) = next_opt else { continue };
 
                     *v.min_diff.lock() = next;
@@ -1853,6 +1876,23 @@ mod retention_tests {
             let (tx, _rx) = mpsc::unbounded_channel();
             StratumContext::new("127.0.0.1".to_string(), 12345, accepted_stream, state, tx)
         })
+    }
+
+    #[test]
+    fn vardiff_goes_under_one_for_a_cpu_port_and_never_under_the_floor() {
+        // One share in two minutes against a target of thirty a minute: a big step down.
+        let next = vardiff_compute_next_diff(0.01, 3.0, 120.0, 30.0, false, 0.001).expect("a change");
+        assert!((0.001..0.01).contains(&next), "{next}");
+        // Already at the floor: the step down lands on it.
+        assert_eq!(vardiff_compute_next_diff(0.0015, 3.0, 120.0, 30.0, false, 0.001), Some(0.001));
+        // No shares at all for a long time: halves, and stops at the floor.
+        assert_eq!(vardiff_compute_next_diff(0.0015, 0.0, 100.0, 30.0, false, 0.001), Some(0.001));
+        // An ASIC port keeps the old floor of one.
+        assert_eq!(vardiff_compute_next_diff(1.5, 3.0, 120.0, 30.0, false, 1.0), Some(1.0));
+        // The power-of-two clamp works below one as well.
+        let clamped = vardiff_compute_next_diff(0.01, 3.0, 120.0, 30.0, true, 0.001).expect("a change");
+        assert!((clamped.log2() - clamped.log2().round()).abs() < 1e-9, "{clamped} is not a power of two");
+        assert!(clamped >= 0.001);
     }
 
     #[test]

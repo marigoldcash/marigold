@@ -59,3 +59,11 @@ instances:
     min_share_diff: 16384
     prom_port: ":2117"
     log_to_file: true
+
+  # CPU wallets ('marigold-cli mine start --pool <host>:5562'). A CPU does
+  # about a megahash a second, so its shares need a difficulty around a
+  # thousandth; vardiff takes it from here, never under this floor.
+  - stratum_port: ":5562"
+    min_share_diff: 0.002
+    prom_port: ":2121"
+    log_to_file: true
