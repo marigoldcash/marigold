@@ -111,11 +111,7 @@ fn config(anchor_params: FinalityAnchorParams) -> crate::config::Config {
 }
 
 fn keyed_params(keypairs: &[secp256k1::Keypair], depth: u64, interval: u64) -> FinalityAnchorParams {
-    FinalityAnchorParams {
-        trustees: Some(trustee_keys(keypairs)),
-        depth,
-        launch_interval: interval,
-    }
+    FinalityAnchorParams { trustees: Some(trustee_keys(keypairs)), depth, launch_interval: interval }
 }
 
 /// Builds a linear chain of empty blocks `first_hash..first_hash+count` on `tip`,
