@@ -89,6 +89,12 @@ Do: the grandma-safe pass over every string, screen reader labels, large text, d
 
 Verify: a checklist in the pull request; two testers from the group who are not developers complete the four flows unaided. Done when: they do.
 
+### M11b — Knowing when a payment arrived while the app was closed (after M7, before the stores)
+
+Do, in this order, each its own pull request. (1) A background check: the app asks the operating system for periodic background time (iOS background app refresh, Android WorkManager), takes the light copy's diffs since its last look, checks its own request keys and its ledger address locally, and raises a local notification "A payment arrived. Open the wallet." Nothing leaves the phone; the delay is the operating system's, fifteen minutes to hours. (2) A payer-side ping, opt in: a request code may carry a one-time notify token minted by a small relay we run; a paying wallet that honours it tells the relay "token done" once its transaction is accepted, and the relay pushes the same content-free line to the device behind the token. The relay learns that a device received a payment at a time, never which note or how much; tokens are single use; the wallet trusts nothing in the push and reads its own copy on open. (3) For people with a home machine, the wallet service there, which watches anyway, pings through the same relay. Never (4): registering keys with a public node to be watched.
+
+Verify: (1) on a simulator with background refresh forced, a faucet payment to a request issued before the app was closed raises the local notification within the next refresh; (2) a terminal wallet paying a request with a token produces a push on the device within seconds, and the relay's log holds no key, serial or amount; (3) the Telegram-linked machine's payment produces the push. Done when: the three pass and the FAQ says what the relay learns.
+
 ### M12 — The stores
 
 Do: App Store listing and review (privacy manifest, the non-custodial wallet declaration, screenshots), Play listing (data safety form, financial-services declaration), a page on marigold.cash for the app, the FAQ entry, and the release post.
@@ -97,4 +103,4 @@ Verify: both apps live, installable from the stores. Done when: the links are on
 
 ## Out of scope, on purpose
 
-Push notifications for incoming payments (would need a server that knows your notes), mining on the phone (forbidden by Apple, pointless anyway), the Telegram bot's features (the bot stays as the remote for a home machine), assets and lanes (not active on any network), and any visual design beyond the basic components until the structure stands.
+A public node watching your request keys to notify you (it would learn which keys are yours, the thing the light wallet exists to avoid); mining on the phone (forbidden by Apple, pointless anyway), the Telegram bot's features (the bot stays as the remote for a home machine), assets and lanes (not active on any network), and any visual design beyond the basic components until the structure stands.
