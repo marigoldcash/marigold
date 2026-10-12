@@ -27,7 +27,7 @@ name = "bench"
 harness = false
 
 [lints]
-rust = { unexpected_cfgs = { level = "warn", check-cfg = ['cfg(fuzzing)'] } }
+rust = { unexpected_cfgs = { level = "warn", check-cfg = ['cfg(fuzzing)'] }, unknown_lints = "allow" }
 
 [lints.clippy]
 empty_docs = "allow"

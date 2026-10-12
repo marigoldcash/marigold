@@ -115,7 +115,6 @@ fn keyed_params(keypairs: &[secp256k1::Keypair], depth: u64, interval: u64) -> F
         trustees: Some(trustee_keys(keypairs)),
         depth,
         launch_interval: interval,
-        ..FinalityAnchorParams::LAUNCH_UNKEYED
     }
 }
 
