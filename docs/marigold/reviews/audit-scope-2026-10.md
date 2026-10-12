@@ -4,7 +4,7 @@
 
 **Parties.** The audit is commissioned by marigold.cash Ltd (a UK company limited by guarantee with open-source clauses, incorporation applied for in October 2026) and paid for by O'Brien & Partners, Neyruz, Switzerland, the founder's consultancy, on the company's behalf. The auditor must be independent: no ownership, employment or other payment from either party beyond the fee for this audit, and in particular the auditor is not O'Brien & Partners. The report is published in full, under the auditor's name, in `docs/marigold/reviews/` of the public repository, beside the project's own [self-assessment](self-assessment-2026-10.md), which is disclosed as the founder's.
 
-**Object.** The Marigold source at a named tag of [marigoldcash/marigold](https://github.com/marigoldcash/marigold), `v2.87.343` or the tag current at signing, as a fork of rusty-kaspa version 2.0.1 (upstream commit `a41a333b`). The audit is of the difference from upstream, `git diff master..<tag>`, not of rusty-kaspa itself.
+**Object.** The Marigold source at a named tag of [marigoldcash/marigold](https://github.com/marigoldcash/marigold), `v2.87.343` or the tag current at signing, as a fork of rusty-kaspa (upstream v2.1.0 merged on 2026-10-12; the `master` branch of the repository is the untouched upstream snapshot at the version last merged). The audit is of the difference from upstream, `git diff master..<tag>`, not of rusty-kaspa itself.
 
 ## In scope
 
