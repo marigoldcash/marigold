@@ -179,15 +179,17 @@ Marigold läuft auf einer Proof-of-Work-Blockchain, die ungefähr 10 Blöcke pro
 
 ---
 
-## Sicherheit beim Start: Stützräder, die wieder abkommen
+## Die Anker: eine kleine Absicherung, die bleibt
 
-Eine neue Proof-of-Work-Chain hat wenig Rechenleistung hinter sich, und wenig Rechenleistung lädt zu Angriffen ein. Marigold startet mit einer befristeten, vollständig offengelegten Absicherung namens **Finalitätsanker**: Fünf öffentlich benannte Treuhänder unterschreiben in regelmäßigen Abständen gemeinsam einen jungen Block — mindestens 3 von 5 müssen mitmachen — und machen ihn damit endgültig und unumkehrbar. Einen verankerten Block kann niemand mehr rückgängig machen.
+Eine neue Proof-of-Work-Chain hat wenig Rechenleistung hinter sich, und wenig Rechenleistung lädt zu Angriffen ein. Marigold hat eine vollständig offengelegte Absicherung namens **Finalitätsanker**: Fünf öffentlich benannte Treuhänder unterschreiben in regelmäßigen Abständen gemeinsam einen jungen Block — mindestens 3 von 5 müssen mitmachen — und machen ihn damit endgültig. Einen verankerten Block kann niemand rückgängig machen, mit wie viel Rechenleistung auch immer.
 
-Die Treuhänder können keine Transaktionen zensieren, keine Coins erzeugen, niemandes Geld bewegen und keine Blöcke produzieren. Ihre einzige Macht ist, das Rückgängigmachen abgeschlossener Transaktionen zu verhindern. Wenn sie verstummen, läuft die Chain ganz normal als gewöhnliches Proof-of-Work-Netzwerk weiter — etwas weniger geschützt, aber voll funktionsfähig.
+Die Treuhänder können keine Transaktionen zensieren, keine Coins erzeugen, niemandes Geld bewegen und keine Blöcke produzieren. Ihre einzige Macht ist, das Rückgängigmachen abgeschlossener Transaktionen zu verhindern. Verstummen sie, läuft die Chain als gewöhnliches Proof-of-Work-Netz weiter — etwas weniger geschützt, aber voll funktionsfähig.
 
-Die Absicherung ist darauf angelegt, wieder zu verschwinden. Sobald die Rechenleistung im Netzwerk stark genug ist, dass Angriffe unbezahlbar werden, werden die Anker von verbindlich zu empfehlend und treten am Ende ganz außer Kraft. Vorher soll die Auswahl der nachfolgenden Treuhänder an die Mitbestimmung der Scheininhaber übergehen — selbst der Rest der Stützräder wechselt also von den Gründern zur Gemeinschaft, bevor sie ganz abgenommen werden.
+Frühere Fassungen dieses Papiers nannten die Anker Stützräder, die abkommen, sobald das Netz stark genug ist. Sie bleiben, und der Grund ist deine Wallet. Die meisten Wallets betreiben keinen eigenen Knoten: Deine Wallet fragt einen öffentlichen Rechner nach dem jüngsten Anker, prüft die Unterschriften der Treuhänder darauf, prüft die Noten, die er ihr aushändigt, gegen diesen verankerten Block, findet darunter deine eigenen, ohne irgendwem zu sagen, welche das sind, und folgt der Chain von dort an. Der Anker ist das Einzige, woran deine Wallet einen öffentlichen Rechner messen kann. Ohne ihn müsste eine Wallet ohne Knoten diesem Rechner in allem aufs Wort glauben.
 
-Im öffentlichen Testnetz läuft die Absicherung jetzt: fünf Treuhänder-Schlüssel, etwa alle dreißig Sekunden ein Anker, jeder Knoten setzt ihn durch. Die Testnetz-Treuhänder sind Wegwerfschlüssel für die Probe; die echten werden zum Start bestimmt.
+Die ehrliche Aussage lautet also: Den fünf Treuhändern wird zugetraut, keinen falschen Anker zu unterschreiben, solange Marigold läuft. Drei von ihnen gemeinsam könnten es; mit einem öffentlichen Rechner, der mitspielt, könnten sie eine Wallet ohne Knoten in die Irre führen. Wer keinen Treuhänder dazwischen haben will, kann einen eigenen Knoten betreiben, der jeden Block selbst prüft. Die Gründer wählen die ersten fünf Treuhänder, nicht die letzten: Ihre Ablösung soll an die übergehen, die Noten halten, und wie ein Treuhänder an einen Nachfolger übergibt, wird gerade entworfen.
+
+Im öffentlichen Testnetz läuft die Absicherung: fünf Treuhänderschlüssel, etwa alle dreißig Sekunden ein Anker, jeder Knoten setzt ihn durch, jede Wallet startet vom jüngsten Anker. Die Treuhänder des Testnetzes sind Wegwerfschlüssel für die Probe; die echten werden zum Start gewählt.
 
 ---
 

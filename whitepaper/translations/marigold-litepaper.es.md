@@ -179,15 +179,17 @@ Marigold funciona sobre una blockchain de prueba de trabajo que produce unos 10 
 
 ---
 
-## Seguridad en el lanzamiento: ruedas de apoyo que se acaban quitando
+## Los anclajes: una pequeña salvaguarda que se queda
 
-Una cadena de prueba de trabajo recién nacida tiene poca potencia de minería, y la poca potencia de minería invita a los ataques. Marigold se lanza con una salvaguarda temporal y enteramente pública llamada **anclas de finalidad**: cinco garantes identificados públicamente co-firman cada cierto tiempo (hacen falta al menos 3 de 5) un bloque reciente y lo vuelven permanente e irreversible. Nadie puede deshacer un bloque anclado.
+Una cadena de prueba de trabajo recién nacida tiene poca potencia de minería, y la poca potencia de minería invita a los ataques. Marigold tiene una salvaguarda enteramente pública llamada **anclas de finalidad**: cinco garantes identificados públicamente co-firman cada cierto tiempo (hacen falta al menos 3 de 5) un bloque reciente y lo vuelven permanente. Nadie puede deshacer un bloque anclado, por mucha potencia de minería que traiga.
 
-Los garantes no pueden censurar transacciones, ni crear monedas, ni mover los fondos de nadie, ni producir bloques. Su único poder es impedir que se deshagan transacciones ya completadas. Si se quedan en silencio, la cadena sigue funcionando con normalidad como una red de prueba de trabajo corriente: algo menos protegida, pero plenamente operativa.
+Los garantes no pueden censurar transacciones, ni crear monedas, ni mover los fondos de nadie, ni producir bloques. Su único poder es impedir que se deshagan transacciones ya completadas. Si se quedan en silencio, la cadena sigue adelante como una red de prueba de trabajo corriente: algo menos protegida, pero funcionando por completo.
 
-La salvaguarda está diseñada para retirarse. Cuando la potencia de minería de la red crezca lo bastante como para que atacarla salga prohibitivamente caro, las anclas pasarán de obligatorias a consultivas y de ahí a caducadas del todo. Antes de que eso ocurra, la elección de los garantes sucesores está pensada para pasar a la gobernanza de quienes tienen billetes — de modo que incluso lo que quede de las ruedas de apoyo pase de los fundadores a la comunidad antes de que se retiren por completo.
+Versiones anteriores de este documento llamaban a las anclas ruedas de apoyo, que se quitarían cuando la red fuera fuerte. Se quedan, y el motivo es tu monedero. La mayoría de los monederos no tienen un nodo propio: tu monedero pide a un ordenador público el ancla más reciente, comprueba las firmas de los garantes, comprueba los billetes que le entregan contra ese bloque anclado, encuentra entre ellos los tuyos sin decirle a nadie cuáles son, y sigue la cadena a partir de ahí. El ancla es lo único con lo que tu monedero puede exigir cuentas a un ordenador público. Sin ella, un monedero sin nodo tendría que fiarse de la palabra de ese ordenador para todo.
 
-En la red de pruebas pública la salvaguarda ya está funcionando: cinco llaves de fideicomisarios, un ancla cada treinta segundos aproximadamente, todos los nodos haciéndola cumplir. Los fideicomisarios de la red de pruebas son llaves desechables hechas para el ensayo; los de verdad se eligen en el lanzamiento.
+Así que la afirmación honesta es esta: se confía en que los cinco garantes no firmen un ancla falsa, mientras Marigold exista. Tres de ellos juntos podrían hacerlo; con un ordenador público cómplice, podrían engañar a un monedero sin nodo. Quien no quiera ningún garante de por medio puede tener un nodo propio, que comprueba cada bloque por sí mismo. Los fundadores eligen a los cinco primeros garantes, no a los últimos: su relevo ha de pasar a quienes tienen billetes, y cómo un garante cede el puesto a su sucesor se está diseñando ahora.
+
+En la red de pruebas pública la salvaguarda está funcionando: cinco llaves de garantes, un ancla cada treinta segundos aproximadamente, todos los nodos haciéndola cumplir, todos los monederos arrancando desde el ancla más reciente. Los garantes de la red de pruebas son llaves desechables creadas para el ensayo; el conjunto real se elige en el lanzamiento.
 
 ---
 

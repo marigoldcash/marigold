@@ -179,15 +179,17 @@ Marigold roda em um blockchain de prova de trabalho que produz cerca de 10 bloco
 
 ---
 
-## Segurança no lançamento: rodinhas que saem depois
+## As âncoras: uma pequena proteção que fica
 
-Um blockchain de prova de trabalho novo tem pouco poder de mineração, e pouco poder de mineração é convite para ataque. Marigold é lançado com uma proteção temporária e totalmente divulgada, chamada **âncoras de finalidade**: cinco curadores publicamente identificados assinam em conjunto, de tempos em tempos (com no mínimo 3 de 5), um bloco recente, tornando-o permanente e irreversível. Ninguém consegue desfazer um bloco ancorado.
+Um blockchain de prova de trabalho novo tem pouco poder de mineração, e pouco poder de mineração é convite para ataque. Marigold tem uma proteção totalmente divulgada, chamada **âncoras de finalidade**: cinco curadores publicamente identificados assinam em conjunto, de tempos em tempos (com no mínimo 3 de 5), um bloco recente, tornando-o permanente. Ninguém consegue desfazer um bloco ancorado, por mais poder de mineração que traga.
 
-Os curadores não podem censurar transações, criar moedas, mover o dinheiro de ninguém nem produzir blocos. O único poder deles é impedir que transações concluídas sejam desfeitas. Se ficarem em silêncio, o blockchain segue normalmente como uma rede comum de prova de trabalho — um pouco menos protegida, mas plenamente operacional.
+Os curadores não podem censurar transações, criar moedas, mover o dinheiro de ninguém nem produzir blocos. O único poder deles é impedir que transações concluídas sejam desfeitas. Se ficarem em silêncio, a cadeia segue como uma rede de prova de trabalho comum: um pouco menos protegida, mas funcionando por inteiro.
 
-A proteção foi feita para se aposentar. Quando o poder de mineração da rede crescer a ponto de tornar os ataques proibitivamente caros, as âncoras deixam de ser obrigatórias, passam a ser apenas consultivas e depois expiram de vez. Antes disso, a escolha dos curadores sucessores deve passar para a governança de quem tem cédulas — de modo que até o que resta das rodinhas sai das mãos dos fundadores para as da comunidade antes de ser retirado por completo.
+Versões anteriores deste documento chamavam as âncoras de rodinhas, a tirar quando a rede estivesse forte. Elas ficam, e o motivo é a sua carteira. A maioria das carteiras não roda um nó próprio: a sua carteira pede a um computador público a âncora mais recente, confere as assinaturas dos curadores, confere as notas que recebe contra aquele bloco ancorado, encontra as suas entre elas sem contar a ninguém quais são, e segue a cadeia dali em diante. A âncora é a única coisa com que a sua carteira pode cobrar um computador público. Sem ela, uma carteira sem nó teria de aceitar a palavra desse computador para tudo.
 
-Na rede de testes pública a proteção já está funcionando: cinco chaves de curadores, uma âncora a cada trinta segundos mais ou menos, todos os nós fazendo valer. Os curadores da rede de testes são chaves descartáveis feitas para o ensaio; os de verdade são escolhidos no lançamento.
+Então a afirmação honesta é esta: confia-se que os cinco curadores não assinem uma âncora falsa, enquanto Marigold existir. Três deles juntos poderiam; com um computador público cúmplice, poderiam enganar uma carteira sem nó. Quem não quiser curador nenhum no caminho pode rodar um nó próprio, que confere cada bloco por conta própria. Os fundadores escolhem os cinco primeiros curadores, não os últimos: a substituição deles deve passar para quem tem notas, e como um curador passa o lugar a um sucessor está sendo desenhado agora.
+
+Na rede de testes pública a proteção está rodando: cinco chaves de curadores, uma âncora a cada trinta segundos mais ou menos, todo nó fazendo valer, toda carteira partindo da âncora mais recente. Os curadores da rede de testes são chaves descartáveis feitas para o ensaio; o conjunto de verdade é escolhido no lançamento.
 
 ---
 

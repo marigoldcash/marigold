@@ -38,7 +38,7 @@
       "Why It Is Honest Money": "the arithmetic",
       "The Chain: Fast Enough to Feel Like Cash": "the chain",
       "Economics at a Glance": "economics",
-      "The Anchors: A Small Safeguard That Stays": "launch security",
+      "The Anchors: A Small Safeguard That Stays": "the anchors",
       "What Marigold Is — and Is Not": "in one breath"
     },
     "edition": "Second edition · October 2026"
@@ -66,10 +66,10 @@
       "Why It Is Honest Money": "la aritmética",
       "The Chain: Fast Enough to Feel Like Cash": "la cadena",
       "Economics at a Glance": "economía",
-      "The Anchors: A Small Safeguard That Stays": "seguridad al lanzar",
-      "What Marigold Is — and Is Not": "en una frase"
+      "What Marigold Is — and Is Not": "en una frase",
+      "The Anchors: A Small Safeguard That Stays": "los anclajes"
     },
-    "edition": "Second edition · October 2026"
+    "edition": "Segunda edición · octubre de 2026"
   },
   "de": {
     "name": "Deutsch",
@@ -94,10 +94,10 @@
       "Why It Is Honest Money": "die rechnung",
       "The Chain: Fast Enough to Feel Like Cash": "die chain",
       "Economics at a Glance": "ökonomie",
-      "The Anchors: A Small Safeguard That Stays": "sicherheit zum start",
-      "What Marigold Is — and Is Not": "in einem satz"
+      "What Marigold Is — and Is Not": "in einem satz",
+      "The Anchors: A Small Safeguard That Stays": "die anker"
     },
-    "edition": "Second edition · October 2026"
+    "edition": "Zweite Ausgabe · Oktober 2026"
   },
   "fr": {
     "name": "Français",
@@ -122,10 +122,10 @@
       "Why It Is Honest Money": "l'arithmétique",
       "The Chain: Fast Enough to Feel Like Cash": "la chaîne",
       "Economics at a Glance": "économie",
-      "The Anchors: A Small Safeguard That Stays": "sécurité au lancement",
-      "What Marigold Is — and Is Not": "en une phrase"
+      "What Marigold Is — and Is Not": "en une phrase",
+      "The Anchors: A Small Safeguard That Stays": "les ancres"
     },
-    "edition": "Second edition · October 2026"
+    "edition": "Deuxième édition · octobre 2026"
   },
   "it": {
     "name": "Italiano",
@@ -150,10 +150,10 @@
       "Why It Is Honest Money": "l'aritmetica",
       "The Chain: Fast Enough to Feel Like Cash": "la catena",
       "Economics at a Glance": "economia",
-      "The Anchors: A Small Safeguard That Stays": "sicurezza al lancio",
-      "What Marigold Is — and Is Not": "in una frase"
+      "What Marigold Is — and Is Not": "in una frase",
+      "The Anchors: A Small Safeguard That Stays": "le ancore"
     },
-    "edition": "Second edition · October 2026"
+    "edition": "Seconda edizione · ottobre 2026"
   },
   "pt": {
     "name": "Português",
@@ -178,10 +178,10 @@
       "Why It Is Honest Money": "a aritmética",
       "The Chain: Fast Enough to Feel Like Cash": "a cadeia",
       "Economics at a Glance": "economia",
-      "The Anchors: A Small Safeguard That Stays": "segurança no lançamento",
-      "What Marigold Is — and Is Not": "em uma frase"
+      "What Marigold Is — and Is Not": "em uma frase",
+      "The Anchors: A Small Safeguard That Stays": "as âncoras"
     },
-    "edition": "Second edition · October 2026"
+    "edition": "Segunda edição · outubro de 2026"
   },
   "ru": {
     "name": "Русский",
@@ -206,10 +206,10 @@
       "Why It Is Honest Money": "арифметика",
       "The Chain: Fast Enough to Feel Like Cash": "цепочка",
       "Economics at a Glance": "экономика",
-      "The Anchors: A Small Safeguard That Stays": "защита на старте",
-      "What Marigold Is — and Is Not": "коротко"
+      "What Marigold Is — and Is Not": "коротко",
+      "The Anchors: A Small Safeguard That Stays": "якоря"
     },
-    "edition": "Second edition · October 2026"
+    "edition": "Второе издание · октябрь 2026"
   },
   "zh": {
     "name": "中文",
@@ -234,9 +234,9 @@
       "Why It Is Honest Money": "算术",
       "The Chain: Fast Enough to Feel Like Cash": "这条链",
       "Economics at a Glance": "经济模型",
-      "The Anchors: A Small Safeguard That Stays": "启动期安全",
-      "What Marigold Is — and Is Not": "一句话"
+      "What Marigold Is — and Is Not": "一句话",
+      "The Anchors: A Small Safeguard That Stays": "锚点"
     },
-    "edition": "Second edition · October 2026"
+    "edition": "第二版 · 2026 年 10 月"
   }
 }

@@ -179,15 +179,17 @@ Marigold gira su una blockchain proof-of-work che produce circa 10 blocchi al se
 
 ---
 
-## Sicurezza al lancio: rotelle che poi si tolgono
+## Le ancore: una piccola protezione che resta
 
-Una catena proof-of-work nuova ha poca potenza di mining, e poca potenza di mining invita gli attacchi. Marigold parte con una protezione temporanea e dichiarata per intero, chiamata **ancore di irreversibilità**: cinque garanti identificati pubblicamente firmano insieme, a intervalli regolari (ne bastano almeno 3 su 5), un blocco recente, e lo rendono permanente e irreversibile. Un blocco ancorato non lo può annullare nessuno.
+Una catena proof-of-work nuova ha poca potenza di mining, e poca potenza di mining invita gli attacchi. Marigold ha una protezione dichiarata per intero, chiamata **ancore di irreversibilità**: cinque garanti identificati pubblicamente firmano insieme, a intervalli regolari (ne bastano almeno 3 su 5), un blocco recente, e lo rendono permanente. Un blocco ancorato non lo può annullare nessuno, con quanta potenza di mining si voglia.
 
-I garanti non possono censurare transazioni, creare monete, spostare i fondi di qualcuno o produrre blocchi. Il loro unico potere è impedire che si annullino transazioni già concluse. Se tacciono, la catena va avanti normalmente come una rete proof-of-work qualsiasi — un po' meno protetta, ma perfettamente funzionante.
+I garanti non possono censurare transazioni, creare monete, spostare i fondi di qualcuno o produrre blocchi. Il loro unico potere è impedire che si annullino transazioni già concluse. Se tacciono, la catena va avanti come una normale rete proof-of-work: un po' meno protetta, ma pienamente funzionante.
 
-La protezione è fatta per andare in pensione. Quando la potenza di mining della rete sarà cresciuta abbastanza da rendere un attacco proibitivamente caro, le ancore passeranno da obbligatorie a consultive, e poi scadranno del tutto. Prima che accada, la scelta dei garanti successivi dovrebbe passare al voto di chi detiene le banconote — così anche quel che resta delle rotelle passa dai fondatori alla comunità, prima di essere tolto del tutto.
+Le versioni precedenti di questo documento chiamavano le ancore rotelle, da togliere una volta che la rete fosse forte. Restano, e il motivo è il tuo portafoglio. La maggior parte dei portafogli non ha un nodo proprio: il tuo portafoglio chiede a un computer pubblico l'ancora più recente, ne controlla le firme dei garanti, controlla le banconote che gli vengono consegnate contro quel blocco ancorato, vi trova le tue senza dire a nessuno quali siano, e segue la catena da lì. L'ancora è l'unica cosa a cui il tuo portafoglio può tenere fede un computer pubblico. Senza, un portafoglio senza nodo dovrebbe credere a quel computer sulla parola per tutto.
 
-Sulla rete di prova pubblica la protezione è in funzione adesso: cinque chiavi di fiduciari, un'ancora ogni trenta secondi circa, ogni nodo che la fa rispettare. I fiduciari della rete di prova sono chiavi usa e getta fatte per la prova generale; quelli veri si scelgono al lancio.
+Quindi l'affermazione onesta è questa: ai cinque garanti si affida il non firmare mai un'ancora falsa, finché Marigold esiste. Tre di loro insieme potrebbero farlo; con un computer pubblico complice, potrebbero ingannare un portafoglio senza nodo. Chi non vuole nessun garante di mezzo può far girare un nodo proprio, che controlla ogni blocco da sé. I fondatori scelgono i primi cinque garanti, non gli ultimi: la loro sostituzione deve passare a chi detiene banconote, e come un garante passa il testimone a un successore si sta progettando ora.
+
+Sulla rete di prova pubblica la protezione è in funzione: cinque chiavi di garanti, un'ancora ogni trenta secondi circa, ogni nodo che la fa rispettare, ogni portafoglio che parte dall'ancora più recente. I garanti della rete di prova sono chiavi usa e getta create per la prova generale; l'insieme vero si sceglie al lancio.
 
 ---
 

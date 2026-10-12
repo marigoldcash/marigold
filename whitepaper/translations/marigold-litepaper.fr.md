@@ -179,15 +179,17 @@ Marigold tourne sur une blockchain à preuve de travail qui produit environ 10 b
 
 ---
 
-## Sécurité au lancement : des petites roues faites pour être enlevées
+## Les ancres : une petite protection qui reste
 
-Une nouvelle chaîne à preuve de travail dispose de peu de puissance de minage, et une faible puissance de minage attire les attaques. Marigold démarre avec une protection temporaire et entièrement divulguée, appelée **ancres de finalité** : cinq garants publiquement identifiés co-signent périodiquement un bloc récent (il en faut au moins 3 sur 5), ce qui le rend permanent et irréversible. Personne ne peut défaire un bloc ancré.
+Une nouvelle chaîne à preuve de travail dispose de peu de puissance de minage, et une faible puissance de minage attire les attaques. Marigold a une protection entièrement divulguée, appelée **ancres de finalité** : cinq garants publiquement identifiés co-signent périodiquement un bloc récent (il en faut au moins 3 sur 5), ce qui le rend permanent. Personne ne peut défaire un bloc ancré, quelle que soit la puissance de minage apportée.
 
-Les garants ne peuvent pas censurer de transactions, créer des pièces, déplacer les fonds de qui que ce soit, ni produire des blocs. Leur seul pouvoir est d'empêcher qu'une transaction déjà faite soit défaite. S'ils se taisent, la chaîne continue normalement, comme un réseau à preuve de travail ordinaire — un peu moins protégée, mais pleinement opérationnelle.
+Les garants ne peuvent pas censurer de transactions, créer des pièces, déplacer les fonds de qui que ce soit, ni produire des blocs. Leur seul pouvoir est d'empêcher qu'une transaction déjà faite soit défaite. S'ils se taisent, la chaîne continue comme un réseau à preuve de travail ordinaire — un peu moins protégée, mais pleinement en marche.
 
-Cette protection est conçue pour disparaître. Dès que la puissance de minage du réseau devient assez forte pour rendre une attaque hors de prix, les ancres passent d'obligatoires à consultatives, puis expirent tout à fait. Avant cela, le choix des garants suivants doit revenir à une gouvernance des détenteurs de billets — de sorte que même ce qui reste des petites roues passe des fondateurs à la communauté avant d'être retiré pour de bon.
+Les versions précédentes de ce document appelaient les ancres des petites roues, à retirer une fois le réseau solide. Elles restent, et la raison est votre portefeuille. La plupart des portefeuilles n'ont pas de nœud à eux : votre portefeuille demande à un ordinateur public la dernière ancre, vérifie les signatures des garants, vérifie les billets qu'on lui remet contre ce bloc ancré, y retrouve les vôtres sans dire à personne lesquels, et suit la chaîne à partir de là. L'ancre est la seule chose à laquelle votre portefeuille peut tenir un ordinateur public. Sans elle, un portefeuille sans nœud devrait croire cet ordinateur sur parole pour tout.
 
-Sur le réseau de test public, la protection tourne dès maintenant : cinq clés de garants, une ancre toutes les trente secondes environ, chaque nœud qui l'applique. Les garants du réseau de test sont des clés jetables faites pour la répétition ; les vrais sont choisis au lancement.
+L'énoncé honnête est donc celui-ci : on fait confiance aux cinq garants pour ne pas signer de fausse ancre, aussi longtemps que Marigold existe. Trois d'entre eux ensemble le pourraient ; avec un ordinateur public complice, ils pourraient tromper un portefeuille sans nœud. Qui ne veut aucun garant dans la boucle peut faire tourner son propre nœud, qui vérifie lui-même chaque bloc. Les fondateurs choisissent les cinq premiers garants, pas les derniers : leur remplacement doit revenir à ceux qui détiennent des billets, et la façon dont un garant passe la main à un successeur se conçoit en ce moment.
+
+Sur le réseau de test public, la protection tourne : cinq clés de garants, une ancre toutes les trente secondes environ, chaque nœud qui l'applique, chaque portefeuille qui part de la dernière ancre. Les garants du réseau de test sont des clés jetables faites pour la répétition ; le vrai ensemble est choisi au lancement.
 
 ---
 
