@@ -93,7 +93,7 @@ Cadence — two distinct announcement moments, deliberately different in volume:
 ### 3.6 Long-lead items to start during the soak (they gate mainnet, not testnet)
 
 - **Trustee recruitment (P9.1)** — five genuinely independent people/orgs with measurable independence criteria; realistically the longest human lead time in the whole plan. Start conversations now.
-- **External audit sourcing (P8.8)** — scoped on 2026-10-11 to the consensus diff from upstream (pool, anchors, lanes) plus the wallet crypto, published; not the whole node (DECISIONS "The audit promise, narrowed to what is funded"). Auditors book out 4–8 weeks ahead: quotes and a slot by the end of October 2026, or the launch date moves. Budget item, borne by the founder so far.
+- **External audit sourcing (P8.8)** — scoped on 2026-10-11 to the consensus diff from upstream (pool, anchors, lanes) plus the wallet crypto, published; not the whole node (DECISIONS "The audit promise, narrowed to what is funded"). Scope and self-assessment published 2026-10-12; **not commissioned, unfunded as of that date**, so the launch date follows the money, not the calendar. Auditors book out 4–8 weeks ahead once engaged. Budget item, borne by the founder so far.
 - ~~**P5.8 sunset-threshold model (P9.5 hard gate)**~~ — withdrawn 2026-10-11 with the sunset itself (POOL-SPEC v1.3, DECISIONS "The anchors stay"); P9.1b, trustee succession, takes its place on the list.
 - **Legal counsel (P9.6)** — engage once the whitepaper draft exists (counsel reviews public claims; give them the actual claims).
 - **Exchange posture** — per P1.9, nothing to *do* pre-launch except not promising anything; distribution at launch is mining + P2P, stated honestly everywhere.

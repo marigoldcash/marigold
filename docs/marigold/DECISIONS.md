@@ -592,3 +592,11 @@ is priced like plumbing; notes are money and cost a penny to move.
 
 **Where.** README (status box and "Development process and review"), PLAN P8.8, LAUNCH-PLAN; the audit's scope statement and report go to `docs/marigold/reviews/` when they exist.
 
+## The audit is not yet commissioned; the self-assessment stands alone for now (2026-10-12)
+
+**Decision.** The independent audit of the consensus diff stays scoped and published, and is not commissioned: the project has no treasury and the founder, who has paid for everything so far, does not have the money for it today. Until it is signed, every public text says that what exists is the external spec reviews plus the project's own self-assessment, labelled as such, and that the audit waits on funding. PLAN P8.8 remains the gate before mainnet, so the launch date follows the money. The README's status line changes the day an engagement is signed, not before.
+
+**Why.** Founder, 2026-10-12: "I still don't think we have enough money for this. So for the moment it just stays like this, a security self-assessment." The same principle as the day before: no line in public with nothing behind it. A self-assessment that says what it is costs nothing in credibility; a promised audit without a signed engagement would.
+
+**Where.** README, PLAN P8.8, LAUNCH-PLAN, reviews/README.md, the scope statement's status line.
+

@@ -15,12 +15,13 @@ transferred by handing over a private key.
 
 > ⚠️ **Status: pre-mainnet.** Marigold's mainnet has not launched. There is no MAGLD
 > token to buy anywhere — anything sold under that name today is a scam. The current
-> phase is the public testnet soak. Before mainnet, the consensus changes from upstream
-> rusty-kaspa — the note pool, the finality anchors, the lanes — are independently audited,
-> and the audit is published in [docs/marigold/reviews/](docs/marigold/reviews/) beside the
-> external cryptographer reviews of the pool specification already there. That is the
-> promise, scoped to what a project with no treasury can deliver; it is not a full audit
-> of the whole node. Launch is fair from zero: no premine, no dev fund, no airdrop.
+> phase is the public testnet soak. What exists on the security side is in
+> [docs/marigold/reviews/](docs/marigold/reviews/): the external cryptographer reviews of
+> the pool specification, a security self-assessment written by the project itself and
+> labelled as such, and the published scope of an independent audit of the consensus
+> changes from upstream rusty-kaspa. That audit is not yet commissioned: the project has
+> no treasury and has not found the money for it, and this line will change the day it is
+> signed, not before. Launch is fair from zero: no premine, no dev fund, no airdrop.
 
 ## Nothing is hidden
 
@@ -202,11 +203,12 @@ There is also a **desktop wallet** in [gui/](gui/): the same wallet with screens
 Marigold is developed by [leancode](https://github.com/leancode) using AI-assisted
 engineering, with all consensus-critical work externally reviewed: the pool specification
 passed review by external cryptographers (see [docs/marigold/reviews/](docs/marigold/reviews/));
-before mainnet, the consensus changes from upstream rusty-kaspa — the note pool, the
-finality anchors, the lanes — are independently audited, with the scope and the report
-published in the same folder (PLAN P8.8; the whole node is not re-audited, and the README
-says so rather than promising it); and the network has soaked on a public testnet since
-August 2026, months before any real value touches it. The development record — including
+the project's own security self-assessment and the scope of an independent audit of the
+consensus changes from upstream rusty-kaspa — the note pool, the finality anchors, the
+lanes — are published in the same folder, and the audit itself waits on money the project
+does not yet have (PLAN P8.8 keeps it as the gate before mainnet; the whole node is not
+re-audited either way); and the network has soaked on a public testnet since August 2026,
+months before any real value touches it. The development record — including
 the step-by-step [PLAN.md](PLAN.md) this project is built from — is published as-is; trust
 should rest on tests, review, audit, and soak, not on who typed the code.
 

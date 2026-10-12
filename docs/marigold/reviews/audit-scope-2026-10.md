@@ -1,5 +1,7 @@
 # Scope statement for the independent security audit of Marigold
 
+**Status, 2026-10-12: not commissioned.** The project has no treasury and has not found the money for this audit. The scope is published anyway, so that an exchange, a tester or a prospective auditor knows exactly what will be examined when it is, and so that the project cannot quietly narrow it later. The security self-assessment beside it is what exists today, and it says so.
+
 **Parties.** The audit is commissioned by marigold.cash Ltd (a UK company limited by guarantee with open-source clauses, incorporation applied for in October 2026) and paid for by O'Brien & Partners, Neyruz, Switzerland, the founder's consultancy, on the company's behalf. The auditor must be independent: no ownership, employment or other payment from either party beyond the fee for this audit, and in particular the auditor is not O'Brien & Partners. The report is published in full, under the auditor's name, in `docs/marigold/reviews/` of the public repository, beside the project's own [self-assessment](self-assessment-2026-10.md), which is disclosed as the founder's.
 
 **Object.** The Marigold source at a named tag of [marigoldcash/marigold](https://github.com/marigoldcash/marigold), `v2.87.343` or the tag current at signing, as a fork of rusty-kaspa version 2.0.1 (upstream commit `a41a333b`). The audit is of the difference from upstream, `git diff master..<tag>`, not of rusty-kaspa itself.
@@ -32,4 +34,4 @@ A written report with: the scope as actually covered, including anything in this
 
 ## Timeline
 
-Engagement signed by the end of October 2026; report before the mainnet genesis announcement, which is made at least four weeks before genesis. If the audit cannot be delivered on that timeline, the launch date moves; the audit does not shrink.
+The engagement is signed when it is funded; the report comes before the mainnet genesis announcement, which is made at least four weeks before genesis. The launch date follows the audit; the audit does not shrink to meet a date.
