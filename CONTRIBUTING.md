@@ -41,6 +41,10 @@ Write the pull request for the reviewer: what changed, why, what you considered 
 
 Commit messages: a subject line under about sixty characters, a blank line, then the reasoning. Write them for the person reading `git log` in two years. No generated attribution lines of any kind.
 
+## Releasing
+
+A release is one script, `scripts/release.sh`, run from a clean `main` by someone with write access to both repositories; [docs/marigold/RELEASE.md](docs/marigold/RELEASE.md) says what the machine needs, what the script does, and what to do when it stops half way.
+
 ## Reviewing
 
 If you can read a change, review it, whether or not you have written code here. If you can only run it, run it and say what happened. Approve when you believe it is correct and safe; request changes when you find a real problem, and say what would fix it.
