@@ -19,9 +19,11 @@ transferred by handing over a private key.
 > [docs/marigold/reviews/](docs/marigold/reviews/): the external cryptographer reviews of
 > the pool specification, a security self-assessment written by the project itself and
 > labelled as such, and the published scope of an independent audit of the consensus
-> changes from upstream rusty-kaspa. That audit is not yet commissioned: the project has
-> no treasury and has not found the money for it, and this line will change the day it is
-> signed, not before. Launch is fair from zero: no premine, no dev fund, no airdrop.
+> changes from upstream rusty-kaspa. **Mainnet launches without that audit.** The project
+> has no treasury; the audit is commissioned after launch, from the project's first
+> income, and published when done. Anyone who needs an independent audit before trusting
+> value to the network should wait for it. Launch is fair from zero: no premine, no dev
+> fund, no airdrop.
 
 ## Nothing is hidden
 
@@ -205,10 +207,10 @@ engineering, with all consensus-critical work externally reviewed: the pool spec
 passed review by external cryptographers (see [docs/marigold/reviews/](docs/marigold/reviews/));
 the project's own security self-assessment and the scope of an independent audit of the
 consensus changes from upstream rusty-kaspa — the note pool, the finality anchors, the
-lanes — are published in the same folder, and the audit itself waits on money the project
-does not yet have (PLAN P8.8 keeps it as the gate before mainnet; the whole node is not
-re-audited either way); and the network has soaked on a public testnet since August 2026,
-months before any real value touches it. The development record — including
+lanes — are published in the same folder; the audit itself comes after launch, paid for
+from the project's first income, and is not a gate before mainnet (PLAN P8.8; the whole
+node is not re-audited either way); and the network has soaked on a public testnet since
+August 2026, months before any real value touches it. The development record — including
 the step-by-step [PLAN.md](PLAN.md) this project is built from — is published as-is; trust
 should rest on tests, review, audit, and soak, not on who typed the code.
 

@@ -1,6 +1,6 @@
 # Reviews
 
-This directory holds the written external reviews of the frozen pool specification (P5.9), the wallet threat pass of 2026-09-20 (P8.5), and the material for the independent code audit (P8.8): the project's own [security self-assessment](self-assessment-2026-10.md), disclosed as prepared by the founder's firm, and the [scope statement](audit-scope-2026-10.md) an independent auditor will be engaged against. As of 2026-10-12 no audit is commissioned, for want of money; the scope is published so that it is known before the funds are. The audit report goes here too, under the auditor's name, when it exists.
+This directory holds the written external reviews of the frozen pool specification (P5.9), the wallet threat pass of 2026-09-20 (P8.5), and the material for the independent code audit (P8.8): the project's own [security self-assessment](self-assessment-2026-10.md), disclosed as prepared by the founder's firm, and the [scope statement](audit-scope-2026-10.md) an independent auditor will be engaged against. As of 2026-10-12 no audit is commissioned, for want of money, and mainnet launches without it: the audit is commissioned after launch, from the project's first income. The scope is published so that it is known before the funds are. The audit report goes here too, under the auditor's name, when it exists.
 
 
 ## P5.9 — Pool spec review (CLOSED 2026-08-15 — spec tagged `pool-spec-v1.1`)

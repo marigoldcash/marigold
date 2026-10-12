@@ -1,6 +1,6 @@
 # Scope statement for the independent security audit of Marigold
 
-**Status, 2026-10-12: not commissioned.** The project has no treasury and has not found the money for this audit. The scope is published anyway, so that an exchange, a tester or a prospective auditor knows exactly what will be examined when it is, and so that the project cannot quietly narrow it later. The security self-assessment beside it is what exists today, and it says so.
+**Status, 2026-10-12: not commissioned, and mainnet does not wait for it.** The project has no treasury; the audit is commissioned after launch, from the project's first income. The scope is published anyway, so that an exchange, a tester or a prospective auditor knows exactly what will be examined when it is, and so that the project cannot quietly narrow it later. The security self-assessment beside it is what exists today, and it says so.
 
 **Parties.** The audit is commissioned by marigold.cash Ltd (a UK company limited by guarantee with open-source clauses, incorporation applied for in October 2026) and paid for by O'Brien & Partners, Neyruz, Switzerland, the founder's consultancy, on the company's behalf. The auditor must be independent: no ownership, employment or other payment from either party beyond the fee for this audit, and in particular the auditor is not O'Brien & Partners. The report is published in full, under the auditor's name, in `docs/marigold/reviews/` of the public repository, beside the project's own [self-assessment](self-assessment-2026-10.md), which is disclosed as the founder's.
 
@@ -30,8 +30,8 @@ The public repository at the tag; this scope; the self-assessment; POOL-SPEC v1.
 
 ## Deliverables
 
-A written report with: the scope as actually covered, including anything in this statement that was not reached and why; findings with a severity scale defined in the report, each with reproduction and the affected code; recommendations; and, after the project's fixes, a re-review of every finding rated high or critical with the fixing commits named. The report is published whole, with no finding removed; the project's responses are published beside it. Findings rated critical or high must be closed, with linked commits, before mainnet genesis (PLAN P8.8).
+A written report with: the scope as actually covered, including anything in this statement that was not reached and why; findings with a severity scale defined in the report, each with reproduction and the affected code; recommendations; and, after the project's fixes, a re-review of every finding rated high or critical with the fixing commits named. The report is published whole, with no finding removed; the project's responses are published beside it. Findings rated critical or high are closed, with linked commits, as the first priority after the report (PLAN P8.8).
 
 ## Timeline
 
-The engagement is signed when it is funded; the report comes before the mainnet genesis announcement, which is made at least four weeks before genesis. The launch date follows the audit; the audit does not shrink to meet a date.
+The engagement is signed as soon after mainnet genesis as the project's income allows; the report is published when done, and findings rated critical or high are fixed and re-reviewed as the first priority after launch. The audit does not shrink to fit the money; it waits for it.

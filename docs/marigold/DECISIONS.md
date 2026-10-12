@@ -600,3 +600,11 @@ is priced like plumbing; notes are money and cost a penny to move.
 
 **Where.** README, PLAN P8.8, LAUNCH-PLAN, reviews/README.md, the scope statement's status line.
 
+## Mainnet launches on the date; the audit follows launch (2026-10-12, later the same day)
+
+**Decision.** The launch date stands. The independent audit of the consensus diff is commissioned after mainnet launch, paid for from the project's first income, and is no longer a gate before genesis: PLAN P8.8 is reworded, Phase 9 no longer waits on it, and every public text says in plain words that mainnet launches without an independent audit, with the external spec reviews, the testnet record and the project's own self-assessment as what stands at launch. The README tells anyone who needs an independent audit before trusting value to the network to wait for it.
+
+**Why.** Founder, 2026-10-12: "Keep the date, the money will come only when we launch." There is no treasury before launch; delaying launch for an audit that only launch can pay for is a circle. The honest alternative to a promise is a disclosure, so the disclosure is made everywhere the promise used to be.
+
+**Where.** README (status box and development section), PLAN (phase ordering and P8.8), LAUNCH-PLAN, reviews/README.md, the scope statement's status and timeline.
+
