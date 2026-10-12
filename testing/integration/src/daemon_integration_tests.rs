@@ -1926,12 +1926,7 @@ mod finality_anchor_helpers {
     /// tests' files apart.
     pub fn write_anchor_params_file(keypairs: &[secp256k1::Keypair], depth: u64, interval: u64, test_tag: &str) -> String {
         let mut params = SIMNET_PARAMS.clone();
-        params.finality_anchor = FinalityAnchorParams {
-            trustees: Some(trustee_keys(keypairs)),
-            depth,
-            launch_interval: interval,
-            ..FinalityAnchorParams::LAUNCH_UNKEYED
-        };
+        params.finality_anchor = FinalityAnchorParams { trustees: Some(trustee_keys(keypairs)), depth, launch_interval: interval };
         let override_params: OverrideParams = params.into();
         let path = std::env::temp_dir().join(format!("marigold_anchor_params_{test_tag}.json"));
         fs::write(&path, serde_json::to_string_pretty(&override_params).unwrap()).unwrap();

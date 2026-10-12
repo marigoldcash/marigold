@@ -3005,7 +3005,7 @@ impl KaspaCli {
                     }
                 }
                 drop(guard);
-                if !orphans.is_empty() && Arc::ptr_eq(&self.wallet.store(), &interface) {
+                if !orphans.is_empty() && Arc::ptr_eq(self.wallet.store(), interface) {
                     let removed = orphans.len();
                     for id in orphans {
                         store.remove(&secret, &id).await.ok();
