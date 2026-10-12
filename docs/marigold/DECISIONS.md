@@ -616,3 +616,11 @@ is priced like plumbing; notes are money and cost a penny to move.
 
 **Where.** The merge commit on `upstream-2.1.0`; `master` moves to upstream's v2.1.0 when the branch lands on `main`; EXCHANGE.md and the self-assessment name the merged version.
 
+## The phone wallet: one Rust core, a React Native screen (2026-10-12)
+
+**Decision.** iOS and Android wallet apps are built on the light wallet, as one Rust core compiled natively for the phones and wrapped by UniFFI, with one TypeScript app under Expo as the screen, through one Expo native module. No wallet operation is ever implemented a second time on the phone side; every operation goes through the wallet service, which moves out of the cli into its own crate first. The plan is [MOBILE-PLAN.md](MOBILE-PLAN.md), steps M0–M12, each with its verification.
+
+**Why.** Founder, 2026-10-12: with the sync solved and the wallet light, the phone can hold its own keys and follow the chain in seconds; the company now holds an Apple organisation account, which Apple requires for wallet apps, and a Google account is one payment. One codebase was asked for; React Native over a native Rust core gives native components, the system camera, biometrics and the platform keystores, and Expo's build service handles signing and submission; Tauri mobile would reach a first build faster but ships a web view, and two native UIs double the work.
+
+**Where.** `wallet/service` (the extracted service), `mobile/` (the app and the native module), the `mobile-core.yaml` and `mobile-release.yaml` workflows.
+

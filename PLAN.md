@@ -328,6 +328,10 @@ Below follows a tick-offable plan for a **non-shielded, very simplistic fixed-de
 
 ---
 
+## Phase 10 — The phone wallet (started 2026-10-12, runs beside Phase 9)
+
+- [ ] **P10 — iOS and Android wallet apps on the light wallet.** One Rust core wrapped by UniFFI, one React Native app under Expo; the executable plan with its verifications is [docs/marigold/MOBILE-PLAN.md](docs/marigold/MOBILE-PLAN.md), steps M0–M12, ticked there. DECISIONS "The phone wallet: one Rust core, a React Native screen".
+
 ## Future work (post-launch, deliberately out of launch scope)
 
 **Issued assets on the pool (a fiat-backed coin) — foundation laid in P8.0k, the coin itself post-launch.** The pool's note carries an asset field from the testnet on, so a second asset is an activation and an issuer, not a redesign; [docs/marigold/ASSETS.md](docs/marigold/ASSETS.md) is the plan, and the questions it leaves open (freeze on legal order, listing, stamps for asset-only wallets, the redemption flow) are the coin phase's, to be decided when there is an issuer and not before.
