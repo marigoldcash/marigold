@@ -426,9 +426,11 @@ opt-level = 2
 opt-level = 2
 
 [workspace.lints.rust]
-# The clippy allows below name lints by their 1.98 names; a newer stable (the
-# CI's) may not know one, and with -D warnings an unknown lint name was an
-# error (Tests red 2026-10-11, `chunks_exact_to_as_chunks`).
+# The clippy allows below name lints by their 1.98 names; a clippy of another
+# version may not know one, and with -D warnings an unknown lint name is an
+# error (Tests red 2026-10-11: the lint job still ran 1.93 and did not know
+# `chunks_exact_to_as_chunks`). The toolchain is pinned in rust-toolchain.toml
+# since then; this stays so a bump never trips on a renamed lint alone.
 unknown_lints = "allow"
 
 [workspace.lints.clippy]

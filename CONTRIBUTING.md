@@ -22,6 +22,10 @@ These are not style. They are what lets us keep taking upstream's security fixes
 3. **Every consensus change carries its test in the same pull request.** No exceptions.
 4. **Money-guarding code soaks on testnet before it goes anywhere near mainnet.** A change to the pool, the wallet's key handling or the finality anchors is not done when it merges; it is done when it has run for weeks with real testers.
 
+## The toolchain
+
+`rust-toolchain.toml` at the root pins the Rust version every build uses: CI, the release host and your checkout, which rustup switches to on the first `cargo` call. Build and lint with that version, not with whatever stable is current, or CI will see warnings you did not. A bump is a commit of its own: change the file and the version named in `.github/workflows/`, run `cargo fmt --all -- --check` and `cargo clippy --workspace --tests --benches --examples -- -D warnings` on the new version, and fix what they say before pushing.
+
 ## Before you open a pull request
 
 Build on a machine with room; the workspace is large. Then:
