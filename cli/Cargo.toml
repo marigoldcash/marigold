@@ -117,6 +117,7 @@ tokio = { workspace = true, features = ["rt-multi-thread"] }
 # gRPC pulls tonic, hyper and mio, none of which build for the browser; the
 # only callers are the headless miner and `serve`, which are native anyway.
 kaspa-grpc-client.workspace = true
+kaspa-hashes.workspace = true
 
 
 [dev-dependencies]
