@@ -233,9 +233,6 @@ pub async fn open_session(options: &SessionOptions, shutdown: Arc<AtomicBool>, s
             )),
         }
     }
-    match &node {
-        _ => {}
-    }
     say("Opening the wallet…".to_string());
     let descriptors = wallet.clone().wallet_open(options.password.clone(), Some(options.wallet.clone()), true, false).await?;
     if let Some(descriptors) = descriptors {

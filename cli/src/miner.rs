@@ -703,6 +703,8 @@ impl MinerHost {
     }
 }
 
+// The service crate's miner interface exists off wasm32 only, like the module that uses it.
+#[cfg(not(target_arch = "wasm32"))]
 impl kaspa_wallet_service::providers::MinerHostApi for MinerHost {
     fn bind_address(&self, address: Address) {
         MinerHost::bind_address(self, address)
