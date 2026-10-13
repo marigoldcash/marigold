@@ -12,6 +12,8 @@ pub mod backup;
 pub mod bundle;
 pub mod error;
 pub mod format;
+#[cfg(feature = "ffi")]
+pub mod ffi;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod providers;
 pub mod result;

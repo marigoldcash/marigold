@@ -15,6 +15,8 @@ repository.workspace = true
 [features]
 # The gRPC client, for a node named by a grpc:// address. The phone apps leave it off.
 grpc = ["dep:kaspa-grpc-client"]
+# The interface the phone apps call (PH-M3). Off for every other build.
+ffi = []
 
 [dependencies]
 async-trait.workspace = true

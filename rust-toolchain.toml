@@ -7,4 +7,5 @@
 [toolchain]
 channel = "1.98.1"
 components = ["rustfmt", "clippy"]
-targets = ["wasm32-unknown-unknown"]
+# The four phone targets (PH-M2): iPhone, iPhone simulator on Apple silicon, Android phone, Android emulator.
+targets = ["wasm32-unknown-unknown", "aarch64-apple-ios", "aarch64-apple-ios-sim", "aarch64-linux-android", "x86_64-linux-android"]

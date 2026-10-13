@@ -1,0 +1,90 @@
+# The wallet core for the phones (docs/marigold/MOBILE-PLAN.md, PH-M2).
+#
+# Builds kaspa-wallet-service as a library each phone can load: Android's .so for the phone and the
+# emulator, an XCFramework for the iPhone and the simulator on Apple silicon. The phone apps never
+# compile Rust; they download these. PH-M3 gives the libraries their interface and attaches them to
+# the marigold release of a tag. Until then this runs by hand and on every push to a mobile/ branch,
+# and keeps the files as workflow artifacts.
+#
+# scripts/mobile-core.sh does the work, so the same steps run on a developer's machine.
+name: Mobile core
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["mobile/**"]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  android:
+    name: android (arm64-v8a, x86_64)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@1.98.1
+        with:
+          targets: aarch64-linux-android,x86_64-linux-android
+
+      - name: Set up cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: android
+
+      - name: Build
+        run: ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME" scripts/mobile-core.sh android
+
+      - name: Upload the jniLibs
+        uses: actions/upload-artifact@v4
+        with:
+          name: marigold-core-android
+          path: target/mobile-core/jniLibs
+          if-no-files-found: error
+
+  ios:
+    name: ios (iPhone, simulator)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@1.98.1
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim
+
+      - name: Set up cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ios
+
+      - name: Build
+        run: scripts/mobile-core.sh ios
+
+      - name: Show the symbols in each slice
+        run: |
+          for lib in target/mobile-core/MarigoldCore.xcframework/*/*.a; do
+            echo "== $lib"
+            nm -gU "$lib" 2>/dev/null | grep marigold_core_version
+          done
+
+      - name: Upload the XCFramework
+        uses: actions/upload-artifact@v4
+        with:
+          name: marigold-core-ios
+          path: target/mobile-core/MarigoldCore.xcframework
+          if-no-files-found: error
