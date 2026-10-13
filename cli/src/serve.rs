@@ -320,6 +320,7 @@ impl WalletService {
             self.secret.clone(),
             state.clone(),
             self.say.clone(),
+            self.say.clone(),
         )
         .await;
     }
@@ -347,7 +348,7 @@ impl WalletService {
     pub async fn backup_flush(&self) {
         let say = self.say.clone();
         let relay = move |line: String| say(line);
-        crate::tgbackup::flush_for(&self.wallet, &self.telegram_path(), &self.name, &self.secret, &relay).await;
+        crate::tgbackup::flush_for(&self.wallet, &self.telegram_path(), &self.name, &self.secret, &relay, &relay).await;
     }
 
     /// Which miner, if any: one this service runs, one inside the terminal
