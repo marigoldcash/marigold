@@ -2,6 +2,7 @@ use std::net::AddrParseError;
 
 use downcast::DowncastError;
 use kaspa_wallet_core::error::Error as WalletError;
+pub use kaspa_wallet_service::error::Error as ServiceError;
 use workflow_core::channel::ChannelError;
 use workflow_terminal::error::Error as TerminalError;
 
@@ -20,6 +21,11 @@ pub enum Error {
 
     #[error(transparent)]
     WalletError(#[from] WalletError),
+
+    // The wallet service's own errors, said as they are (kaspa-wallet-service,
+    // docs/marigold/MOBILE-PLAN.md M1a).
+    #[error(transparent)]
+    Service(#[from] ServiceError),
 
     // Transparent, not "Cli error {0}": a command that runs another command
     // crosses the handler framework twice, and each crossing re-wrapped the

@@ -15,6 +15,7 @@ members = [
     "wallet/bip32",
     "wallet/keys",
     "wallet/pskt",
+    "wallet/service",
     "consensus",
     "consensus/core",
     "consensus/client",
@@ -147,6 +148,7 @@ kaspa-wallet = { version = "2.88.346", path = "wallet/native" }
 kaspa-wallet-cli-wasm = { version = "2.88.346", path = "wallet/wasm" }
 kaspa-wallet-keys = { version = "2.88.346", path = "wallet/keys" }
 kaspa-wallet-pskt = { version = "2.88.346", path = "wallet/pskt" }
+kaspa-wallet-service = { version = "2.88.346", path = "wallet/service" }
 kaspa-wallet-core = { version = "2.88.346", path = "wallet/core" }
 kaspa-wallet-macros = { version = "2.88.346", path = "wallet/macros" }
 kaspa-wasm = { version = "2.88.346", path = "wasm" }

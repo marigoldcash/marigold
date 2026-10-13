@@ -1,0 +1,23 @@
+[package]
+name = "kaspa-wallet-service"
+description = "The Marigold wallet service: the operations behind the terminal wallet, the desktop app, the Telegram bot and the phone apps"
+rust-version.workspace = true
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+include.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# The service never depends on the terminal (workflow-terminal) or on kaspa-cli:
+# the phone apps link it without either (docs/marigold/MOBILE-PLAN.md, M1).
+# The gRPC client joins in M1c, gated off wasm32 as it is in the cli.
+[dependencies]
+kaspa-rpc-core.workspace = true
+kaspa-wallet-core.workspace = true
+kaspa-wrpc-client.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
