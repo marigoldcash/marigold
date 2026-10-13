@@ -453,7 +453,7 @@ impl Destination {
 /// One backup run from the terminal: the open wallet's folder, its words to
 /// check its own part by. Returns what was posted, for the line the caller prints.
 pub async fn run(cli: &Arc<KaspaCli>, words: &str, force_checkpoint: bool, say: &(dyn Fn(String) + Send + Sync)) -> Result<String> {
-    let files = WalletFiles::of(cli).await?;
+    let files = wallet_files(cli).await?;
     let cfg_path = telegram_config_path(cli)?;
     let cfg = TelegramConfig::load(&cfg_path).ok_or_else(|| Error::custom("no Telegram bot is set up for this wallet"))?;
     let folder = Folder::around(&files)?;

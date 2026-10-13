@@ -954,7 +954,7 @@ impl Wallet {
         }
         let descriptor = ctx.store().descriptor().ok_or_else(|| Error::custom("no wallet is open"))?;
         let name = descriptor.filename.clone();
-        let files = crate::bundle::WalletFiles::of(ctx).await?;
+        let files = crate::bundle::wallet_files(ctx).await?;
         let folder = crate::bundle::Folder::around(&files)?;
 
         let target = Self::backup_target(argv.first().map(|s| s.as_str()))?;
@@ -999,7 +999,7 @@ impl Wallet {
         let (secret, _) = ctx.ask_wallet_secret_for_tidying(None).await?;
         let words = ctx.wallet().store().as_note_key_store()?.recovery_words(&secret).await?;
         Self::announce_covered(ctx, crate::bundle::ensure_recipient(&ctx.wallet(), &name, &secret).await?);
-        let files = crate::bundle::WalletFiles::of(ctx).await?;
+        let files = crate::bundle::wallet_files(ctx).await?;
         let (entries, packed, names) = crate::bundle::bundle_checked(&files, &words)?;
         let file_count = entries.len();
         Self::write_private(&target, &packed)?;
@@ -1425,7 +1425,7 @@ impl Wallet {
             tprintln!(ctx, "No Telegram bot is set up for this wallet. 'telegram link <token>' first, with a token from @BotFather.");
             return Ok(());
         };
-        let files = crate::bundle::WalletFiles::of(ctx).await?;
+        let files = crate::bundle::wallet_files(ctx).await?;
         let mut settings = tgbackup::WalletBackupSettings::load(&files.wallet_dir);
         let when = |secs: u64| -> String {
             if secs == 0 {
@@ -1583,7 +1583,7 @@ impl Wallet {
             tprintln!(ctx, "Open a wallet first — 'backup folder' runs from an open wallet.");
             return Ok(());
         }
-        let files = crate::bundle::WalletFiles::of(ctx).await?;
+        let files = crate::bundle::wallet_files(ctx).await?;
         let settings = tgbackup::WalletBackupSettings::load(&files.wallet_dir);
         let when = |secs: u64| -> String {
             if secs == 0 {
@@ -1638,7 +1638,7 @@ impl Wallet {
                 let (secret, _) = ctx.ask_wallet_secret_for_tidying(None).await?;
                 Self::announce_covered(ctx, crate::bundle::ensure_recipient(&ctx.wallet(), &files.name, &secret).await?);
                 let words = ctx.wallet().store().as_note_key_store()?.recovery_words(&secret).await?;
-                let files = crate::bundle::WalletFiles::of(ctx).await?;
+                let files = crate::bundle::wallet_files(ctx).await?;
                 let folder = crate::bundle::Folder::around(&files)?;
                 tprintln!(ctx, "Writing a full copy…");
                 let ctx_ = ctx.clone();

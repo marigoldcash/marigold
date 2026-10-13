@@ -4565,6 +4565,7 @@ dependencies = [
 name = "kaspa-wallet-service"
 version = "2.88.346"
 dependencies = [
+ "chrono",
  "faster-hex 0.9.0",
  "flate2",
  "hex",

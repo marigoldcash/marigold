@@ -60,7 +60,7 @@ impl Telegram {
             }
             Some("backup") => ctx.exec_within("wallet backup telegram now").await,
             Some("cover") => {
-                let files = crate::bundle::WalletFiles::of(ctx).await?;
+                let files = crate::bundle::wallet_files(ctx).await?;
                 let folder = crate::bundle::Folder::around(&files)?;
                 crate::tgbackup::cover_wizard(ctx, &folder, true).await;
                 Ok(())
@@ -205,7 +205,7 @@ impl Telegram {
             tprintln!(ctx, "{}", style("The bot is not answering at the moment; starting it again.").yellow());
             self.restart_bot(ctx).await;
         }
-        if let Ok(files) = crate::bundle::WalletFiles::of(ctx).await {
+        if let Ok(files) = crate::bundle::wallet_files(ctx).await {
             let st = crate::tgbackup::status(&files, Some(cfg));
             let when = |secs: u64| -> String {
                 if secs == 0 {

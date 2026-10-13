@@ -13,6 +13,7 @@ repository.workspace = true
 # the phone apps link it without either (docs/marigold/MOBILE-PLAN.md, PH-M1).
 # The gRPC client joins in PH-M1c, gated off wasm32 as it is in the cli.
 [dependencies]
+chrono.workspace = true
 faster-hex.workspace = true
 flate2.workspace = true
 hex.workspace = true
