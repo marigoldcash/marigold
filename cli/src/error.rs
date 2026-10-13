@@ -23,7 +23,7 @@ pub enum Error {
     WalletError(#[from] WalletError),
 
     // The wallet service's own errors, said as they are (kaspa-wallet-service,
-    // docs/marigold/MOBILE-PLAN.md M1a).
+    // docs/marigold/MOBILE-PLAN.md PH-M1a).
     #[error(transparent)]
     Service(#[from] ServiceError),
 
