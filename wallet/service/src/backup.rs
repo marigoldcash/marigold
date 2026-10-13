@@ -43,11 +43,13 @@
 //! own words" below. The passphrase form above is what a backup from before
 //! then is, and `unpack` still reads it.
 
-use crate::imports::*;
+use crate::error::Error;
+use crate::result::Result;
 use kaspa_bip32::secp256k1;
 use kaspa_wallet_core::encryption::{
     decrypt_salted_or_legacy, decrypt_xchacha20poly1305_raw_key, encrypt_salted, encrypt_xchacha20poly1305_raw_key,
 };
+use kaspa_wallet_core::prelude::Secret;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
@@ -537,7 +539,7 @@ pub fn human_size(bytes: usize) -> String {
 
 /// Write a restored file for its owner alone: a restored vault is the
 /// wallet, and the archive's own modes are not kept.
-pub(crate) fn write_owner_only(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+pub fn write_owner_only(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create(true).truncate(true);

@@ -680,7 +680,7 @@ pub fn merge(collected: &BTreeMap<String, Vec<u8>>, unlock: Unlock<'_>) -> Resul
     } else {
         let open = |bytes: &[u8]| -> Result<Vec<ArchiveEntry>> {
             match &unlock {
-                Unlock::Legacy(key) => archive::unpack(bytes, key),
+                Unlock::Legacy(key) => Ok(archive::unpack(bytes, key)?),
                 Unlock::Words(map) => {
                     for words in map.values() {
                         if let Ok(entries) = archive::unpack(bytes, &archive::key_from_words(words)) {

@@ -8,6 +8,7 @@
 //! Nothing in this crate prints, and nothing depends on the terminal library:
 //! a message is a `say` line handed to the caller, or a returned value.
 
+pub mod backup;
 pub mod error;
 pub mod result;
 

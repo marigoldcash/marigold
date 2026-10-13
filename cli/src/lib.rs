@@ -1,7 +1,9 @@
 #![allow(clippy::arithmetic_side_effects)]
 extern crate self as kaspa_cli;
 
-pub mod backup;
+// The archive and sealing code moved to the wallet service crate (PH-M1b1); the
+// path `kaspa_cli_lib::backup` stays.
+pub use kaspa_wallet_service::backup;
 
 /// The wallet password policy (founder, 2026-10-10): a password, or at least a
 /// PIN, of a reasonable length is required of a regular user; a wallet without
