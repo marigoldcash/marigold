@@ -12,6 +12,7 @@ Below follows a tick-offable plan for a **non-shielded, very simplistic fixed-de
 
 - Work **strictly in order** within a phase. Phases 0–4 are sequential. Phase 5 (spec) can begin while Phase 4 stabilizes. Phase 6 starts only after the P5.9 review gate; Phase 8 overlaps late Phase 7 (start the P8.7 testnet soak as early as it can stand); Phase 9 no longer waits for P8.8: the audit follows launch (decided 2026-10-12).
 - Each step has an ID (e.g. `P2.3`). In a session, say *"do step P2.3 of PLAN.md"*. The step contains everything needed.
+- **Which repository, which checkout:** [docs/marigold/REPOS.md](docs/marigold/REPOS.md) maps every Marigold repository, says where a new piece of code belongs, and sets the one-checkout-per-session rule. Read it before the first commit of a session, and before starting work that touches the pool or the phone wallet, whose plans live partly elsewhere.
 - A step is **done** only when its ✅ *Verify* command passes. Tick the box, commit with the step ID in the message (e.g. `P2.3: rebrand address prefix`).
 - Steps marked ⚠️ **HARD** are research-grade: do them with extra care, expect iteration, and treat external expert review as mandatory before real value touches the code.
 - Steps marked 🧑‍⚖️ **DECISION** need a human choice.
