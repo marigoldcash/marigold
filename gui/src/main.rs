@@ -7,11 +7,12 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use kaspa_cli_lib::app;
 use kaspa_cli_lib::serve::{Session, SessionOptions, WalletService, open_session};
 use kaspa_cli_lib::tgbackup::{AutoState, BackupStatus};
 use kaspa_consensus_core::network::NetworkId;
 use kaspa_wallet_core::prelude::*;
-use kaspa_wallet_core::utils::{sompi_to_kaspa_string, try_kaspa_str_to_sompi};
+use kaspa_wallet_core::utils::sompi_to_kaspa_string;
 use kaspa_wallet_core::wallet::Wallet;
 use serde::Serialize;
 use std::sync::Arc;
@@ -178,81 +179,16 @@ async fn local_program_present() -> Result<bool, String> {
 
 /// The wallet settings decide the folder and the network, as everywhere else.
 async fn probe() -> Result<(Arc<Wallet>, String, NetworkId), String> {
-    let wallet =
-        Arc::new(Wallet::try_with_rpc(None, Wallet::local_store().map_err(|e| e.to_string())?, None).map_err(|e| e.to_string())?);
-    wallet.load_settings().await.ok();
-    let folder = wallet
-        .settings()
-        .get::<String>(WalletSettings::Folder)
-        .unwrap_or_else(|| kaspa_wallet_core::storage::local::default_storage_folder().to_string());
-    let network_id = wallet
-        .settings()
-        .get::<String>(WalletSettings::Network)
-        .and_then(|s| s.parse::<NetworkId>().ok())
-        .unwrap_or(NetworkId::with_suffix(kaspa_consensus_core::network::NetworkType::Testnet, 10));
-    wallet.store().set_storage_folder(&folder).map_err(|e| e.to_string())?;
-    Ok((wallet, folder, network_id))
+    app::probe(None, None).await
 }
 
-/// Makes a wallet the way the terminal wallet's wizard does: 24 vault words, a
-/// ledger account derived from them, the vault keyed by them. With `words`, the
-/// same wallet is rebuilt from a written-down set (its notes still need the
-/// wallet's files, restored with the terminal wallet's `backup restore`).
+/// Makes a wallet the way the terminal wallet's wizard does (`app::create_wallet`). With `words`,
+/// the same wallet is rebuilt from a written-down set (its notes still need the wallet's files,
+/// restored with the terminal wallet's `backup restore`).
 #[tauri::command]
 async fn create_wallet(name: String, password: String, words: Option<String>, allow_empty: Option<bool>) -> Result<Created, String> {
-    use kaspa_wallet_core::storage::keydata::PrvKeyDataVariantKind;
-    use kaspa_wallet_core::storage::local::notevault::{account_mnemonic_from_vault_words, new_vault_words};
-    let name = name.trim();
-    let name = if name.is_empty() { "marigold" } else { name };
-    match kaspa_cli_lib::password_verdict(&password, allow_empty.unwrap_or(false) || kaspa_cli_lib::empty_password_allowed_by_env()) {
-        kaspa_cli_lib::PasswordVerdict::EmptyRefused => {
-            return Err(format!(
-                "a password is needed — at least {} characters; a PIN will do. No password at all is the advanced box below.",
-                kaspa_cli_lib::MIN_WALLET_PASSWORD_CHARS
-            ));
-        }
-        kaspa_cli_lib::PasswordVerdict::TooShort => {
-            return Err(format!("at least {} characters, please — a PIN will do", kaspa_cli_lib::MIN_WALLET_PASSWORD_CHARS));
-        }
-        _ => {}
-    }
-    let (wallet, _, network_id) = probe().await?;
-    wallet.set_network_id(&network_id).map_err(|e| e.to_string())?;
-    let bare = kaspa_wallet_core::storage::make_filename(&Some(name.to_string()), &None);
-    if wallet.store().exists(Some(&bare)).await.unwrap_or(false) {
-        return Err(format!("a wallet named '{bare}' already exists on this machine"));
-    }
-    let vault_words = match words {
-        Some(given) => {
-            let normalised: Vec<String> = given.split_whitespace().map(|w| w.to_lowercase()).collect();
-            if normalised.len() != 24 {
-                return Err(format!("that is {} words; a wallet has 24", normalised.len()));
-            }
-            let phrase = normalised.join(" ");
-            kaspa_bip32::Mnemonic::new(phrase.clone(), kaspa_bip32::Language::English)
-                .map_err(|_| "those are not 24 wallet words".to_string())?;
-            phrase
-        }
-        None => new_vault_words().map_err(|e| e.to_string())?,
-    };
-    let secret = Secret::from(password);
-    let account = account_mnemonic_from_vault_words(&vault_words).map_err(|e| e.to_string())?;
-    let prv = PrvKeyDataCreateArgs::new(None, None, Secret::from(account.phrase_string()), PrvKeyDataVariantKind::Mnemonic);
-    wallet.store().batch().await.map_err(|e| e.to_string())?;
-    let args = WalletCreateArgs::new(Some(name.to_string()), None, EncryptionKind::XChaCha20Poly1305, None, true);
-    let (descriptor, _) = wallet.create_wallet(&secret, args).await.map_err(|e| e.to_string())?;
-    let key_id = wallet.create_prv_key_data(&secret, prv).await.map_err(|e| e.to_string())?;
-    wallet.create_account_bip32(&secret, key_id, None, AccountCreateArgsBip32::new(None, None)).await.map_err(|e| e.to_string())?;
-    wallet.store().flush(&secret).await.map_err(|e| e.to_string())?;
-    let store = wallet.store().as_note_key_store().map_err(|e| e.to_string())?;
-    store.vault_restore_from_words(&vault_words, &secret).await.map_err(|e| e.to_string())?;
-    // The public half of the wallet's backup key pair, beside the wallet.
-    if let Ok(vault_folder) = store.vault_folder().await
-        && let Some(wallet_dir) = vault_folder.parent()
-    {
-        kaspa_cli_lib::backup::write_recipient(wallet_dir, &vault_words).map_err(|e| e.to_string())?;
-    }
-    Ok(Created { filename: descriptor.filename, words: vault_words })
+    let made = app::create_wallet(None, None, &name, &password, words.as_deref(), allow_empty.unwrap_or(false)).await?;
+    Ok(Created { filename: made.filename, words: made.words })
 }
 
 #[tauri::command]
@@ -262,12 +198,7 @@ async fn version() -> String {
 
 #[tauri::command]
 async fn wallets() -> Result<Vec<WalletEntry>, String> {
-    let (wallet, _, _) = probe().await?;
-    let list = wallet.store().wallet_list().await.map_err(|e| e.to_string())?;
-    Ok(list
-        .into_iter()
-        .map(|d| WalletEntry { title: d.title.clone().unwrap_or_else(|| d.filename.clone()), filename: d.filename })
-        .collect())
+    Ok(app::list_wallets(None, None).await?.into_iter().map(|d| WalletEntry { filename: d.filename, title: d.title }).collect())
 }
 
 /// `node`: "public" for a public computer, "local" for a node on this machine,
@@ -275,17 +206,7 @@ async fn wallets() -> Result<Vec<WalletEntry>, String> {
 #[tauri::command]
 async fn open(app: AppHandle, state: State<'_, App>, wallet: String, password: String, node: String) -> Result<Opened, String> {
     let (_, _, network_id) = probe().await?;
-    let node_url = match node.as_str() {
-        "own" => None,
-        "local" => Some(format!("ws://127.0.0.1:{}", network_id.default_borsh_rpc_port())),
-        "public" => Some(
-            kaspa_wrpc_client::resolver::public_nodes(network_id)
-                .into_iter()
-                .next()
-                .ok_or_else(|| "no public computer is known for this network".to_string())?,
-        ),
-        url => Some(url.to_string()),
-    };
+    let node_url = app::resolve_node(&node, network_id)?;
     let say_app = app.clone();
     let say: kaspa_cli_lib::serve::Say = Arc::new(move |line: String| {
         let _ = say_app.emit("say", strip_ansi(&line));
@@ -298,27 +219,11 @@ async fn open(app: AppHandle, state: State<'_, App>, wallet: String, password: S
         // Status screen can start it; nothing mines until asked.
         mine: Some(50),
         network: Some(network_id),
+        folder: None,
         origin: "desktop",
     };
-    let session = open_session(&options, state.shutdown.clone(), say).await.map_err(|e| {
-        let text = e.to_string();
-        // The node's own words tell a terminal user to type a command; here
-        // the way out is a choice on this screen (founder, 2026-09-23).
-        if text.contains("already in use") {
-            "Looks like there is already a Marigold network running on this computer. Select \"A network running on this computer\" to connect to it.".to_string()
-        } else if node == "local" && (text.contains("cannot reach") || text.contains("Connection refused") || text.contains("timed out")) {
-            "No Marigold program is answering on this computer right now; the one that was running has stopped. Choose \"Sync here, inside the app\" or a public computer instead.".to_string()
-        } else {
-            text
-        }
-    })?;
-    let access = match node.as_str() {
-        "own" => "your own sync",
-        "local" => "a network on this computer",
-        "public" => "a public computer",
-        _ => "the node you named",
-    }
-    .to_string();
+    let session = open_session(&options, state.shutdown.clone(), say).await.map_err(|e| app::open_error_text(e.to_string(), &node))?;
+    let access = app::access_words(&node).to_string();
     let opened = Opened {
         wallet,
         network: network_id.to_string(),
@@ -372,59 +277,8 @@ async fn backup_folder(state: State<'_, App>, path: String) -> Result<String, St
 /// mirrored to this computer — the way the Telegram restore does, with the
 /// words of the wallet wanted.
 #[tauri::command]
-async fn restore_folder(app: AppHandle, path: String, words: String, name: String) -> Result<String, String> {
-    use kaspa_cli_lib::backup as archive;
-    use kaspa_cli_lib::bundle::{self, Unlock};
-    if !archive::looks_like_words(&words) {
-        return Err("that is not 24 words".to_string());
-    }
-    let dir = std::path::PathBuf::from(path.trim());
-    if !dir.is_dir() {
-        return Err(format!("{} is not a folder", dir.display()));
-    }
-    let archives = bundle::collect_dir(&dir).map_err(|e| e.to_string())?;
-    let (_, folder, _) = probe().await?;
-    let folder = if let Some(rest) = folder.strip_prefix("~/") {
-        app.path().home_dir().map_err(|e| e.to_string())?.join(rest)
-    } else {
-        std::path::PathBuf::from(&folder)
-    };
-    let names = bundle::bundle_wallets(&archives).map_err(|e| e.to_string())?;
-    let merged = if names.is_empty() {
-        bundle::merge(&archives, Unlock::Legacy(&archive::key_from_words(&words)))
-    } else {
-        let fits = bundle::wallets_for_words(&archives, &words).map_err(|e| e.to_string())?;
-        let Some(mine) = fits.first() else {
-            return Err(format!(
-                "those words open none of the wallets in this backup ({}) — each wallet opens with its own 24 words",
-                names.join(", ")
-            ));
-        };
-        let mut map = std::collections::BTreeMap::new();
-        map.insert(mine.clone(), words.clone());
-        bundle::merge(&archives, Unlock::Words(&map))
-    }
-    .map_err(|e| e.to_string())?;
-    let new_name = if name.trim().is_empty() { None } else { Some(name.trim().to_string()) };
-    let mut done = Vec::new();
-    let mut restored_names = Vec::new();
-    for (wallet, entries) in merged.wallets {
-        let restored = archive::install_restored(entries, &folder, new_name.clone()).map_err(|e| e.to_string())?;
-        restored_names.push(wallet);
-        done.push(format!("Restored {} files as '{}'", restored.written, restored.name));
-    }
-    let others: Vec<String> = names.into_iter().filter(|n| !restored_names.contains(n)).collect();
-    Ok(format!(
-        "{} from the full copy of {} with {} change set(s) after it. Open it with the password it had when the backup was made.{}",
-        done.join("; "),
-        bundle::checkpoint_moment(&merged.stamp),
-        merged.deltas,
-        if others.is_empty() {
-            String::new()
-        } else {
-            format!(" The backup also holds {}: run this again with its own words.", bundle::wallets_phrase(&others))
-        }
-    ))
+async fn restore_folder(path: String, words: String, name: String) -> Result<String, String> {
+    app::restore_from_folder(None, None, &path, &words, &name).await
 }
 
 #[tauri::command]
@@ -472,71 +326,11 @@ async fn telegram_setup(state: State<'_, App>, token: String, pin: String) -> Re
 /// while the parts arrive.
 #[tauri::command]
 async fn restore_telegram(app: AppHandle, token: String, words: String, name: String) -> Result<String, String> {
-    use kaspa_cli_lib::backup as archive;
-    use kaspa_cli_lib::bundle::{self, Unlock};
-    if !archive::looks_like_words(&words) {
-        return Err("that is not 24 words".to_string());
-    }
-    let token = token.trim().to_string();
-    if !token.contains(':') || token.len() < 20 {
-        return Err("that does not look like a bot token".to_string());
-    }
-    let (_, folder, _) = probe().await?;
-    let folder = if let Some(rest) = folder.strip_prefix("~/") {
-        app.path().home_dir().map_err(|e| e.to_string())?.join(rest)
-    } else {
-        std::path::PathBuf::from(&folder)
-    };
     let say_app = app.clone();
     let progress = move |line: String| {
         let _ = say_app.emit("say", line);
     };
-    let sets = kaspa_cli_lib::telegram::collect_backup_sets(&token, Duration::from_secs(600), &progress).await?;
-    let mut archives = std::collections::BTreeMap::new();
-    for (backup, parts) in &sets {
-        let mut bytes = Vec::new();
-        for part in parts {
-            bytes.extend(kaspa_cli_lib::telegram::download_file(&token, &part.file_id).await?);
-        }
-        progress(format!("Received {backup} ({} bytes).", bytes.len()));
-        archives.insert(backup.clone(), bytes);
-    }
-    let names = bundle::bundle_wallets(&archives).map_err(|e| e.to_string())?;
-    let merged = if names.is_empty() {
-        bundle::merge(&archives, Unlock::Legacy(&archive::key_from_words(&words)))
-    } else {
-        let fits = bundle::wallets_for_words(&archives, &words).map_err(|e| e.to_string())?;
-        let Some(mine) = fits.first() else {
-            return Err(format!(
-                "those words open none of the wallets in this backup ({}) — each wallet opens with its own 24 words",
-                names.join(", ")
-            ));
-        };
-        let mut map = std::collections::BTreeMap::new();
-        map.insert(mine.clone(), words.clone());
-        bundle::merge(&archives, Unlock::Words(&map))
-    }
-    .map_err(|e| e.to_string())?;
-    let new_name = if name.trim().is_empty() { None } else { Some(name.trim().to_string()) };
-    let mut done = Vec::new();
-    let mut restored_names = Vec::new();
-    for (wallet, entries) in merged.wallets {
-        let restored = archive::install_restored(entries, &folder, new_name.clone()).map_err(|e| e.to_string())?;
-        restored_names.push(wallet);
-        done.push(format!("Restored {} files as '{}'", restored.written, restored.name));
-    }
-    let others: Vec<String> = names.into_iter().filter(|n| !restored_names.contains(n)).collect();
-    Ok(format!(
-        "{} from the full copy of {} with {} change set(s) after it. Open it with the password it had when the backup was made. If any other copy of this backup could exist, rotate its notes to fresh keys once ('note rotate all' in the terminal wallet).{}",
-        done.join("; "),
-        bundle::checkpoint_moment(&merged.stamp),
-        merged.deltas,
-        if others.is_empty() {
-            String::new()
-        } else {
-            format!(" The backup also holds {}: run this again with its own words.", bundle::wallets_phrase(&others))
-        }
-    ))
+    kaspa_cli_lib::app::restore_from_telegram(None, None, &token, &words, &name, &progress).await
 }
 
 /// What the updater found at the compiled-in address, if newer than this build.
@@ -657,37 +451,14 @@ async fn history(state: State<'_, App>) -> Result<String, String> {
 /// What a pasted code is, before anything is done with it.
 #[tauri::command]
 async fn classify(code: String) -> Result<Classified, String> {
-    use kaspa_wallet_core::account::notepool::{
-        BEARER_NOTE_PREFIX, HANDOVER_PREFIX, LOCKED_HANDOVER_PREFIX, PAYMENT_RECEIPT_PREFIX, PaymentRequest,
-    };
-    let code = code.trim();
-    if let Ok(request) = PaymentRequest::from_text(code) {
-        request.verify().map_err(|e| e.to_string())?;
-        return Ok(Classified {
-            kind: "request".into(),
-            amount: request.amount_petals.map(sompi_to_kaspa_string).unwrap_or_default(),
-        });
-    }
-    let kind = if code.starts_with(HANDOVER_PREFIX) || code.starts_with(LOCKED_HANDOVER_PREFIX) {
-        "handover"
-    } else if code.starts_with(BEARER_NOTE_PREFIX) {
-        "note"
-    } else if code.starts_with(PAYMENT_RECEIPT_PREFIX) {
-        "receipt"
-    } else {
-        "unknown"
-    };
-    Ok(Classified { kind: kind.into(), amount: String::new() })
+    let found = app::classify(&code)?;
+    Ok(Classified { kind: found.kind, amount: found.amount })
 }
 
 /// `amount` is used only when the request pins none.
 #[tauri::command]
 async fn pay(state: State<'_, App>, code: String, amount: String) -> Result<PaidOut, String> {
-    let chosen = if amount.trim().is_empty() {
-        None
-    } else {
-        Some(try_kaspa_str_to_sompi(amount.trim()).map_err(|e| e.to_string())?.filter(|p| *p > 0).ok_or("that is not an amount")?)
-    };
+    let chosen = app::optional_amount(&amount)?;
     with_service(&state, |s| async move {
         let paid = s.pay_request_with(code.trim(), chosen).await?;
         Ok(PaidOut {
@@ -729,8 +500,7 @@ async fn share_key(state: State<'_, App>) -> Result<Requested, String> {
 /// notes come back to this wallet by themselves.
 #[tauri::command]
 async fn give(state: State<'_, App>, amount: String, key: String, minutes: u64) -> Result<Given, String> {
-    let petals =
-        try_kaspa_str_to_sompi(amount.trim()).map_err(|e| e.to_string())?.filter(|p| *p > 0).ok_or("that is not an amount")?;
+    let petals = app::amount(&amount)?;
     let key = key.trim().to_string();
     with_service(&state, |s| async move {
         let paid = if key.is_empty() {
@@ -755,11 +525,7 @@ async fn give(state: State<'_, App>, amount: String, key: String, minutes: u64) 
 
 #[tauri::command]
 async fn request(state: State<'_, App>, amount: String) -> Result<Requested, String> {
-    let petals = if amount.trim().is_empty() {
-        None
-    } else {
-        Some(try_kaspa_str_to_sompi(amount.trim()).map_err(|e| e.to_string())?.filter(|p| *p > 0).ok_or("that is not an amount")?)
-    };
+    let petals = app::optional_amount(&amount)?;
     with_service(&state, |s| async move {
         let code = kaspa_cli_lib::serve::WalletService::request(&s, petals).await?;
         let qr = qr_data_url(&code);

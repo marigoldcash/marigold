@@ -1,0 +1,21 @@
+[package]
+name = "marigold-uniffi-bindgen"
+description = "Writes the Swift and Kotlin bindings of the wallet core (scripts/mobile-bindings.sh)"
+rust-version.workspace = true
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+include.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/main.rs"
+
+[dependencies]
+uniffi = { workspace = true, features = ["cli"] }
+
+[lints]
+workspace = true

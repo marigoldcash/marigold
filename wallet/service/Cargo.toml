@@ -16,7 +16,7 @@ repository.workspace = true
 # The gRPC client, for a node named by a grpc:// address. The phone apps leave it off.
 grpc = ["dep:kaspa-grpc-client"]
 # The interface the phone apps call (PH-M3). Off for every other build.
-ffi = []
+ffi = ["dep:uniffi"]
 
 [dependencies]
 async-trait.workspace = true
@@ -45,7 +45,12 @@ workflow-store.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 kaspa-grpc-client = { workspace = true, optional = true }
-tokio = { workspace = true, features = ["sync", "time"] }
+tokio = { workspace = true, features = ["sync", "time", "rt", "macros"] }
+# The interface for Swift and Kotlin; the phone apps' build turns it on.
+uniffi = { workspace = true, optional = true }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

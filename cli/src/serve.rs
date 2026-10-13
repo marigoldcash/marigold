@@ -143,6 +143,7 @@ pub async fn serve(args: Vec<String>) -> Result<()> {
             node: options.node.clone(),
             mine: options.mine,
             network: options.network,
+            folder: None,
             origin: "telegram",
         },
         shutdown.clone(),

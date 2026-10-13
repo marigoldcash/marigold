@@ -16,6 +16,7 @@ members = [
     "wallet/keys",
     "wallet/pskt",
     "wallet/service",
+    "wallet/uniffi-bindgen",
     "consensus",
     "consensus/core",
     "consensus/client",
@@ -280,6 +281,7 @@ tempfile = "3.8.1"
 textwrap = "0.16.0"
 thiserror = { version = "2.0.18", default-features = false }
 tokio = { version = "1.42.1", features = ["sync"] }
+uniffi = { version = "0.32", features = ["tokio"] }
 tokio-stream = "0.1.14"
 toml = "0.8.8"
 tonic = { version = "0.14.5", features = ["tls-webpki-roots", "gzip", "transport"] }

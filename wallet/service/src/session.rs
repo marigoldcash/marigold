@@ -35,6 +35,8 @@ pub struct SessionOptions {
     pub node: Option<String>,
     pub mine: Option<u32>,
     pub network: Option<NetworkId>,
+    /// The wallets folder; `None` takes it from the wallet settings. A phone names its own.
+    pub folder: Option<String>,
     /// Named in the history beside every entry this session makes.
     pub origin: &'static str,
 }
@@ -91,23 +93,9 @@ impl Session {
 /// Opens the wallet and connects it, the way `serve` does; `say` receives
 /// the service's one-line remarks.
 pub async fn open_session(options: &SessionOptions, shutdown: Arc<AtomicBool>, say: Say, providers: &Providers) -> Result<Session> {
-    // The wallet's settings say which network and which folder; read them the
-    // way the terminal wallet does, before anything opens.
-    let probe = Wallet::try_with_rpc(None, Wallet::local_store()?, None)?;
-    probe.load_settings().await.ok();
-    let folder: String = probe
-        .settings()
-        .get::<String>(WalletSettings::Folder)
-        .unwrap_or_else(|| kaspa_wallet_core::storage::local::default_storage_folder().to_string());
-    let network_id = match options.network {
-        Some(id) => id,
-        None => probe
-            .settings()
-            .get::<String>(WalletSettings::Network)
-            .and_then(|s| s.parse::<NetworkId>().ok())
-            .unwrap_or(NetworkId::with_suffix(kaspa_consensus_core::network::NetworkType::Testnet, 10)),
-    };
-    drop(probe);
+    // The wallet's settings say which network and which folder, unless the caller named them;
+    // read them the way the terminal wallet does, before anything opens.
+    let (_, folder, network_id) = crate::app::probe(options.folder.as_deref(), options.network).await.map_err(Error::custom)?;
 
     log::info!("Marigold wallet service {}: wallet '{}' on {network_id}", env!("CARGO_PKG_VERSION"), options.wallet);
     let miner_host: Option<Arc<dyn MinerHostApi>> = match (options.mine, &providers.miner) {
@@ -186,7 +174,9 @@ pub async fn open_session(options: &SessionOptions, shutdown: Arc<AtomicBool>, s
     #[cfg(feature = "grpc")]
     let rpc_ctl_open = rpc_ctl.rpc_ctl().clone();
     let wallet = Arc::new(Wallet::try_with_rpc(Some(rpc_ctl), Wallet::local_store()?, Some(network_id))?);
-    wallet.load_settings().await.ok();
+    if options.folder.is_none() {
+        wallet.load_settings().await.ok();
+    }
     wallet.store().set_storage_folder(&folder)?;
     wallet.clone().start().await?;
     match &node {

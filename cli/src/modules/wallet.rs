@@ -1783,21 +1783,13 @@ async fn change_password(ctx: &Arc<KaspaCli>, argv: Vec<String>, guard: WalletGu
     tprintln!(ctx, "The password it has now, first.");
     let (old, _) = ctx.ask_wallet_secret(None).await?;
     let Some(new) = ask_new_password(ctx, "The new password: ").await? else { return Ok(()) };
-    let store = ctx.store();
-    let notes = store.as_note_key_store()?;
-    // The notes' key first, since that write is atomic; then the keys file,
-    // and the notes' key goes back if the keys file refuses.
-    if let Err(err) = notes.vault_change_secret(&old, &new).await {
-        let text = err.to_string();
-        if text.contains("decrypt") || text.contains("aead") || text.contains("Decrypt") {
+    match kaspa_wallet_service::app::change_password(&ctx.wallet(), &old, &new).await {
+        Ok(()) => {}
+        Err(kaspa_wallet_service::app::PasswordChange::WrongPassword) => {
             tprintln!(ctx, "{}", crate::ui::warn("That is not this wallet's password; nothing was changed."));
             return Ok(());
         }
-        return Err(err.into());
-    }
-    if let Err(err) = store.change_secret(&old, &new).await {
-        let _ = notes.vault_change_secret(&new, &old).await;
-        return Err(Error::custom(format!("the keys file could not be rewritten ({err}); nothing was changed")));
+        Err(kaspa_wallet_service::app::PasswordChange::Failed(text)) => return Err(Error::custom(text)),
     }
     tprintln!(ctx, "{}", crate::ui::ok("Password changed."));
     tprintln!(ctx, "{}", crate::ui::dim("Your backups are still secured by your 24 words only, not your password."));

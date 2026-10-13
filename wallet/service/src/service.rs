@@ -504,7 +504,11 @@ impl WalletService {
     /// the bot never offers this.
     pub async fn recovery_words(&self, password: Secret) -> std::result::Result<String, String> {
         let store = self.wallet.store().as_note_key_store().map_err(|e| e.to_string())?;
-        store.recovery_words(&password).await.map_err(|_| "that is not this wallet's password".to_string())
+        // `recovery_words` alone would answer from the key an open wallet already holds, whatever
+        // password was typed; the file is read again to check it.
+        let wrong = |_| "that is not this wallet's password".to_string();
+        store.verify_secret(&password).await.map_err(wrong)?;
+        store.recovery_words(&password).await.map_err(wrong)
     }
 
     pub async fn share_key(&self, label: &str) -> std::result::Result<String, String> {

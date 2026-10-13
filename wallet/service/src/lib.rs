@@ -8,12 +8,14 @@
 //! Nothing in this crate prints, and nothing depends on the terminal library:
 //! a message is a `say` line handed to the caller, or a returned value.
 
+pub mod app;
 pub mod backup;
 pub mod bundle;
 pub mod error;
-#[cfg(feature = "ffi")]
+#[cfg(all(feature = "ffi", not(target_arch = "wasm32")))]
 pub mod ffi;
 pub mod format;
+pub mod policy;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod providers;
 pub mod result;
@@ -25,6 +27,9 @@ pub mod session;
 pub mod telegram;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod tgbackup;
+
+#[cfg(all(feature = "ffi", not(target_arch = "wasm32")))]
+uniffi::setup_scaffolding!();
 
 pub use error::Error;
 pub use result::Result;
