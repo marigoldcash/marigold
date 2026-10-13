@@ -42,7 +42,9 @@ android() {
       cargo rustc --release --locked -p "$CRATE" --lib --features ffi --target "$target" --crate-type cdylib
     mkdir -p "$OUT/jniLibs/$abi"
     cp "target/$target/release/$LIB.so" "$OUT/jniLibs/$abi/"
-    "$bin/llvm-nm" -D "$OUT/jniLibs/$abi/$LIB.so" | grep -q " T $SYMBOL" || { echo "$SYMBOL missing from $abi" >&2; exit 1; }
+    local symbols
+    symbols=$("$bin/llvm-nm" -D "$OUT/jniLibs/$abi/$LIB.so")
+    grep -q " T $SYMBOL" <<<"$symbols" || { echo "$SYMBOL missing from $abi" >&2; exit 1; }
   done
   find "$OUT/jniLibs" -name '*.so' -exec ls -l {} +
 }
@@ -66,7 +68,9 @@ H
   for target in aarch64-apple-ios aarch64-apple-ios-sim; do
     echo "→ $target"
     cargo rustc --release --locked -p "$CRATE" --lib --features ffi --target "$target" --crate-type staticlib
-    nm -gU "target/$target/release/$LIB.a" 2>/dev/null | grep -q " T _$SYMBOL" || { echo "$SYMBOL missing from $target" >&2; exit 1; }
+    local symbols
+    symbols=$(nm -gU "target/$target/release/$LIB.a" 2>&1 || true)
+    grep -q " T _$SYMBOL" <<<"$symbols" || { echo "$SYMBOL missing from $target; nm printed:" >&2; head -20 <<<"$symbols" >&2; exit 1; }
     args+=(-library "target/$target/release/$LIB.a" -headers "$OUT/ios/include")
   done
   xcodebuild -create-xcframework "${args[@]}" -output "$OUT/MarigoldCore.xcframework"

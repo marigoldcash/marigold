@@ -39,6 +39,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           key: android
+          cache-on-failure: true
 
       - name: Build
         run: ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME" scripts/mobile-core.sh android
@@ -71,6 +72,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           key: ios
+          cache-on-failure: true
 
       - name: Build
         run: scripts/mobile-core.sh ios
