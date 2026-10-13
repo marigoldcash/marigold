@@ -50,6 +50,7 @@ hex.workspace = true
 kaspa-addresses.workspace = true
 kaspa-bip32.workspace = true
 kaspa-consensus-core.workspace = true
+kaspa-hashes.workspace = true
 kaspad = { workspace = true, optional = true }
 kaspa-core.workspace = true
 chrono.workspace = true
@@ -117,7 +118,6 @@ tokio = { workspace = true, features = ["rt-multi-thread"] }
 # gRPC pulls tonic, hyper and mio, none of which build for the browser; the
 # only callers are the headless miner and `serve`, which are native anyway.
 kaspa-grpc-client.workspace = true
-kaspa-hashes.workspace = true
 
 
 [dev-dependencies]
