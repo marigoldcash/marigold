@@ -331,7 +331,7 @@ Below follows a tick-offable plan for a **non-shielded, very simplistic fixed-de
 
 ## Phase 10 — The phone wallet (started 2026-10-12, runs beside Phase 9)
 
-- [ ] **P10 — iOS and Android wallet apps on the light wallet.** One Rust core wrapped by UniFFI, one React Native app under Expo; the executable plan with its verifications is [docs/marigold/MOBILE-PLAN.md](docs/marigold/MOBILE-PLAN.md), steps M0–M12, ticked there. DECISIONS "The phone wallet: one Rust core, a React Native screen".
+- [ ] **P10 — iOS and Android wallet apps on the light wallet.** One Rust core wrapped by UniFFI, one React Native app under Expo; the executable plan with its verifications is [docs/marigold/MOBILE-PLAN.md](docs/marigold/MOBILE-PLAN.md), steps PH-M0 to PH-M12, ticked there. DECISIONS "The phone wallet: one Rust core, a React Native screen".
 
 ## Future work (post-launch, deliberately out of launch scope)
 

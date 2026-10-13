@@ -10,8 +10,8 @@ license.workspace = true
 repository.workspace = true
 
 # The service never depends on the terminal (workflow-terminal) or on kaspa-cli:
-# the phone apps link it without either (docs/marigold/MOBILE-PLAN.md, M1).
-# The gRPC client joins in M1c, gated off wasm32 as it is in the cli.
+# the phone apps link it without either (docs/marigold/MOBILE-PLAN.md, PH-M1).
+# The gRPC client joins in PH-M1c, gated off wasm32 as it is in the cli.
 [dependencies]
 kaspa-rpc-core.workspace = true
 kaspa-wallet-core.workspace = true
