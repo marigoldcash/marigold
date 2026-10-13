@@ -1,7 +1,7 @@
 //! What the phone apps call. PH-M2 puts one C symbol here so the libraries built for the phones
 //! have something to link and `nm` can show; PH-M3 replaces it with the UniFFI interface.
 
-use std::ffi::{c_char, CStr};
+use std::ffi::{CStr, c_char};
 
 static VERSION: &CStr = match CStr::from_bytes_with_nul(concat!(env!("CARGO_PKG_VERSION"), "\0").as_bytes()) {
     Ok(v) => v,
