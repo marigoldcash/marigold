@@ -62,7 +62,7 @@ kaspa-notify.workspace = true
 kaspa-rpc-core.workspace = true
 kaspa-utils.workspace = true
 kaspa-wallet-core.workspace = true
-kaspa-wallet-service.workspace = true
+kaspa-wallet-service = { workspace = true, features = ["grpc"] }
 kaspa-wallet-keys.workspace = true
 kaspa-wallet-pskt.workspace = true
 kaspa-wrpc-client.workspace = true

@@ -340,3 +340,37 @@ fn database_locked_elsewhere(appdir: &Path) -> Option<(std::path::PathBuf, u32)>
 fn database_locked_elsewhere(_appdir: &Path) -> Option<(std::path::PathBuf, u32)> {
     None
 }
+
+// ---- What the wallet service takes from this program (PH-M1c): the node
+// inside the process, behind two small traits, so the service never links it.
+
+fn service_error(err: Error) -> kaspa_wallet_service::Error {
+    kaspa_wallet_service::Error::custom(err.to_string())
+}
+
+#[async_trait]
+impl kaspa_wallet_service::providers::NodeInside for EmbeddedNode {
+    async fn signal_connected(&self) -> kaspa_wallet_service::Result<()> {
+        EmbeddedNode::signal_connected(self).await.map_err(service_error)
+    }
+
+    async fn stop(&self) -> kaspa_wallet_service::Result<()> {
+        EmbeddedNode::stop(self).await.map_err(service_error)
+    }
+}
+
+/// Starts the node inside this process for the service.
+pub struct Starter;
+
+#[async_trait]
+impl kaspa_wallet_service::providers::NodeStarter for Starter {
+    async fn start(
+        &self,
+        network_id: NetworkId,
+        miner: Option<Arc<dyn kaspa_rpc_core::api::miner::MinerControl>>,
+    ) -> kaspa_wallet_service::Result<(Arc<dyn kaspa_wallet_service::providers::NodeInside>, Rpc)> {
+        let appdir = appdir(network_id).await.map_err(service_error)?;
+        let (node, rpc) = EmbeddedNode::start_with(network_id, &appdir, miner, None).map_err(service_error)?;
+        Ok((node as Arc<dyn kaspa_wallet_service::providers::NodeInside>, rpc))
+    }
+}

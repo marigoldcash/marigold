@@ -12,7 +12,13 @@ pub mod backup;
 pub mod bundle;
 pub mod error;
 pub mod format;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod providers;
 pub mod result;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod service;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod session;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod telegram;
 #[cfg(not(target_arch = "wasm32"))]

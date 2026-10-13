@@ -703,6 +703,32 @@ impl MinerHost {
     }
 }
 
+impl kaspa_wallet_service::providers::MinerHostApi for MinerHost {
+    fn bind_address(&self, address: Address) {
+        MinerHost::bind_address(self, address)
+    }
+
+    fn bind(&self, rpc: Arc<DynRpcApi>) {
+        MinerHost::bind(self, rpc)
+    }
+
+    fn address_bound(&self) -> bool {
+        MinerHost::address_bound(self)
+    }
+
+    fn start(&self, percent: u32) -> RpcResult<RpcMinerStatus> {
+        MinerHost::start(self, percent)
+    }
+
+    fn stop(&self) -> RpcMinerStatus {
+        MinerHost::stop(self)
+    }
+
+    fn mining(&self) -> Option<u32> {
+        self.miner().map(|m| m.percent())
+    }
+}
+
 impl MinerControl for MinerHost {
     fn status(&self) -> RpcMinerStatus {
         MinerHost::status(self)

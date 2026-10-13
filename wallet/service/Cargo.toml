@@ -12,9 +12,15 @@ repository.workspace = true
 # The service never depends on the terminal (workflow-terminal) or on kaspa-cli:
 # the phone apps link it without either (docs/marigold/MOBILE-PLAN.md, PH-M1).
 # The gRPC client joins in PH-M1c, gated off wasm32 as it is in the cli.
+[features]
+# The gRPC client, for a node named by a grpc:// address. The phone apps leave it off.
+grpc = ["dep:kaspa-grpc-client"]
+
 [dependencies]
+async-trait.workspace = true
 chrono.workspace = true
 faster-hex.workspace = true
+futures.workspace = true
 flate2.workspace = true
 hex.workspace = true
 kaspa-bip32.workspace = true
@@ -36,6 +42,7 @@ workflow-http.workspace = true
 workflow-store.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+kaspa-grpc-client = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["sync", "time"] }
 
 [lints]

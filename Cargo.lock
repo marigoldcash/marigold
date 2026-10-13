@@ -4565,17 +4565,22 @@ dependencies = [
 name = "kaspa-wallet-service"
 version = "2.88.346"
 dependencies = [
+ "async-trait",
  "chrono",
  "faster-hex 0.9.0",
  "flate2",
+ "futures",
  "hex",
  "kaspa-bip32",
+ "kaspa-consensus-core",
+ "kaspa-grpc-client",
  "kaspa-rpc-core",
  "kaspa-wallet-core",
  "kaspa-wrpc-client",
  "log",
  "rand 0.8.6",
  "reqwest",
+ "separator",
  "serde",
  "serde_json",
  "sha2",
