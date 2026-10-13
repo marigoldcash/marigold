@@ -11,6 +11,8 @@
 pub mod backup;
 pub mod error;
 pub mod result;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod telegram;
 
 pub use error::Error;
 pub use result::Result;
