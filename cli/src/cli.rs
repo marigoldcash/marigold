@@ -274,19 +274,7 @@ fn coins_per_minute() -> u64 {
     SWEEP_TRANSACTIONS_PER_PASS_CONST as u64 * COINS_PER_SWEEP_TRANSACTION
 }
 
-/// "about 4 hours", "about 20 minutes" — a figure somebody can plan around,
-/// not one they should hold us to.
-pub(crate) fn humanised_minutes(minutes: u64) -> String {
-    match minutes {
-        0 => "a moment".to_string(),
-        1 => "a minute".to_string(),
-        m if m < 90 => format!("{m} minutes"),
-        m => {
-            let hours = (m + 30) / 60;
-            format!("{hours} hour{}", if hours == 1 { "" } else { "s" })
-        }
-    }
-}
+pub(crate) use kaspa_wallet_service::format::humanised_minutes;
 
 /// "20 minutes", "3 hours", "4 days": how long a wait is, in the unit a
 /// person would pick. Not gated on the embedded node: the lane command uses

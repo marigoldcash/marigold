@@ -722,18 +722,7 @@ impl MinerControl for MinerHost {
     }
 }
 
-/// Human-readable hash rate. A CPU on this chain is in the kilohash range, so
-/// "0.00 MH/s" — which is what the stratum bridge shows — tells nobody
-/// anything.
-pub fn format_hashrate(rate: f64) -> String {
-    if rate >= 1_000_000.0 {
-        format!("{:.2} MH/s", rate / 1_000_000.0)
-    } else if rate >= 1_000.0 {
-        format!("{:.1} kH/s", rate / 1_000.0)
-    } else {
-        format!("{rate:.0} H/s")
-    }
-}
+pub use kaspa_wallet_service::format::format_hashrate;
 
 #[cfg(test)]
 mod tests {
@@ -862,12 +851,5 @@ mod tests {
         let name = worker_name();
         assert!(!name.is_empty() && name.len() <= 32);
         assert!(name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'), "{name}");
-    }
-
-    #[test]
-    fn hashrate_reads_in_units_a_person_can_use() {
-        assert_eq!(format_hashrate(12.0), "12 H/s");
-        assert_eq!(format_hashrate(4_500.0), "4.5 kH/s");
-        assert_eq!(format_hashrate(2_500_000.0), "2.50 MH/s");
     }
 }

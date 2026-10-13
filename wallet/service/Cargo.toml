@@ -18,6 +18,7 @@ faster-hex.workspace = true
 flate2.workspace = true
 hex.workspace = true
 kaspa-bip32.workspace = true
+kaspa-consensus-core.workspace = true
 kaspa-rpc-core.workspace = true
 kaspa-wallet-core.workspace = true
 kaspa-wrpc-client.workspace = true
@@ -25,6 +26,7 @@ log.workspace = true
 rand.workspace = true
 # Telegram uploads (multipart POST); the same reqwest workflow-http already builds.
 reqwest = { version = "0.12.8", default-features = false, features = ["rustls-tls-webpki-roots", "multipart"] }
+separator.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
