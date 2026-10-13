@@ -3206,6 +3206,7 @@ dependencies = [
  "kaspa-wallet-core",
  "kaspa-wallet-keys",
  "kaspa-wallet-pskt",
+ "kaspa-wallet-service",
  "kaspa-wrpc-client",
  "kaspad",
  "libc",
@@ -4557,6 +4558,17 @@ dependencies = [
  "wasm-bindgen-test",
  "web-sys",
  "workflow-wasm",
+]
+
+[[package]]
+name = "kaspa-wallet-service"
+version = "2.88.346"
+dependencies = [
+ "kaspa-rpc-core",
+ "kaspa-wallet-core",
+ "kaspa-wrpc-client",
+ "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
