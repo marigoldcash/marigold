@@ -510,6 +510,35 @@ mod tests {
         assert!(core.restore_from_words("bad".into(), "hunter2".into(), "one two three".into()).await.is_err());
     }
 
+    /// What a wallet leaves on a phone is the owner's alone: nothing in the wallets folder can be read, written or
+    /// entered by anyone else, as on the desktop (docs/marigold/MOBILE-PLAN.md, PH-M5).
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_files_of_a_new_wallet_are_the_owners_alone() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let core = core(&dir);
+        core.create_wallet("ph".into(), "hunter2".into(), false).await.unwrap();
+        let mut seen = 0;
+        let mut open_to_others = Vec::new();
+        let mut stack = vec![dir.path().to_path_buf()];
+        while let Some(path) = stack.pop() {
+            for entry in std::fs::read_dir(&path).unwrap() {
+                let entry = entry.unwrap();
+                let mode = entry.metadata().unwrap().permissions().mode() & 0o777;
+                seen += 1;
+                if mode & 0o077 != 0 {
+                    open_to_others.push(format!("{:o} {}", mode, entry.path().display()));
+                }
+                if entry.file_type().unwrap().is_dir() {
+                    stack.push(entry.path());
+                }
+            }
+        }
+        assert!(seen >= 3, "a wallet leaves files behind; saw {seen}");
+        assert!(open_to_others.is_empty(), "files others can reach: {open_to_others:?}");
+    }
+
     #[test]
     fn a_pasted_code_is_told_apart() {
         let dir = tempfile::tempdir().unwrap();

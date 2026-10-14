@@ -110,7 +110,7 @@ pub async fn create_wallet(
         }
         _ => {}
     }
-    let (wallet, _, network_id) = probe(folder, network).await?;
+    let (wallet, folder, network_id) = probe(folder, network).await?;
     wallet.set_network_id(&network_id).map_err(|e| e.to_string())?;
     let bare = kaspa_wallet_core::storage::make_filename(&Some(name.to_string()), &None);
     if wallet.store().exists(Some(&bare)).await.unwrap_or(false) {
@@ -146,7 +146,47 @@ pub async fn create_wallet(
     {
         archive::write_recipient(wallet_dir, &vault_words).map_err(|e| e.to_string())?;
     }
+    if let Ok(dir) = wallet_dir_of(&folder, &descriptor.filename) {
+        restrict_to_owner(&dir);
+    }
     Ok(Created { filename: descriptor.filename, words: vault_words })
+}
+
+/// Makes everything a wallet keeps in its folder the owner's alone: folders `0700`, files `0600`. The keys file is
+/// encrypted and the rest is public or a lock, but nothing about a wallet is for anyone else to read, and a phone's
+/// folder should say so as plainly as the desktop's. Run when a wallet is made and each time it is opened, so a wallet
+/// made by an older program is brought in line. Where there are no such permissions (Windows) it does nothing.
+pub fn restrict_to_owner(wallet_dir: &std::path::Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut stack = vec![wallet_dir.to_path_buf()];
+        while let Some(path) = stack.pop() {
+            let Ok(meta) = std::fs::symlink_metadata(&path) else { continue };
+            if meta.file_type().is_symlink() {
+                continue;
+            }
+            let wanted = if meta.is_dir() { 0o700 } else { 0o600 };
+            if meta.permissions().mode() & 0o777 != wanted
+                && let Err(err) = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(wanted))
+            {
+                log::warn!("could not restrict {}: {err}", path.display());
+            }
+            if meta.is_dir()
+                && let Ok(entries) = std::fs::read_dir(&path)
+            {
+                stack.extend(entries.flatten().map(|e| e.path()));
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = wallet_dir;
+}
+
+/// The folder a wallet of this file name keeps its files in, inside the wallets folder.
+pub fn wallet_dir_of(folder: &str, filename: &str) -> Result<PathBuf, String> {
+    let base = workflow_store::fs::resolve_path(folder).map_err(|e| e.to_string())?;
+    Ok(base.join(kaspa_wallet_core::storage::local::wallet_dir_name(filename)))
 }
 
 /// The node an open screen's choice names: "public" for a public computer, "local" for a node on

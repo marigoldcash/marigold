@@ -262,6 +262,11 @@ pub async fn open_session(options: &SessionOptions, shutdown: Arc<AtomicBool>, s
         }
     }
 
+    // Whatever an older program left readable by others is closed now.
+    if let Ok(dir) = crate::app::wallet_dir_of(&folder, &options.wallet) {
+        crate::app::restrict_to_owner(&dir);
+    }
+
     // The wallet's backup key, written on the first open since the backups
     // started covering every wallet (2026-10-06).
     match bundle::ensure_recipient(&wallet, &options.wallet, &options.password).await {
