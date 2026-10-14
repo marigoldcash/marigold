@@ -78,7 +78,9 @@ impl Session {
     pub async fn resume(&self, shutdown: Arc<AtomicBool>, say: Say) -> Result<()> {
         match &self.node {
             Node::Wrpc(client, url) => {
-                if !self.wallet.is_connected() {
+                if !self.wallet.is_connected() || !node_answers(&self.rpc).await {
+                    // A connection the phone dropped in the background can look open for minutes: let it go first.
+                    client.disconnect().await.ok();
                     use kaspa_wallet_core::rpc::{ConnectOptions, ConnectStrategy};
                     say("Connecting again…".to_string());
                     let options = ConnectOptions {
@@ -283,6 +285,12 @@ pub async fn open_session(options: &SessionOptions, shutdown: Arc<AtomicBool>, s
         options.origin,
     );
     Ok(Session { service, wallet, rpc, node, miner_host, folder, network_id })
+}
+
+/// Whether the node answers a plain question within a few seconds. A connection can look open long after the network
+/// under it has gone (a phone that was in a pocket, an airplane), and this is how that is told from a working one.
+pub async fn node_answers(rpc: &Arc<DynRpcApi>) -> bool {
+    matches!(tokio::time::timeout(std::time::Duration::from_secs(4), rpc.get_server_info()).await, Ok(Ok(_)))
 }
 
 /// Takes the wallet's own copy of the pool from the latest anchor and keeps it current until the wallet lets go of it,

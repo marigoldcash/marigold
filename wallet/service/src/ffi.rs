@@ -267,10 +267,11 @@ impl MarigoldCore {
             access: app::access_words(&node).to_string(),
             ticker: session.service.ticker().to_string(),
         };
-        let (service, wallet) = (session.service.clone(), session.wallet.clone());
+        let (service, wallet, session_rpc) = (session.service.clone(), session.wallet.clone(), session.rpc.clone());
         *self.access.lock().unwrap() = node;
         *self.session.lock().await = Some(session);
-        *self.watcher.lock().await = Some(self.watch(service, wallet));
+        let rpc = session_rpc;
+        *self.watcher.lock().await = Some(self.watch(service, wallet, rpc));
         Ok(opened)
     }
 
@@ -422,7 +423,8 @@ impl MarigoldCore {
     /// notes. What a status line on the screen shows.
     pub async fn connection(&self) -> Reply<ConnectionInfo> {
         let wallet = self.session.lock().await.as_ref().map(|s| s.wallet.clone()).ok_or(WalletError::NoWalletOpen)?;
-        let connected = wallet.is_connected();
+        let rpc = self.session.lock().await.as_ref().map(|s| s.rpc.clone()).ok_or(WalletError::NoWalletOpen)?;
+        let connected = wallet.is_connected() && crate::session::node_answers(&rpc).await;
         let words = if !connected {
             "There is no connection to the network right now. Your wallet is safe, and it catches up when the connection is back."
                 .to_string()
@@ -467,14 +469,19 @@ impl MarigoldCore {
 
     /// While a wallet is open: tells the app when the balance or the connection changes, and keeps
     /// the automatic backup going.
-    fn watch(&self, service: Arc<WalletService>, wallet: Arc<kaspa_wallet_core::wallet::Wallet>) -> tokio::task::JoinHandle<()> {
+    fn watch(
+        &self,
+        service: Arc<WalletService>,
+        wallet: Arc<kaspa_wallet_core::wallet::Wallet>,
+        rpc: Arc<kaspa_wallet_core::rpc::DynRpcApi>,
+    ) -> tokio::task::JoinHandle<()> {
         let (listener, state) = (self.listener.clone(), self.backup_state.clone());
         tokio::spawn(async move {
             let (mut balance, mut connected, mut round) = (String::new(), None::<bool>, 0u64);
             loop {
                 tokio::time::sleep(Duration::from_secs(3)).await;
                 round += 1;
-                let now = wallet.is_connected();
+                let now = wallet.is_connected() && crate::session::node_answers(&rpc).await;
                 if connected != Some(now) {
                     connected = Some(now);
                     if let Some(l) = listener.lock().unwrap().clone() {
@@ -617,6 +624,16 @@ mod tests {
         assert!(connection.connected);
         assert_eq!(connection.words, "Using: a public computer, with your own copy of the notes.");
         core.resume().await.unwrap();
+
+        // The connection is lost, as when a phone sleeps or the network goes: the words say so, and resume brings it back.
+        core.session.lock().await.as_ref().unwrap().stop_node().await.unwrap();
+        let lost = core.connection().await.unwrap();
+        assert!(!lost.connected);
+        assert!(lost.words.starts_with("There is no connection to the network right now."), "{}", lost.words);
+        core.resume().await.unwrap();
+        let back = core.connection().await.unwrap();
+        assert!(back.connected, "{}", back.words);
+        assert_eq!(back.words, "Using: a public computer, with your own copy of the notes.");
         let light = core.light_status().await.unwrap();
         assert!(light.active && light.notes > 0, "the copy of the notes is kept: {light:?}");
         assert!(core.balance().await.is_ok());
