@@ -1,6 +1,6 @@
 # Exchanges and integrators: the interface, and what differs from Kaspa
 
-Marigold is a fork of rusty-kaspa. Anything that speaks Kaspa's gRPC or wRPC, parses its addresses, or follows its headers mostly works unchanged, and the differences are few and deliberate. This page is the integrator's contract: which calls to use, what counts as final, the address format, and from which tag the interface is frozen. The normative text of the pool is [POOL-SPEC.md](POOL-SPEC.md); the reasons behind each choice are in [DECISIONS.md](DECISIONS.md).
+Marigold is a fork of rusty-kaspa. Anything that speaks Kaspa's gRPC or wRPC, parses its addresses, or follows its headers mostly works unchanged, and the differences are few and deliberate. This page is the integrator's contract: which calls to use, what counts as final, the address format, and from which tag the interface is frozen. An exchange that converts at a shop's till, the processor model, has its own page, [MERCHANT-PROCESSOR.md](MERCHANT-PROCESSOR.md): the bill as a request code, the payment landing under the processor's key, and what paid and final mean in seconds. The normative text of the pool is [POOL-SPEC.md](POOL-SPEC.md); the reasons behind each choice are in [DECISIONS.md](DECISIONS.md).
 
 ## Where the code is, and what is stable
 
