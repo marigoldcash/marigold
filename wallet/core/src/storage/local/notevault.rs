@@ -465,7 +465,14 @@ impl NoteVault {
 
     /// The 24 words, from the key: `K` is their entropy, the words are only an
     /// encoding, so they can be shown whenever someone wants paper.
+    ///
+    /// The password is checked against the file every time, never against the
+    /// key the session already holds: `unlock` answers from its cache once the
+    /// wallet is open, so without this the words came out for any password
+    /// typed at `words` (found 2026-10-14 on the desktop, the same in the
+    /// terminal).
     pub async fn recovery_words(&self, wallet_secret: &Secret) -> Result<String> {
+        self.verify_secret(wallet_secret).await.map_err(|_| Error::Custom("That is not this wallet's password.".to_string()))?;
         let k = self.unlock(wallet_secret).await?;
         Ok(Mnemonic::from_entropy(k.to_vec(), Language::English)?.phrase_string())
     }
@@ -1294,6 +1301,23 @@ mod tests {
         let sn = Hash::from([0x91u8; 32]);
         vault.store(&secret, NoteKeyEntry::new(sn, [0x92u8; 32], DenominationTag::D1, NoteProvenance::Cold)).await?;
         assert!(vault.load_key(&secret, &sn).await?.is_some());
+        Ok(())
+    }
+
+    /// `words` asks for the password while the wallet is open, when `unlock`
+    /// already holds the key: the words must still come out only for the
+    /// password that opens the file (2026-10-14).
+    #[tokio::test]
+    async fn recovery_words_refuse_a_wrong_password_once_unlocked() -> Result<()> {
+        let dir = tempfile::tempdir().unwrap();
+        let secret = Secret::from("hunter2hunter2");
+        let vault = make_vault(&dir);
+        vault.create(&secret).await?;
+        vault.unlock(&secret).await?;
+        let wrong = Secret::from("nothunter2");
+        let err = vault.recovery_words(&wrong).await.err().expect("a wrong password must be refused");
+        assert!(err.to_string().contains("not this wallet's password"), "{err}");
+        assert_eq!(vault.recovery_words(&secret).await?.split_whitespace().count(), 24);
         Ok(())
     }
 
