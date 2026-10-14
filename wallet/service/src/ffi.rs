@@ -152,6 +152,13 @@ pub struct LightInfo {
     pub checked_ms: u64,
 }
 
+/// How the wallet reaches the network right now, in words for the person.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct ConnectionInfo {
+    pub connected: bool,
+    pub words: String,
+}
+
 /// What the app hears from the core while a wallet is open.
 #[uniffi::export(with_foreign)]
 pub trait EventListener: Send + Sync {
@@ -175,6 +182,8 @@ pub struct MarigoldCore {
     listener: Listener,
     watcher: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
     backup_state: Arc<Mutex<AutoState>>,
+    /// How the open wallet was told to reach the network ("public" or an address), for the words about the connection.
+    access: Mutex<String>,
 }
 
 #[uniffi::export(async_runtime = "tokio")]
@@ -195,6 +204,7 @@ impl MarigoldCore {
             listener: Arc::new(Mutex::new(None)),
             watcher: tokio::sync::Mutex::new(None),
             backup_state: Arc::new(Mutex::new(AutoState::default())),
+            access: Mutex::new(String::new()),
         }))
     }
 
@@ -258,6 +268,7 @@ impl MarigoldCore {
             ticker: session.service.ticker().to_string(),
         };
         let (service, wallet) = (session.service.clone(), session.wallet.clone());
+        *self.access.lock().unwrap() = node;
         *self.session.lock().await = Some(session);
         *self.watcher.lock().await = Some(self.watch(service, wallet));
         Ok(opened)
@@ -407,6 +418,35 @@ impl MarigoldCore {
         Ok(self.service().await?.telegram_setup(&token, &pin)?)
     }
 
+    /// How the wallet reaches the network, in words: connected or not, to what, and whether it keeps its own copy of the
+    /// notes. What a status line on the screen shows.
+    pub async fn connection(&self) -> Reply<ConnectionInfo> {
+        let wallet = self.session.lock().await.as_ref().map(|s| s.wallet.clone()).ok_or(WalletError::NoWalletOpen)?;
+        let connected = wallet.is_connected();
+        let words = if !connected {
+            "There is no connection to the network right now. Your wallet is safe, and it catches up when the connection is back."
+                .to_string()
+        } else {
+            let access = app::access_words(&self.access.lock().unwrap());
+            let copy = if wallet.light().is_some() { ", with your own copy of the notes" } else { "" };
+            format!("Using: {access}{copy}.")
+        };
+        Ok(ConnectionInfo { connected, words })
+    }
+
+    /// The app is in the foreground again, or the network is back: reconnects if the connection was lost and takes the
+    /// wallet's copy of the notes afresh from the latest anchor.
+    pub async fn resume(&self) -> Reply<()> {
+        let listener = self.listener.clone();
+        let say: Say = Arc::new(move |line: String| say_to(&listener, line));
+        let guard = self.session.lock().await;
+        let session = guard.as_ref().ok_or(WalletError::NoWalletOpen)?;
+        session
+            .resume(self.shutdown.clone(), say)
+            .await
+            .map_err(|e| WalletError::from(app::open_error_text(e.to_string(), &self.access.lock().unwrap())))
+    }
+
     /// Whether the wallet follows the notes in a copy of its own, and how fresh the copy is.
     pub async fn light_status(&self) -> Reply<LightInfo> {
         let wallet = self.session.lock().await.as_ref().map(|s| s.wallet.clone()).ok_or(WalletError::NoWalletOpen)?;
@@ -498,6 +538,8 @@ mod tests {
         assert!(core.create_wallet("ph".into(), "hunter2".into(), false).await.is_err(), "a name is not used twice");
 
         assert!(matches!(core.status().await, Err(WalletError::NoWalletOpen)));
+        assert!(matches!(core.connection().await, Err(WalletError::NoWalletOpen)));
+        assert!(matches!(core.resume().await, Err(WalletError::NoWalletOpen)));
         assert!(matches!(core.balance().await, Err(WalletError::NoWalletOpen)));
         assert!(matches!(core.change_password("a".into(), "bbbb".into(), false).await, Err(WalletError::NoWalletOpen)));
 
@@ -571,6 +613,10 @@ mod tests {
         assert_eq!(opened.access, "a public computer");
         let status = core.status().await.unwrap();
         assert!(!status.is_empty());
+        let connection = core.connection().await.unwrap();
+        assert!(connection.connected);
+        assert_eq!(connection.words, "Using: a public computer, with your own copy of the notes.");
+        core.resume().await.unwrap();
         let light = core.light_status().await.unwrap();
         assert!(light.active && light.notes > 0, "the copy of the notes is kept: {light:?}");
         assert!(core.balance().await.is_ok());

@@ -21,7 +21,7 @@ use std::sync::atomic::AtomicBool;
 
 enum Node {
     Own(Arc<dyn NodeInside>),
-    Wrpc(Arc<kaspa_wrpc_client::KaspaRpcClient>),
+    Wrpc(Arc<kaspa_wrpc_client::KaspaRpcClient>, String),
     #[cfg(feature = "grpc")]
     Grpc(Arc<kaspa_grpc_client::GrpcClient>),
 }
@@ -65,11 +65,35 @@ impl Session {
             Node::Own(node) => {
                 let _ = node.stop().await;
             }
-            Node::Wrpc(client) => {
+            Node::Wrpc(client, _) => {
                 let _ = client.disconnect().await;
             }
             #[cfg(feature = "grpc")]
             Node::Grpc(_) => {}
+        }
+    }
+
+    /// The phone came back to the foreground, or the network came back: if the connection to the node was lost it is made
+    /// again, and the wallet's copy of the notes is taken afresh from the latest anchor, since it may be long out of date.
+    pub async fn resume(&self, shutdown: Arc<AtomicBool>, say: Say) -> Result<()> {
+        match &self.node {
+            Node::Wrpc(client, url) => {
+                if !self.wallet.is_connected() {
+                    use kaspa_wallet_core::rpc::{ConnectOptions, ConnectStrategy};
+                    say("Connecting again…".to_string());
+                    let options = ConnectOptions {
+                        block_async_connect: true,
+                        strategy: ConnectStrategy::Fallback,
+                        url: Some(url.clone()),
+                        connect_timeout: Some(std::time::Duration::from_secs(15)),
+                        ..Default::default()
+                    };
+                    client.connect(Some(options)).await.map_err(|err| Error::custom(format!("cannot reach {url}: {err}")))?;
+                }
+                start_light(&self.wallet, &self.rpc, self.network_id, &shutdown, &say).await;
+                Ok(())
+            }
+            _ => Ok(()),
         }
     }
 
@@ -78,7 +102,7 @@ impl Session {
     pub async fn stop_node(&self) -> Result<()> {
         match &self.node {
             Node::Own(node) => node.stop().await?,
-            Node::Wrpc(client) => {
+            Node::Wrpc(client, _) => {
                 client.disconnect().await.ok();
             }
             #[cfg(feature = "grpc")]
@@ -158,7 +182,7 @@ pub async fn open_session(options: &SessionOptions, shutdown: Arc<AtomicBool>, s
             log::info!("Using the node at {url}");
             client.connect(Some(options)).await.map_err(|err| Error::custom(format!("cannot reach {url}: {err}")))?;
             let rpc: Arc<DynRpcApi> = client.clone();
-            (Node::Wrpc(client.clone()), rpc.clone(), kaspa_wallet_core::rpc::Rpc::new(rpc, client.ctl().clone()))
+            (Node::Wrpc(client.clone(), url.clone()), rpc.clone(), kaspa_wallet_core::rpc::Rpc::new(rpc, client.ctl().clone()))
         }
         None => {
             let Some(starter) = &providers.node else {
@@ -185,43 +209,13 @@ pub async fn open_session(options: &SessionOptions, shutdown: Arc<AtomicBool>, s
         Node::Grpc(_) => {
             rpc_ctl_open.signal_open().await.map_err(|e| Error::custom(format!("rpc: {e}")))?;
         }
-        Node::Wrpc(_) => {}
+        Node::Wrpc(..) => {}
     }
     // On any computer that is not our own node, the notes are followed in a
     // light copy of the pool checked against the trustees' anchors, so the
     // computer is never asked which notes are ours (SYNC-LIGHT.md).
-    if !matches!(node, Node::Own(_)) && kaspa_wallet_core::light::LightPool::supported(network_id) {
-        say("Connected. Taking your own copy of the notes and checking it against the network…".to_string());
-        match kaspa_wallet_core::light::LightPool::start(&rpc, network_id).await {
-            Ok(light) => {
-                let st = light.status();
-                log::info!("light copy: {} notes as of the trustees' anchor at DAA {}", st.notes, st.anchored_daa);
-                say("Your own copy of the notes is here, checked against the network. This computer is never asked which notes are yours.".to_string());
-                wallet.set_light(Some(light.clone()));
-                let (wallet_, rpc_, shutdown_) = (wallet.clone(), rpc.clone(), shutdown.clone());
-                workflow_core::task::spawn(async move {
-                    loop {
-                        workflow_core::task::sleep(std::time::Duration::from_secs(2)).await;
-                        if shutdown_.load(std::sync::atomic::Ordering::SeqCst) {
-                            break;
-                        }
-                        match wallet_.light() {
-                            Some(current) if Arc::ptr_eq(&current, &light) => {}
-                            _ => break,
-                        }
-                        if !wallet_.is_connected() {
-                            continue;
-                        }
-                        if let Err(err) = light.follow(&rpc_).await {
-                            log::warn!("light wallet: {err}");
-                        }
-                    }
-                });
-            }
-            Err(err) => say(format!(
-                "This computer cannot serve a light wallet ({err}); it is asked about notes the old way, which tells it which notes are yours."
-            )),
-        }
+    if !matches!(node, Node::Own(_)) {
+        start_light(&wallet, &rpc, network_id, &shutdown, &say).await;
     }
     say("Opening the wallet…".to_string());
     let descriptors = wallet.clone().wallet_open(options.password.clone(), Some(options.wallet.clone()), true, false).await?;
@@ -289,4 +283,46 @@ pub async fn open_session(options: &SessionOptions, shutdown: Arc<AtomicBool>, s
         options.origin,
     );
     Ok(Session { service, wallet, rpc, node, miner_host, folder, network_id })
+}
+
+/// Takes the wallet's own copy of the pool from the latest anchor and keeps it current until the wallet lets go of it,
+/// the program shuts down, or another copy replaces it (as `Session::resume` does after a lost connection).
+async fn start_light(wallet: &Arc<Wallet>, rpc: &Arc<DynRpcApi>, network_id: NetworkId, shutdown: &Arc<AtomicBool>, say: &Say) {
+    if !kaspa_wallet_core::light::LightPool::supported(network_id) {
+        return;
+    }
+    say("Connected. Taking your own copy of the notes and checking it against the network…".to_string());
+    match kaspa_wallet_core::light::LightPool::start(rpc, network_id).await {
+        Ok(light) => {
+            let st = light.status();
+            log::info!("light copy: {} notes as of the trustees' anchor at DAA {}", st.notes, st.anchored_daa);
+            say(
+                "Your own copy of the notes is here, checked against the network. This computer is never asked which notes are yours."
+                    .to_string(),
+            );
+            wallet.set_light(Some(light.clone()));
+            let (wallet_, rpc_, shutdown_) = (wallet.clone(), rpc.clone(), shutdown.clone());
+            workflow_core::task::spawn(async move {
+                loop {
+                    workflow_core::task::sleep(std::time::Duration::from_secs(2)).await;
+                    if shutdown_.load(std::sync::atomic::Ordering::SeqCst) {
+                        break;
+                    }
+                    match wallet_.light() {
+                        Some(current) if Arc::ptr_eq(&current, &light) => {}
+                        _ => break,
+                    }
+                    if !wallet_.is_connected() {
+                        continue;
+                    }
+                    if let Err(err) = light.follow(&rpc_).await {
+                        log::warn!("light wallet: {err}");
+                    }
+                }
+            });
+        }
+        Err(err) => say(format!(
+            "This computer cannot serve a light wallet ({err}); it is asked about notes the old way, which tells it which notes are yours."
+        )),
+    }
 }
