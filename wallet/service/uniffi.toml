@@ -1,0 +1,8 @@
+# How the wallet core's bindings are named for the two phones (scripts/mobile-bindings.sh).
+[bindings.swift]
+module_name = "MarigoldCore"
+cdylib_name = "kaspa_wallet_service"
+
+[bindings.kotlin]
+package_name = "cash.marigold.core"
+cdylib_name = "kaspa_wallet_service"
