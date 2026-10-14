@@ -1,16 +1,24 @@
-# The wallet core for the phones (docs/marigold/MOBILE-PLAN.md, PH-M2).
+# The wallet core for the phones (docs/marigold/MOBILE-PLAN.md, PH-M2 and PH-M3).
 #
-# Builds kaspa-wallet-service as a library each phone can load: Android's .so for the phone and the
-# emulator, an XCFramework for the iPhone and the simulator on Apple silicon. The phone apps never
-# compile Rust; they download these. PH-M3 gives the libraries their interface and attaches them to
-# the marigold release of a tag. Until then this runs by hand and on every push to a mobile/ branch,
-# and keeps the files as workflow artifacts.
+# Builds kaspa-wallet-service as a library each phone can load, with the Swift and Kotlin bindings that
+# call it: Android's .so for the phone and the emulator with the Kotlin binding, an XCFramework for the
+# iPhone and the simulator on Apple silicon with the Swift binding. The phone apps never compile Rust;
+# they download these (the app repository, marigoldcash/expo-mobile, pins a version and a checksum).
 #
-# scripts/mobile-core.sh does the work, so the same steps run on a developer's machine.
+# scripts/release.sh starts this with the release tag, and the two zips are attached to the `marigold`
+# release of that tag in this repository, with their checksums. Run by hand without a tag, or on a push to a
+# mobile/ branch, it keeps the files as workflow artifacts. The attaching uses this workflow's own token
+# (permissions: contents: write), so it needs no secret; the wallet binaries' upload keeps its own, which
+# reaches only marigold-wallet. Nothing here signs: the app signs what it ships.
 name: Mobile core
 
 on:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "marigold release tag to attach the two zips to (empty: artifacts only)"
+        required: false
+        default: ""
   push:
     branches: ["mobile/**"]
 
@@ -18,8 +26,40 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  bindings:
+    name: bindings (Swift, Kotlin)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@1.98.1
+
+      - name: Set up cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: bindings
+          cache-on-failure: true
+
+      - name: Generate (twice, and compare)
+        run: scripts/mobile-bindings.sh
+
+      - name: Upload the bindings
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-bindings
+          path: target/mobile-bindings
+          if-no-files-found: error
+
   android:
     name: android (arm64-v8a, x86_64)
+    needs: bindings
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
@@ -44,15 +84,24 @@ jobs:
       - name: Build
         run: ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME" scripts/mobile-core.sh android
 
-      - name: Upload the jniLibs
+      - uses: actions/download-artifact@v4
+        with:
+          name: mobile-bindings
+          path: target/mobile-bindings
+
+      - name: Pack
+        run: scripts/mobile-pack.sh android
+
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: marigold-core-android
-          path: target/mobile-core/jniLibs
+          path: target/mobile-core/marigold-core-*-android.zip
           if-no-files-found: error
 
   ios:
     name: ios (iPhone, simulator)
+    needs: bindings
     runs-on: macos-latest
     steps:
       - name: Checkout sources
@@ -74,6 +123,11 @@ jobs:
           key: ios
           cache-on-failure: true
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: mobile-bindings
+          path: target/mobile-bindings
+
       - name: Build
         run: scripts/mobile-core.sh ios
 
@@ -84,9 +138,39 @@ jobs:
             nm -gU "$lib" 2>/dev/null | grep marigold_core_version
           done
 
-      - name: Upload the XCFramework
+      - name: Swift links it and prints the version
+        run: scripts/mobile-swift-check.sh
+
+      - name: Pack
+        run: scripts/mobile-pack.sh ios
+
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: marigold-core-ios
-          path: target/mobile-core/MarigoldCore.xcframework
+          path: target/mobile-core/marigold-core-*-ios.zip
           if-no-files-found: error
+
+  publish:
+    name: Attach to the marigold release
+    needs: [android, ios]
+    if: ${{ inputs.release_tag != '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: marigold-core-*
+          merge-multiple: true
+
+      - name: Attach
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd artifacts
+          for zip in *.zip; do sha256sum "$zip" | tee "$zip.sha256"; done
+          cat *.zip.sha256 > SHA256SUMS-core.txt
+          cat SHA256SUMS-core.txt
+          gh release upload --repo "$GITHUB_REPOSITORY" "${{ inputs.release_tag }}" *.zip *.zip.sha256 SHA256SUMS-core.txt --clobber

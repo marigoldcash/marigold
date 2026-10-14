@@ -7,7 +7,8 @@
 #
 # Android writes target/mobile-core/jniLibs/<abi>/libkaspa_wallet_service.so for the phone (arm64-v8a)
 # and the emulator (x86_64). iOS writes target/mobile-core/MarigoldCore.xcframework with a slice for
-# the iPhone and one for the simulator on Apple silicon. The crate stays an ordinary library for every
+# the iPhone and one for the simulator on Apple silicon; it needs the bindings (scripts/mobile-bindings.sh) made first,
+# for the header the Swift binding imports. The crate stays an ordinary library for every
 # other build: the library kinds the phones need are asked for here, on the command line.
 #
 # The Rust targets come from rust-toolchain.toml. Phone apps load these files; they never compile Rust
@@ -53,17 +54,12 @@ ios() {
   command -v xcodebuild >/dev/null || { echo "xcodebuild not found: this part needs macOS with Xcode" >&2; exit 1; }
   export IPHONEOS_DEPLOYMENT_TARGET="$IOS_MIN"
   rm -rf "$OUT/ios" "$OUT/MarigoldCore.xcframework"
+  # The C half of the interface comes from the generated bindings, so the library and the Swift file agree.
+  local bindings=target/mobile-bindings/swift
+  [ -f "$bindings/MarigoldCoreFFI.h" ] || { echo "run scripts/mobile-bindings.sh first" >&2; exit 1; }
   mkdir -p "$OUT/ios/include"
-  cat > "$OUT/ios/include/marigold_core.h" <<H
-// The Marigold wallet core. The interface the app calls arrives with PH-M3; this is the one symbol PH-M2 proves links.
-const char *marigold_core_version(void);
-H
-  cat > "$OUT/ios/include/module.modulemap" <<H
-module MarigoldCore {
-    header "marigold_core.h"
-    export *
-}
-H
+  cp "$bindings/MarigoldCoreFFI.h" "$OUT/ios/include/"
+  cp "$bindings/MarigoldCoreFFI.modulemap" "$OUT/ios/include/module.modulemap"
   local args=()
   for target in aarch64-apple-ios aarch64-apple-ios-sim; do
     echo "→ $target"
