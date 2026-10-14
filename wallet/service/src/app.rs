@@ -274,7 +274,7 @@ fn restore_archives(
         bundle::merge(&archives, Unlock::Words(&map))
     }
     .map_err(|e| e.to_string())?;
-    let folder = PathBuf::from(workflow_store::fs::resolve_path(folder).map_err(|e| e.to_string())?);
+    let folder = workflow_store::fs::resolve_path(folder).map_err(|e| e.to_string())?;
     let new_name = if name.trim().is_empty() { None } else { Some(name.trim().to_string()) };
     let mut done = Vec::new();
     let mut restored_names = Vec::new();
