@@ -208,7 +208,9 @@ pub fn resolve_node(choice: &str, network_id: NetworkId) -> Result<Option<String
 /// The node's own words tell a terminal user to type a command; a screen has a choice to point at
 /// instead (founder, 2026-09-23).
 pub fn open_error_text(text: String, choice: &str) -> String {
-    if text.contains("already in use") {
+    if text.contains("Unable to decrypt") {
+        "That is not this wallet's password.".to_string()
+    } else if text.contains("already in use") {
         "Looks like there is already a Marigold network running on this computer. Select \"A network running on this computer\" to connect to it.".to_string()
     } else if choice == "local" && (text.contains("cannot reach") || text.contains("Connection refused") || text.contains("timed out"))
     {
@@ -445,4 +447,20 @@ pub async fn change_password(wallet: &Arc<Wallet>, old: &Secret, new: &Secret) -
         return Err(PasswordChange::Failed(format!("the keys file could not be rewritten ({err}); nothing was changed")));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_wrong_password_is_said_in_words() {
+        assert_eq!(open_error_text("Unable to decrypt this wallet".to_string(), "public"), "That is not this wallet's password.");
+    }
+
+    #[test]
+    fn a_node_that_is_not_there_points_at_the_other_choices() {
+        assert!(open_error_text("cannot reach ws://127.0.0.1:17210".to_string(), "local").contains("Choose"));
+        assert_eq!(open_error_text("cannot reach wss://x".to_string(), "public"), "cannot reach wss://x");
+    }
 }

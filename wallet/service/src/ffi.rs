@@ -584,7 +584,8 @@ mod tests {
         core.close_wallet().await;
         assert!(matches!(core.status().await, Err(WalletError::NoWalletOpen)));
 
-        assert!(core.open("ph".into(), "hunter2".into(), "public".into()).await.is_err(), "the old password no longer opens it");
+        let wrong = core.open("ph".into(), "hunter2".into(), "public".into()).await.unwrap_err();
+        assert_eq!(wrong.to_string(), "That is not this wallet's password.", "the old password no longer opens it");
         core.open("ph".into(), "newpass".into(), "public".into()).await.unwrap();
         core.close_wallet().await;
         assert!(heard.lock().unwrap().iter().any(|l| l.contains("Opening the wallet")), "{:?}", heard.lock().unwrap());
