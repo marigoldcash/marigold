@@ -15,11 +15,12 @@ One script does it: `scripts/release.sh <previous tag> <notes file>`, run from a
 1. Bumps the release number (`scripts/bump-version.sh release`), commits "build: version X", tags `vX`, pushes main and the tag.
 2. Replaces the previous tag with the new one in the wallet repository's Dockerfile and README, commits and pushes.
 3. Creates the release on `marigold-wallet` with the notes, and a source release on `marigold` that points at it.
-4. Starts the two build workflows (`binaries.yaml`, `gui-binaries.yaml`) for the tag.
+4. Starts the three build workflows (`binaries.yaml`, `gui-binaries.yaml`, `mobile-core.yaml`) for the tag. The last builds the wallet core for the phones and attaches two zips (`marigold-core-<version>-ios.zip`, `marigold-core-<version>-android.zip`), their `.sha256` files and `SHA256SUMS-core.txt` to the `marigold` release, with the workflow's own token; the phone app (`marigoldcash/expo-mobile`) pins one of these by version and checksum.
 5. Moves the site's "latest" line in `release.json` and pushes the site.
 6. Waits for the wallet build, then attaches the bare `marigold-cli` (the Linux binary under its plain name), which the self-update downloads.
 7. Waits for the desktop build; if the installers carry the updater's signature, writes `desktop.json` (they do not yet, see the three signatures).
-8. Downloads the release's digest list (`SHA256SUMS-cli.txt`), has the trustees sign it, writes the signatures into `release.json`, pushes the site.
+8. Reports how the phone core's run ended and which files are on the `marigold` release (the wallet release does not wait on it; if it failed, run the workflow again from Actions with the tag).
+9. Downloads the release's digest list (`SHA256SUMS-cli.txt`), has the trustees sign it, writes the signatures into `release.json`, pushes the site.
 
 Afterwards, by hand: the announcement (`scripts/announce.sh < post.txt` for the channel, `--to <group id>` for the testers' group, always with the tag's own link, never `/releases/latest`), the row in [STATE.md](STATE.md), and the local rebuild.
 

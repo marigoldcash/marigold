@@ -12,7 +12,7 @@
 # What it does, in order: bumps the release number and tags main; pushes the
 # wallet repository (the Docker image's files); creates the release on
 # marigold-wallet with the notes and the source release on marigold; starts
-# the two build workflows; moves the site's "latest" line; waits for the
+# the three build workflows (wallet, desktop, the core for the phones); moves the site's "latest" line; waits for the
 # wallet build, attaches the bare `marigold-cli` for the self-update; waits
 # for the desktop build, writes the desktop update document if the
 # installers were signed; has the trustees sign the release's digests and
@@ -43,8 +43,8 @@ git commit -q -m "build: version $V" && git tag "v$V" && git push -q origin main
 (cd "$WALLET_REPO" && git pull -q && sed -i "s/${PREV}/v$V/g" Dockerfile README.md && git add Dockerfile README.md && git commit -q -m "v$V" && git push -q && echo "wallet repository pushed")
 
 gh release create "v$V" --repo $W --title "v$V" --notes "$NOTES" >/dev/null && echo "wallet release created"
-gh release create "v$V" --repo $R --title "v$V" --notes "Source release. Binaries and installers are under marigold-wallet: https://github.com/$W/releases/tag/v$V" >/dev/null && echo "source release created"
-gh workflow run binaries.yaml --repo $R -f release_tag="v$V" && gh workflow run gui-binaries.yaml --repo $R -f release_tag="v$V" && echo "workflows dispatched"
+gh release create "v$V" --repo $R --title "v$V" --notes "Source release. Binaries and installers are under marigold-wallet: https://github.com/$W/releases/tag/v$V. The files attached here (marigold-core-*, SHA256SUMS-core.txt) are the wallet core for the phone app, for developers." >/dev/null && echo "source release created"
+gh workflow run binaries.yaml --repo $R -f release_tag="v$V" && gh workflow run gui-binaries.yaml --repo $R -f release_tag="v$V" && gh workflow run mobile-core.yaml --repo $R -f release_tag="v$V" && echo "workflows dispatched"
 
 (cd "$SITE" && git pull -q)
 SITE="$SITE" scripts/release-notice.sh --latest "$V" 2>&1 | grep -m1 latest
@@ -55,6 +55,7 @@ echo "V=$V"
 sleep 30
 WALLET_RUN=$(gh run list -R $R --workflow binaries.yaml --limit 1 --json databaseId -q ".[0].databaseId")
 DESKTOP_RUN=$(gh run list -R $R --workflow gui-binaries.yaml --limit 1 --json databaseId -q ".[0].databaseId")
+MOBILE_RUN=$(gh run list -R $R --workflow mobile-core.yaml --limit 1 --json databaseId -q ".[0].databaseId")
 w=""; for i in $(seq 1 40); do w=$(gh run view "$WALLET_RUN" -R $R --json status,conclusion -q '.status+"/"+.conclusion'); case "$w" in completed/*) break;; esac; sleep 120; done
 echo "wallet run: $w"
 if [ "$w" = "completed/success" ]; then
@@ -63,6 +64,10 @@ if [ "$w" = "completed/success" ]; then
 fi
 d2=""; for i in $(seq 1 30); do d2=$(gh run view "$DESKTOP_RUN" -R $R --json status,conclusion -q '.status+"/"+.conclusion'); case "$d2" in completed/*) break;; esac; sleep 120; done
 echo "desktop run: $d2"; echo "assets on the release: $(gh release view "v$V" -R $W --json assets -q '.assets | length')"
+# The wallet core for the phones attaches itself to this repository's release (two zips and their checksums);
+# the wallet release does not wait on it, and the phone app takes it from there.
+m=""; for i in $(seq 1 30); do m=$(gh run view "$MOBILE_RUN" -R $R --json status,conclusion -q '.status+"/"+.conclusion'); case "$m" in completed/*) break;; esac; sleep 120; done
+echo "phone core run: $m; assets on the marigold release: $(gh release view "v$V" -R $R --json assets -q '[.assets[].name] | join(", ")')"
 # The desktop's update document, only when the installers carry the updater's signature.
 if [ "$d2" = "completed/success" ]; then SITE="$SITE" scripts/desktop-manifest.sh "$V" 2>&1 | tail -1; fi
 # The trustees sign the release's digests, and the site carries them: what 'update' installs.
