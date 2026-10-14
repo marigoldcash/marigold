@@ -250,7 +250,7 @@ impl MarigoldCore {
         let session = open_session(&options, self.shutdown.clone(), say, &Providers::default())
             .await
             .map_err(|e| WalletError::from(app::open_error_text(e.to_string(), &node)))?;
-        self.close().await;
+        self.close_wallet().await;
         let opened = Opened {
             wallet,
             network: self.network.to_string(),
@@ -263,8 +263,9 @@ impl MarigoldCore {
         Ok(opened)
     }
 
-    /// Closes the open wallet properly: the last backup change goes out and the watcher stops.
-    pub async fn close(&self) {
+    /// Closes the open wallet properly: the last backup change goes out and the watcher stops. (Not called `close`: the Kotlin
+    /// binding gives its object a `close()` of its own.)
+    pub async fn close_wallet(&self) {
         if let Some(watcher) = self.watcher.lock().await.take() {
             watcher.abort();
         }
@@ -551,12 +552,12 @@ mod tests {
 
         assert!(core.change_password("not it".into(), "newpass".into(), false).await.is_err());
         core.change_password("hunter2".into(), "newpass".into(), false).await.unwrap();
-        core.close().await;
+        core.close_wallet().await;
         assert!(matches!(core.status().await, Err(WalletError::NoWalletOpen)));
 
         assert!(core.open("ph".into(), "hunter2".into(), "public".into()).await.is_err(), "the old password no longer opens it");
         core.open("ph".into(), "newpass".into(), "public".into()).await.unwrap();
-        core.close().await;
+        core.close_wallet().await;
         assert!(heard.lock().unwrap().iter().any(|l| l.contains("Opening the wallet")), "{:?}", heard.lock().unwrap());
     }
 }
