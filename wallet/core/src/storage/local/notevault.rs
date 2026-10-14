@@ -1315,7 +1315,7 @@ mod tests {
         vault.create(&secret).await?;
         vault.unlock(&secret).await?;
         let wrong = Secret::from("nothunter2");
-        let err = vault.recovery_words(&wrong).await.err().expect("a wrong password must be refused");
+        let err = vault.recovery_words(&wrong).await.expect_err("a wrong password must be refused");
         assert!(err.to_string().contains("not this wallet's password"), "{err}");
         assert_eq!(vault.recovery_words(&secret).await?.split_whitespace().count(), 24);
         Ok(())
