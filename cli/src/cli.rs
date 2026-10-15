@@ -4932,8 +4932,11 @@ pub async fn kaspa_cli(terminal_options: TerminalOptions, banner: Option<String>
     // Once a day: is there a newer wallet, and is this one still allowed on the
     // network the trustees sign for? Nothing waits on it.
     #[cfg(not(target_arch = "wasm32"))]
-    crate::selfupdate::sweep_parked();
-    crate::release_check::start(&cli);
+    {
+        // Parked copies an earlier update left behind go once nothing runs from them.
+        crate::selfupdate::sweep_parked();
+        crate::release_check::start(&cli);
+    }
 
     // terminal blocks async execution, delivering commands to the terminals
     cli.run().await?;
