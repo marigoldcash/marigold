@@ -1,0 +1,44 @@
+# CodeQL over the Rust code: GitHub's default setup offers no Rust, so this is
+# the advanced setup. Findings go to the Security tab; nothing here blocks a
+# push. Weekly as well as on changes to main, so new queries get a run.
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "17 4 * * 1"
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    name: Analyze Rust
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install the pinned toolchain
+        uses: dtolnay/rust-toolchain@1.98.1
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: rust
+          build-mode: none
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:rust"
