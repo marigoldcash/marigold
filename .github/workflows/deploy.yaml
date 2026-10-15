@@ -6,8 +6,15 @@ name: Build and upload assets
 on:
   workflow_dispatch:
 
+# The token can read the repository and nothing more; a job that publishes a
+# release says so itself (CodeQL, actions/missing-workflow-permissions).
+permissions:
+  contents: read
+
 jobs:
   build:
+    permissions:
+      contents: write
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -110,6 +117,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-wasm:
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     name: Building WASM32 SDK
     steps:

@@ -8,6 +8,11 @@ on:
     branches:
       - master
 
+# The token can read the repository and nothing more; a job that publishes a
+# release says so itself (CodeQL, actions/missing-workflow-permissions).
+permissions:
+  contents: read
+
 jobs:
   build-toolchain:
     runs-on: ubuntu-latest

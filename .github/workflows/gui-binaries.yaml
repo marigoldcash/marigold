@@ -18,6 +18,11 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+# The token can read the repository and nothing more; a job that publishes a
+# release says so itself (CodeQL, actions/missing-workflow-permissions).
+permissions:
+  contents: read
+
 jobs:
   build:
     name: ${{ matrix.name }}
@@ -144,6 +149,8 @@ jobs:
           if-no-files-found: error
 
   publish:
+    permissions:
+      contents: write
     name: Attach to the marigold-wallet release
     needs: [build]
     if: ${{ inputs.release_tag != '' }}

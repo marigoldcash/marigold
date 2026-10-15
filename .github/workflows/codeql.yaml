@@ -1,6 +1,8 @@
-# CodeQL over the Rust code: GitHub's default setup offers no Rust, so this is
-# the advanced setup. Findings go to the Security tab; nothing here blocks a
-# push. Weekly as well as on changes to main, so new queries get a run.
+# CodeQL over the Rust code and the rest: GitHub's default setup offers no
+# Rust, so this is the advanced setup, and it also covers what the default
+# setup would (the workflows, the JavaScript, the Python), since the two
+# cannot run side by side. Findings go to the Security tab; nothing here
+# blocks a push. Weekly as well as on changes to main, so new queries run.
 name: CodeQL
 
 on:
@@ -17,9 +19,13 @@ permissions:
 
 jobs:
   analyze:
-    name: Analyze Rust
+    name: Analyze ${{ matrix.language }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [rust, actions, javascript-typescript, python]
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -35,10 +41,10 @@ jobs:
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
-          languages: rust
+          languages: ${{ matrix.language }}
           build-mode: none
 
       - name: Analyze
         uses: github/codeql-action/analyze@v3
         with:
-          category: "/language:rust"
+          category: "/language:${{ matrix.language }}"
