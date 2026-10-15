@@ -180,6 +180,37 @@ pub async fn download(offer: &Offer, say: &(dyn Fn(String) + Send + Sync)) -> Re
     Ok(staged)
 }
 
+/// Makes room for the next `.old`. On Windows the shell that the previous
+/// update left around the new program is still running from `.old.exe`, so
+/// that file cannot be deleted and the rename onto it was refused
+/// ("Accès refusé", tester, 2026-10-11, #30); a running program can still be
+/// renamed, so it is moved to a name of its own and deleted on a later run.
+fn clear_aside(old: &Path) {
+    if std::fs::remove_file(old).is_ok() || !old.exists() {
+        return;
+    }
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let parked = old.with_extension(if cfg!(windows) { format!("old-{stamp}.exe") } else { format!("old-{stamp}") });
+    if std::fs::rename(old, &parked).is_err() {
+        log::warn!("could not move {} out of the way", old.display());
+    }
+}
+
+/// Removes the parked `.old-<time>` programs an earlier update left once
+/// nothing runs from them any more. Called at startup; silent.
+pub fn sweep_parked() {
+    let Ok((exe, _, _)) = program_home() else { return };
+    let Some(dir) = exe.parent() else { return };
+    let Some(stem) = exe.file_stem().and_then(|s| s.to_str()) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.starts_with(&format!("{stem}.old-")) {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
 /// Puts the staged file in place of the running program. The old one stays
 /// beside it as `.old`.
 pub fn install(staged: &Path) -> Result<PathBuf> {
@@ -188,7 +219,7 @@ pub fn install(staged: &Path) -> Result<PathBuf> {
     if !writable {
         return install_with_privileges(staged, &exe, &old, &dir);
     }
-    let _ = std::fs::remove_file(&old);
+    clear_aside(&old);
     // A running program can be renamed on every platform, and overwritten on
     // none that matters here: move the old aside, the new in.
     std::fs::rename(&exe, &old).map_err(|e| Error::custom(format!("cannot move {} aside: {e}", exe.display())))?;
@@ -253,8 +284,19 @@ pub fn restart(exe: &Path) -> Result<()> {
     }
 }
 
+/// True while `update` runs, so the periodic release notice keeps quiet
+/// instead of announcing the very release being installed (#31).
+pub static UPDATING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// The `update` command.
 pub async fn command(cli: &Arc<KaspaCli>) -> Result<()> {
+    UPDATING.store(true, std::sync::atomic::Ordering::SeqCst);
+    let result = command_inner(cli).await;
+    UPDATING.store(false, std::sync::atomic::Ordering::SeqCst);
+    result
+}
+
+async fn command_inner(cli: &Arc<KaspaCli>) -> Result<()> {
     if in_docker() {
         tprintln!(
             cli,

@@ -1129,7 +1129,21 @@ impl Note {
                 report.corrupted.len()
             );
             if !report.corrupted.is_empty() {
-                tprintln!(ctx, "corrupted serial(s): {:?}", report.corrupted);
+                tprintln!(ctx, "");
+                tprintln!(ctx, "{}", crate::ui::warn(format!("{} note(s) whose key file cannot be read:", report.corrupted.len())));
+                for sn in &report.corrupted {
+                    tprintln!(ctx, "    {sn}");
+                }
+                tprintln!(ctx, "");
+                tpara!(
+                    ctx,
+                    "What this means: the note is still on the chain, under a key this wallet holds in a file that is damaged \
+                    (a power cut or a closed console while it was written is the usual cause). The wallet counts it in the \
+                    balance, but it cannot be spent or consolidated until the file is whole again. A backup from before the \
+                    damage holds the file: 'backup restore <folder>' or 'telegram restore' brings it back, and the other notes \
+                    stay as they are. Without such a backup the note's value is lost; the rest of the wallet is unaffected, \
+                    and the housekeeping simply leaves that note aside."
+                );
             }
             tprintln!(ctx, "");
             return Ok(());

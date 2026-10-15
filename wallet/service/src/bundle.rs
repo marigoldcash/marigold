@@ -158,7 +158,10 @@ fn list_tree(root: &Path, prefix: &str, out: &mut Vec<Listed>) -> Result<()> {
             let entry = entry.map_err(|e| Error::custom(format!("cannot read {}: {e}", dir.display())))?;
             let name = entry.file_name().to_string_lossy().to_string();
             let child_rel = if rel.is_empty() { name.clone() } else { format!("{rel}/{name}") };
-            let meta = entry.path().metadata().map_err(|e| Error::custom(format!("cannot read {}: {e}", entry.path().display())))?;
+            // A note file the housekeeping moved between the listing and this
+            // look is gone from here and present elsewhere; the next backup
+            // has it (tester on Windows, 2026-10-11, #29).
+            let Ok(meta) = entry.path().metadata() else { continue };
             if meta.is_dir() {
                 dirs.push((entry.path(), child_rel));
             } else {
@@ -169,15 +172,22 @@ fn list_tree(root: &Path, prefix: &str, out: &mut Vec<Listed>) -> Result<()> {
     Ok(())
 }
 
-/// Reads listed files into entries.
+/// Reads listed files into entries. A file that vanished since the listing
+/// (the housekeeping rotates notes while a backup runs, and a rotated note's
+/// file moves between the vault's folders) is left out: it is in the next
+/// backup under its new name, and the notes it replaced are already here.
 pub fn read_listed(listed: &[Listed]) -> Result<Vec<ArchiveEntry>> {
-    listed
-        .iter()
-        .map(|l| {
-            let data = std::fs::read(&l.file).map_err(|e| Error::custom(format!("cannot read {}: {e}", l.file.display())))?;
-            Ok(ArchiveEntry { path: l.path.clone(), data })
-        })
-        .collect()
+    let mut out = Vec::with_capacity(listed.len());
+    for l in listed {
+        match std::fs::read(&l.file) {
+            Ok(data) => out.push(ArchiveEntry { path: l.path.clone(), data }),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                log::debug!("backup: {} moved while the backup ran; it is in the next one", l.file.display());
+            }
+            Err(e) => return Err(Error::custom(format!("cannot read {}: {e}", l.file.display()))),
+        }
+    }
+    Ok(out)
 }
 
 /// Every wallet in a folder, for one backup run.

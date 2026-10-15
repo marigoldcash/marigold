@@ -227,6 +227,9 @@ impl Wallet {
                 let (wallet_secret, _) = ctx.ask_wallet_secret(None).await?;
                 let _ = ctx.notifier().show(Notification::Processing).await;
                 let args = WalletOpenArgs::default_with_legacy_accounts();
+                // The prompt's balance is the previous wallet's until this one has been read;
+                // it showed the old figure beside the new name for a line (#24).
+                ctx.invalidate_prompt_total();
                 ctx.wallet().open(&wallet_secret, name.clone(), args, &guard).await.map_err(|err| match err {
                     // "Unable to decrypt this wallet" read as damage to a tester;
                     // it means the password was not this wallet's (founder, 2026-10-11).
@@ -368,7 +371,11 @@ impl Wallet {
                         .as_ref()
                         .and_then(|m| m.server.clone())
                         .or_else(|| ctx.wallet().settings().get::<String>(WalletSettings::Server))
-                        .filter(|server| server != "public" && !crate::modules::connect::is_local_target(server));
+                        .filter(|server| {
+                            // An empty setting is no server: it asked "Connect now? [Y/n]" and then
+                            // ran 'connect' with nothing, which showed the menu a second time (#26, #33).
+                            !server.trim().is_empty() && server != "public" && !crate::modules::connect::is_local_target(server)
+                        });
                     match target {
                         Some(server) => {
                             tprintln!(ctx, "");

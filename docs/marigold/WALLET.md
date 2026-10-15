@@ -138,7 +138,7 @@ A wallet keeps its notes as one encrypted file each, under a key that is the ent
 ```
 words                 # the wallet's 24 words, for paper (asks the password); 'wallet words' is the same
 wallet verify         # every note you hold checked against the live pool, no secret needed
-wallet verify deep    # also opens every note file and re-derives its key — the one check that catches a corrupted file
+wallet verify deep    # also opens every note file and re-derives its key — the one check that catches a corrupted file; it names each such note and says what to do: a backup from before the damage ('backup restore', 'telegram restore') brings the file back, without one the note's value is lost, the rest of the wallet is unaffected and the housekeeping leaves that note aside (2026-10-15, #34)
 wallet paper export <dir>    # a paper QR copy: encrypted pages written to <dir>, their own 12-word password printed once
 wallet paper import <page-file> ...   # reads the pages back (asks for that password), rotating every note as it lands
 ```

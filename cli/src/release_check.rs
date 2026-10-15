@@ -236,6 +236,10 @@ pub fn start(cli: &Arc<KaspaCli>) {
                         return;
                     }
                     Verdict::Newer { latest } if announced != Some(latest) => {
+                        if crate::selfupdate::UPDATING.load(std::sync::atomic::Ordering::SeqCst) {
+                            // 'update' is already on it; the line would only confuse (#31).
+                            continue;
+                        }
                         announced = Some(latest);
                         let term = cli.term();
                         term.writeln("");

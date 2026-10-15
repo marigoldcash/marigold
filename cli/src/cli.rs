@@ -2326,6 +2326,11 @@ impl KaspaCli {
         self.prompt_total_valid.store(false, Ordering::SeqCst);
     }
 
+    /// The prompt shows "..." until the open wallet's balance has been read.
+    pub fn invalidate_prompt_total(&self) {
+        self.prompt_total_valid.store(false, Ordering::SeqCst);
+    }
+
     pub fn auto_mint_armed(&self) -> bool {
         self.auto_secret.lock().unwrap().is_some()
     }
@@ -3155,7 +3160,10 @@ impl KaspaCli {
                 if let Some(reason) = failure
                     && loud
                 {
-                    tprintln!(self, "Note consolidation stopped: {reason}");
+                    // The merge carries on past an unreadable note; only that
+                    // note's group is left out (#34).
+                    tprintln!(self, "One group of notes was left out of the consolidation: {reason}");
+                    tprintln!(self, "{}", crate::ui::dim("'wallet verify deep' lists such notes and says what to do about them."));
                 }
             }
             Err(err) => {
@@ -4924,6 +4932,7 @@ pub async fn kaspa_cli(terminal_options: TerminalOptions, banner: Option<String>
     // Once a day: is there a newer wallet, and is this one still allowed on the
     // network the trustees sign for? Nothing waits on it.
     #[cfg(not(target_arch = "wasm32"))]
+    crate::selfupdate::sweep_parked();
     crate::release_check::start(&cli);
 
     // terminal blocks async execution, delivering commands to the terminals
