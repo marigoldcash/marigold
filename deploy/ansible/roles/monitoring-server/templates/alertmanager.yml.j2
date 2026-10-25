@@ -1,6 +1,12 @@
 # Managed by Ansible (deploy/ansible/roles/monitoring-server).
 # Contains the Telegram bot token — mode 0640, never committed (the values
 # live in the gitignored inventory.ini).
+# Short one-line Telegram alerts (2026-10-25): the role's template, then any
+# a host keeps outside Ansible under templates.d (its own rules' phrases).
+templates:
+  - /etc/prometheus/telegram.tmpl
+  - /etc/prometheus/templates.d/*.tmpl
+
 route:
   receiver: telegram
   group_by: [alertname, node]
@@ -15,3 +21,6 @@ receivers:
         chat_id: {{ telegram_chat_id }}
         api_url: "https://api.telegram.org"
         send_resolved: true
+{% raw %}
+        message: '{{ template "mg.telegram" . }}'
+{% endraw %}

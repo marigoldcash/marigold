@@ -63,6 +63,19 @@
     mode: "0644"
   notify: restart prometheus
 
+- name: Install the Telegram message template
+  ansible.builtin.copy:
+    src: telegram.tmpl
+    dest: /etc/prometheus/telegram.tmpl
+    mode: "0644"
+  notify: restart alertmanager
+
+- name: The folder for a host's own message templates, kept outside Ansible
+  ansible.builtin.file:
+    path: /etc/prometheus/templates.d
+    state: directory
+    mode: "0755"
+
 - name: Install the Alertmanager config (holds the Telegram token)
   ansible.builtin.template:
     src: alertmanager.yml.j2

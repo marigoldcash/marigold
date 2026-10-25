@@ -1,0 +1,51 @@
+{{/*
+  Short Telegram alerts (2026-10-25): the first line is all a phone's lock
+  screen shows, so it says what happened and to what ("SERVICE DOWN: seed3
+  marigoldd", "NO PEERS: seed2", "seed3 marigoldd: SERVICE DOWN over"); the
+  detail follows for when the message is opened. No label dumps, no links.
+
+  Managed by Ansible (deploy/ansible/roles/monitoring-server), installed as
+  /etc/prometheus/telegram.tmpl. Alerts that are not the network's (a host's
+  own rules under /etc/prometheus/rules.d/, kept outside Ansible) get their
+  phrases from /etc/prometheus/templates.d/*.tmpl, outside Ansible as well:
+  a file there may redefine "mg.phrase.extra", "mg.subject.extra" and
+  "mg.resolved.extra", which are the three hooks below and otherwise do
+  nothing. An alert name no file knows falls back to the name itself.
+*/}}
+
+{{ define "mg.phrase" }}{{ $n := . -}}
+{{ if eq $n "TargetDown" }}DOWN
+{{- else if eq $n "MarigoldServiceDown" }}SERVICE DOWN
+{{- else if eq $n "NoPeers" }}NO PEERS
+{{- else if eq $n "NoNewBlocks" }}NO NEW BLOCKS
+{{- else if eq $n "MiningStalled" }}MINING STALLED
+{{- else if eq $n "AnchorsStale" }}ANCHORS STALE
+{{- else if eq $n "AnchorsNotEnforcing" }}ANCHORS NOT ENFORCING
+{{- else }}{{ template "mg.phrase.extra" $n }}{{ end }}{{ end }}
+
+{{/* The hooks: a file under templates.d may redefine them; each falls
+     through to the managed version when it has nothing to say. */}}
+{{ define "mg.phrase.extra" }}{{ . }}{{ end }}
+{{ define "mg.subject.extra" }}{{ template "mg.subject" . }}{{ end }}
+{{ define "mg.resolved.extra" }}{{ template "mg.resolved" . }}{{ end }}
+
+{{ define "mg.subject" -}}
+{{ if .Labels.node }}{{ .Labels.node }}{{ if .Labels.name }} {{ reReplaceAll "\\.service$" "" .Labels.name }}{{ end }}
+{{- else if .Labels.instance }}{{ .Labels.instance }}
+{{- else }}{{ .Labels.job }}{{ end }}{{ end }}
+
+{{ define "mg.resolved" }}{{ $n := . -}}
+{{ if eq $n "TargetDown" }} back up
+{{- else }}: {{ template "mg.phrase" $n }} over{{ end }}{{ end }}
+
+{{ define "mg.telegram" -}}
+{{ $name := .CommonLabels.alertname -}}
+{{ if eq .Status "firing" -}}
+{{ template "mg.phrase" $name }}: {{ range $i, $a := .Alerts.Firing }}{{ if $i }}, {{ end }}{{ template "mg.subject.extra" $a }}{{ end }}
+{{- else -}}
+{{ range $i, $a := .Alerts }}{{ if $i }}, {{ end }}{{ template "mg.subject.extra" $a }}{{ end }}{{ template "mg.resolved.extra" $name }}
+{{- end }}
+
+{{ range .Alerts }}{{ if eq .Status "firing" }}• {{ else }}✓ {{ end }}{{ .Annotations.summary | html }}
+{{ if .Annotations.description }}{{ .Annotations.description | html }}
+{{ end }}{{ end }}{{ end }}
